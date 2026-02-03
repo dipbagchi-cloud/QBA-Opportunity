@@ -110,7 +110,7 @@ const config: Config = {
         sm: "calc(var(--radius) - 4px)",
       },
       fontFamily: {
-        sans: ["var(--font-geist-sans)", "Inter", "system-ui", "sans-serif"],
+        sans: ["var(--font-jakarta)", "Inter", "system-ui", "sans-serif"],
         mono: ["var(--font-geist-mono)", "Fira Code", "monospace"],
       },
       fontSize: {

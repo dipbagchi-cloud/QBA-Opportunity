@@ -1,13 +1,11 @@
 // Agentic CRM - Database Schema
 generator client {
-  provider        = "prisma-client-js"
-  previewFeatures = ["postgresqlExtensions"]
+  provider = "prisma-client-js"
 }
 
 datasource db {
-  provider   = "postgresql"
-  url        = env("DATABASE_URL")
-  extensions = [pgvector(map: "vector")]
+  provider = "sqlite"
+  url      = "file:./dev.db"
 }
 
 // ============================================================================
@@ -19,11 +17,11 @@ model User {
   email         String    @unique
   name          String
   image         String?
-  title         String? // Job title
+  title         String?
   department    String?
   phone         String?
   isActive      Boolean   @default(true)
-  externalId    String?   @unique // External ID from Azure AD or Frappe
+  externalId    String?   @unique
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   lastLoginAt   DateTime?
@@ -56,10 +54,10 @@ model User {
 
 model Role {
   id          String   @id @default(cuid())
-  name        String   @unique // "Sales User", "Sales Manager", "Admin", "Executive"
+  name        String   @unique
   description String?
-  permissions Json // Array of permission strings
-  isSystem    Boolean  @default(false) // Cannot be deleted
+  permissions Json
+  isSystem    Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -88,18 +86,18 @@ model Team {
 model Client {
   id            String   @id @default(cuid())
   name          String
-  domain        String? // Company website domain
+  domain        String?
   industry      String?
-  size          String? // "1-10", "11-50", "51-200", etc.
-  revenue       Decimal? @db.Decimal(15, 2)
+  size          String?
+  revenue       Decimal?
   location      String?
   country       String?
-  description   String?  @db.Text
+  description   String?
   logoUrl       String?
   isActive      Boolean  @default(true)
-  externalId    String?  @unique // From external CRM/ERP
-  enrichedAt    DateTime? // Last enrichment timestamp
-  enrichmentData Json? // Firmographics from enrichment API
+  externalId    String?  @unique
+  enrichedAt    DateTime?
+  enrichmentData Json?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -117,7 +115,7 @@ model Contact {
   lastName    String
   email       String?
   phone       String?
-  title       String? // Job title
+  title       String?
   department  String?
   isPrimary   Boolean  @default(false)
   linkedInUrl String?
@@ -136,27 +134,60 @@ model Contact {
 }
 
 // ============================================================================
+// RESOURCES (HRMS MOCK)
+// ============================================================================
+
+model Resource {
+  id              String @id @default(cuid())
+  name            String
+  grade           String    // e.g. "Senior Dev", "Junior QA"
+  effortFactor    Float     @default(1.0)
+  attritionFactor Float     @default(1.0)
+  standardRate    Float     // Hourly cost
+  skills          String?   // JSON or CSV
+  availability    Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@map("resources")
+}
+
+// ============================================================================
 // OPPORTUNITIES & LIFECYCLE
 // ============================================================================
 
 model Opportunity {
   id                String   @id @default(cuid())
   title             String
-  description       String?  @db.Text
-  value             Decimal  @db.Decimal(15, 2)
+  description       String?
+  value             Decimal
   currency          String   @default("USD")
-  probability       Int      @default(0) // 0-100%
+  probability       Int      @default(0)
   expectedCloseDate DateTime?
   actualCloseDate   DateTime?
-  source            String? // "Inbound", "Outbound", "Referral", "Partner"
-  priority          String   @default("Medium") // "Low", "Medium", "High", "Critical"
-  tags              String[] // Array of tags
-  metadata          Json? // Flexible JSON for custom fields
-  duplicateOf       String? // Reference to merged opportunity
+  source            String?
+  priority          String   @default("Medium")
+  tags              String   
+  metadata          Json?
+  duplicateOf       String?
   isArchived        Boolean  @default(false)
   archivedAt        DateTime?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
+
+  // -- New Lifecycle Fields --
+  geolocation       String?
+  salesRepName      String?
+  
+  // Pipeline, Presales, Sales
+  currentStage      String   @default("Pipeline") 
+  detailedStatus    String?  // e.g. "just received", "Estimation in progress"
+  
+  // Presales Data (JSON: { selectedResources: [], totalHours: 0, estimatedCost: 0, projectedQuote: 0, proposalUrl: "" })
+  presalesData      Json?
+  
+  // Sales Data (JSON: { finalQuote: 0, category: "Assured" | "Probable" | "Unlikely", comparison: {} })
+  salesData         Json?
 
   // Relations
   client            Client          @relation(fields: [clientId], references: [id])
@@ -194,15 +225,15 @@ model Opportunity {
 model Stage {
   id               String   @id @default(cuid())
   name             String   @unique
-  order            Int // Display order
-  probability      Int      @default(0) // Default probability %
-  color            String   @default("#6B7280") // Hex color for UI
-  isClosed         Boolean  @default(false) // Is this a terminal stage?
-  isWon            Boolean  @default(false) // Is this a won stage?
-  requiredFields   String[] // Array of required field names
-  requiredDocs     String[] // Array of required document types
-  allowedNextStages String[] // Array of stage IDs that can be transitioned to
-  slaHours         Int? // SLA in hours for this stage
+  order            Int
+  probability      Int      @default(0)
+  color            String   @default("#6B7280")
+  isClosed         Boolean  @default(false)
+  isWon            Boolean  @default(false)
+  requiredFields   String   
+  requiredDocs     String   
+  allowedNextStages String  
+  slaHours         Int?
   isSystem         Boolean  @default(false)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
@@ -231,8 +262,8 @@ model StageHistory {
   id            String   @id @default(cuid())
   enteredAt     DateTime @default(now())
   exitedAt      DateTime?
-  durationHours Int? // Auto-calculated
-  notes         String?  @db.Text
+  durationHours Int?
+  notes         String?
 
   opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
   opportunityId String
@@ -251,14 +282,14 @@ model StageHistory {
 
 model Activity {
   id          String   @id @default(cuid())
-  type        String // "Call", "Email", "Meeting", "Note", "Stage Change", "Assignment"
+  type        String
   subject     String?
-  description String?  @db.Text
-  duration    Int? // In minutes
+  description String?
+  duration    Int?
   scheduledAt DateTime?
   completedAt DateTime?
-  outcome     String? // "Scheduled", "Completed", "No Answer", "Left Voicemail", etc.
-  isSystem    Boolean  @default(false) // Auto-generated vs manual
+  outcome     String?
+  isSystem    Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -279,11 +310,11 @@ model Activity {
 model Task {
   id          String    @id @default(cuid())
   title       String
-  description String?   @db.Text
+  description String?
   dueDate     DateTime?
   completedAt DateTime?
-  priority    String    @default("Medium") // "Low", "Medium", "High", "Urgent"
-  status      String    @default("Open") // "Open", "In Progress", "Completed", "Cancelled"
+  priority    String    @default("Medium")
+  status      String    @default("Open")
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -303,8 +334,8 @@ model Task {
 
 model Note {
   id          String   @id @default(cuid())
-  content     String   @db.Text
-  mentions    String[] // Array of user IDs mentioned
+  content     String
+  mentions    String   
   isPinned    Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -322,10 +353,10 @@ model Note {
 model Attachment {
   id          String   @id @default(cuid())
   fileName    String
-  fileType    String // MIME type
-  fileSize    Int // In bytes
-  filePath    String // Storage path/URL
-  category    String? // "Proposal", "Contract", "Presentation", etc.
+  fileType    String
+  fileSize    Int
+  filePath    String
+  category    String?
   uploadedAt  DateTime @default(now())
 
   opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
@@ -341,10 +372,10 @@ model Attachment {
 
 model ApprovalRequest {
   id          String   @id @default(cuid())
-  type        String // "Stage Transition", "Value Change", "Close Deal"
-  reason      String?  @db.Text
-  status      String   @default("Pending") // "Pending", "Approved", "Rejected", "Cancelled"
-  comments    String?  @db.Text
+  type        String
+  reason      String?
+  status      String   @default("Pending")
+  comments    String?
   requestedAt DateTime @default(now())
   reviewedAt  DateTime?
 
@@ -366,10 +397,10 @@ model ApprovalRequest {
 
 model Notification {
   id        String   @id @default(cuid())
-  type      String // "Task Due", "Mention", "Approval", "SLA Breach", "AI Suggestion"
+  type      String
   title     String
-  message   String   @db.Text
-  link      String? // Deep link to relevant page
+  message   String
+  link      String?
   isRead    Boolean  @default(false)
   readAt    DateTime?
   createdAt DateTime @default(now())
@@ -385,8 +416,8 @@ model Notification {
 
 model NotificationPreference {
   id      String  @id @default(cuid())
-  channel String // "Email", "In-App", "Teams", "Slack"
-  type    String // Notification type
+  channel String
+  type    String
   enabled Boolean @default(true)
 
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -402,16 +433,16 @@ model NotificationPreference {
 
 model AIInteraction {
   id           String   @id @default(cuid())
-  type         String // "Query", "Draft", "Suggestion", "Analysis", "Automation"
-  prompt       String   @db.Text
-  response     String   @db.Text
-  status       String   @default("Pending") // "Pending", "Approved", "Rejected", "Applied"
-  confidence   Float? // 0.0 to 1.0
-  toolsCalled  Json? // Array of tools/functions called
-  cost         Decimal? @db.Decimal(10, 6) // USD cost
-  latencyMs    Int? // Response time in milliseconds
-  feedback     String? // "Useful", "Not Useful", "Harmful"
-  feedbackText String?  @db.Text
+  type         String
+  prompt       String
+  response     String
+  status       String   @default("Pending")
+  confidence   Float?
+  toolsCalled  Json?
+  cost         Decimal?
+  latencyMs    Int?
+  feedback     String?
+  feedbackText String?
   createdAt    DateTime @default(now())
   reviewedAt   DateTime?
 
@@ -430,11 +461,11 @@ model AIInteraction {
 
 model LeadScore {
   id              String   @id @default(cuid())
-  score           Int // 0-100
-  scoreVersion    String // Model version
-  factors         Json // Breakdown of scoring factors
-  confidence      Float // 0.0 to 1.0
-  recommendedAction String? // "Contact immediately", "Nurture", "Disqualify"
+  score           Int
+  scoreVersion    String
+  factors         Json
+  confidence      Float
+  recommendedAction String?
   calculatedAt    DateTime @default(now())
   
   opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
@@ -445,11 +476,11 @@ model LeadScore {
 }
 
 model VectorEmbedding {
-  id        String                     @id @default(cuid())
-  embedding Unsupported("vector(1536)") // OpenAI embedding dimension
-  content   String                     @db.Text // The text that was embedded
-  metadata  Json? // Additional context
-  createdAt DateTime                   @default(now())
+  id        String   @id @default(cuid())
+  embedding String   
+  content   String
+  metadata  Json?
+  createdAt DateTime @default(now())
 
   opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
   opportunityId String      @unique
@@ -464,10 +495,10 @@ model VectorEmbedding {
 model SavedView {
   id          String   @id @default(cuid())
   name        String
-  filters     Json // Filter configuration
-  sortBy      Json? // Sort configuration
+  filters     Json
+  sortBy      Json?
   isDefault   Boolean  @default(false)
-  isPublic    Boolean  @default(false) // Shared with team
+  isPublic    Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -484,10 +515,10 @@ model SavedView {
 
 model AuditLog {
   id          String   @id @default(cuid())
-  entity      String // "Opportunity", "Stage", "User", etc.
+  entity      String
   entityId    String
-  action      String // "Create", "Update", "Delete", "Stage Change", "Export"
-  changes     Json? // Before/after values
+  action      String
+  changes     Json?
   ipAddress   String?
   userAgent   String?
   timestamp   DateTime @default(now())
@@ -501,15 +532,11 @@ model AuditLog {
   @@map("audit_logs")
 }
 
-// ============================================================================
-// CONFIGURATION & MASTER DATA
-// ============================================================================
-
 model SystemConfig {
   id        String   @id @default(cuid())
   key       String   @unique
   value     Json
-  category  String // "General", "AI", "Integrations", "Security"
+  category  String
   description String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
