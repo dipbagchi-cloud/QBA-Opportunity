@@ -22,465 +22,288 @@ Building an AI-powered Lead/Opportunity Management System with autonomous agent 
 
 ---
 
-## Implementation Phases
+## Detailed Implementation Epics
 
-## Phase 1: Foundation & Infrastructure (Weeks 1-2)
+This roadmap is structured around 10 core Epics that evolve the platform from a standard CRM to an autonomous Agentic System.
 
-### 1.1 Project Setup
-- [x] Initialize Next.js project with TypeScript
-- [ ] Configure Tailwind CSS + shadcn/ui
-- [ ] Setup ESLint, Prettier, commit hooks
-- [ ] Configure environment management (.env structure)
+### EPIC 1: Authentication, Organization & RBAC Foundation
+**Goal**: Enable secure multi-tenant access with fine-grained permissions for humans and agents.
 
-### 1.2 Database & ORM
-- [ ] Design initial Prisma schema (Users, Roles, Permissions, Opportunities, Clients, Contacts)
-- [ ] Setup PostgreSQL (local + cloud)
-- [ ] Configure Prisma migrations
-- [ ] Create seed scripts for master data
-- [ ] Add pgvector extension for AI/RAG
+**Capabilities**
+*   Auth & session management
+*   Org & team hierarchy
+*   Role-based access control (RBAC)
+*   Admin console
 
-### 1.3 Authentication & Authorization
-- [ ] Implement NextAuth.js with Azure AD provider
-- [ ] Create RBAC middleware (role → permissions → resources)
-- [ ] Implement row-level security helpers
-- [ ] Session management + refresh tokens
-- [ ] Build login/logout UI
+**User Stories**
+*   As a user, I want to sign up and log in securely so I can access my organization’s CRM.
+*   As an admin, I want to create roles with granular permissions so access is controlled by responsibility.
+*   As an admin, I want to assign users to teams so data can be scoped correctly.
+*   As a system, I want to enforce row-level security so users only see allowed records.
+*   As an admin, I want to view an audit log of all user and agent actions for compliance.
+*   As a security admin, I want MFA for privileged roles so admin access is protected.
 
-### 1.4 Design System
-- [ ] Setup design tokens (colors, typography, spacing)
-- [ ] Create base components (Button, Input, Card, Modal, etc.)
-- [ ] Implement layout components (Sidebar, Header, Container)
-- [ ] Build form components with validation
-- [ ] Create loading states, skeletons, error boundaries
-
-### 1.5 DevOps Foundation
-- [ ] Setup CI/CD pipeline (GitHub Actions / Azure Pipelines)
-- [ ] Configure development/staging/production environments
-- [ ] Setup database migrations in pipeline
-- [ ] Configure secrets management
-- [ ] Setup monitoring (logs, errors, performance)
-
-**Deliverables:**
-- Running application with login
-- Database schema v1
-- Design system documentation
-- Deployed to staging environment
+**Technical Implementation & Logic**
+*   **Data Model**:
+    *   `Organization`: Tenant root.
+    *   `Role`: JSON-based permission sets (e.g., `{ "resource": "deals", "action": "create", "scope": "team" }`).
+    *   `User`: Linked to Org and Role.
+*   **Security Logic (RBAC Middleware)**:
+    ```typescript
+    function hasPermission(user, resource, action) {
+      const permission = user.role.permissions.find(p => p.resource === resource);
+      if (!permission) return false;
+      return permission.actions.includes(action);
+    }
+    ```
 
 ---
 
-## Phase 2: Core CRM Features (Weeks 3-5)
+### EPIC 2: Unified Lead Intake & Qualification
+**Goal**: Ingest leads from anywhere and qualify them automatically.
 
-### 2.1 Master Data Management
-- [ ] Admin UI for Clients/Accounts CRUD
-- [ ] Admin UI for Stages configuration (name, order, probability %, required fields)
-- [ ] Admin UI for Opportunity Types, Industries, Regions
-- [ ] Admin UI for Users & Teams management
-- [ ] Validation rules engine
+**Capabilities**
+*   Lead capture (forms, APIs, inbox)
+*   Deduplication & enrichment
+*   Scoring & assignment
+*   Agent reasoning output
 
-### 2.2 Opportunity Management (CRUD)
-- [ ] Create opportunity form with validation
-- [ ] Edit opportunity with change tracking
-- [ ] View opportunity detail page
-- [ ] Delete/archive opportunity (soft delete)
-- [ ] Attachment upload/download/delete
-- [ ] File validation (type, size, virus scan integration)
-- [ ] Duplicate detection on create
+**User Stories**
+*   As a marketer, I want to capture leads via forms and APIs so all inquiries land in one system.
+*   As a system, I want to detect duplicate leads automatically to avoid data pollution.
+*   As a sales rep, I want leads auto-assigned based on rules and capacity so I don’t miss opportunities.
+*   As a sales rep, I want to see a lead score and ICP fit explanation so I know where to focus.
+*   As an agent, I want to enrich lead data from external sources to improve qualification accuracy.
+*   As a manager, I want to override assignment rules when needed.
 
-### 2.3 Pipeline Views
-- [ ] List view with server-side pagination
-- [ ] Advanced filters (stage, owner, date range, client, value)
-- [ ] Sorting (multi-column)
-- [ ] Global search (Elasticsearch or PostgreSQL full-text)
-- [ ] Saved views (persist user preferences)
-- [ ] Bulk actions (assign, update stage, add tags)
-
-### 2.4 Kanban Board
-- [ ] Kanban UI with stage columns
-- [ ] Drag-and-drop opportunity cards
-- [ ] Stage transition validation
-- [ ] Real-time updates (optional: WebSockets)
-- [ ] Card quick actions (edit, assign, view)
-- [ ] WIP limits per stage (optional)
-
-### 2.5 Activity Timeline
-- [ ] Activity model (calls, emails, meetings, notes, tasks)
-- [ ] Log activity UI (modal/drawer)
-- [ ] Activity timeline on opportunity detail
-- [ ] Filter/search activities
-- [ ] Auto-activity logging (stage changes, assignments)
-
-**Deliverables:**
-- Fully functional CRM CRUD operations
-- Pipeline and Kanban views
-- Activity tracking
-- File attachments working
+**Technical Implementation & Logic**
+*   **Deduplication Logic**:
+    *   Use Fuzzy Matching (Levenshtein Distance) on Email and Company Name.
+    *   `MatchConfidence = (EmailMatch * 0.8) + (NameMatch * 0.2)`
+*   **Lead Scoring Formula**:
+    ```typescript
+    // Logic: Weighted sum of explicit (profile) and implicit (behavior) factors
+    const calculateLeadScore = (lead, activities) => {
+      const explicitScore = (lead.isCxO ? 20 : 0) + (lead.budget > 100k ? 30 : 0);
+      const implicitScore = activities.reduce((sum, act) => sum + (act.type === 'webviz' ? 5 : 2), 0);
+      return Math.min(explicitScore + implicitScore, 100);
+    }
+    ```
 
 ---
 
-## Phase 3: Workflow & Collaboration (Weeks 6-7)
+### EPIC 3: Sales Pipeline & Opportunity Management
+**Goal**: Track deals through stages with predictive intelligence instead of manual babysitting.
 
-### 3.1 Lifecycle Workflows
-- [ ] Stage gate configuration (required fields per stage)
-- [ ] Stage transition rules engine
-- [ ] Required documents validation
-- [ ] Workflow state machine implementation
-- [ ] Transition audit logs
+**Capabilities**
+*   Pipelines & stages
+*   Activities & timelines
+*   Risk detection
+*   Next-best-action suggestions
 
-### 3.2 Approvals
-- [ ] Approval workflow engine (request → approve/reject)
-- [ ] Approval UI (pending requests, history)
-- [ ] Multi-level approval chains
-- [ ] Approval notifications
-- [ ] Approval audit trail
+**User Stories**
+*   As a sales rep, I want to move deals through stages so I can track progress.
+*   As a sales rep, I want a unified activity timeline so I see all interactions in one place.
+*   As an agent, I want to detect stalled or risky deals based on behavior and time in stage.
+*   As a sales rep, I want the system to suggest my next best action for each deal.
+*   As a manager, I want to see pipeline health by rep and team so I can coach effectively.
+*   As a system, I want to prevent deals from closing without required data.
 
-### 3.3 SLA & Reminders
-- [ ] SLA rules configuration (time-in-stage thresholds)
-- [ ] SLA tracking engine (background jobs)
-- [ ] Follow-up due date management
-- [ ] Notification service (email + in-app)
-- [ ] Escalation rules for overdue items
-- [ ] Reminder scheduling
-
-### 3.4 Tasks & Collaboration
-- [ ] Task model (linked to opportunities)
-- [ ] Create/assign/complete tasks
-- [ ] Task due dates + reminders
-- [ ] Notes with @mentions
-- [ ] Mention notifications
-- [ ] Team collaboration UI
-
-**Deliverables:**
-- Stage gates enforced
-- Approval workflows operational
-- SLA tracking + notifications
-- Task management
+**Technical Implementation & Logic**
+*   **Stall Detection Logic**:
+    *   `DaysInStage > (AverageDaysInStage + (1.5 * StandardDeviation))` -> Flag as "Stalled".
+*   **Deal Health Score**:
+    *   `Health = (ActivityRecency * 0.4) + (StakeholderEngagement * 0.3) + (Momentum * 0.3)`
+    *   *Where Momentum is measured by stage velocity compared to historical average.*
 
 ---
 
-## Phase 4: Analytics & Reporting (Weeks 8-9)
+### EPIC 4: Communication & Engagement Automation
+**Goal**: Improve conversion with intelligent, contextual follow-ups.
 
-### 4.1 Data Model for Analytics
-- [ ] Stage history tracking (time-series)
-- [ ] Snapshot tables for historical reporting
-- [ ] Materialized views for dashboards
-- [ ] KPI calculation engine
+**Capabilities**
+*   Omnichannel messaging
+*   Templates & sequences
+*   Agent-generated drafts
+*   Sentiment detection
 
-### 4.2 Executive Dashboard
-- [ ] KPI widgets (pipeline value, conversion rate, avg. deal size)
-- [ ] Stage distribution chart
-- [ ] Win/loss trend
-- [ ] Top performers leaderboard
-- [ ] Role-based widget visibility
+**User Stories**
+*   As a sales rep, I want to send emails and messages directly from the CRM so everything is logged.
+*   As a sales rep, I want AI-drafted follow-ups so I save time writing.
+*   As an agent, I want to adjust tone and timing based on deal stage and persona.
+*   As a system, I want to automatically create follow-up tasks if no response is detected.
+*   As a manager, I want visibility into engagement effectiveness by channel.
+*   As a system, I want to pause automation when negative sentiment is detected.
 
-### 4.3 Operational Reports
-- [ ] Funnel analysis (conversion % per stage)
-- [ ] Velocity metrics (avg. time-in-stage)
-- [ ] Activity reports (calls, meetings per user)
-- [ ] Forecast reports (weighted pipeline by probability)
-- [ ] Performance reports (individual + team)
-
-### 4.4 Exports & BI Integration
-- [ ] CSV/Excel export with permission filtering
-- [ ] Scheduled report delivery
-- [ ] Power BI connector (optional)
-- [ ] API for custom BI tools
-
-**Deliverables:**
-- Executive dashboard live
-- Operational reports accessible
-- Export functionality
-- Historical data tracking
+**Technical Implementation & Logic**
+*   **Sentiment Analysis**:
+    *   Use NLP (e.g., OpenAI/LangChain classification) on incoming emails.
+    *   If `SentimentScore < -0.6` (Negative), trigger `WorkflowPause` event.
+*   **Smart Scheduling**:
+    *   Analyze recipient's past reply times to predict `OptimalSendTime`.
 
 ---
 
-## Phase 5: Integrations & APIs (Weeks 10-11)
+### EPIC 5: Deal Governance & Approvals
+**Goal**: Protect revenue and compliance without slowing sales velocity.
 
-### 5.1 Opportunity → Project Conversion
-- [ ] Conversion data contract definition
-- [ ] Conversion workflow (validation + approval)
-- [ ] Conversion UI (map fields, preview)
-- [ ] Post-conversion hooks
-- [ ] Rollback capability
+**Capabilities**
+*   Approval workflows
+*   Policy enforcement
+*   Risk explanations
 
-### 5.2 External API
-- [ ] REST API for converted projects
-- [ ] API authentication (OAuth2 client credentials / API keys)
-- [ ] API versioning (v1)
-- [ ] Rate limiting
-- [ ] API documentation (OpenAPI/Swagger)
-- [ ] Webhook support for events
-- [ ] Idempotency handling
+**User Stories**
+*   As a sales rep, I want to request approval for discounts so deals move forward compliantly.
+*   As a manager, I want to approve or reject requests with full context.
+*   As an agent, I want to flag risky deals automatically based on pricing or terms.
+*   As a finance admin, I want deal changes logged for auditability.
+*   As a system, I want to block unauthorized deal closure actions.
 
-### 5.3 HRIS Integration (Frappe)
-- [ ] User sync from Frappe
-- [ ] Team/org structure sync
-- [ ] Activity data consumption
-- [ ] Error handling + retry logic
-
-### 5.4 Calendar Integration
-- [ ] Google Calendar / Outlook integration
-- [ ] Meeting scheduling from CRM
-- [ ] Auto-create activities for meetings
-- [ ] Calendar availability check
-
-**Deliverables:**
-- Conversion workflow complete
-- External API published
-- HRIS integration functional
-- API documentation
+**Technical Implementation & Logic**
+*   **Discount Approval Rule**:
+    *   `IF Discount > 15% AND Margin < 20% THEN RequireApproval(FinanceManager)`
+*   **Audit Logging**:
+    *   Immutable append-only log: `{ timestamp, actorId, entityId, previousValue, newValue, clientIP }`.
 
 ---
 
-## Phase 6: AI & Agentic Capabilities (Weeks 12-15)
+### EPIC 6: Deal-to-Project Conversion (Key Differentiator)
+**Goal**: Ensure seamless handoff from sales to delivery with zero context loss.
 
-### 6.1 AI Infrastructure
-- [ ] Setup LangChain/LangGraph framework
-- [ ] Configure OpenAI API integration
-- [ ] Setup vector database (pgvector)
-- [ ] Document embedding pipeline
-- [ ] RAG system implementation
-- [ ] AI service layer architecture
+**Capabilities**
+*   Auto project creation
+*   Templates
+*   Context extraction
+*   Risk flagging
 
-### 6.2 RAG Foundation
-- [ ] Index opportunities (title, description, notes, activities)
-- [ ] Index playbooks, templates, scripts
-- [ ] Index historical win/loss patterns
-- [ ] Semantic search implementation
-- [ ] Permission-aware retrieval
-- [ ] PII redaction in context
+**User Stories**
+*   As a system, I want to automatically create a project when a deal is marked Closed Won.
+*   As a delivery manager, I want projects generated from templates based on deal type.
+*   As an agent, I want to extract scope, timelines, and commitments from deal notes and emails.
+*   As a project owner, I want milestones and tasks pre-created so delivery can start immediately.
+*   As a manager, I want to see delivery risks flagged before kickoff.
 
-### 6.3 AI Tools/Functions
-- [ ] Tool: Create follow-up task
-- [ ] Tool: Update opportunity fields
-- [ ] Tool: Suggest next stage
-- [ ] Tool: Generate activity summary
-- [ ] Tool: Draft outreach email
-- [ ] Tool: Score lead
-- [ ] Tool: Detect duplicates
-- [ ] Tool: Enrich lead data
-- [ ] Tool: Search opportunities
-- [ ] Tool: Query analytics
-
-### 6.4 Agent Orchestration
-- [ ] Planner agent (break down user goals)
-- [ ] Executor agent (call tools in sequence)
-- [ ] Reviewer agent (check outputs, hallucination detection)
-- [ ] Human-in-the-loop approval workflow
-- [ ] Agent state management
-- [ ] Error handling + graceful degradation
-
-### 6.5 AI Assistant UI
-- [ ] Chat interface component
-- [ ] Natural language command input
-- [ ] Proposed changes diff view
-- [ ] Approve/reject UI
-- [ ] AI activity history
-- [ ] Explainability ("why this suggestion?")
-- [ ] Feedback mechanism (useful / not useful)
-
-### 6.6 Agentic Automations
-- [ ] Daily priority agent ("what should I do today?")
-- [ ] Weekly pipeline insights agent
-- [ ] New lead enrichment agent (auto-run)
-- [ ] Stalled deal detection agent
-- [ ] Meeting → task creation agent
-- [ ] Duplicate detection agent
-- [ ] Lead scoring agent
-
-### 6.7 AI Governance & Safety
-- [ ] Permission-aware AI (respects RBAC)
-- [ ] Content filters (harmful content detection)
-- [ ] Prompt injection defenses
-- [ ] AI action audit logs
-- [ ] Cost monitoring + budgets
-- [ ] Rate limiting per user/role
-- [ ] Guardrail configuration UI
-- [ ] "No automatic send" policy (drafts only)
-
-### 6.8 Observability & Quality
-- [ ] Trace logs for each AI run (LangSmith integration)
-- [ ] Quality rating collection
-- [ ] AI performance dashboards
-- [ ] Cost analytics
-- [ ] Hallucination detection metrics
-- [ ] User satisfaction tracking
-
-**Deliverables:**
-- AI assistant functional with core tools
-- RAG system operational
-- Agent orchestration working
-- Human-in-the-loop approvals
-- AI governance controls
-- Automated agents running
+**Technical Implementation & Logic**
+*   **Mapping Logic**:
+    *   `Deal.Value` -> `Project.Budget`
+    *   `Deal.CloseDate` -> `Project.StartDate`
+    *   `Deal.LineItems` -> `Project.Deliverables`
+*   **Agentic Extraction**:
+    *   Run RAG over all Opportunity Emails/Notes -> Extract "Promises Made", "Deadlines", "Tech Constraints" -> Populate `ProjectCharter`.
 
 ---
 
-## Phase 7: Data Enrichment & Scoring (Weeks 16-17)
+### EPIC 7: Project Delivery & Execution (Key Differentiator)
+**Goal**: Help teams deliver on time with proactive intelligence.
 
-### 7.1 Lead Scoring
-- [ ] Rule-based scoring model v1
-- [ ] Score calculation engine
-- [ ] Score explanation UI
-- [ ] Score configuration UI (admin)
-- [ ] Historical score tracking
+**Capabilities**
+*   Task & milestone tracking
+*   Status summaries
+*   Risk prediction
+*   Notifications
 
-### 7.2 ML-Based Scoring
-- [ ] Training data preparation (historical conversions)
-- [ ] Model training pipeline (scikit-learn / AutoML)
-- [ ] Model deployment + inference API
-- [ ] Model monitoring + drift detection
-- [ ] A/B testing framework (rule-based vs ML)
+**User Stories**
+*   As a project manager, I want to track milestones and tasks so delivery is transparent.
+*   As an agent, I want to detect delivery delays before deadlines are missed.
+*   As a system, I want to notify owners automatically when blockers appear.
+*   As a stakeholder, I want weekly status summaries without manual reporting.
+*   As a delivery lead, I want visibility into SLA adherence across projects.
 
-### 7.3 Data Enrichment
-- [ ] Integration with enrichment APIs (Clearbit alternative)
-- [ ] Firmographics enrichment (company size, industry)
-- [ ] Contact enrichment (LinkedIn, email validation)
-- [ ] Confidence scoring for enriched data
-- [ ] Manual override capability
-- [ ] Enrichment cost tracking
-
-**Deliverables:**
-- Lead scoring operational
-- ML model in production (optional)
-- Data enrichment working
+**Technical Implementation & Logic**
+*   **Schedule Variance (SV) Logic**:
+    *   `SV = Earned Value (EV) - Planned Value (PV)`
+    *   If `SV < 0`, Agent triggers an alert: "Project is behind schedule."
+*   **Auto-Status Report**:
+    *   Agent summarizes completed tasks vs planned tasks weekly and generates a natural language digest.
 
 ---
 
-## Phase 8: Testing & Quality (Weeks 18-19)
+### EPIC 8: Reporting, Forecasting & Insights
+**Goal**: Turn CRM data into explainable, actionable insights.
 
-### 8.1 Testing Infrastructure
-- [ ] Unit test coverage (>80% critical paths)
-- [ ] Integration tests (API layer)
-- [ ] E2E tests (Playwright/Cypress)
-- [ ] Contract tests for external APIs
-- [ ] Load testing (k6 / Artillery)
-- [ ] Security testing (OWASP Top 10)
+**Capabilities**
+*   Dashboards
+*   Forecasting
+*   Natural language queries
+*   Agent impact metrics
 
-### 8.2 Test Data & Fixtures
-- [ ] Synthetic pipeline generator
-- [ ] Test user personas
-- [ ] Test data seed scripts
-- [ ] Anonymized production data (optional)
+**User Stories**
+*   As a sales leader, I want pipeline forecasts so I can plan revenue.
+*   As a manager, I want explanations for forecast changes, not just numbers.
+*   As a user, I want to ask questions like “Why did deals stall this week?” in plain language.
+*   As a product owner, I want to measure how agent actions improve outcomes.
+*   As a finance leader, I want revenue vs delivery insights.
 
-### 8.3 UAT Preparation
-- [ ] UAT scripts mapped to user stories
-- [ ] UAT environment setup
-- [ ] User training materials
-- [ ] Bug tracking process
-
-**Deliverables:**
-- Comprehensive test suite
-- Passing quality gates
-- UAT environment ready
+**Technical Implementation & Logic**
+*   **Weighted Forecast**:
+    *   `Forecast = Sum(Opportunity.Value * Stage.Probability)`
+*   **AI Explained Variance**:
+    *   Compare `Forecast(ThisWeek)` vs `Forecast(LastWeek)`.
+    *   Identify distinct deals that changed stage or value.
+    *   Agent output: "Forecast dropped $50k primarily because Deal X moved to 'Closed Lost' and Deal Y was delayed."
 
 ---
 
-## Phase 9: Performance & Scalability (Week 20)
+### EPIC 9: Agent Framework & Governance (Key Differentiator)
+**Goal**: Safely operate autonomous agents with transparency and control.
 
-### 9.1 Performance Optimization
-- [ ] Database query optimization + indexing
-- [ ] Caching strategy (Redis)
-- [ ] API response time optimization
-- [ ] Frontend bundle optimization
-- [ ] Image/asset optimization
-- [ ] Lazy loading + code splitting
+**Capabilities**
+*   Agent definitions
+*   Execution modes (Auto/Human-in-loop)
+*   Approvals & rollback
+*   Observability
 
-### 9.2 Scalability Readiness
-- [ ] Horizontal scaling plan
-- [ ] Background job queue (BullMQ/Celery)
-- [ ] Connection pooling
-- [ ] CDN setup for static assets
-- [ ] Load balancer configuration
+**User Stories**
+*   As an admin, I want to configure which actions agents can execute automatically.
+*   As a user, I want to approve or reject agent-proposed actions.
+*   As a system, I want all agent actions logged with reasoning.
+*   As an admin, I want to roll back agent changes if needed.
+*   As a compliance officer, I want agent behavior auditable.
 
-### 9.3 Monitoring & Observability
-- [ ] Application Performance Monitoring (APM)
-- [ ] Error tracking (Sentry)
-- [ ] Log aggregation
-- [ ] Metrics dashboards (Grafana)
-- [ ] Alerting rules
-- [ ] Health check endpoints
-
-**Deliverables:**
-- Performance benchmarks met
-- Monitoring dashboards live
-- Scalability plan documented
+**Technical Implementation & Logic**
+*   **Agent State Machine**:
+    *   States: `Idle` -> `Reasoning` -> `Proposing` -> `Executing` -> `Completed`.
+*   **Governance Check**:
+    ```typescript
+    if (action.riskLevel === 'High' && !user.approved) {
+      return state.transitionTo('AwaitingApproval');
+    }
+    ```
 
 ---
 
-## Phase 10: Documentation & Launch (Week 21)
+### EPIC 10: Automation Engine (Rules + Agents)
+**Goal**: Combine deterministic workflows with intelligent decision-making.
 
-### 10.1 Documentation
-- [ ] User guide (end-user operations)
-- [ ] Admin guide (configuration, master data)
-- [ ] API documentation (OpenAPI + examples)
-- [ ] AI assistant guide (capabilities, limitations)
-- [ ] Developer documentation (architecture, setup)
-- [ ] Runbook (operations, troubleshooting)
+**Capabilities**
+*   Triggers & conditions
+*   Rule-based actions
+*   Agent invocation
+*   SLA timers
 
-### 10.2 Training & Enablement
-- [ ] Admin training sessions
-- [ ] User training videos
-- [ ] Help center content
-- [ ] FAQ document
-- [ ] In-app tooltips + onboarding
+**User Stories**
+*   As an admin, I want to define automation rules without code.
+*   As a system, I want to trigger agents only when human judgment is beneficial.
+*   As a manager, I want approval gates for high-risk automations.
+*   As a system, I want to enforce SLAs automatically.
+*   As a developer, I want clear execution traces for debugging.
 
-### 10.3 Launch Preparation
-- [ ] Production environment verification
-- [ ] Backup/restore testing
-- [ ] DR plan validation
-- [ ] Security review sign-off
-- [ ] Performance validation
-- [ ] Launch checklist completion
-
-### 10.4 Go-Live
-- [ ] Data migration (if applicable)
-- [ ] Cutover plan execution
-- [ ] Hypercare period (2 weeks post-launch)
-- [ ] Issue triage + hotfix process
-- [ ] User feedback collection
-
-**Deliverables:**
-- Complete documentation
-- Training completed
-- Production launch successful
-- Hypercare support active
+**Technical Implementation & Logic**
+*   **Hybrid Trigger Logic**:
+    *   Event: `EmailReceived`.
+    *   Rule: If `SenderDomain` is `Competitor`, Tag as `Competitor`. (Deterministic)
+    *   Agent: If `Content` implies `Urgency`, Draft `HighPriorityResponse`. (Probabilistic)
 
 ---
 
-## Success Metrics
+## Strategic Differentiation Map
 
-### Business Metrics
-- **Time saved per user**: 2+ hours/week (AI assistance)
-- **Conversion rate improvement**: +10% (better lead scoring + follow-up)
-- **SLA adherence**: >95% (automated reminders)
-- **User adoption**: >90% active users within 30 days
-- **Data quality**: <5% incomplete/stale records
-
-### Technical Metrics
-- **Uptime**: 99.9%
-- **API response time**: p95 <500ms
-- **Page load time**: <2s
-- **AI response time**: <5s for complex queries
-- **Zero critical security vulnerabilities**
-
-### AI Metrics
-- **AI suggestion acceptance rate**: >60%
-- **AI-generated content usage**: >40% of drafts
-- **Hallucination rate**: <5%
-- **User satisfaction with AI**: >4/5 stars
-
----
-
-## Risk Mitigation
-
-| Risk | Impact | Mitigation |
-|------|--------|------------|
-| AI costs exceed budget | High | Implement strict rate limiting, caching, model optimization |
-| Data privacy violation | Critical | Comprehensive audit logs, PII masking, permission checks |
-| Poor AI accuracy | Medium | Human-in-the-loop, feedback loops, confidence thresholds |
-| Performance degradation | High | Load testing, caching, database optimization, monitoring |
-| Integration failures | Medium | Retry logic, circuit breakers, fallback strategies |
-| User adoption low | High | Excellent UX, training, change management, early wins |
+| Feature Area | Salesforce (Leader) | GoHighLevel (Challenger) | **Agentic CRM (This System)** |
+| :--- | :--- | :--- | :--- |
+| **Primary Strength** | Enterprise Scale & Customization | Integrated Marketing & Speed | **Autonomous Intelligence & Delivery Handoff** |
+| **Core Epics** | 1, 3, 5, 8 (Strong but heavy) | 2, 4, 10 (Fast but shallow) | **6, 7, 9 (Agentic + Lifecycle Continuity)** |
+| **AI Approach** | Copilot (Sidebar helper) | Content Gen (Templates) | **Agents (Active Workers)** |
+| **Delivery Handoff** | Requires complex integration | Not supported | **Native Deal-to-Project Conversion** |
 
 ---
 

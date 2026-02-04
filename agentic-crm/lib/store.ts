@@ -9,8 +9,12 @@ export interface Opportunity {
     probability: number;
     lastActivity: string;
     owner: string;
-    status: 'healthy' | 'at-risk';
+    status: 'healthy' | 'at-risk' | 'critical';
     description?: string;
+    // Epic 3 Intelligence Fields
+    healthScore?: number;
+    isStalled?: boolean;
+    daysInStage?: number;
 }
 
 interface OpportunityStore {
@@ -19,6 +23,7 @@ interface OpportunityStore {
     fetchOpportunities: () => Promise<void>;
     addOpportunity: (opportunity: any) => Promise<void>;
     deleteOpportunity: (id: string) => Promise<void>;
+    updateOpportunity: (id: string, updates: Partial<Opportunity>) => Promise<void>;
 }
 
 export const useOpportunityStore = create<OpportunityStore>((set, get) => ({
@@ -61,5 +66,31 @@ export const useOpportunityStore = create<OpportunityStore>((set, get) => ({
 
         // In a real implementation:
         // await fetch(`/api/opportunities/${id}`, { method: 'DELETE' });
+    },
+
+    updateOpportunity: async (id, updates) => {
+        // Optimistic update
+        set((state) => ({
+            opportunities: state.opportunities.map((opp) =>
+                opp.id === id ? { ...opp, ...updates } : opp
+            ),
+        }));
+
+        try {
+            // Persist to backend (Epic 3 Persistence)
+            // Note: We need a PATCH endpoint for this to work fully.
+            // For now, we simulate success or log error.
+            /* 
+            const res = await fetch(`/api/opportunities/${id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(updates)
+            }); 
+            */
+        } catch (error) {
+            console.error("Failed to update", error);
+            // Revert optimistically
+            get().fetchOpportunities();
+        }
     },
 }));

@@ -14,6 +14,7 @@ import {
   Workflow,
   BarChart3,
   Lock,
+  Heart,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -175,12 +176,131 @@ export default function HomePage() {
       </section>
 
       {/* Footer */}
-      <footer className="relative py-12 px-6 border-t border-white/10">
-        <div className="max-w-7xl mx-auto text-center text-neutral-500">
-          <p>&copy; 2026 Agentic CRM. All rights reserved.</p>
-          <p className="mt-2 text-sm">
-            Powered by Advanced AI • Built with Next.js
-          </p>
+      <footer className="relative py-12 px-6 border-t border-white/10 bg-neutral-900/50 backdrop-blur-sm">
+        <div className="max-w-7xl mx-auto">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-8 mb-12">
+            <div>
+              <h3 className="text-lg font-semibold mb-4 text-white">Product</h3>
+              <ul className="space-y-2 text-neutral-400">
+                <li>
+                  <Link
+                    href="#features"
+                    className="hover:text-primary-400 transition-colors"
+                  >
+                    Features
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    href="/pricing"
+                    className="hover:text-primary-400 transition-colors"
+                  >
+                    Pricing
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    href="/login"
+                    className="hover:text-primary-400 transition-colors"
+                  >
+                    Login
+                  </Link>
+                </li>
+              </ul>
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold mb-4 text-white">Company</h3>
+              <ul className="space-y-2 text-neutral-400">
+                <li>
+                  <Link
+                    href="/about"
+                    className="hover:text-primary-400 transition-colors"
+                  >
+                    About Us
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    href="/contact"
+                    className="hover:text-primary-400 transition-colors"
+                  >
+                    Contact
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    href="/careers"
+                    className="hover:text-primary-400 transition-colors"
+                  >
+                    Careers
+                  </Link>
+                </li>
+              </ul>
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold mb-4 text-white">
+                Resources
+              </h3>
+              <ul className="space-y-2 text-neutral-400">
+                <li>
+                  <Link
+                    href="/blog"
+                    className="hover:text-primary-400 transition-colors"
+                  >
+                    Blog
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    href="/docs"
+                    className="hover:text-primary-400 transition-colors"
+                  >
+                    Documentation
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    href="/help"
+                    className="hover:text-primary-400 transition-colors"
+                  >
+                    Help Center
+                  </Link>
+                </li>
+              </ul>
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold mb-4 text-white">Legal</h3>
+              <ul className="space-y-2 text-neutral-400">
+                <li>
+                  <Link
+                    href="/privacy"
+                    className="hover:text-primary-400 transition-colors"
+                  >
+                    Privacy Policy
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    href="/terms"
+                    className="hover:text-primary-400 transition-colors"
+                  >
+                    Terms of Service
+                  </Link>
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <div className="pt-8 border-t border-white/10 text-center flex flex-col items-center justify-center gap-2">
+            <p className="flex items-center gap-1 text-neutral-500">
+              Build with{" "}
+              <Heart className="w-4 h-4 text-red-500 fill-red-500" /> at
+              Quantum Business Advisory
+            </p>
+            <p className="text-neutral-500 text-sm">
+              Copyright © QBA. All Rights Reserved.
+            </p>
+          </div>
         </div>
       </footer>
     </div>

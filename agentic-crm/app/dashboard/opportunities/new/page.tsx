@@ -1,189 +1,348 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Save, Sparkles } from "lucide-react";
+import {
+    Calendar,
+    Search,
+    ChevronDown,
+    Plus,
+    ArrowRight,
+    Briefcase,
+    Globe,
+    Code,
+    User,
+    CheckCircle2,
+    Paperclip
+} from "lucide-react";
 import { useOpportunityStore } from "@/lib/store";
+
+// Mock Data for Dropdowns
+const REGIONS = ["North America", "EMEA", "APAC", "LATAM"];
+const PRACTICES = ["Cloud Engineering", "Data & AI", "Enterprise Apps", "Cybersecurity", "Digital Experience"];
+const PROJECT_TYPES = ["New Development", "Modernization", "Maintenance", "Consulting"];
+const PRICING_MODELS = ["Time & Material", "Fixed Price", "Retainer", "Hybrid"];
+const DURATIONS = ["3 Months", "6 Months", "9 Months", "12 Months", "> 1 Year"];
 
 export default function NewOpportunityPage() {
     const router = useRouter();
     const { addOpportunity } = useOpportunityStore();
-    const [isAnalyzing, setIsAnalyzing] = useState(false);
+    const [isLoading, setIsLoading] = useState(false);
 
     // Form State
     const [formData, setFormData] = useState({
-        name: "",
-        client: "",
-        value: "",
-        stage: "Discovery",
+        clientName: "",
+        region: "",
+        projectType: "",
+        projectName: "",
+        practice: "",
+        salesRep: "",
+        technology: "",
+        tentativeStartDate: "",
+        tentativeEndDate: "",
+        duration: "",
+        pricingModel: "",
+        expectedDayRate: "",
         description: "",
+        value: 0
     });
 
-    const handleAnalyze = () => {
-        if (!formData.description) return;
-        setIsAnalyzing(true);
-        // Simulate AI analysis
-        setTimeout(() => {
-            setIsAnalyzing(false);
-            // Simulate AI suggestions
-            setFormData(prev => ({
-                ...prev,
-                value: "150000",
-                stage: "Qualifying"
-            }));
-        }, 1500);
+    // Step State
+    const [activeStep, setActiveStep] = useState(0);
+    const steps = ["Pipeline", "Presales", "Sales", "Project"];
+
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+        const { name, value } = e.target;
+        setFormData(prev => ({ ...prev, [name]: value }));
     };
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        setIsLoading(true);
 
-        // Add to global store
-        addOpportunity({
-            name: formData.name,
-            client: formData.client,
-            value: Number(formData.value) || 0,
-            stage: formData.stage,
-            probability: 20, // Default for new deals
-            owner: "Dip Bagchi", // Current user
-            description: formData.description
-        });
+        try {
+            await addOpportunity({
+                title: formData.projectName,
+                companyName: formData.clientName, // Store maps this to Client Relation
+                value: Number(formData.value) || (Number(formData.expectedDayRate) * 20), // Fallback calculation
+                stage: "Pipeline",
+                description: formData.description,
 
-        router.push("/dashboard/opportunities");
+                // Enhanced Fields
+                region: formData.region,
+                practice: formData.practice,
+                technology: formData.technology,
+                tentativeStartDate: formData.tentativeStartDate ? new Date(formData.tentativeStartDate) : null,
+                tentativeEndDate: formData.tentativeEndDate ? new Date(formData.tentativeEndDate) : null,
+                tentativeDuration: formData.duration,
+                salesRepName: formData.salesRep,
+                pricingModel: formData.pricingModel,
+                expectedDayRate: Number(formData.expectedDayRate),
+
+                // Defaults
+                probability: 10,
+                ownerId: "user-1", // Mock current user
+                source: "Manual Entry"
+            });
+
+            router.push("/dashboard/opportunities");
+        } catch (error) {
+            console.error("Failed to create opportunity", error);
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     return (
-        <div className="max-w-3xl mx-auto space-y-6">
-            {/* Header */}
-            <div className="flex items-center gap-4">
-                <button
-                    onClick={() => router.back()}
-                    className="p-2 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors"
-                >
-                    <ArrowLeft className="w-5 h-5" />
-                </button>
-                <div>
-                    <h1 className="text-2xl font-bold text-slate-900">New Opportunity</h1>
-                    <p className="text-slate-500">Create a new deal or ask AI to draft it from notes.</p>
+        <div className="max-w-7xl mx-auto space-y-8">
+            {/* Header / Breadcrumb */}
+            <div>
+                <h1 className="text-2xl font-semibold text-slate-800">
+                    Opportunity / <span className="text-slate-500 font-normal">New Pipeline</span>
+                </h1>
+            </div>
+
+            {/* Stepper Navigation */}
+            <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
+                <div className="flex w-full mt-2 h-10 bg-slate-50 rounded-full overflow-hidden border border-slate-200">
+                    {steps.map((step, idx) => (
+                        <button
+                            key={step}
+                            onClick={() => setActiveStep(idx)}
+                            className={`flex-1 flex items-center justify-center gap-2 text-sm font-medium transition-colors relative
+                                ${activeStep === idx
+                                    ? 'bg-indigo-900 text-white'
+                                    : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700'
+                                }
+                            `}
+                        >
+                            {step}
+                            {/* Chevron Separator */}
+                            {idx !== steps.length - 1 && (
+                                <div className="absolute right-0 top-0 bottom-0 w-[1px] bg-white transform skew-x-12 translate-x-3 z-10 border-r border-slate-300"></div>
+                            )}
+                        </button>
+                    ))}
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                {/* Main Form */}
-                <div className="md:col-span-2 space-y-6">
-                    <form onSubmit={handleSubmit} className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-6">
-
-                        <div className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Opportunity Name</label>
-                                <input
-                                    type="text"
-                                    className="w-full px-4 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all font-medium"
-                                    placeholder="e.g., Enterprise License Expansion"
-                                    value={formData.name}
-                                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                                    required
-                                />
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Client / Account</label>
-                                <input
-                                    type="text"
-                                    className="w-full px-4 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
-                                    placeholder="Search client..."
-                                    value={formData.client}
-                                    onChange={(e) => setFormData({ ...formData, client: e.target.value })}
-                                    required
-                                />
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Estimated Value</label>
-                                    <div className="relative">
-                                        <span className="absolute left-4 top-2 text-slate-400">$</span>
-                                        <input
-                                            type="number"
-                                            className="w-full pl-8 pr-4 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
-                                            placeholder="0.00"
-                                            value={formData.value}
-                                            onChange={(e) => setFormData({ ...formData, value: e.target.value })}
-                                        />
-                                    </div>
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Stage</label>
-                                    <select
-                                        className="w-full px-4 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all bg-white"
-                                        value={formData.stage}
-                                        onChange={(e) => setFormData({ ...formData, stage: e.target.value })}
-                                    >
-                                        <option>Discovery</option>
-                                        <option>Qualifying</option>
-                                        <option>Proposal</option>
-                                        <option>Negotiation</option>
-                                        <option>Closed Won</option>
-                                    </select>
-                                </div>
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Description / Notes</label>
-                                <div className="relative">
-                                    <textarea
-                                        className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all min-h-[120px]"
-                                        placeholder="Paste meeting notes or email content here for AI analysis..."
-                                        value={formData.description}
-                                        onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                                    />
-                                    <button
-                                        type="button"
-                                        onClick={handleAnalyze}
-                                        disabled={isAnalyzing || !formData.description}
-                                        className="absolute right-3 bottom-3 p-2 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 disabled:opacity-50 transition-colors"
-                                        title="Analyze with AI"
-                                    >
-                                        <Sparkles className={`w-4 h-4 ${isAnalyzing ? "animate-spin" : ""}`} />
-                                    </button>
-                                </div>
-                                <p className="text-xs text-slate-400 mt-2">
-                                    Tip: Paste your raw meeting notes above and click the sparkle icon to auto-fill fields.
-                                </p>
-                            </div>
-                        </div>
-
-                        <div className="pt-4 flex items-center justify-end gap-3 border-t border-slate-100">
-                            <button
-                                type="button"
-                                onClick={() => router.back()}
-                                className="btn-ghost"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                type="submit"
-                                className="btn-primary flex items-center gap-2"
-                            >
-                                <Save className="w-4 h-4" />
-                                Create Opportunity
-                            </button>
-                        </div>
-                    </form>
+            {/* Basic Information Form */}
+            <form onSubmit={handleSubmit} className="bg-white rounded-lg shadow-sm border border-slate-200 p-8">
+                <div className="mb-6">
+                    <h2 className="text-lg font-bold text-slate-900">Basic Information</h2>
                 </div>
 
-                {/* Sidebar Info */}
-                <div className="space-y-6">
-                    <div className="bg-indigo-50 rounded-2xl p-6 border border-indigo-100">
-                        <div className="w-10 h-10 rounded-lg bg-indigo-100 flex items-center justify-center mb-4">
-                            <Sparkles className="w-5 h-5 text-indigo-600" />
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-6">
+
+                    {/* Row 1 */}
+                    <div className="space-y-1.5">
+                        <label className="block text-sm font-bold text-slate-700">Client Name *</label>
+                        <div className="flex gap-2">
+                            <div className="relative flex-1">
+                                <select
+                                    name="clientName"
+                                    required
+                                    className="w-full pl-3 pr-10 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm
+                                             focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                    onChange={handleChange}
+                                >
+                                    <option value="">Select Client</option>
+                                    <option value="Acme Corp">Acme Corp</option>
+                                    <option value="Globex">Globex Inc</option>
+                                    <option value="Stark Ind">Stark Industries</option>
+                                </select>
+                            </div>
+                            <button type="button" className="p-2.5 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors">
+                                <Plus className="w-5 h-5" />
+                            </button>
                         </div>
-                        <h3 className="font-semibold text-indigo-900 mb-2">AI Assistant</h3>
-                        <p className="text-sm text-indigo-700/80 leading-relaxed">
-                            I can help you fill out this form. Just verify the client name and paste any rough notes you have. I'll predict the deal value and suggest the appropriate stage.
-                        </p>
                     </div>
+
+                    <div className="space-y-1.5">
+                        <label className="block text-sm font-bold text-slate-700">Region *</label>
+                        <select
+                            name="region"
+                            required
+                            className="w-full pl-3 pr-10 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
+                            onChange={handleChange}
+                        >
+                            <option value="">Select Region</option>
+                            {REGIONS.map(r => <option key={r} value={r}>{r}</option>)}
+                        </select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                        <label className="block text-sm font-bold text-slate-700">Project Type *</label>
+                        <select
+                            name="projectType"
+                            required
+                            className="w-full pl-3 pr-10 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
+                            onChange={handleChange}
+                        >
+                            <option value="">Select Project Type</option>
+                            {PROJECT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                    </div>
+
+                    {/* Row 2 */}
+                    <div className="col-span-1 md:col-span-2 space-y-1.5">
+                        <label className="block text-sm font-bold text-slate-700">Project Name *</label>
+                        <input
+                            type="text"
+                            name="projectName"
+                            required
+                            placeholder="XXX--XXX- Project Details"
+                            className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
+                            onChange={handleChange}
+                        />
+                    </div>
+
+                    <div className="space-y-1.5">
+                        <label className="block text-sm font-bold text-slate-700">Practice</label>
+                        <select
+                            name="practice"
+                            className="w-full pl-3 pr-10 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
+                            onChange={handleChange}
+                        >
+                            <option value="">Find Practice</option>
+                            {PRACTICES.map(p => <option key={p} value={p}>{p}</option>)}
+                        </select>
+                    </div>
+
+                    {/* Row 3 */}
+                    <div className="space-y-1.5">
+                        <label className="block text-sm font-bold text-slate-700">Sales Representative *</label>
+                        <select
+                            name="salesRep"
+                            required
+                            className="w-full pl-3 pr-10 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
+                            onChange={handleChange}
+                        >
+                            <option value="">Find SalesPerson</option>
+                            <option value="Sarah Wilson">Sarah Wilson</option>
+                            <option value="Mike Ross">Mike Ross</option>
+                        </select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                        <label className="block text-sm font-bold text-slate-700">Technology *</label>
+                        <input
+                            type="text"
+                            name="technology"
+                            required
+                            placeholder="Technology"
+                            className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
+                            onChange={handleChange}
+                        />
+                    </div>
+
+                    {/* Row 4: Dates & Duration */}
+                    <div className="space-y-1.5">
+                        <label className="block text-sm font-bold text-slate-700">Tentative Start Date *</label>
+                        <input
+                            type="date"
+                            name="tentativeStartDate"
+                            required
+                            className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm text-slate-500"
+                            onChange={handleChange}
+                        />
+                    </div>
+
+                    <div className="space-y-1.5">
+                        <label className="block text-sm font-bold text-slate-700">Duration/Tentative End Date</label>
+                        <select
+                            name="duration"
+                            className="w-full pl-3 pr-10 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
+                            onChange={handleChange}
+                        >
+                            <option value="">Select Duration</option>
+                            {DURATIONS.map(d => <option key={d} value={d}>{d}</option>)}
+                        </select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                        <label className="block text-sm font-bold text-slate-700">Tentative End Date</label>
+                        <input
+                            type="date"
+                            name="tentativeEndDate"
+                            className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm text-slate-500"
+                            onChange={handleChange}
+                        />
+                    </div>
+
+                    {/* Row 5: Pricing */}
+                    <div className="space-y-1.5">
+                        <label className="block text-sm font-bold text-slate-700">Pricing Model *</label>
+                        <select
+                            name="pricingModel"
+                            required
+                            className="w-full pl-3 pr-10 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
+                            onChange={handleChange}
+                        >
+                            <option value="">Select Model</option>
+                            {PRICING_MODELS.map(m => <option key={m} value={m}>{m}</option>)}
+                        </select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                        <label className="block text-sm font-bold text-slate-700">Expected Day Rate (₹) *</label>
+                        <input
+                            type="number"
+                            name="expectedDayRate"
+                            required
+                            placeholder="0"
+                            className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
+                            onChange={handleChange}
+                        />
+                    </div>
+
+                    {/* Spacer for 3rd column */}
+                    <div className="hidden lg:block"></div>
+
+                    {/* Row 6: Description & Attachments */}
+                    <div className="col-span-1 md:col-span-2 lg:col-span-2 space-y-1.5">
+                        <label className="block text-sm font-bold text-slate-700">Description *</label>
+                        <textarea
+                            name="description"
+                            required
+                            placeholder="Project Description..."
+                            rows={4}
+                            className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm resize-none"
+                            onChange={handleChange}
+                        />
+                    </div>
+
+                    <div className="col-span-1 space-y-1.5 flex flex-col">
+                        <label className="block text-sm font-bold text-slate-700">Attachments</label>
+                        <div className="flex-1 mt-1 border border-slate-300 rounded-md p-4 bg-white flex flex-col items-center justify-center text-slate-400 gap-2 border-dashed">
+                            <span className="text-xs">There is nothing attached.</span>
+                            <button type="button" className="flex items-center gap-1 text-slate-600 font-semibold text-xs hover:text-indigo-600">
+                                <Paperclip className="w-3 h-3" />
+                                Attach file
+                            </button>
+                        </div>
+                    </div>
+
                 </div>
-            </div>
+
+                {/* Footer Actions */}
+                <div className="mt-12 flex justify-end gap-3 pt-6 border-t border-slate-100">
+                    <button
+                        type="button"
+                        onClick={() => router.back()}
+                        className="px-6 py-2 bg-white border border-slate-300 rounded-md text-slate-700 font-medium hover:bg-slate-50 transition-colors"
+                    >
+                        Clear
+                    </button>
+                    <button
+                        type="submit"
+                        disabled={isLoading}
+                        className="px-6 py-2 bg-indigo-600 border border-transparent rounded-md text-white font-bold hover:bg-indigo-700 transition-all disabled:opacity-70 disabled:cursor-not-allowed"
+                    >
+                        {isLoading ? 'Submitting...' : 'Submit Details'}
+                    </button>
+                </div>
+            </form>
         </div>
     );
 }

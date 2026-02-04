@@ -45,6 +45,8 @@ model User {
   savedViews              SavedView[]
   notifications           Notification[]
   notificationPreferences NotificationPreference[]
+  projectMembers          ProjectMember[]
+  managedProjects         Project[]
 
   @@index([email])
   @@index([roleId])
@@ -103,6 +105,7 @@ model Client {
 
   contacts      Contact[]
   opportunities Opportunity[]
+  projects      Project[]
 
   @@index([name])
   @@index([domain])
@@ -177,7 +180,17 @@ model Opportunity {
 
   // -- New Lifecycle Fields --
   geolocation       String?
-  salesRepName      String?
+  salesRepName      String? // Legacy or text-based override
+  
+  // Detailed Fields from UI
+  region            String?
+  practice          String?
+  technology        String?
+  tentativeStartDate DateTime?
+  tentativeDuration String?
+  tentativeEndDate  DateTime?
+  pricingModel      String?
+  expectedDayRate   Decimal?
   
   // Pipeline, Presales, Sales
   currentStage      String   @default("Pipeline") 
@@ -211,6 +224,7 @@ model Opportunity {
   aiInteractions    AIInteraction[]
   leadScore         LeadScore?
   vectorEmbedding   VectorEmbedding?
+  project           Project?
 
   @@index([clientId])
   @@index([ownerId])
@@ -543,4 +557,95 @@ model SystemConfig {
 
   @@index([category])
   @@map("system_config")
+}
+
+// ============================================================================
+// PROJECT DELIVERY (EPIC 6 & 7)
+// ============================================================================
+
+model Project {
+  id          String   @id @default(cuid())
+  name        String
+  code        String?  @unique // e.g. PROJ-2024-001
+  description String?
+  status      String   @default("Planning") // Planning, Active, AtRisk, Completed, OnHold
+  startDate   DateTime?
+  endDate     DateTime?
+  budget      Decimal?
+  consumed    Decimal? @default(0)
+  currency    String   @default("USD")
+  
+  // Health Metrics (Epic 7)
+  healthScore Int      @default(100)
+  riskLevel   String   @default("Low") // Low, Medium, High
+  scheduleVariance Decimal? @default(0) // SV = EV - PV
+  
+  // Relations
+  client      Client   @relation(fields: [clientId], references: [id])
+  clientId    String
+  opportunity Opportunity? @relation(fields: [opportunityId], references: [id])
+  opportunityId String? @unique // One deal -> One project (usually)
+  
+  manager     User?    @relation(fields: [managerId], references: [id])
+  managerId   String?
+  
+  // Children
+  milestones  Milestone[]
+  risks       ProjectRisk[]
+  team        ProjectMember[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([clientId])
+  @@index([managerId])
+  @@index([status])
+  @@map("projects")
+}
+
+model Milestone {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  dueDate     DateTime?
+  completedAt DateTime?
+  status      String   @default("Pending")
+  
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId   String
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([projectId])
+  @@map("milestones")
+}
+
+model ProjectRisk {
+  id          String   @id @default(cuid())
+  description String
+  impact      String   // Low, Medium, High
+  probability String   // Low, Medium, High
+  status      String   @default("Open")
+  mitigationPlan String?
+  
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId   String
+
+  @@index([projectId])
+  @@map("project_risks")
+}
+
+model ProjectMember {
+  id        String   @id @default(cuid())
+  role      String   // e.g. Developer, PM
+  allocationPct Int  @default(100)
+  
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId String
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String
+
+  @@unique([projectId, userId])
+  @@map("project_members")
 }

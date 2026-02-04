@@ -1,15 +1,18 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 
-export async function GET(req: Request, { params }: { params: { id: string } }) {
+export async function GET(
+    req: Request,
+    { params }: { params: Promise<{ id: string }> }
+) {
     try {
+        const { id } = await params;
         const opportunity = await prisma.opportunity.findUnique({
-            where: { id: params.id },
+            where: { id },
             include: {
                 client: true,
                 stage: true,
-                type: true,
-                owner: true
+                owner: true,
             }
         });
 
@@ -19,48 +22,73 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 
         return NextResponse.json(opportunity);
     } catch (error) {
-        console.error('Fetch Opportunity Error:', error);
-        return NextResponse.json({ error: 'Failed' }, { status: 500 });
+        return NextResponse.json({ error: 'Failed to fetch opportunity' }, { status: 500 });
     }
 }
 
-export async function PUT(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(
+    req: Request,
+    { params }: { params: Promise<{ id: string }> }
+) {
     try {
+        const { id } = await params;
         const body = await req.json();
 
-        // We update fields based on what's passed.
-        // Specially handle JSON fields if needed, but Prisma handles 'presalesData: jsonObject' fine.
+        // Handle Client update if name changed
+        let clientId = body.clientId;
+        if (body.clientName) {
+            const existingClient = await prisma.client.findFirst({ where: { name: body.clientName } });
+            if (existingClient) {
+                clientId = existingClient.id;
+            } else {
+                const newClient = await prisma.client.create({ data: { name: body.clientName } });
+                clientId = newClient.id;
+            }
+        }
+
+        // Handle Stage Transition
+        let stageUpdate = {};
+        if (body.stageName) {
+            const stage = await prisma.stage.findFirst({ where: { name: body.stageName } });
+            if (stage) {
+                stageUpdate = {
+                    stageId: stage.id,
+                    currentStage: body.stageName
+                };
+            }
+        }
 
         const updatedOpp = await prisma.opportunity.update({
-            where: { id: params.id },
+            where: { id },
             data: {
-                title: body.title,
+                title: body.projectName || body.title, // Map UI 'projectName' to DB 'title'
                 description: body.description,
-                geolocation: body.geolocation,
-                salesRepName: body.salesRepName,
-                currentStage: body.currentStage,
-                detailedStatus: body.detailedStatus,
-                presalesData: body.presalesData, // Pass the JSON object directly
-                salesData: body.salesData,       // Pass the JSON object directly
-                value: body.value,               // Decimal/Float
-                probability: body.probability,
-                // Relations updates if needed
-                stageId: body.stageId
+                value: body.value,
+
+                // Detailed Fields
+                region: body.region,
+                practice: body.practice,
+                technology: body.technology,
+                salesRepName: body.salesRepName || body.salesRep,
+                tentativeStartDate: body.tentativeStartDate ? new Date(body.tentativeStartDate) : undefined,
+                tentativeEndDate: body.tentativeEndDate ? new Date(body.tentativeEndDate) : undefined,
+                tentativeDuration: body.tentativeDuration || body.duration,
+                pricingModel: body.pricingModel,
+                expectedDayRate: body.expectedDayRate,
+
+                // Complex Data
+                presalesData: body.presalesData,
+                salesData: body.salesData,
+
+                // Relations if changed
+                clientId: clientId,
+                ...stageUpdate
             }
         });
 
         return NextResponse.json(updatedOpp);
     } catch (error) {
-        console.error('Update Opportunity Error:', error);
-        return NextResponse.json({ error: 'Failed to update' }, { status: 500 });
-    }
-}
-
-export async function DELETE(req: Request, { params }: { params: { id: string } }) {
-    try {
-        await prisma.opportunity.delete({ where: { id: params.id } });
-        return NextResponse.json({ success: true });
-    } catch (error) {
-        return NextResponse.json({ error: 'Failed' }, { status: 500 });
+        console.error("Update Error:", error);
+        return NextResponse.json({ error: 'Failed to update opportunity' }, { status: 500 });
     }
 }
