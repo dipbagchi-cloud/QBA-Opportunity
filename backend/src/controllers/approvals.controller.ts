@@ -1,17 +1,18 @@
-import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { Request, Response } from 'express';
+import { prisma } from '../lib/prisma';
 
 // Epic 5 Logic: Deal Governance
-export async function POST(req: Request) {
+// POST /api/approvals
+export async function createApproval(req: Request, res: Response) {
     try {
-        const body = await req.json();
+        const body = req.body;
         const { opportunityId, discountPercent, marginPercent, requesterId } = body;
 
         // Rule: IF Discount > 15% AND Margin < 20% THEN RequireApproval
         const requiresApproval = discountPercent > 15 && marginPercent < 20;
 
         if (!requiresApproval) {
-            return NextResponse.json({
+            return res.json({
                 status: 'Approved',
                 message: 'Auto-approved based on policy.',
                 requiresReview: false
@@ -40,7 +41,7 @@ export async function POST(req: Request) {
             }
         });
 
-        return NextResponse.json({
+        res.json({
             status: 'Pending',
             message: 'Request sent to Finance for review.',
             requiresReview: true,
@@ -49,6 +50,6 @@ export async function POST(req: Request) {
 
     } catch (error) {
         console.error('Approval Error:', error);
-        return NextResponse.json({ error: 'Failed' }, { status: 500 });
+        res.status(500).json({ error: 'Failed' });
     }
 }

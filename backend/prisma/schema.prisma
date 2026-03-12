@@ -1,11 +1,11 @@
-// Agentic CRM - Database Schema
+// Agentic CRM - Database Schema (PostgreSQL)
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = "file:./dev.db"
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 // ============================================================================
@@ -143,11 +143,11 @@ model Contact {
 model Resource {
   id              String @id @default(cuid())
   name            String
-  grade           String    // e.g. "Senior Dev", "Junior QA"
+  grade           String
   effortFactor    Float     @default(1.0)
   attritionFactor Float     @default(1.0)
-  standardRate    Float     // Hourly cost
-  skills          String?   // JSON or CSV
+  standardRate    Float
+  skills          String?
   availability    Boolean   @default(true)
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
@@ -180,7 +180,7 @@ model Opportunity {
 
   // -- New Lifecycle Fields --
   geolocation       String?
-  salesRepName      String? // Legacy or text-based override
+  salesRepName      String?
   
   // Detailed Fields from UI
   region            String?
@@ -194,12 +194,12 @@ model Opportunity {
   
   // Pipeline, Presales, Sales
   currentStage      String   @default("Pipeline") 
-  detailedStatus    String?  // e.g. "just received", "Estimation in progress"
+  detailedStatus    String?
   
-  // Presales Data (JSON: { selectedResources: [], totalHours: 0, estimatedCost: 0, projectedQuote: 0, proposalUrl: "" })
+  // Presales Data
   presalesData      Json?
   
-  // Sales Data (JSON: { finalQuote: 0, category: "Assured" | "Probable" | "Unlikely", comparison: {} })
+  // Sales Data
   salesData         Json?
 
   // Relations
@@ -566,9 +566,9 @@ model SystemConfig {
 model Project {
   id          String   @id @default(cuid())
   name        String
-  code        String?  @unique // e.g. PROJ-2024-001
+  code        String?  @unique
   description String?
-  status      String   @default("Planning") // Planning, Active, AtRisk, Completed, OnHold
+  status      String   @default("Planning")
   startDate   DateTime?
   endDate     DateTime?
   budget      Decimal?
@@ -577,14 +577,14 @@ model Project {
   
   // Health Metrics (Epic 7)
   healthScore Int      @default(100)
-  riskLevel   String   @default("Low") // Low, Medium, High
-  scheduleVariance Decimal? @default(0) // SV = EV - PV
+  riskLevel   String   @default("Low")
+  scheduleVariance Decimal? @default(0)
   
   // Relations
   client      Client   @relation(fields: [clientId], references: [id])
   clientId    String
   opportunity Opportunity? @relation(fields: [opportunityId], references: [id])
-  opportunityId String? @unique // One deal -> One project (usually)
+  opportunityId String? @unique
   
   manager     User?    @relation(fields: [managerId], references: [id])
   managerId   String?
@@ -624,8 +624,8 @@ model Milestone {
 model ProjectRisk {
   id          String   @id @default(cuid())
   description String
-  impact      String   // Low, Medium, High
-  probability String   // Low, Medium, High
+  impact      String
+  probability String
   status      String   @default("Open")
   mitigationPlan String?
   
@@ -638,7 +638,7 @@ model ProjectRisk {
 
 model ProjectMember {
   id        String   @id @default(cuid())
-  role      String   // e.g. Developer, PM
+  role      String
   allocationPct Int  @default(100)
   
   project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)

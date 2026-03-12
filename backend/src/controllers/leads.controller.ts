@@ -1,5 +1,5 @@
-import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { Request, Response } from 'express';
+import { prisma } from '../lib/prisma';
 
 // Helper: Calculate Lead Score (Epic 2 Logic)
 function calculateLeadScore(data: any): { score: number, factors: any, explanation: string } {
@@ -38,7 +38,6 @@ function calculateLeadScore(data: any): { score: number, factors: any, explanati
     }
 
     // 2. Implicit Factors (Behavior - Mocked for Intake)
-    // Assuming 'source' tells us something
     if (data.source === 'Inbound Demo Request') {
         score += 25;
         factors.implicit += 25;
@@ -58,12 +57,12 @@ function calculateLeadScore(data: any): { score: number, factors: any, explanati
     return { score, factors, explanation };
 }
 
-export async function POST(req: Request) {
+// POST /api/leads
+export async function ingestLead(req: Request, res: Response) {
     try {
-        const body = await req.json();
+        const body = req.body;
 
         // 1. Deduplication (Epic 2 Capability)
-        // Check for existing contact by email
         let contact = null;
         if (body.contact?.email) {
             contact = await prisma.contact.findFirst({
@@ -77,13 +76,13 @@ export async function POST(req: Request) {
             const duplicateOpp = await prisma.opportunity.findFirst({
                 where: {
                     clientId: contact.clientId,
-                    title: body.title, // Or match loosely
-                    createdAt: { gt: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000) } // 60 days
+                    title: body.title,
+                    createdAt: { gt: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000) }
                 }
             });
 
             if (duplicateOpp) {
-                return NextResponse.json({
+                return res.json({
                     status: 'duplicate',
                     message: `Duplicate lead detected. Existing opportunity ID: ${duplicateOpp.id}`,
                     opportunityId: duplicateOpp.id
@@ -95,7 +94,6 @@ export async function POST(req: Request) {
         let clientId = contact?.clientId;
 
         if (!clientId && body.companyName) {
-            // Find or Create Client
             let client = await prisma.client.findFirst({ where: { name: body.companyName } });
             if (!client) {
                 client = await prisma.client.create({
@@ -124,12 +122,11 @@ export async function POST(req: Request) {
         const qualification = calculateLeadScore(body);
 
         // 4. Creation (as Opportunity in 'Discovery' or 'Pipeline' stage)
-        // Get 'Discovery' or first stage
         const stage = await prisma.stage.findUnique({ where: { name: 'Discovery' } })
             || await prisma.stage.findFirst({ orderBy: { order: 'asc' } });
 
         const defaultType = await prisma.opportunityType.findFirst();
-        const defaultUser = await prisma.user.findFirst(); // Auto-assign to first user for now (or Round Robin in future)
+        const defaultUser = await prisma.user.findFirst();
 
         const newLead = await prisma.opportunity.create({
             data: {
@@ -138,12 +135,12 @@ export async function POST(req: Request) {
                 description: body.description,
                 source: body.source || 'API',
                 tags: "",
-                probability: qualification.score > 70 ? 30 : 10, // Higher score = Higher initial probability
+                probability: qualification.score > 70 ? 30 : 10,
 
                 clientId: clientId!,
                 stageId: stage?.id!,
                 typeId: defaultType?.id!,
-                ownerId: defaultUser?.id!, // Lead Assignment Rule would go here
+                ownerId: defaultUser?.id!,
 
                 // Store Score
                 leadScore: {
@@ -162,7 +159,7 @@ export async function POST(req: Request) {
             }
         });
 
-        return NextResponse.json({
+        res.json({
             status: 'success',
             lead: newLead,
             qualification: qualification
@@ -170,6 +167,6 @@ export async function POST(req: Request) {
 
     } catch (error) {
         console.error('Lead Ingestion Error:', error);
-        return NextResponse.json({ error: 'Failed to ingest lead' }, { status: 500 });
+        res.status(500).json({ error: 'Failed to ingest lead' });
     }
 }

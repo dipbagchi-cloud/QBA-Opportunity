@@ -49,7 +49,7 @@ async function main() {
             role: {
                 create: {
                     name: 'Admin',
-                    permissions: "[\"*\"]"
+                    permissions: ["*"]
                 }
             }
         },

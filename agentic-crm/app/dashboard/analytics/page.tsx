@@ -7,6 +7,8 @@ import {
 } from 'recharts';
 import { Loader2, DollarSign, Activity, TrendingUp, Users, Target, Clock, FileText, CheckCircle, Trophy, XCircle } from "lucide-react";
 
+import { API_URL } from '@/lib/api';
+
 const COLORS = ['#6366f1', '#ec4899', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444'];
 
 export default function AnalyticsPage() {
@@ -15,7 +17,7 @@ export default function AnalyticsPage() {
     const [activeTab, setActiveTab] = useState("dashboard");
 
     useEffect(() => {
-        fetch('/api/analytics')
+        fetch(`${API_URL}/api/analytics`)
             .then(res => res.json())
             .then(data => {
                 setData(data);

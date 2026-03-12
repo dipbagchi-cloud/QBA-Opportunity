@@ -2,6 +2,7 @@
 
 import { Bot, Sparkles, MessageSquare, Zap, Play, Plus, Settings, Activity, Power, X, Save, Terminal } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
+import { API_URL } from '@/lib/api';
 
 interface AgentLog {
     step: string;
@@ -69,7 +70,7 @@ export default function AgenticAIPage() {
         setSelectedAgent(clearedAgent);
 
         try {
-            const response = await fetch('/api/agent/run', {
+            const response = await fetch(`${API_URL}/api/agent/run`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ agentId: selectedAgent.id, task: runInput })

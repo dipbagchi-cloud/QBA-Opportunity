@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { API_URL } from './api';
 
 export interface Opportunity {
     id: string;
@@ -33,7 +34,7 @@ export const useOpportunityStore = create<OpportunityStore>((set, get) => ({
     fetchOpportunities: async () => {
         set({ isLoading: true });
         try {
-            const res = await fetch('/api/opportunities');
+            const res = await fetch(`${API_URL}/api/opportunities`);
             if (!res.ok) throw new Error('Failed to fetch');
             const data = await res.json();
             set({ opportunities: data, isLoading: false });
@@ -45,7 +46,7 @@ export const useOpportunityStore = create<OpportunityStore>((set, get) => ({
 
     addOpportunity: async (opportunity) => {
         try {
-            const res = await fetch('/api/opportunities', {
+            const res = await fetch(`${API_URL}/api/opportunities`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(opportunity)
@@ -65,7 +66,7 @@ export const useOpportunityStore = create<OpportunityStore>((set, get) => ({
         }));
 
         // In a real implementation:
-        // await fetch(`/api/opportunities/${id}`, { method: 'DELETE' });
+        // await fetch(`${API_URL}/api/opportunities/${id}`, { method: 'DELETE' });
     },
 
     updateOpportunity: async (id, updates) => {
@@ -81,7 +82,7 @@ export const useOpportunityStore = create<OpportunityStore>((set, get) => ({
             // Note: We need a PATCH endpoint for this to work fully.
             // For now, we simulate success or log error.
             /* 
-            const res = await fetch(`/api/opportunities/${id}`, {
+            const res = await fetch(`${API_URL}/api/opportunities/${id}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(updates)

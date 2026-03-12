@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, use } from "react";
 import { useRouter } from "next/navigation";
+import { API_URL } from '@/lib/api';
 import {
     Calendar,
     Plus,
@@ -171,7 +172,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     useEffect(() => {
         const fetchDetails = async () => {
             try {
-                const res = await fetch(`/api/opportunities/${id}`);
+                const res = await fetch(`${API_URL}/api/opportunities/${id}`);
                 if (!res.ok) throw new Error("Failed to load");
                 const data = await res.json();
 
@@ -215,7 +216,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         e.preventDefault();
         setIsSaving(true);
         try {
-            const res = await fetch(`/api/opportunities/${id}`, {
+            const res = await fetch(`${API_URL}/api/opportunities/${id}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(formData)
@@ -246,7 +247,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         setIsSaving(true);
         try {
             // Update stage to Qualification (Presales) and save presales data
-            const res = await fetch(`/api/opportunities/${id}`, {
+            const res = await fetch(`${API_URL}/api/opportunities/${id}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
