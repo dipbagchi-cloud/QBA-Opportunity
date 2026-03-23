@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { TrendingUp, AlertCircle, CheckCircle, XCircle, DollarSign } from "lucide-react";
-import { AssumptionsView } from "./AssumptionsView";
 import { useOpportunityEstimation } from "../context/OpportunityEstimationContext";
 
 // Exchange rates (INR as base)
@@ -30,6 +29,7 @@ export function GomCalculatorTab() {
         gomPercent,
         gomStatus,
         resources,
+        readOnly,
     } = useOpportunityEstimation();
 
     // Currency converter state
@@ -55,73 +55,88 @@ export function GomCalculatorTab() {
     };
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-4">
             {/* Summary Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg p-4 text-white shadow-lg">
-                    <div className="flex items-center justify-between mb-2">
-                        <span className="text-sm font-medium opacity-90">Total Revenue</span>
-                        <TrendingUp className="w-5 h-5 opacity-75" />
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg p-3 text-white shadow-lg">
+                    <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs font-medium opacity-90">Total Revenue</span>
+                        <TrendingUp className="w-4 h-4 opacity-75" />
                     </div>
-                    <div className="text-2xl font-bold">₹{revenue.toLocaleString()}</div>
-                    <div className="text-xs opacity-75 mt-1">Quote Price</div>
+                    <div className="text-xl font-bold">₹{revenue.toLocaleString()}</div>
+                    <div className="text-[10px] opacity-75 mt-0.5">Quote Price</div>
                 </div>
 
-                <div className="bg-gradient-to-br from-slate-700 to-slate-800 rounded-lg p-4 text-white shadow-lg">
-                    <div className="flex items-center justify-between mb-2">
-                        <span className="text-sm font-medium opacity-90">Total Cost</span>
-                        <span className="text-xs font-semibold px-2 py-1 bg-white/20 rounded">
+                <div className="bg-gradient-to-br from-slate-700 to-slate-800 rounded-lg p-3 text-white shadow-lg">
+                    <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs font-medium opacity-90">Total Cost</span>
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 bg-white/20 rounded">
                             {resources.length} Resources
                         </span>
                     </div>
-                    <div className="text-2xl font-bold">₹{totalCost.toLocaleString()}</div>
-                    <div className="text-xs opacity-75 mt-1">Resource + Travel</div>
+                    <div className="text-xl font-bold">₹{totalCost.toLocaleString()}</div>
+                    <div className="text-[10px] opacity-75 mt-0.5">Resource + Travel</div>
                 </div>
 
-                <div className={`bg-gradient-to-br rounded-lg p-4 text-white shadow-lg ${gomPercent >= 20 ? 'from-green-500 to-green-600' : 'from-red-500 to-red-600'}`}>
-                    <div className="flex items-center justify-between mb-2">
-                        <span className="text-sm font-medium opacity-90">GOM %</span>
+                <div className={`bg-gradient-to-br rounded-lg p-3 text-white shadow-lg ${gomPercent >= 20 ? 'from-green-500 to-green-600' : 'from-red-500 to-red-600'}`}>
+                    <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs font-medium opacity-90">GOM %</span>
                         {getStatusIcon()}
                     </div>
-                    <div className="text-2xl font-bold">{gomPercent.toFixed(1)}%</div>
-                    <div className="text-xs opacity-75 mt-1">{gomStatus.text}</div>
+                    <div className="text-xl font-bold">{gomPercent.toFixed(1)}%</div>
+                    <div className="text-[10px] opacity-75 mt-0.5">{gomStatus.text}</div>
                 </div>
 
-                <div className="bg-gradient-to-br from-purple-500 to-purple-600 rounded-lg p-4 text-white shadow-lg">
-                    <div className="flex items-center justify-between mb-2">
-                        <span className="text-sm font-medium opacity-90">Profit</span>
-                        <span className="text-xs font-semibold px-2 py-1 bg-white/20 rounded">
+                <div className="bg-gradient-to-br from-purple-500 to-purple-600 rounded-lg p-3 text-white shadow-lg">
+                    <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs font-medium opacity-90">Profit</span>
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 bg-white/20 rounded">
                             INR
                         </span>
                     </div>
-                    <div className="text-2xl font-bold">₹{(revenue - totalCost).toLocaleString()}</div>
-                    <div className="text-xs opacity-75 mt-1">Net Margin</div>
+                    <div className="text-xl font-bold">₹{(revenue - totalCost).toLocaleString()}</div>
+                    <div className="text-[10px] opacity-75 mt-0.5">Net Margin</div>
                 </div>
             </div>
 
-            {/* Budget Assumptions */}
+            {/* Budget Assumptions (Read-Only from Admin Settings) */}
             <div>
-                <h3 className="text-lg font-bold text-slate-800 mb-4">Budget Assumptions</h3>
-                <AssumptionsView data={assumptions} onChange={setAssumptions} />
+                <h3 className="text-base font-bold text-slate-800 mb-3">Budget Assumptions <span className="text-xs font-normal text-slate-500">(Configured by Admin)</span></h3>
+                <div className="bg-slate-50 rounded-lg border border-slate-200 p-4">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                        <div><span className="text-slate-500">Margin:</span> <span className="font-semibold">{assumptions.marginPercent}%</span></div>
+                        <div><span className="text-slate-500">Working Days/Year:</span> <span className="font-semibold">{assumptions.workingDaysPerYear}</span></div>
+                        <div><span className="text-slate-500">Delivery Mgmt:</span> <span className="font-semibold">{assumptions.deliveryMgmtPercent}%</span></div>
+                        <div><span className="text-slate-500">Bench:</span> <span className="font-semibold">{assumptions.benchPercent}%</span></div>
+                        <div><span className="text-slate-500">Leave Eligibility:</span> <span className="font-semibold">{assumptions.leaveEligibilityPercent}%</span></div>
+                        <div><span className="text-slate-500">Growth Buffer:</span> <span className="font-semibold">{assumptions.annualGrowthBufferPercent}%</span></div>
+                        <div><span className="text-slate-500">Increments:</span> <span className="font-semibold">{assumptions.averageIncrementPercent}%</span></div>
+                        <div><span className="text-slate-500">Bonus:</span> <span className="font-semibold">{assumptions.bonusPercent}%</span></div>
+                        <div><span className="text-slate-500">Indirect Cost:</span> <span className="font-semibold">{assumptions.indirectCostPercent}%</span></div>
+                        <div><span className="text-slate-500">Welfare/FTE:</span> <span className="font-semibold">₹{assumptions.welfarePerFte.toLocaleString()}</span></div>
+                        <div><span className="text-slate-500">Training/FTE:</span> <span className="font-semibold">₹{assumptions.trainingPerFte.toLocaleString()}</span></div>
+                    </div>
+                </div>
             </div>
 
             {/* GOM Configuration & Travel Costs */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 {/* GOM Configuration */}
-                <div className="bg-white rounded-lg border border-slate-200 shadow-sm p-6">
-                    <h3 className="text-lg font-bold text-slate-800 mb-6">GOM Configuration</h3>
+                <div className="bg-white rounded-lg border border-slate-200 shadow-sm p-4">
+                    <h3 className="text-base font-bold text-slate-800 mb-4">GOM Configuration</h3>
 
-                    <div className="space-y-4">
+                    <div className="space-y-3">
                         {/* Markup Input */}
                         <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-2">
+                            <label className="block text-xs font-medium text-slate-700 mb-1">
                                 Markup Percentage (%)
                             </label>
                             <input
                                 type="number"
                                 value={markupPercent}
                                 onChange={(e) => setMarkupPercent(Number(e.target.value))}
-                                className="flex h-12 w-full rounded-md border border-slate-300 bg-white px-4 py-2 text-base focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                disabled={readOnly}
+                                className="flex h-9 w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:bg-slate-100 disabled:cursor-not-allowed"
                                 placeholder="Enter markup %"
                                 min="0"
                                 step="0.1"
@@ -154,10 +169,10 @@ export function GomCalculatorTab() {
                         </div>
 
                         {/* Revenue Calculation */}
-                        <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
-                            <div className="flex justify-between items-center mb-2">
-                                <span className="text-sm font-medium text-blue-900">Calculated Revenue:</span>
-                                <span className="text-xl font-bold text-blue-700">₹{revenue.toLocaleString()}</span>
+                        <div className="bg-blue-50 rounded-lg p-3 border border-blue-200">
+                            <div className="flex justify-between items-center mb-1">
+                                <span className="text-xs font-medium text-blue-900">Calculated Revenue:</span>
+                                <span className="text-base font-bold text-blue-700">₹{revenue.toLocaleString()}</span>
                             </div>
                             <p className="text-xs text-blue-600">
                                 Formula: Total Cost × (1 + {markupPercent}%)
@@ -165,14 +180,14 @@ export function GomCalculatorTab() {
                         </div>
 
                         {/* GOM Status */}
-                        <div className={`rounded-lg p-4 border ${gomStatus.color}`}>
+                        <div className={`rounded-lg p-3 border ${gomStatus.color}`}>
                             <div className="flex items-center justify-between">
                                 <div>
-                                    <div className="text-sm font-medium mb-1">GOM Status</div>
-                                    <div className="text-2xl font-bold">{gomStatus.text}</div>
+                                    <div className="text-xs font-medium mb-1">GOM Status</div>
+                                    <div className="text-lg font-bold">{gomStatus.text}</div>
                                 </div>
                                 <div className="text-right">
-                                    <div className="text-3xl font-bold">{gomPercent.toFixed(1)}%</div>
+                                    <div className="text-2xl font-bold">{gomPercent.toFixed(1)}%</div>
                                     <div className="text-xs mt-1">
                                         {gomPercent >= 30 ? '✓ Exceeds 30%' : gomPercent >= 20 ? '⚠ Above 20%' : '✗ Below 20%'}
                                     </div>
@@ -183,18 +198,19 @@ export function GomCalculatorTab() {
                 </div>
 
                 {/* Travel & Hospitality Costs */}
-                <div className="bg-white rounded-lg border border-slate-200 shadow-sm p-6">
-                    <h3 className="text-lg font-bold text-slate-800 mb-6">Travel & Hospitality Costs</h3>
+                <div className="bg-white rounded-lg border border-slate-200 shadow-sm p-4">
+                    <h3 className="text-base font-bold text-slate-800 mb-4">Travel & Hospitality Costs</h3>
 
-                    <div className="space-y-4">
+                    <div className="space-y-3">
                         {/* Travel Details */}
                         <div className="grid grid-cols-2 gap-4">
                             <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-2">Mode of Travel</label>
+                                <label className="block text-xs font-medium text-slate-700 mb-1">Mode of Travel</label>
                                 <select
                                     value={travelCosts.modeOfTravel}
                                     onChange={(e) => setTravelCosts({ ...travelCosts, modeOfTravel: e.target.value })}
-                                    className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    disabled={readOnly}
+                                    className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                                 >
                                     <option value="">Select Mode</option>
                                     <option value="Flight">Flight</option>
@@ -203,13 +219,14 @@ export function GomCalculatorTab() {
                                 </select>
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-2">Frequency</label>
+                                <label className="block text-xs font-medium text-slate-700 mb-1">Frequency</label>
                                 <input
                                     type="text"
                                     value={travelCosts.frequency}
                                     onChange={(e) => setTravelCosts({ ...travelCosts, frequency: e.target.value })}
+                                    disabled={readOnly}
                                     placeholder="e.g., Monthly"
-                                    className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                                 />
                             </div>
                         </div>
@@ -217,89 +234,96 @@ export function GomCalculatorTab() {
                         {/* Cost Fields */}
                         <div className="grid grid-cols-2 gap-4">
                             <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-2">Round Trip Cost (₹)</label>
+                                <label className="block text-xs font-medium text-slate-700 mb-1">Round Trip Cost (₹)</label>
                                 <input
                                     type="number"
                                     value={travelCosts.roundTripCost}
                                     onChange={(e) => setTravelCosts({ ...travelCosts, roundTripCost: Number(e.target.value) })}
+                                    disabled={readOnly}
                                     placeholder="0"
-                                    className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                                 />
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-2">Medical Insurance (₹)</label>
+                                <label className="block text-xs font-medium text-slate-700 mb-1">Medical Insurance (₹)</label>
                                 <input
                                     type="number"
                                     value={travelCosts.medicalInsurance}
                                     onChange={(e) => setTravelCosts({ ...travelCosts, medicalInsurance: Number(e.target.value) })}
+                                    disabled={readOnly}
                                     placeholder="0"
-                                    className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                                 />
                             </div>
                         </div>
 
                         <div className="grid grid-cols-2 gap-4">
                             <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-2">Visa Cost (₹)</label>
+                                <label className="block text-xs font-medium text-slate-700 mb-1">Visa Cost (₹)</label>
                                 <input
                                     type="number"
                                     value={travelCosts.visaCost}
                                     onChange={(e) => setTravelCosts({ ...travelCosts, visaCost: Number(e.target.value) })}
+                                    disabled={readOnly}
                                     placeholder="0"
-                                    className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                                 />
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-2">Vaccine Cost (₹)</label>
+                                <label className="block text-xs font-medium text-slate-700 mb-1">Vaccine Cost (₹)</label>
                                 <input
                                     type="number"
                                     value={travelCosts.vaccineCost}
                                     onChange={(e) => setTravelCosts({ ...travelCosts, vaccineCost: Number(e.target.value) })}
+                                    disabled={readOnly}
                                     placeholder="0"
-                                    className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                                 />
                             </div>
                         </div>
 
                         <div className="grid grid-cols-2 gap-4">
                             <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-2">Local Conveyance (₹)</label>
+                                <label className="block text-xs font-medium text-slate-700 mb-1">Local Conveyance (₹)</label>
                                 <input
                                     type="number"
                                     value={travelCosts.localConveyance}
                                     onChange={(e) => setTravelCosts({ ...travelCosts, localConveyance: Number(e.target.value) })}
+                                    disabled={readOnly}
                                     placeholder="0"
-                                    className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                                 />
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-2">Marketing/Communication (₹)</label>
+                                <label className="block text-xs font-medium text-slate-700 mb-1">Marketing/Communication (₹)</label>
                                 <input
                                     type="number"
                                     value={travelCosts.marketingCom}
                                     onChange={(e) => setTravelCosts({ ...travelCosts, marketingCom: Number(e.target.value) })}
+                                    disabled={readOnly}
                                     placeholder="0"
-                                    className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                                 />
                             </div>
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-2">Hotel Cost (₹)</label>
+                            <label className="block text-xs font-medium text-slate-700 mb-1">Hotel Cost (₹)</label>
                             <input
                                 type="number"
                                 value={travelCosts.hotelCost}
                                 onChange={(e) => setTravelCosts({ ...travelCosts, hotelCost: Number(e.target.value) })}
+                                disabled={readOnly}
                                 placeholder="0"
-                                className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                             />
                         </div>
 
                         {/* Total Travel Cost Summary */}
-                        <div className="bg-blue-50 p-4 rounded-md border border-blue-200 mt-4">
+                        <div className="bg-blue-50 p-3 rounded-md border border-blue-200 mt-3">
                             <div className="flex justify-between items-center">
-                                <span className="text-sm font-medium text-blue-900">Total Travel Cost:</span>
-                                <span className="text-xl font-bold text-blue-700">
+                                <span className="text-xs font-medium text-blue-900">Total Travel Cost:</span>
+                                <span className="text-base font-bold text-blue-700">
                                     ₹{totalTravelCost.toLocaleString()}
                                 </span>
                             </div>
@@ -309,8 +333,8 @@ export function GomCalculatorTab() {
             </div>
 
             {/* Quick Reference Guide */}
-            <div className="bg-gradient-to-r from-slate-50 to-slate-100 rounded-lg p-6 border border-slate-200">
-                <h4 className="text-sm font-semibold text-slate-700 mb-4">GOM Calculation Reference</h4>
+            <div className="bg-gradient-to-r from-slate-50 to-slate-100 rounded-lg p-4 border border-slate-200">
+                <h4 className="text-xs font-semibold text-slate-700 mb-3">GOM Calculation Reference</h4>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
                     <div className="bg-white p-3 rounded border border-slate-200">
                         <div className="font-semibold text-slate-700 mb-1">Total Cost</div>
@@ -328,14 +352,14 @@ export function GomCalculatorTab() {
             </div>
 
             {/* Currency Converter */}
-            <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-lg p-6 border-2 border-indigo-200 shadow-lg">
-                <div className="flex items-center justify-between mb-6">
-                    <div className="flex items-center gap-3">
-                        <div className="bg-indigo-600 p-2 rounded-lg">
-                            <DollarSign className="w-6 h-6 text-white" />
+            <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-lg p-4 border-2 border-indigo-200 shadow-lg">
+                <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                        <div className="bg-indigo-600 p-1.5 rounded-lg">
+                            <DollarSign className="w-5 h-5 text-white" />
                         </div>
                         <div>
-                            <h3 className="text-lg font-bold text-slate-800">Currency Converter</h3>
+                            <h3 className="text-base font-bold text-slate-800">Currency Converter</h3>
                             <p className="text-xs text-slate-600">View GOM metrics in different currencies</p>
                         </div>
                     </div>
@@ -343,7 +367,7 @@ export function GomCalculatorTab() {
                     <select
                         value={selectedCurrency}
                         onChange={(e) => setSelectedCurrency(e.target.value)}
-                        className="px-4 py-2 bg-white border-2 border-indigo-300 rounded-lg text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent shadow-sm"
+                        className="px-3 py-1.5 bg-white border-2 border-indigo-300 rounded-lg text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent shadow-sm"
                     >
                         {Object.entries(EXCHANGE_RATES).map(([code, { name, symbol }]) => (
                             <option key={code} value={code}>
@@ -354,11 +378,11 @@ export function GomCalculatorTab() {
                 </div>
 
                 {/* Converted Values Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
                     {/* Total Revenue */}
-                    <div className="bg-white rounded-lg p-4 border border-indigo-200 shadow-sm hover:shadow-md transition-shadow">
+                    <div className="bg-white rounded-lg p-3 border border-indigo-200 shadow-sm hover:shadow-md transition-shadow">
                         <div className="text-xs font-medium text-slate-500 uppercase mb-1">Total Revenue</div>
-                        <div className="text-2xl font-bold text-blue-600 mb-1">
+                        <div className="text-lg font-bold text-blue-600 mb-1">
                             {formatCurrency(convertCurrency(revenue))}
                         </div>
                         <div className="text-xs text-slate-500">
@@ -367,9 +391,9 @@ export function GomCalculatorTab() {
                     </div>
 
                     {/* Total Cost */}
-                    <div className="bg-white rounded-lg p-4 border border-indigo-200 shadow-sm hover:shadow-md transition-shadow">
+                    <div className="bg-white rounded-lg p-3 border border-indigo-200 shadow-sm hover:shadow-md transition-shadow">
                         <div className="text-xs font-medium text-slate-500 uppercase mb-1">Total Cost</div>
-                        <div className="text-2xl font-bold text-slate-700 mb-1">
+                        <div className="text-lg font-bold text-slate-700 mb-1">
                             {formatCurrency(convertCurrency(totalCost))}
                         </div>
                         <div className="text-xs text-slate-500">
@@ -378,9 +402,9 @@ export function GomCalculatorTab() {
                     </div>
 
                     {/* Profit */}
-                    <div className="bg-white rounded-lg p-4 border border-indigo-200 shadow-sm hover:shadow-md transition-shadow">
+                    <div className="bg-white rounded-lg p-3 border border-indigo-200 shadow-sm hover:shadow-md transition-shadow">
                         <div className="text-xs font-medium text-slate-500 uppercase mb-1">Profit</div>
-                        <div className="text-2xl font-bold text-purple-600 mb-1">
+                        <div className="text-lg font-bold text-purple-600 mb-1">
                             {formatCurrency(convertCurrency(revenue - totalCost))}
                         </div>
                         <div className="text-xs text-slate-500">
@@ -389,9 +413,9 @@ export function GomCalculatorTab() {
                     </div>
 
                     {/* GOM % (No conversion needed) */}
-                    <div className={`bg-white rounded-lg p-4 border-2 shadow-sm hover:shadow-md transition-shadow ${gomPercent >= 20 ? 'border-green-300' : 'border-red-300'}`}>
+                    <div className={`bg-white rounded-lg p-3 border-2 shadow-sm hover:shadow-md transition-shadow ${gomPercent >= 20 ? 'border-green-300' : 'border-red-300'}`}>
                         <div className="text-xs font-medium text-slate-500 uppercase mb-1">GOM %</div>
-                        <div className={`text-2xl font-bold mb-1 ${gomPercent >= 20 ? 'text-green-600' : 'text-red-600'}`}>
+                        <div className={`text-lg font-bold mb-1 ${gomPercent >= 20 ? 'text-green-600' : 'text-red-600'}`}>
                             {gomPercent.toFixed(1)}%
                         </div>
                         <div className="text-xs font-semibold" style={{ color: gomPercent >= 30 ? '#16a34a' : gomPercent >= 20 ? '#d97706' : '#dc2626' }}>
@@ -401,8 +425,8 @@ export function GomCalculatorTab() {
                 </div>
 
                 {/* Detailed Breakdown */}
-                <div className="mt-6 bg-white rounded-lg p-4 border border-indigo-200">
-                    <h4 className="text-sm font-semibold text-slate-700 mb-3">Detailed Cost Breakdown</h4>
+                <div className="mt-4 bg-white rounded-lg p-3 border border-indigo-200">
+                    <h4 className="text-xs font-semibold text-slate-700 mb-2">Detailed Cost Breakdown</h4>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
                         <div className="flex justify-between items-center py-2 border-b border-slate-100">
                             <span className="text-slate-600">Resource Cost:</span>

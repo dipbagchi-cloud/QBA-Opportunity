@@ -1,24 +1,47 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 
+// Stage-to-display mapping for grouping
+const STAGE_GROUP: Record<string, string> = {
+    'Discovery': 'Pipeline',
+    'Pipeline': 'Pipeline',
+    'Qualification': 'Qualification',
+    'Presales': 'Qualification',
+    'Proposal': 'Proposal',
+    'Sales': 'Proposal',
+    'Negotiation': 'Negotiation',
+    'Closed Won': 'Closed Won',
+    'Closed Lost': 'Closed Lost',
+    'Proposal Lost': 'Proposal Lost',
+};
+
+// Dynamic probability based on stage
+function getStageProbability(stageName: string): number {
+    switch (stageName) {
+        case 'Discovery': case 'Pipeline': return 10;
+        case 'Qualification': case 'Presales': return 25;
+        case 'Proposal': case 'Sales': return 50;
+        case 'Negotiation': return 75;
+        case 'Closed Won': return 100;
+        case 'Closed Lost': return 0;
+        case 'Proposal Lost': return 0;
+        default: return 10;
+    }
+}
+
 // Helper to calculate revenue based on status logic
 function getRevenue(opp: any) {
-    const status = opp.detailedStatus || opp.currentStage;
-
-    if (['Pipeline', 'Presales', 'Cancelled', 'Lost', 'On Hold'].includes(opp.currentStage)) {
-        const presales = typeof opp.presalesData === 'string' ? JSON.parse(opp.presalesData) : opp.presalesData;
-        return presales?.projectedQuote || Number(opp.value) || 0;
-    } else {
-        const sales = typeof opp.salesData === 'string' ? JSON.parse(opp.salesData) : opp.salesData;
-        return sales?.finalQuote || Number(opp.value) || 0;
-    }
+    const val = Number(opp.value) || 0;
+    const presales = typeof opp.presalesData === 'string' ? JSON.parse(opp.presalesData) : opp.presalesData;
+    const sales = typeof opp.salesData === 'string' ? JSON.parse(opp.salesData) : opp.salesData;
+    return sales?.finalQuote || presales?.projectedQuote || val;
 }
 
 // GET /api/analytics
 export async function getAnalytics(req: Request, res: Response) {
     try {
         const opportunities = await prisma.opportunity.findMany({
-            include: { client: true, owner: true, type: true }
+            include: { client: true, owner: true, type: true, stage: true }
         });
 
         // 1. Opportunity Dashboard Data
@@ -30,19 +53,22 @@ export async function getAnalytics(req: Request, res: Response) {
             const rev = getRevenue(opp);
             const date = new Date(opp.expectedCloseDate || opp.createdAt);
             const monthKey = date.toLocaleString('default', { month: 'short', year: 'numeric' });
+            const stageName = opp.stage?.name || opp.currentStage || 'Pipeline';
+            const groupName = STAGE_GROUP[stageName] || stageName;
 
             // Revenue Projection
-            if (!revenueByMonth[monthKey]) revenueByMonth[monthKey] = { name: monthKey, proposed: 0, actual: 0 };
+            if (!revenueByMonth[monthKey]) revenueByMonth[monthKey] = { name: monthKey, proposed: 0, actual: 0, lost: 0 };
 
-            if (opp.currentStage === 'Sales' && (opp.detailedStatus === 'Closed Won' || opp.detailedStatus === 'Moved to Sales')) {
+            if (stageName === 'Closed Won') {
                 revenueByMonth[monthKey].actual += rev;
+            } else if (stageName === 'Closed Lost' || stageName === 'Proposal Lost') {
+                revenueByMonth[monthKey].lost += rev;
             } else {
                 revenueByMonth[monthKey].proposed += rev;
             }
 
-            // Count by Status
-            const status = opp.currentStage;
-            countByStatus[status] = (countByStatus[status] || 0) + 1;
+            // Count by Stage (grouped)
+            countByStatus[groupName] = (countByStatus[groupName] || 0) + 1;
 
             // Count by Client
             const clientName = opp.client?.name || 'Unknown';
@@ -54,27 +80,40 @@ export async function getAnalytics(req: Request, res: Response) {
         const clientBarData = Object.keys(countByClient).map(k => ({ name: k, value: countByClient[k] }));
 
         // 4. Pipeline Metrics
-        const activeProjects = opportunities.filter(o =>
-            !['Cancelled', 'On Hold', 'Moved to Presales'].includes(o.detailedStatus || '') &&
-            !['Cancelled', 'On Hold'].includes(o.currentStage)
-        ).length;
+        const activeOpps = opportunities.filter(o => {
+            const sn = o.stage?.name || o.currentStage;
+            return sn !== 'Closed Won' && sn !== 'Closed Lost' && sn !== 'Proposal Lost';
+        });
 
-        const wonCount = opportunities.filter(o => o.detailedStatus === 'Closed Won').length;
-        const conversionRate = opportunities.length > 0 ? (wonCount / opportunities.length) * 100 : 0;
+        const wonOpps = opportunities.filter(o => {
+            const sn = o.stage?.name || o.currentStage;
+            return sn === 'Closed Won';
+        });
+        const lostOpps = opportunities.filter(o => {
+            const sn = o.stage?.name || o.currentStage;
+            return sn === 'Closed Lost' || sn === 'Proposal Lost';
+        });
+        const closedOpps = wonOpps.length + lostOpps.length;
+        const conversionRate = closedOpps > 0 ? (wonOpps.length / closedOpps) * 100 : 0;
 
-        const pipelineValue = opportunities
-            .filter(o => o.currentStage !== 'Cancelled')
-            .reduce((sum, o) => sum + getRevenue(o), 0);
+        const pipelineValue = activeOpps.reduce((sum, o) => sum + getRevenue(o), 0);
+        const avgDealValue = activeOpps.length > 0 ? pipelineValue / activeOpps.length : 0;
 
-        const growthRate = opportunities.length > 0 ? pipelineValue / opportunities.length : 0;
-
-        const uniqueClients = new Set(opportunities.map(o => o.clientId)).size;
-        const avgDealSize = opportunities.length > 0 ? uniqueClients / opportunities.length : 0;
-        const avgDealValue = opportunities.length > 0 ? pipelineValue / opportunities.length : 0;
+        // Weighted pipeline value (probability × value)
+        const weightedPipeline = activeOpps.reduce((sum, o) => {
+            const prob = getStageProbability(o.stage?.name || o.currentStage || 'Pipeline');
+            return sum + (getRevenue(o) * prob / 100);
+        }, 0);
 
         // 5. Pre-Sales Metrics
-        const presalesOpps = opportunities.filter(o => o.currentStage === 'Presales' || o.presalesData);
-        const movedToSales = presalesOpps.filter(o => o.detailedStatus === 'Moved to Sales' || o.currentStage === 'Sales').length;
+        const presalesOpps = opportunities.filter(o => {
+            const sn = o.stage?.name || o.currentStage;
+            return sn === 'Qualification' || sn === 'Presales' || sn === 'Proposal' || sn === 'Sales' || sn === 'Negotiation' || sn === 'Closed Won';
+        });
+        const movedToSales = presalesOpps.filter(o => {
+            const sn = o.stage?.name || o.currentStage;
+            return sn === 'Proposal' || sn === 'Sales' || sn === 'Negotiation' || sn === 'Closed Won';
+        }).length;
         const proposalSuccessRate = presalesOpps.length > 0 ? (movedToSales / presalesOpps.length) * 100 : 0;
 
         // Effort per Opportunity
@@ -104,22 +143,21 @@ export async function getAnalytics(req: Request, res: Response) {
                 countByClient: clientBarData
             },
             pipeline: {
-                activeProjects,
+                activeProjects: activeOpps.length,
                 conversionRate,
                 pipelineValue,
-                growthRate,
+                weightedPipeline,
                 avgDealValue,
                 totalOpps: opportunities.length
             },
             presales: {
                 proposalSuccessRate,
-                effortPerOpp,
                 totalPresalesOpps: presalesOpps.length
             },
             sales: {
                 avgTimeToClose,
-                wonCount,
-                lostCount: opportunities.filter(o => o.currentStage === 'Cancelled' || o.detailedStatus === 'Closed Lost').length
+                wonCount: wonOpps.length,
+                lostCount: lostOpps.length
             }
         });
 

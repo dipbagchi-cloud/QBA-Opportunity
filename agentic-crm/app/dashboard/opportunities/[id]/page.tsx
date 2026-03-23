@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useState, useEffect, use } from "react";
+import React, { useState, useEffect, useRef, useCallback, use } from "react";
 import { useRouter } from "next/navigation";
-import { API_URL } from '@/lib/api';
+import { API_URL, getAuthHeaders } from '@/lib/api';
+import { useToast } from '@/hooks/use-toast';
 import {
     Calendar,
     Plus,
@@ -16,29 +17,74 @@ import {
     RefreshCw,
     Percent,
     Info,
-    Clock
+    Clock,
+    ChevronDown,
+    XCircle,
+    AlertTriangle,
+    Search
 } from "lucide-react";
 import { useOpportunityStore } from "@/lib/store";
 import { EstimationTab } from "./components/EstimationTab";
 import { ResourceAssignmentTab } from "./components/ResourceAssignmentTab";
 import { GomCalculatorTab } from "./components/GomCalculatorTab";
-import { OpportunityEstimationProvider } from "./context/OpportunityEstimationContext";
+import { OpportunityEstimationProvider, useOpportunityEstimation } from "./context/OpportunityEstimationContext";
 
-// Mock Data for Dropdowns (Shared)
-const REGIONS = ["North America", "EMEA", "APAC", "LATAM"];
-const PRACTICES = ["Cloud Engineering", "Data & AI", "Enterprise Apps", "Cybersecurity", "Digital Experience"];
+// Static dropdowns (not master-data driven)
 const PROJECT_TYPES = ["New Development", "Modernization", "Maintenance", "Consulting"];
-const PRICING_MODELS = ["Time & Material", "Fixed Price", "Retainer", "Hybrid"];
 const DURATIONS = ["3 Months", "6 Months", "9 Months", "12 Months", "> 1 Year"];
 const ARCHITECTS = ["David Chen", "Sarah Jones", "Rahul Gupta", "Emily White"];
+
+const DURATION_MONTHS: Record<string, number> = {
+    "3 Months": 3, "6 Months": 6, "9 Months": 9, "12 Months": 12, "> 1 Year": 18,
+};
+
+// Save button that uses the estimation context (must be inside the provider)
+function PresalesSaveButton() {
+    const { saveEstimation, isSaving } = useOpportunityEstimation();
+    const { toast } = useToast();
+
+    const handleSave = async () => {
+        try {
+            await saveEstimation();
+            toast({ title: "Saved", description: "Estimation data saved successfully." });
+        } catch {
+            toast({ title: "Error", description: "Failed to save estimation data." });
+        }
+    };
+
+    return (
+        <div className="flex justify-end mb-2">
+            <button
+                onClick={handleSave}
+                disabled={isSaving}
+                className="px-4 py-2 bg-emerald-600 text-white rounded-lg font-semibold text-sm hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-2 shadow-sm"
+            >
+                {isSaving ? (
+                    <><RefreshCw className="w-4 h-4 animate-spin" /> Saving...</>
+                ) : (
+                    <><Check className="w-4 h-4" /> Save Estimation</>
+                )}
+            </button>
+        </div>
+    );
+}
 
 export default function OpportunityDetailsPage({ params }: { params: Promise<{ id: string }> }) {
     const router = useRouter();
     const { id } = use(params);
     const { updateOpportunity } = useOpportunityStore();
+    const { toast } = useToast();
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
     const [showPresalesModal, setShowPresalesModal] = useState(false);
+
+    // Dynamic dropdown data
+    const [clients, setClients] = useState<{ id: string; name: string }[]>([]);
+    const [regions, setRegions] = useState<string[]>([]);
+    const [technologies, setTechnologies] = useState<string[]>([]);
+    const [pricingModels, setPricingModels] = useState<string[]>([]);
+    const [salespersons, setSalespersons] = useState<{ id: string; name: string }[]>([]);
+    const [departments, setDepartments] = useState<string[]>([]);
 
     // Form State
     const [formData, setFormData] = useState({
@@ -83,7 +129,38 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
     const [activeTab, setActiveTab] = useState("Project Details");
     const [activeStep, setActiveStep] = useState(0); // 0: Pipeline, 1: Presales
+    const [opportunityStage, setOpportunityStage] = useState(0); // actual DB stage (0-3), stays fixed when navigating steps
+    const [currentStageName, setCurrentStageName] = useState(''); // actual Kanban stage name (Discovery, Qualification, Proposal, Negotiation, Closed Won, Closed Lost)
     const steps = ["Pipeline", "Presales", "Sales", "Project"];
+
+    // Sales view collapsible sections
+    const [salesPipelineOpen, setSalesPipelineOpen] = useState(false);
+    const [salesPresalesOpen, setSalesPresalesOpen] = useState(false);
+
+    // Mark as Lost state
+    const [showLostModal, setShowLostModal] = useState(false);
+    const [lostRemarks, setLostRemarks] = useState("");
+    const [isLost, setIsLost] = useState(false);
+    const [lostModalType, setLostModalType] = useState<string>('Closed Lost');
+
+    // Technology multiselect state
+    const [techDropdownOpen, setTechDropdownOpen] = useState(false);
+    const [techSearch, setTechSearch] = useState("");
+    const techDropdownRef = useRef<HTMLDivElement>(null);
+
+    // Click-outside handler for tech dropdown
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (techDropdownRef.current && !techDropdownRef.current.contains(e.target as Node)) {
+                setTechDropdownOpen(false);
+                setTechSearch("");
+            }
+        };
+        if (techDropdownOpen) {
+            document.addEventListener('mousedown', handleClickOutside);
+        }
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [techDropdownOpen]);
 
     // GOM Calculator State
     const [gomInputs, setGomInputs] = useState({
@@ -168,11 +245,59 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
     }, [gomInputs]);
 
+    // Fetch master data for dropdowns
+    useEffect(() => {
+        const fetchMasterData = async () => {
+            const headers = getAuthHeaders();
+            try {
+                const [clientsRes, regionsRes, techRes, pricingRes, salesRes, deptRes] = await Promise.all([
+                    fetch(`${API_URL}/api/master/clients`, { headers }),
+                    fetch(`${API_URL}/api/master/regions`, { headers }),
+                    fetch(`${API_URL}/api/master/technologies`, { headers }),
+                    fetch(`${API_URL}/api/master/pricing-models`, { headers }),
+                    fetch(`${API_URL}/api/master/salespersons`, { headers }),
+                    fetch(`${API_URL}/api/master/departments`, { headers }),
+                ]);
+                if (clientsRes.ok) setClients(await clientsRes.json());
+                if (regionsRes.ok) setRegions((await regionsRes.json()).map((r: any) => r.name));
+                if (techRes.ok) setTechnologies((await techRes.json()).map((t: any) => t.name));
+                if (pricingRes.ok) setPricingModels((await pricingRes.json()).map((p: any) => p.name));
+                if (salesRes.ok) setSalespersons(await salesRes.json());
+                if (deptRes.ok) setDepartments(await deptRes.json());
+            } catch (err) {
+                console.error("Failed to load master data", err);
+            }
+        };
+        fetchMasterData();
+    }, []);
+
+    // Auto-calculate tentative end date
+    useEffect(() => {
+        if (formData.tentativeStartDate && formData.duration && DURATION_MONTHS[formData.duration]) {
+            const start = new Date(formData.tentativeStartDate);
+            const months = DURATION_MONTHS[formData.duration];
+            const end = new Date(start);
+            end.setMonth(end.getMonth() + months);
+            setFormData(prev => ({ ...prev, tentativeEndDate: end.toISOString().split('T')[0] }));
+        }
+    }, [formData.tentativeStartDate, formData.duration]);
+
+    // Auto-calculate estimated value = Expected Day Rate × 20 working days × Duration months
+    useEffect(() => {
+        const rate = Number(formData.expectedDayRate) || 0;
+        const months = DURATION_MONTHS[formData.duration] || 0;
+        if (rate > 0 && months > 0) {
+            setFormData(prev => ({ ...prev, value: rate * 20 * months }));
+        }
+    }, [formData.expectedDayRate, formData.duration]);
+
     // Fetch Data on Load
     useEffect(() => {
         const fetchDetails = async () => {
             try {
-                const res = await fetch(`${API_URL}/api/opportunities/${id}`);
+                const res = await fetch(`${API_URL}/api/opportunities/${id}`, {
+                    headers: getAuthHeaders(),
+                });
                 if (!res.ok) throw new Error("Failed to load");
                 const data = await res.json();
 
@@ -194,8 +319,40 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 });
 
                 // Update active step based on stage
-                if (data.currentStage === 'Presales' || data.stage?.name === 'Qualification') setActiveStep(1);
-                else if (data.stage?.name === 'Proposal') setActiveStep(2);
+                const stageName = data.stage?.name || data.currentStage || '';
+                setCurrentStageName(stageName);
+                let stageIdx = 0;
+                if (stageName === 'Closed Lost' || stageName === 'Proposal Lost') {
+                    stageIdx = 2; // keep on Sales tab view
+                    setIsLost(true);
+                    setLostRemarks(data.salesData?.lostRemarks || data.detailedStatus || '');
+                } else if (stageName === 'Closed Won' || stageName === 'Closed-Won' || stageName === 'Delivered' || data.project) {
+                    stageIdx = 3;
+                } else if (stageName === 'Proposal' || stageName === 'Negotiation' || stageName === 'Sales') {
+                    stageIdx = 2;
+                } else if (stageName === 'Presales' || stageName === 'Qualification') {
+                    stageIdx = 1;
+                }
+                setActiveStep(stageIdx);
+                setOpportunityStage(stageIdx);
+
+                // Load presales data from saved record (Project Details tab fields)
+                if (data.presalesData && typeof data.presalesData === 'object') {
+                    const pd = data.presalesData as any;
+                    if (pd.travelCosts) {
+                        setPresalesData(prev => ({
+                            ...prev,
+                            markup: pd.markupPercent ?? prev.markup,
+                            modeOfTravel: pd.travelCosts.modeOfTravel || prev.modeOfTravel,
+                            frequency: pd.travelCosts.frequency || prev.frequency,
+                            roundTripCost: pd.travelCosts.roundTripCost ?? prev.roundTripCost,
+                            medicalInsuranceCost: pd.travelCosts.medicalInsurance ?? prev.medicalInsuranceCost,
+                            visaCost: pd.travelCosts.visaCost ?? prev.visaCost,
+                            vaccineCost: pd.travelCosts.vaccineCost ?? prev.vaccineCost,
+                            hotelCost: pd.travelCosts.hotelCost ?? prev.hotelCost,
+                        }));
+                    }
+                }
 
             } catch (error) {
                 console.error("Load error:", error);
@@ -218,7 +375,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         try {
             const res = await fetch(`${API_URL}/api/opportunities/${id}`, {
                 method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
+                headers: getAuthHeaders(),
                 body: JSON.stringify(formData)
             });
 
@@ -228,15 +385,14 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     name: formData.projectName,
                     value: Number(formData.value)
                 });
-                // Success feedback could be toast, for now just redirect or stay
-                alert("Opportunity updated successfully!");
+                toast({ title: "Success", description: "Opportunity updated successfully!" });
                 router.push("/dashboard/opportunities");
             } else {
-                alert("Failed to save changes. Please check all fields.");
+                toast({ title: "Error", description: "Failed to save changes. Please check all fields." });
             }
         } catch (error) {
             console.error("Update failed", error);
-            alert("An unknown error occurred.");
+            toast({ title: "Error", description: "An unknown error occurred." });
         } finally {
             setIsSaving(false);
         }
@@ -249,7 +405,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             // Update stage to Qualification (Presales) and save presales data
             const res = await fetch(`${API_URL}/api/opportunities/${id}`, {
                 method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
+                headers: getAuthHeaders(),
                 body: JSON.stringify({
                     stageName: 'Qualification', // Maps to Presales in our workflow
                     presalesData: presalesForm
@@ -258,11 +414,13 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
             if (res.ok) {
                 await updateOpportunity(id, { stage: 'Qualification' });
+                setCurrentStageName('Qualification');
                 setActiveStep(1);
+                setOpportunityStage(1);
                 setShowPresalesModal(false);
-                alert("Moved to Presales successfully!");
+                toast({ title: "Success", description: "Moved to Presales successfully!" });
             } else {
-                alert("Failed to move to Presales.");
+                toast({ title: "Error", description: "Failed to move to Presales." });
             }
         } catch (e) {
             console.error(e);
@@ -271,55 +429,261 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         }
     };
 
-    if (isLoading) return <div className="p-8">Loading Opportunity...</div>;
+    const handleMoveToSales = async () => {
+        setIsSaving(true);
+        try {
+            const res = await fetch(`${API_URL}/api/opportunities/${id}`, {
+                method: 'PATCH',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({ stageName: 'Proposal' })
+            });
+            if (res.ok) {
+                await updateOpportunity(id, { stage: 'Proposal' });
+                setCurrentStageName('Proposal');
+                setActiveStep(2);
+                setOpportunityStage(2);
+                toast({ title: "Success", description: "Moved to Sales stage." });
+            } else {
+                toast({ title: "Error", description: "Failed to move to Sales." });
+            }
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    const handleProposalSent = async () => {
+        setIsSaving(true);
+        try {
+            const res = await fetch(`${API_URL}/api/opportunities/${id}`, {
+                method: 'PATCH',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({ stageName: 'Negotiation' })
+            });
+            if (res.ok) {
+                await updateOpportunity(id, { stage: 'Negotiation' });
+                setCurrentStageName('Negotiation');
+                toast({ title: "Success", description: "Proposal sent. Opportunity moved to Negotiation." });
+            } else {
+                toast({ title: "Error", description: "Failed to update stage." });
+            }
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    const handleSendBackForReestimate = async () => {
+        setIsSaving(true);
+        try {
+            const res = await fetch(`${API_URL}/api/opportunities/${id}`, {
+                method: 'PATCH',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({ stageName: 'Qualification' })
+            });
+            if (res.ok) {
+                await updateOpportunity(id, { stage: 'Qualification' });
+                setCurrentStageName('Qualification');
+                setActiveStep(1);
+                setOpportunityStage(1);
+                toast({ title: "Success", description: "Sent back for re-estimation." });
+            } else {
+                toast({ title: "Error", description: "Failed to send back for re-estimation." });
+            }
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    const handleMarkAsLost = async () => {
+        if (!lostRemarks.trim()) {
+            toast({ title: "Required", description: "Please enter remarks for marking as lost." });
+            return;
+        }
+        setIsSaving(true);
+        try {
+            const res = await fetch(`${API_URL}/api/opportunities/${id}`, {
+                method: 'PATCH',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({
+                    stageName: lostModalType,
+                    salesData: { lostRemarks: lostRemarks.trim() }
+                })
+            });
+            if (res.ok) {
+                setIsLost(true);
+                setCurrentStageName(lostModalType);
+                setShowLostModal(false);
+                const lostLabel = lostModalType === 'Proposal Lost' ? 'Proposal Lost' : 'Closed Lost';
+                toast({ title: lostLabel, description: `Opportunity has been marked as ${lostLabel}.` });
+            } else {
+                toast({ title: "Error", description: "Failed to mark as lost." });
+            }
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    const handleMoveToProject = async () => {
+        setIsSaving(true);
+        try {
+            const res = await fetch(`${API_URL}/api/opportunities/${id}/convert`, {
+                method: 'POST',
+                headers: getAuthHeaders(),
+            });
+            const data = await res.json();
+            if (res.ok) {
+                setCurrentStageName('Closed Won');
+                setActiveStep(3);
+                setOpportunityStage(3);
+                toast({ title: "Success", description: "Opportunity converted to Project!" });
+            } else if (res.status === 409) {
+                // Project already exists — just navigate to project view
+                setCurrentStageName('Closed Won');
+                setActiveStep(3);
+                setOpportunityStage(3);
+                toast({ title: "Info", description: "Project already exists for this opportunity." });
+            } else {
+                toast({ title: "Error", description: data.error || "Failed to convert to Project." });
+            }
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    if (isLoading) return <div className="p-6">Loading Opportunity...</div>;
 
     return (
-        <div className="max-w-7xl mx-auto space-y-8 relative">
+        <div className="max-w-7xl mx-auto space-y-4 relative">
             {/* Header with Actions */}
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                    <h1 className="text-2xl font-semibold text-slate-800">
+                    <h1 className="text-lg font-semibold text-slate-800">
                         Opportunity / <span className="text-slate-500 font-normal">Pipeline Details</span>
                     </h1>
                 </div>
 
-                <div className="flex gap-3">
+                <div className="flex gap-2">
                     <button
                         onClick={() => router.back()}
                         className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 rounded-md text-slate-700 font-medium hover:bg-slate-50"
                     >
                         <ArrowLeft className="w-4 h-4" /> Back
                     </button>
-                    <button className="px-4 py-2 bg-white border border-red-200 text-red-600 rounded-md font-medium hover:bg-red-50">
-                        Cancel Opportunity
-                    </button>
-                    <button
-                        onClick={() => setShowPresalesModal(true)}
-                        className="px-4 py-2 bg-blue-600 text-white rounded-md font-medium hover:bg-blue-700"
-                    >
-                        Move to Presales
-                    </button>
-                    <button className="px-4 py-2 bg-slate-900 text-white rounded-md font-medium hover:bg-slate-800">
-                        Hold
-                    </button>
+                    {opportunityStage < 3 && !isLost && (
+                        <button className="px-4 py-2 bg-white border border-red-200 text-red-600 rounded-md font-medium hover:bg-red-50">
+                            Cancel Opportunity
+                        </button>
+                    )}
+                    {opportunityStage === 0 && (
+                        <button
+                            onClick={() => setShowPresalesModal(true)}
+                            className="px-4 py-2 bg-blue-600 text-white rounded-md font-medium hover:bg-blue-700"
+                        >
+                            Move to Presales
+                        </button>
+                    )}
+                    {opportunityStage === 1 && (
+                        <button
+                            onClick={handleMoveToSales}
+                            disabled={isSaving}
+                            className="px-4 py-2 bg-blue-600 text-white rounded-md font-medium hover:bg-blue-700 disabled:opacity-50"
+                        >
+                            {isSaving ? 'Moving...' : 'Move to Sales'}
+                        </button>
+                    )}
+                    {opportunityStage === 2 && !isLost && currentStageName === 'Proposal' && (
+                        <>
+                            <button
+                                onClick={() => { setLostModalType('Proposal Lost'); setShowLostModal(true); }}
+                                disabled={isSaving}
+                                className="px-4 py-2 bg-white border border-rose-300 text-rose-600 rounded-md font-medium hover:bg-rose-50 disabled:opacity-50"
+                            >
+                                <span className="flex items-center gap-1.5"><XCircle className="w-4 h-4" /> Proposal Lost</span>
+                            </button>
+                            <button
+                                onClick={handleSendBackForReestimate}
+                                disabled={isSaving}
+                                className="px-4 py-2 bg-white border border-amber-300 text-amber-700 rounded-md font-medium hover:bg-amber-50 disabled:opacity-50"
+                            >
+                                {isSaving ? 'Sending...' : 'Send Back for Re-estimate'}
+                            </button>
+                            <button
+                                onClick={handleProposalSent}
+                                disabled={isSaving}
+                                className="px-4 py-2 bg-orange-600 text-white rounded-md font-medium hover:bg-orange-700 disabled:opacity-50"
+                            >
+                                {isSaving ? 'Sending...' : 'Proposal Sent'}
+                            </button>
+                        </>
+                    )}
+                    {opportunityStage === 2 && !isLost && currentStageName === 'Negotiation' && (
+                        <>
+                            <button
+                                onClick={() => { setLostModalType('Closed Lost'); setShowLostModal(true); }}
+                                disabled={isSaving}
+                                className="px-4 py-2 bg-white border border-red-300 text-red-600 rounded-md font-medium hover:bg-red-50 disabled:opacity-50"
+                            >
+                                <span className="flex items-center gap-1.5"><XCircle className="w-4 h-4" /> Mark as Lost</span>
+                            </button>
+                            <button
+                                onClick={handleSendBackForReestimate}
+                                disabled={isSaving}
+                                className="px-4 py-2 bg-white border border-amber-300 text-amber-700 rounded-md font-medium hover:bg-amber-50 disabled:opacity-50"
+                            >
+                                {isSaving ? 'Sending...' : 'Send Back for Re-estimate'}
+                            </button>
+                            <button
+                                onClick={handleMoveToProject}
+                                disabled={isSaving}
+                                className="px-4 py-2 bg-emerald-600 text-white rounded-md font-medium hover:bg-emerald-700 disabled:opacity-50"
+                            >
+                                {isSaving ? 'Converting...' : 'Move to Project'}
+                            </button>
+                        </>
+                    )}
+                    {isLost && (
+                        <span className="flex items-center gap-2 px-4 py-2 bg-red-50 border border-red-200 text-red-700 rounded-md font-semibold text-sm">
+                            <XCircle className="w-4 h-4" /> {currentStageName || 'Closed Lost'}
+                        </span>
+                    )}
+                    {opportunityStage < 3 && !isLost && (
+                        <button className="px-4 py-2 bg-slate-900 text-white rounded-md font-medium hover:bg-slate-800">
+                            Hold
+                        </button>
+                    )}
                 </div>
             </div>
 
             {/* Stepper Navigation */}
-            <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
-                <div className="flex w-full mt-2 h-10 bg-slate-50 rounded-full overflow-hidden border border-slate-200">
+            <div className="bg-white p-3 rounded-lg shadow-sm border border-slate-200">
+                <div className="flex w-full mt-1 h-8 bg-slate-50 rounded-full overflow-hidden border border-slate-200">
                     {steps.map((step, idx) => {
-                        const isCompleted = idx < activeStep;
+                        const isCompleted = idx < opportunityStage || (idx === 3 && opportunityStage === 3);
                         const isActive = idx === activeStep;
+                        const isAccessible = idx <= opportunityStage;
 
-                        let bgClass = "bg-slate-50 text-slate-500 hover:bg-slate-100 hover:text-slate-700";
-                        if (isCompleted) bgClass = "bg-emerald-500 text-white";
-                        if (isActive) bgClass = "bg-indigo-900 text-white";
+                        let bgClass = "bg-slate-100 text-slate-300 cursor-not-allowed";
+                        if (isAccessible) {
+                            bgClass = "bg-slate-50 text-slate-500 hover:bg-slate-100 hover:text-slate-700 cursor-pointer";
+                        }
+                        if (isCompleted && !isActive) bgClass = "bg-emerald-500 text-white cursor-pointer";
+                        if (isCompleted && isActive) bgClass = "bg-emerald-700 text-white cursor-pointer ring-2 ring-emerald-300";
+                        if (isActive && !isCompleted) bgClass = "bg-indigo-900 text-white cursor-pointer";
 
                         return (
                             <button
                                 key={step}
-                                onClick={() => setActiveStep(idx)}
+                                onClick={() => { if (isAccessible) setActiveStep(idx); }}
+                                disabled={!isAccessible}
                                 className={`flex-1 flex items-center justify-center gap-2 text-sm font-medium transition-colors relative ${bgClass}`}
                             >
                                 {isCompleted && <Check className="w-4 h-4" />}
@@ -327,7 +691,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 {/* Chevron Separator */}
                                 {idx !== steps.length - 1 && (
                                     <div className={`absolute right-0 top-0 bottom-0 w-[1px] transform skew-x-12 translate-x-3 z-10 
-                                        ${isCompleted && idx + 1 <= activeStep ? 'bg-emerald-500 border-r border-emerald-400' : 'bg-white border-r border-slate-300'}`}
+                                        ${isCompleted && idx + 1 <= opportunityStage ? 'bg-emerald-500 border-r border-emerald-400' : 'bg-white border-r border-slate-300'}`}
                                     ></div>
                                 )}
                             </button>
@@ -338,16 +702,43 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
             {/* PIPELINE VIEW (Step 0) */}
             {activeStep === 0 && (
-                <form onSubmit={handleSubmit} className="bg-white rounded-lg shadow-sm border border-slate-200 p-8">
+                <form onSubmit={handleSubmit} className="bg-white rounded-lg shadow-sm border border-slate-200 p-5">
                     {/* ... Existing Pipeline Form Code ... */}
-                    <div className="mb-6 flex items-center gap-4">
-                        <h2 className="text-lg font-bold text-slate-900">Basic Information</h2>
-                        <span className="px-3 py-1 rounded-full bg-purple-100 text-purple-600 text-xs font-semibold border border-purple-200">
-                            Just Received
-                        </span>
+                    <div className="mb-4 flex items-center gap-3">
+                        <h2 className="text-base font-bold text-slate-900">Basic Information</h2>
+                        {isLost && (
+                            <span className="px-3 py-1 rounded-full bg-red-100 text-red-600 text-xs font-semibold border border-red-200">
+                                {currentStageName === 'Proposal Lost' ? 'Proposal Lost' : 'Closed Lost'}
+                            </span>
+                        )}
+                        {!isLost && opportunityStage === 0 && (
+                            <span className="px-3 py-1 rounded-full bg-purple-100 text-purple-600 text-xs font-semibold border border-purple-200">
+                                Just Received
+                            </span>
+                        )}
+                        {!isLost && opportunityStage === 1 && (
+                            <span className="px-3 py-1 rounded-full bg-blue-100 text-blue-600 text-xs font-semibold border border-blue-200">
+                                Estimation in Progress
+                            </span>
+                        )}
+                        {!isLost && opportunityStage === 2 && currentStageName === 'Proposal' && (
+                            <span className="px-3 py-1 rounded-full bg-amber-100 text-amber-600 text-xs font-semibold border border-amber-200">
+                                Proposal Submitted
+                            </span>
+                        )}
+                        {!isLost && opportunityStage === 2 && currentStageName === 'Negotiation' && (
+                            <span className="px-3 py-1 rounded-full bg-orange-100 text-orange-600 text-xs font-semibold border border-orange-200">
+                                Under Negotiation
+                            </span>
+                        )}
+                        {!isLost && opportunityStage === 3 && (
+                            <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-600 text-xs font-semibold border border-emerald-200">
+                                SOW Approved
+                            </span>
+                        )}
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-4">
                         {/* Row 1 */}
                         <div className="space-y-1.5">
                             <label className="block text-sm font-bold text-slate-700">Client Name *</label>
@@ -359,9 +750,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 onChange={handleChange}
                             >
                                 <option value="">Select Client</option>
-                                <option value="Acme Corp">Acme Corp</option>
-                                <option value="Globex">Globex Inc</option>
-                                <option value="African Industries Group">African Industries Group</option>
+                                {clients.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
                             </select>
                         </div>
 
@@ -375,8 +764,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 onChange={handleChange}
                             >
                                 <option value="">Select Region</option>
-                                {REGIONS.map(r => <option key={r} value={r}>{r}</option>)}
-                                <option value="South Africa">South Africa</option>
+                                {regions.map(r => <option key={r} value={r}>{r}</option>)}
                             </select>
                         </div>
 
@@ -418,8 +806,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 onChange={handleChange}
                             >
                                 <option value="">Find Practice</option>
-                                {PRACTICES.map(p => <option key={p} value={p}>{p}</option>)}
-                                <option value="Application Development and Maintenance">Application Development and Maintenance</option>
+                                {departments.map(p => <option key={p} value={p}>{p}</option>)}
                             </select>
                         </div>
 
@@ -434,23 +821,73 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 onChange={handleChange}
                             >
                                 <option value="">Find SalesPerson</option>
-                                <option value="Sarah Wilson">Sarah Wilson</option>
-                                <option value="Mike Ross">Mike Ross</option>
-                                <option value="Sandip Nath">Sandip Nath</option>
+                                {salespersons.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
                             </select>
                         </div>
 
                         <div className="space-y-1.5">
                             <label className="block text-sm font-bold text-slate-700">Technology *</label>
-                            <input
-                                type="text"
-                                name="technology"
-                                required
-                                value={formData.technology}
-                                placeholder="Technology"
-                                className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
-                                onChange={handleChange}
-                            />
+                            <div className="relative" ref={techDropdownRef}>
+                                <div
+                                    className="w-full min-h-[42px] px-3 py-2 bg-white border border-slate-300 rounded-md text-sm shadow-sm flex flex-wrap gap-1 cursor-pointer"
+                                    onClick={() => setTechDropdownOpen(!techDropdownOpen)}
+                                >
+                                    {formData.technology ? formData.technology.split(',').filter(Boolean).map(t => (
+                                        <span key={t} className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 text-xs px-2 py-0.5 rounded-full border border-indigo-200">
+                                            {t}
+                                            <button type="button" onClick={(e) => {
+                                                e.stopPropagation();
+                                                const newTech = formData.technology.split(',').filter(x => x !== t).join(',');
+                                                setFormData(prev => ({ ...prev, technology: newTech }));
+                                            }} className="hover:text-red-500">
+                                                <X className="w-3 h-3" />
+                                            </button>
+                                        </span>
+                                    )) : <span className="text-slate-400">Select Technologies</span>}
+                                </div>
+                                {techDropdownOpen && (
+                                    <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg">
+                                        <div className="p-2 border-b border-slate-100">
+                                            <div className="flex items-center gap-2 px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-md">
+                                                <Search className="w-3.5 h-3.5 text-slate-400" />
+                                                <input
+                                                    type="text"
+                                                    placeholder="Search technologies..."
+                                                    value={techSearch}
+                                                    onChange={(e) => setTechSearch(e.target.value)}
+                                                    className="flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400"
+                                                    autoFocus
+                                                />
+                                            </div>
+                                        </div>
+                                        <div className="max-h-48 overflow-y-auto">
+                                            {technologies.filter(t => t.toLowerCase().includes(techSearch.toLowerCase())).map(t => {
+                                                const selected = formData.technology.split(',').filter(Boolean).includes(t);
+                                                return (
+                                                    <label key={t} className={`flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-slate-50 ${selected ? 'bg-indigo-50 text-indigo-700' : 'text-slate-700'}`}>
+                                                        <input
+                                                            type="checkbox"
+                                                            className="w-3.5 h-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                                            checked={selected}
+                                                            onChange={() => {
+                                                                const current = formData.technology.split(',').filter(Boolean);
+                                                                const newTech = selected
+                                                                    ? current.filter(x => x !== t).join(',')
+                                                                    : [...current, t].join(',');
+                                                                setFormData(prev => ({ ...prev, technology: newTech }));
+                                                            }}
+                                                        />
+                                                        {t}
+                                                    </label>
+                                                );
+                                            })}
+                                            {technologies.filter(t => t.toLowerCase().includes(techSearch.toLowerCase())).length === 0 && (
+                                                <div className="px-3 py-4 text-sm text-slate-400 text-center">No technologies found</div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
                         </div>
 
                         {/* Value */}
@@ -459,12 +896,12 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             <input
                                 type="number"
                                 name="value"
-                                required
+                                readOnly
                                 value={formData.value}
                                 placeholder="0.00"
-                                className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
-                                onChange={handleChange}
+                                className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-md text-sm shadow-sm text-slate-500 cursor-not-allowed"
                             />
+                            <p className="text-[10px] text-slate-400">= Day Rate ({formData.expectedDayRate || 0}) × 20 days × {DURATION_MONTHS[formData.duration] || 0} months</p>
                         </div>
 
                         {/* Row 4: Dates & Duration */}
@@ -475,8 +912,9 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 name="tentativeStartDate"
                                 required
                                 value={formData.tentativeStartDate}
-                                className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm text-slate-500"
+                                className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm text-slate-500 cursor-pointer"
                                 onChange={handleChange}
+                                onClick={(e) => (e.target as HTMLInputElement).showPicker?.()}
                             />
                         </div>
 
@@ -490,7 +928,6 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             >
                                 <option value="">Select Duration</option>
                                 {DURATIONS.map(d => <option key={d} value={d}>{d}</option>)}
-                                <option value="Tentative End Date">Tentative End Date</option>
                             </select>
                         </div>
 
@@ -499,16 +936,17 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             <input
                                 type="date"
                                 name="tentativeEndDate"
+                                readOnly
                                 value={formData.tentativeEndDate}
-                                className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm text-slate-500"
-                                onChange={handleChange}
+                                className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-md text-sm shadow-sm text-slate-500 cursor-not-allowed"
                             />
+                            <p className="text-[10px] text-slate-400">Auto-calculated from Start Date + Duration</p>
                         </div>
 
                     </div>
 
                     {/* Footer Actions */}
-                    <div className="mt-12 flex justify-end gap-3 pt-6 border-t border-slate-100">
+                    <div className="mt-8 flex justify-end gap-3 pt-4 border-t border-slate-100">
                         <button
                             type="submit"
                             disabled={isSaving}
@@ -522,15 +960,26 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
             {/* PRESALES VIEW (Step 1) */}
             {activeStep === 1 && (
-                <OpportunityEstimationProvider>
+                <OpportunityEstimationProvider opportunityId={id} readOnly={opportunityStage >= 2} startDate={formData.tentativeStartDate} endDate={formData.tentativeEndDate}>
+                    {opportunityStage < 2 && <PresalesSaveButton />}
                     <div className="bg-white rounded-lg shadow-sm border border-slate-200">
+                        {isLost && (
+                            <div className="mx-4 mt-3 px-3 py-1.5 bg-red-50 border border-red-200 rounded-md text-xs text-red-700 font-medium">
+                                {currentStageName === 'Proposal Lost' ? 'Proposal Lost' : 'Closed Lost'} — All fields are read-only.
+                            </div>
+                        )}
+                        {!isLost && opportunityStage >= 2 && (
+                            <div className="mx-4 mt-3 px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-md text-xs text-amber-700 font-medium">
+                                {opportunityStage === 3 ? 'SOW Approved' : currentStageName === 'Negotiation' ? 'Under Negotiation' : currentStageName || 'Sales'} — All fields are read-only.
+                            </div>
+                        )}
                         {/* Inner Tabs */}
-                        <div className="flex items-center gap-6 px-6 border-b border-slate-200 text-sm font-medium">
+                        <div className="flex items-center gap-4 px-4 border-b border-slate-200 text-sm font-medium">
                             {["Project Details", "Schedule", "Resource Assignment", "Estimation", "GOM Calculator"].map(tab => (
                                 <button
                                     key={tab}
                                     onClick={() => setActiveTab(tab)}
-                                    className={`py-4 border-b-2 transition-colors ${activeTab === tab ? "border-indigo-600 text-indigo-900 font-bold" : "border-transparent text-slate-500 hover:text-indigo-600"}`}
+                                    className={`py-3 border-b-2 transition-colors ${activeTab === tab ? "border-indigo-600 text-indigo-900 font-bold" : "border-transparent text-slate-500 hover:text-indigo-600"}`}
                                 >
                                     {tab}
                                 </button>
@@ -539,18 +988,18 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
                         {/* TAB CONTENT: Project Details */}
                         {activeTab === "Project Details" && (
-                            <div className="p-8 space-y-8 animate-in fade-in duration-300">
+                            <div className="p-5 space-y-4 animate-in fade-in duration-300">
 
                                 {/* Status Badge */}
-                                <div className="mb-4">
-                                    <h2 className="text-lg font-bold text-slate-900 inline-block mr-4">Project Details</h2>
-                                    <span className="px-3 py-1 rounded-full bg-cyan-50 text-cyan-600 text-xs font-bold border border-cyan-100">
-                                        Estimation in Progress
+                                <div className="mb-3">
+                                    <h2 className="text-base font-bold text-slate-900 inline-block mr-3">Project Details</h2>
+                                    <span className={`px-3 py-1 rounded-full text-xs font-bold border ${isLost ? 'bg-red-50 text-red-700 border-red-200' : opportunityStage === 3 ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : opportunityStage >= 2 ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-cyan-50 text-cyan-600 border-cyan-100'}`}>
+                                        {isLost ? (currentStageName === 'Proposal Lost' ? 'Proposal Lost' : 'Closed Lost') : opportunityStage === 3 ? 'SOW Approved' : opportunityStage >= 2 ? (currentStageName === 'Negotiation' ? 'Under Negotiation' : 'Proposal Submitted') : 'Estimation in Progress'}
                                     </span>
                                 </div>
 
                                 {/* Read Only Grid */}
-                                <div className="grid grid-cols-2 md:grid-cols-4 gap-y-6 gap-x-8 text-sm">
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-y-4 gap-x-6 text-sm">
                                     <div>
                                         <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Client Name</label>
                                         <div className="font-semibold text-slate-800">{formData.clientName}</div>
@@ -605,7 +1054,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 {/* Divider */}
                                 <hr className="border-slate-100" />
 
-                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                                     {/* Left: Resource & Cost */}
                                     <div className="space-y-4">
                                         <h3 className="font-bold text-slate-900 border-b border-slate-200 pb-2 mb-4">Resource & Cost</h3>
@@ -638,7 +1087,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                                 name="markup"
                                                 value={presalesData.markup}
                                                 onChange={handlePresalesDataChange}
-                                                className="col-span-2 px-3 py-2 bg-white border border-slate-300 rounded-md text-sm"
+                                                disabled={opportunityStage >= 2}
+                                                className="col-span-2 px-3 py-2 bg-white border border-slate-300 rounded-md text-sm disabled:bg-slate-100 disabled:cursor-not-allowed"
                                             />
                                         </div>
                                     </div>
@@ -648,7 +1098,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 <div className="space-y-4">
                                     <h3 className="font-bold text-slate-900 border-b border-slate-200 pb-2 mb-4">Travel & Hospitality</h3>
 
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-4">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
                                         {/* Left Col */}
                                         <div className="grid grid-cols-3 gap-4 items-center">
                                             <label className="text-sm font-medium text-slate-600">Mode of Travel</label>
@@ -656,7 +1106,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                                 name="modeOfTravel"
                                                 value={presalesData.modeOfTravel}
                                                 onChange={handlePresalesDataChange}
-                                                className="col-span-2 px-3 py-2 bg-white border border-slate-300 rounded-md text-sm"
+                                                disabled={opportunityStage >= 2}
+                                                className="col-span-2 px-3 py-2 bg-white border border-slate-300 rounded-md text-sm disabled:bg-slate-100 disabled:cursor-not-allowed"
                                             >
                                                 <option>Flight</option>
                                                 <option>Train</option>
@@ -669,7 +1120,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                                 name="frequency"
                                                 value={presalesData.frequency}
                                                 onChange={handlePresalesDataChange}
-                                                className="col-span-2 px-3 py-2 bg-white border border-slate-300 rounded-md text-sm"
+                                                disabled={opportunityStage >= 2}
+                                                className="col-span-2 px-3 py-2 bg-white border border-slate-300 rounded-md text-sm disabled:bg-slate-100 disabled:cursor-not-allowed"
                                             />
                                         </div>
 
@@ -680,7 +1132,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                                 name="roundTripCost"
                                                 value={presalesData.roundTripCost}
                                                 onChange={handlePresalesDataChange}
-                                                className="col-span-2 px-3 py-2 bg-white border border-slate-300 rounded-md text-sm"
+                                                disabled={opportunityStage >= 2}
+                                                className="col-span-2 px-3 py-2 bg-white border border-slate-300 rounded-md text-sm disabled:bg-slate-100 disabled:cursor-not-allowed"
                                             />
                                         </div>
                                         <div className="grid grid-cols-3 gap-4 items-center">
@@ -690,7 +1143,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                                 name="medicalInsuranceCost"
                                                 value={presalesData.medicalInsuranceCost}
                                                 onChange={handlePresalesDataChange}
-                                                className="col-span-2 px-3 py-2 bg-white border border-slate-300 rounded-md text-sm"
+                                                disabled={opportunityStage >= 2}
+                                                className="col-span-2 px-3 py-2 bg-white border border-slate-300 rounded-md text-sm disabled:bg-slate-100 disabled:cursor-not-allowed"
                                             />
                                         </div>
 
@@ -701,7 +1155,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                                 name="visaCost"
                                                 value={presalesData.visaCost}
                                                 onChange={handlePresalesDataChange}
-                                                className="col-span-2 px-3 py-2 bg-white border border-slate-300 rounded-md text-sm"
+                                                disabled={opportunityStage >= 2}
+                                                className="col-span-2 px-3 py-2 bg-white border border-slate-300 rounded-md text-sm disabled:bg-slate-100 disabled:cursor-not-allowed"
                                             />
                                         </div>
                                         <div className="grid grid-cols-3 gap-4 items-center">
@@ -711,7 +1166,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                                 name="vaccineCost"
                                                 value={presalesData.vaccineCost}
                                                 onChange={handlePresalesDataChange}
-                                                className="col-span-2 px-3 py-2 bg-white border border-slate-300 rounded-md text-sm"
+                                                disabled={opportunityStage >= 2}
+                                                className="col-span-2 px-3 py-2 bg-white border border-slate-300 rounded-md text-sm disabled:bg-slate-100 disabled:cursor-not-allowed"
                                             />
                                         </div>
 
@@ -722,14 +1178,17 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                                 name="hotelCost"
                                                 value={presalesData.hotelCost}
                                                 onChange={handlePresalesDataChange}
-                                                className="col-span-2 px-3 py-2 bg-white border border-slate-300 rounded-md text-sm"
+                                                disabled={opportunityStage >= 2}
+                                                className="col-span-2 px-3 py-2 bg-white border border-slate-300 rounded-md text-sm disabled:bg-slate-100 disabled:cursor-not-allowed"
                                             />
                                         </div>
                                         <div className="grid grid-cols-3 gap-4 items-center">
                                             <div className="col-span-3 flex justify-end">
-                                                <button className="px-4 py-2 bg-blue-600 text-white font-bold rounded-md hover:bg-blue-700 text-sm">
-                                                    Send GOM Approval
-                                                </button>
+                                                {opportunityStage < 2 && (
+                                                    <button className="px-4 py-2 bg-blue-600 text-white font-bold rounded-md hover:bg-blue-700 text-sm">
+                                                        Send GOM Approval
+                                                    </button>
+                                                )}
                                             </div>
                                         </div>
                                     </div>
@@ -745,18 +1204,18 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     </div>
 
                                     <div className="bg-slate-50 border border-slate-200 rounded-md overflow-hidden">
-                                        <table className="w-full text-sm text-left text-slate-600">
+                                        <table className="w-full text-xs text-left text-slate-600">
                                             <thead className="bg-slate-100 border-b border-slate-200 font-semibold">
                                                 <tr>
-                                                    <th className="px-4 py-3">File Name</th>
-                                                    <th className="px-4 py-3">File Type</th>
-                                                    <th className="px-4 py-3">Upload Date</th>
-                                                    <th className="px-4 py-3">Action</th>
+                                                    <th className="px-3 py-2">File Name</th>
+                                                    <th className="px-3 py-2">File Type</th>
+                                                    <th className="px-3 py-2">Upload Date</th>
+                                                    <th className="px-3 py-2">Action</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
                                                 <tr>
-                                                    <td className="px-4 py-8 text-center text-slate-400 italic" colSpan={4}>No attachments found</td>
+                                                    <td className="px-3 py-6 text-center text-slate-400 italic" colSpan={4}>No attachments found</td>
                                                 </tr>
                                             </tbody>
                                         </table>
@@ -767,20 +1226,38 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
                         {/* TAB CONTENT: Schedule */}
                         {activeTab === "Schedule" && (
-                            <div className="p-8 space-y-6 animate-in fade-in duration-300">
-                                <div className="flex items-center justify-between mb-4">
-                                    <div className="flex items-center gap-4">
-                                        <h2 className="text-xl font-bold text-slate-900">Schedule Details</h2>
-                                        <span className="px-3 py-1 rounded-full bg-cyan-50 text-cyan-600 text-xs font-bold border border-cyan-100">
-                                            Estimation in Progress
+                            <div className="p-5 space-y-4 animate-in fade-in duration-300">
+                                <div className="flex items-center justify-between mb-3">
+                                    <div className="flex items-center gap-3">
+                                        <h2 className="text-base font-bold text-slate-900">Schedule Details</h2>
+                                        <span className={`px-3 py-1 rounded-full text-xs font-bold border ${isLost ? 'bg-red-50 text-red-700 border-red-200' : opportunityStage >= 2 ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-cyan-50 text-cyan-600 border-cyan-100'}`}>
+                                            {isLost ? (currentStageName === 'Proposal Lost' ? 'Proposal Lost' : 'Closed Lost') : opportunityStage >= 2 ? (currentStageName || 'Sales') : 'Estimation in Progress'}
                                         </span>
                                     </div>
-                                    <button className="px-6 py-2 bg-white border border-blue-200 text-blue-600 font-semibold rounded-md hover:bg-blue-50">
-                                        Update
-                                    </button>
+                                    {opportunityStage < 2 && (
+                                        <button onClick={async () => {
+                                            setIsSaving(true);
+                                            try {
+                                                const res = await fetch(`${API_URL}/api/opportunities/${id}`, {
+                                                    method: 'PATCH',
+                                                    headers: getAuthHeaders(),
+                                                    body: JSON.stringify({
+                                                        tentativeStartDate: formData.tentativeStartDate,
+                                                        tentativeEndDate: formData.tentativeEndDate,
+                                                        duration: formData.duration,
+                                                    })
+                                                });
+                                                if (res.ok) toast({ title: "Success", description: "Schedule updated." });
+                                                else toast({ title: "Error", description: "Failed to update schedule." });
+                                            } catch { toast({ title: "Error", description: "Failed to update schedule." }); }
+                                            finally { setIsSaving(false); }
+                                        }} disabled={isSaving} className="px-6 py-2 bg-white border border-blue-200 text-blue-600 font-semibold rounded-md hover:bg-blue-50 disabled:opacity-50">
+                                            {isSaving ? 'Saving...' : 'Update'}
+                                        </button>
+                                    )}
                                 </div>
 
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                     <div className="space-y-1.5">
                                         <label className="block text-sm font-bold text-slate-700">Tentative Start Date *</label>
                                         <input
@@ -788,7 +1265,9 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                             name="tentativeStartDate"
                                             value={formData.tentativeStartDate}
                                             onChange={handleChange}
-                                            className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
+                                            disabled={opportunityStage >= 2}
+                                            className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm disabled:bg-slate-100 disabled:cursor-not-allowed cursor-pointer"
+                                            onClick={(e) => !(e.target as HTMLInputElement).disabled && (e.target as HTMLInputElement).showPicker?.()}
                                         />
                                     </div>
 
@@ -798,10 +1277,10 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                             name="duration"
                                             value={formData.duration}
                                             onChange={handleChange}
-                                            className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
+                                            disabled={opportunityStage >= 2}
+                                            className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm disabled:bg-slate-100 disabled:cursor-not-allowed"
                                         >
                                             <option value="">Select Duration</option>
-                                            <option value="Tentative End Date">Tentative End Date</option>
                                             {DURATIONS.map(d => <option key={d} value={d}>{d}</option>)}
                                         </select>
                                     </div>
@@ -811,10 +1290,11 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                         <input
                                             type="date"
                                             name="tentativeEndDate"
+                                            readOnly
                                             value={formData.tentativeEndDate}
-                                            onChange={handleChange}
-                                            className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
+                                            className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-md text-sm shadow-sm text-slate-500 cursor-not-allowed"
                                         />
+                                        <p className="text-[10px] text-slate-400">Auto-calculated from Start Date + Duration</p>
                                     </div>
                                 </div>
                             </div>
@@ -824,33 +1304,33 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
                         {/* TAB CONTENT: Resource Assignment */}
                         {activeTab === "Resource Assignment" && (
-                            <div className="p-8">
+                            <div className="p-5">
                                 <ResourceAssignmentTab />
                             </div>
                         )}
 
                         {/* Old GOM Calculator (Hidden) */}
                         {activeTab === "OldResourceAssignment" && (
-                            <div className="p-8 space-y-6 animate-in fade-in duration-300">
-                                <div className="flex items-center justify-between mb-4">
-                                    <div className="flex items-center gap-4">
-                                        <h2 className="text-xl font-bold text-slate-900">Resource Assignment</h2>
+                            <div className="p-5 space-y-4 animate-in fade-in duration-300">
+                                <div className="flex items-center justify-between mb-3">
+                                    <div className="flex items-center gap-3">
+                                        <h2 className="text-base font-bold text-slate-900">Resource Assignment</h2>
                                         <span className="px-3 py-1 rounded-full bg-cyan-50 text-cyan-600 text-xs font-bold border border-cyan-100">
                                             Estimation in Progress
                                         </span>
                                     </div>
                                 </div>
 
-                                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                                     {/* Inputs Column */}
-                                    <div className="lg:col-span-1 space-y-6">
-                                        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-                                            <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-                                                <Briefcase className="w-5 h-5 text-indigo-600" />
+                                    <div className="lg:col-span-1 space-y-4">
+                                        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                                            <h3 className="font-bold text-slate-800 mb-3 flex items-center gap-2">
+                                                <Briefcase className="w-4 h-4 text-indigo-600" />
                                                 Cost Inputs
                                             </h3>
 
-                                            <div className="space-y-4">
+                                            <div className="space-y-3">
                                                 <div>
                                                     <label className="block text-xs font-semibold text-slate-500 mb-1">Annual CTC</label>
                                                     <div className="relative">
@@ -922,9 +1402,9 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                             </div>
                                         </div>
 
-                                        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-                                            <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-                                                <RefreshCw className="w-5 h-5 text-emerald-600" />
+                                        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                                            <h3 className="font-bold text-slate-800 mb-3 flex items-center gap-2">
+                                                <RefreshCw className="w-4 h-4 text-emerald-600" />
                                                 Margin & Markup
                                             </h3>
                                             <div>
@@ -942,9 +1422,9 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                         </div>
 
                                         {/* Period Estimation */}
-                                        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-                                            <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-                                                <Clock className="w-5 h-5 text-amber-600" />
+                                        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                                            <h3 className="font-bold text-slate-800 mb-3 flex items-center gap-2">
+                                                <Clock className="w-4 h-4 text-amber-600" />
                                                 Period Estimation
                                             </h3>
                                             <div className="grid grid-cols-2 gap-4">
@@ -977,11 +1457,11 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     </div>
 
                                     {/* Results Column */}
-                                    <div className="lg:col-span-2 space-y-6">
-                                        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-                                            <h3 className="font-bold text-slate-800 mb-6 border-b border-slate-100 pb-2">Calculation Results</h3>
+                                    <div className="lg:col-span-2 space-y-4">
+                                        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                                            <h3 className="font-bold text-slate-800 mb-4 border-b border-slate-100 pb-2">Calculation Results</h3>
 
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                                                 <div className="space-y-4">
                                                     <h4 className="font-semibold text-indigo-600 flex items-center gap-2">
                                                         <span className="w-2 h-2 rounded-full bg-indigo-500" /> Offshore
@@ -1034,29 +1514,29 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
                                             {/* Detailed Stats */}
                                             <div className="overflow-x-auto">
-                                                <table className="w-full text-sm text-left">
+                                                <table className="w-full text-xs text-left">
                                                     <thead className="bg-slate-50 text-slate-500 font-medium border-y border-slate-200">
                                                         <tr>
-                                                            <th className="py-3 px-4">Metric</th>
-                                                            <th className="py-3 px-4">Value</th>
-                                                            <th className="py-3 px-4">Formula / Notes</th>
+                                                            <th className="py-2 px-3">Metric</th>
+                                                            <th className="py-2 px-3">Value</th>
+                                                            <th className="py-2 px-3">Formula / Notes</th>
                                                         </tr>
                                                     </thead>
                                                     <tbody className="divide-y divide-slate-100">
                                                         <tr>
-                                                            <td className="py-3 px-4 text-slate-800">Adjusted Cost</td>
-                                                            <td className="py-3 px-4 font-mono">{gomResults.adjustedCost.toLocaleString()}</td>
-                                                            <td className="py-3 px-4 text-slate-400 text-xs">CTC * (1 + (Mgmt+Bench)/100)</td>
+                                                            <td className="py-2 px-3 text-slate-800">Adjusted Cost</td>
+                                                            <td className="py-2 px-3 font-mono">{gomResults.adjustedCost.toLocaleString()}</td>
+                                                            <td className="py-2 px-3 text-slate-400 text-xs">CTC * (1 + (Mgmt+Bench)/100)</td>
                                                         </tr>
                                                         <tr>
-                                                            <td className="py-3 px-4 text-slate-800">Annual Working Days</td>
-                                                            <td className="py-3 px-4 font-mono">220</td>
-                                                            <td className="py-3 px-4 text-slate-400 text-xs">Fixed Standard</td>
+                                                            <td className="py-2 px-3 text-slate-800">Annual Working Days</td>
+                                                            <td className="py-2 px-3 font-mono">220</td>
+                                                            <td className="py-2 px-3 text-slate-400 text-xs">Fixed Standard</td>
                                                         </tr>
                                                         <tr>
-                                                            <td className="py-3 px-4 text-slate-800">Actual Profit Margin</td>
-                                                            <td className="py-3 px-4 font-mono font-bold text-indigo-600">{gomResults.offshoreProfit.toLocaleString()}%</td>
-                                                            <td className="py-3 px-4 text-slate-400 text-xs">(Markup / (1 + Markup%)) * 100</td>
+                                                            <td className="py-2 px-3 text-slate-800">Actual Profit Margin</td>
+                                                            <td className="py-2 px-3 font-mono font-bold text-indigo-600">{gomResults.offshoreProfit.toLocaleString()}%</td>
+                                                            <td className="py-2 px-3 text-slate-400 text-xs">(Markup / (1 + Markup%)) * 100</td>
                                                         </tr>
                                                     </tbody>
                                                 </table>
@@ -1069,19 +1549,272 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
                         {/* TAB CONTENT: Estimation */}
                         {activeTab === "Estimation" && (
-                            <div className="p-8">
+                            <div className="p-5">
                                 <EstimationTab />
                             </div>
                         )}
 
                         {/* TAB CONTENT: GOM Calculator */}
                         {activeTab === "GOM Calculator" && (
-                            <div className="p-8">
+                            <div className="p-5">
                                 <GomCalculatorTab />
                             </div>
                         )}
                     </div>
                 </OpportunityEstimationProvider>
+            )}
+
+            {/* SALES VIEW (Step 2) — Read-only summary with collapsible sections */}
+            {activeStep === 2 && (
+                <div className="space-y-4 animate-in fade-in duration-300">
+                    {/* Lost Banner */}
+                    {isLost && (
+                        <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
+                            <div className="w-8 h-8 rounded-full bg-red-100 flex items-center justify-center shrink-0">
+                                <XCircle className="w-4 h-4 text-red-600" />
+                            </div>
+                            <div>
+                                <h3 className="font-bold text-red-800 text-sm">Opportunity Closed — {currentStageName === 'Proposal Lost' ? 'Proposal Lost' : 'Lost'}</h3>
+                                <p className="text-sm text-red-700 mt-1"><span className="font-semibold">Remarks:</span> {lostRemarks || 'No remarks provided.'}</p>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Header Card */}
+                    <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-5">
+                        <div className="flex items-center justify-between mb-4">
+                            <div>
+                                <h2 className="text-base font-bold text-slate-900">Estimation Summary</h2>
+                                <p className="text-xs text-slate-500 mt-1">Review all details before converting to a project or sending back for re-estimation.</p>
+                            </div>
+                            <span className={`px-3 py-1 rounded-full text-xs font-bold border ${isLost
+                                ? 'bg-red-50 text-red-700 border-red-300'
+                                : opportunityStage === 3
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                                    : currentStageName === 'Negotiation'
+                                        ? 'bg-orange-50 text-orange-700 border-orange-300'
+                                        : 'bg-amber-50 text-amber-700 border-amber-300'
+                            }`}>
+                                {isLost ? (currentStageName === 'Proposal Lost' ? 'Proposal Lost' : 'Closed Lost') : opportunityStage === 3 ? 'SOW Approved' : currentStageName === 'Negotiation' ? 'Under Negotiation' : 'Proposal Submitted'}
+                            </span>
+                        </div>
+
+                        {/* Summary Cards */}
+                        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-2">
+                            <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
+                                <p className="text-xs text-slate-500 mb-1">Client</p>
+                                <p className="font-semibold text-slate-800">{formData.clientName}</p>
+                            </div>
+                            <div className="bg-slate-50 rounded-lg p-4 border border-slate-200">
+                                <p className="text-xs text-slate-500 mb-1">Project</p>
+                                <p className="font-semibold text-slate-800">{formData.projectName}</p>
+                            </div>
+                            <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
+                                <p className="text-xs text-slate-500 mb-1">Duration</p>
+                                <p className="font-semibold text-slate-800">{formData.duration || "N/A"}</p>
+                            </div>
+                            <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
+                                <p className="text-xs text-slate-500 mb-1">Day Rate</p>
+                                <p className="font-semibold text-slate-800">{formData.expectedDayRate || "N/A"}</p>
+                            </div>
+                            <div className="bg-indigo-50 rounded-lg p-3 border border-indigo-200">
+                                <p className="text-xs text-indigo-600 mb-1">Estimated Value</p>
+                                <p className="font-semibold text-indigo-700">₹{Number(formData.value).toLocaleString()}</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Pipeline Details — Collapsible */}
+                    <div className="bg-white rounded-lg shadow-sm border border-slate-200">
+                        <button
+                            type="button"
+                            onClick={() => setSalesPipelineOpen(prev => !prev)}
+                            className="w-full flex items-center justify-between px-6 py-3 text-left hover:bg-slate-50 transition-colors"
+                        >
+                            <h3 className="text-sm font-bold text-slate-800">Pipeline Details</h3>
+                            <ChevronDown className={`w-5 h-5 text-slate-400 transition-transform duration-200 ${salesPipelineOpen ? 'rotate-180' : ''}`} />
+                        </button>
+                        {salesPipelineOpen && (
+                            <div className="px-6 pb-4 border-t border-slate-100 pt-3">
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-y-3 gap-x-6 text-sm">
+                                    <div>
+                                        <span className="text-xs text-slate-500 uppercase tracking-wide">Client Name</span>
+                                        <p className="font-medium text-slate-800 mt-1">{formData.clientName || "N/A"}</p>
+                                    </div>
+                                    <div>
+                                        <span className="text-xs text-slate-500 uppercase tracking-wide">Region</span>
+                                        <p className="font-medium text-slate-800 mt-1">{formData.region || "N/A"}</p>
+                                    </div>
+                                    <div>
+                                        <span className="text-xs text-slate-500 uppercase tracking-wide">Project Type</span>
+                                        <p className="font-medium text-slate-800 mt-1">{formData.projectType || "N/A"}</p>
+                                    </div>
+                                    <div>
+                                        <span className="text-xs text-slate-500 uppercase tracking-wide">Project Name</span>
+                                        <p className="font-medium text-slate-800 mt-1">{formData.projectName || "N/A"}</p>
+                                    </div>
+                                    <div>
+                                        <span className="text-xs text-slate-500 uppercase tracking-wide">Practice</span>
+                                        <p className="font-medium text-slate-800 mt-1">{formData.practice || "N/A"}</p>
+                                    </div>
+                                    <div>
+                                        <span className="text-xs text-slate-500 uppercase tracking-wide">Sales Rep</span>
+                                        <p className="font-medium text-slate-800 mt-1">{formData.salesRep || "N/A"}</p>
+                                    </div>
+                                    <div>
+                                        <span className="text-xs text-slate-500 uppercase tracking-wide">Technology</span>
+                                        <div className="flex flex-wrap gap-1 mt-1">
+                                            {formData.technology
+                                                ? formData.technology.split(',').filter(Boolean).map(t => (
+                                                    <span key={t} className="inline-block bg-indigo-50 text-indigo-700 text-xs px-2 py-0.5 rounded-full border border-indigo-200">{t}</span>
+                                                ))
+                                                : <p className="font-medium text-slate-800">N/A</p>
+                                            }
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <span className="text-xs text-slate-500 uppercase tracking-wide">Pricing Model</span>
+                                        <p className="font-medium text-slate-800 mt-1">{formData.pricingModel || "N/A"}</p>
+                                    </div>
+                                    <div>
+                                        <span className="text-xs text-slate-500 uppercase tracking-wide">Start Date</span>
+                                        <p className="font-medium text-slate-800 mt-1">{formData.tentativeStartDate || "N/A"}</p>
+                                    </div>
+                                    <div>
+                                        <span className="text-xs text-slate-500 uppercase tracking-wide">End Date</span>
+                                        <p className="font-medium text-slate-800 mt-1">{formData.tentativeEndDate || "N/A"}</p>
+                                    </div>
+                                    <div>
+                                        <span className="text-xs text-slate-500 uppercase tracking-wide">Duration</span>
+                                        <p className="font-medium text-slate-800 mt-1">{formData.duration || "N/A"}</p>
+                                    </div>
+                                    <div>
+                                        <span className="text-xs text-slate-500 uppercase tracking-wide">Expected Day Rate</span>
+                                        <p className="font-medium text-slate-800 mt-1">{formData.expectedDayRate || "N/A"}</p>
+                                    </div>
+                                </div>
+                                {formData.description && (
+                                    <div className="mt-4 pt-3 border-t border-slate-100">
+                                        <span className="text-xs text-slate-500 uppercase tracking-wide">Description</span>
+                                        <p className="text-sm text-slate-700 mt-1 whitespace-pre-wrap">{formData.description}</p>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Presales Details — Collapsible */}
+                    <div className="bg-white rounded-lg shadow-sm border border-slate-200">
+                        <button
+                            type="button"
+                            onClick={() => setSalesPresalesOpen(prev => !prev)}
+                            className="w-full flex items-center justify-between px-6 py-3 text-left hover:bg-slate-50 transition-colors"
+                        >
+                            <h3 className="text-sm font-bold text-slate-800">Presales / Estimation Details</h3>
+                            <ChevronDown className={`w-5 h-5 text-slate-400 transition-transform duration-200 ${salesPresalesOpen ? 'rotate-180' : ''}`} />
+                        </button>
+                        {salesPresalesOpen && (
+                            <div className="px-6 pb-4 border-t border-slate-100 pt-3">
+                                {/* Travel & Cost Details */}
+                                <h4 className="text-xs font-semibold text-slate-700 mb-2">Travel & Cost Assumptions</h4>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-y-3 gap-x-6 text-sm mb-4">
+                                    <div>
+                                        <span className="text-xs text-slate-500 uppercase tracking-wide">Markup %</span>
+                                        <p className="font-medium text-slate-800 mt-1">{presalesData.markup}%</p>
+                                    </div>
+                                    <div>
+                                        <span className="text-xs text-slate-500 uppercase tracking-wide">Mode of Travel</span>
+                                        <p className="font-medium text-slate-800 mt-1">{presalesData.modeOfTravel || "N/A"}</p>
+                                    </div>
+                                    <div>
+                                        <span className="text-xs text-slate-500 uppercase tracking-wide">Travel Frequency</span>
+                                        <p className="font-medium text-slate-800 mt-1">{presalesData.frequency || "N/A"}</p>
+                                    </div>
+                                    <div>
+                                        <span className="text-xs text-slate-500 uppercase tracking-wide">Round Trip Cost</span>
+                                        <p className="font-medium text-slate-800 mt-1">₹{Number(presalesData.roundTripCost).toLocaleString()}</p>
+                                    </div>
+                                    <div>
+                                        <span className="text-xs text-slate-500 uppercase tracking-wide">Medical Insurance</span>
+                                        <p className="font-medium text-slate-800 mt-1">₹{Number(presalesData.medicalInsuranceCost).toLocaleString()}</p>
+                                    </div>
+                                    <div>
+                                        <span className="text-xs text-slate-500 uppercase tracking-wide">Visa Cost</span>
+                                        <p className="font-medium text-slate-800 mt-1">₹{Number(presalesData.visaCost).toLocaleString()}</p>
+                                    </div>
+                                    <div>
+                                        <span className="text-xs text-slate-500 uppercase tracking-wide">Vaccine Cost</span>
+                                        <p className="font-medium text-slate-800 mt-1">₹{Number(presalesData.vaccineCost).toLocaleString()}</p>
+                                    </div>
+                                    <div>
+                                        <span className="text-xs text-slate-500 uppercase tracking-wide">Hotel Cost</span>
+                                        <p className="font-medium text-slate-800 mt-1">₹{Number(presalesData.hotelCost).toLocaleString()}</p>
+                                    </div>
+                                </div>
+
+                                {/* GOM Summary */}
+                                <h4 className="text-xs font-semibold text-slate-700 mb-2 pt-3 border-t border-slate-100">GOM Summary</h4>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                    <div className="bg-blue-50 rounded-lg p-3 border border-blue-200">
+                                        <p className="text-xs text-blue-600 mb-1">Revenue</p>
+                                        <p className="text-sm font-bold text-blue-700">₹{Math.round(gomResults.offshoreRevenue * (gomInputs.workingDays || 1)).toLocaleString()}</p>
+                                    </div>
+                                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
+                                        <p className="text-xs text-slate-500 mb-1">Offshore Day Rate</p>
+                                        <p className="text-sm font-bold text-slate-700">{gomResults.offshoreDayRate.toLocaleString()}</p>
+                                    </div>
+                                    <div className={`rounded-lg p-3 border ${gomResults.offshoreGom >= 20 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                                        <p className="text-xs text-slate-500 mb-1">GOM %</p>
+                                        <p className={`text-sm font-bold ${gomResults.offshoreGom >= 20 ? 'text-green-700' : 'text-red-700'}`}>{gomResults.offshoreGom.toFixed(1)}%</p>
+                                    </div>
+                                    <div className="bg-purple-50 rounded-lg p-3 border border-purple-200">
+                                        <p className="text-xs text-purple-600 mb-1">Adjusted Cost</p>
+                                        <p className="text-sm font-bold text-purple-700">₹{Math.round(gomResults.adjustedCost).toLocaleString()}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* PROJECT VIEW (Step 3) — Converted project info */}
+            {activeStep === 3 && (
+                <div className="space-y-4 animate-in fade-in duration-300">
+                    <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-5 text-center">
+                        <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-emerald-100 mb-3">
+                            <Check className="w-6 h-6 text-emerald-600" />
+                        </div>
+                        <h2 className="text-base font-bold text-slate-900 mb-2">SOW Approved</h2>
+                        <p className="text-xs text-slate-500 mb-4">This opportunity has been approved and the SOW has been finalized.</p>
+
+                        <div className="max-w-md mx-auto grid grid-cols-2 gap-3 text-left mb-6">
+                            <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
+                                <p className="text-xs text-slate-500 mb-1">Client</p>
+                                <p className="font-semibold text-sm text-slate-800">{formData.clientName}</p>
+                            </div>
+                            <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
+                                <p className="text-xs text-slate-500 mb-1">Project</p>
+                                <p className="font-semibold text-sm text-slate-800">{formData.projectName}</p>
+                            </div>
+                            <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
+                                <p className="text-xs text-slate-500 mb-1">Value</p>
+                                <p className="font-semibold text-sm text-slate-800">₹{Number(formData.value).toLocaleString()}</p>
+                            </div>
+                            <div className="bg-emerald-50 rounded-lg p-3 border border-emerald-200">
+                                <p className="text-xs text-emerald-600 mb-1">Status</p>
+                                <p className="font-semibold text-sm text-emerald-700">SOW Approved</p>
+                            </div>
+                        </div>
+
+                        <button
+                            onClick={() => router.push("/dashboard/opportunities")}
+                            className="px-6 py-2 bg-indigo-600 text-white rounded-md font-medium hover:bg-indigo-700"
+                        >
+                            Back to Opportunities
+                        </button>
+                    </div>
+                </div>
             )}
 
             {/* Presales Modal */}
@@ -1098,7 +1831,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             </button>
                         </div>
 
-                        <form onSubmit={handlePresalesSubmit} className="p-6 space-y-6">
+                        <form onSubmit={handlePresalesSubmit} className="p-5 space-y-4">
 
                             <div className="space-y-1.5">
                                 <label className="block text-sm font-bold text-slate-700">Proposal Due Date *</label>
@@ -1140,6 +1873,63 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 </button>
                             </div>
                         </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Mark as Lost Modal */}
+            {showLostModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden">
+                        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-white">
+                            <div className="flex items-center gap-2">
+                                <AlertTriangle className="w-5 h-5 text-red-500" />
+                                <h3 className="font-bold text-lg text-slate-800">{lostModalType === 'Proposal Lost' ? 'Mark as Proposal Lost' : 'Mark as Lost'}</h3>
+                            </div>
+                            <button
+                                onClick={() => setShowLostModal(false)}
+                                className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100"
+                            >
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+
+                        <div className="p-5 space-y-4">
+                            <p className="text-sm text-slate-600">
+                                {lostModalType === 'Proposal Lost'
+                                    ? 'Mark this opportunity as Proposal Lost — the proposal was not accepted. Please provide a reason.'
+                                    : 'Are you sure you want to mark this opportunity as lost? This action will close the opportunity.'}
+                            </p>
+
+                            <div className="space-y-1.5">
+                                <label className="block text-sm font-bold text-slate-700">Reason / Remarks *</label>
+                                <textarea
+                                    rows={4}
+                                    className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm resize-none focus:outline-none focus:ring-2 focus:ring-red-500/30 focus:border-red-400"
+                                    placeholder="e.g. Lost to competitor, budget constraints, client went with in-house solution..."
+                                    value={lostRemarks}
+                                    onChange={(e) => setLostRemarks(e.target.value)}
+                                />
+                            </div>
+
+                            <div className="pt-4 flex justify-between gap-3 border-t border-slate-50">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowLostModal(false)}
+                                    className="w-full px-4 py-2 text-sm font-bold text-slate-700 bg-white border border-slate-300 rounded-md hover:bg-slate-50 transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleMarkAsLost}
+                                    disabled={isSaving || !lostRemarks.trim()}
+                                    className="w-full px-4 py-2 text-sm font-bold text-white bg-red-600 hover:bg-red-700 rounded-md shadow-sm disabled:opacity-70 transition-colors"
+                                >
+                                    {isSaving ? 'Saving...' : 'Confirm Lost'}
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}

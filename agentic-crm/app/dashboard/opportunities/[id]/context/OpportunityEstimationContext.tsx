@@ -1,8 +1,9 @@
 "use client";
 
-import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
 import { BudgetAssumptions, ResourceLine, OtherCost, GomResult, calculateProjectGom } from "@/lib/gom-calculator";
 import { DEFAULT_ASSUMPTIONS } from "../components/AssumptionsView";
+import { apiClient, API_URL, getAuthHeaders } from "@/lib/api";
 
 interface ResourceRow {
     id: string;
@@ -61,11 +62,23 @@ interface OpportunityEstimationContextType {
     gomSummary: GomResult | null;
     months: string[];
     otherCosts: OtherCost[];
+
+    // Persistence
+    saveEstimation: () => Promise<void>;
+    isSaving: boolean;
+    isLoaded: boolean;
+
+    // Read-only mode (when estimation submitted)
+    readOnly: boolean;
+
+    // Date range for calendar columns
+    startDate: string;
+    endDate: string;
 }
 
 const OpportunityEstimationContext = createContext<OpportunityEstimationContextType | undefined>(undefined);
 
-export function OpportunityEstimationProvider({ children }: { children: ReactNode }) {
+export function OpportunityEstimationProvider({ children, opportunityId, readOnly = false, startDate = '', endDate = '' }: { children: ReactNode; opportunityId?: string; readOnly?: boolean; startDate?: string; endDate?: string }) {
     // State
     const [assumptions, setAssumptions] = useState<BudgetAssumptions>(DEFAULT_ASSUMPTIONS);
     const [resources, setResources] = useState<ResourceRow[]>([]);
@@ -83,6 +96,71 @@ export function OpportunityEstimationProvider({ children }: { children: ReactNod
     });
     const [markupPercent, setMarkupPercent] = useState<number>(0);
     const [currency, setCurrency] = useState<string>("INR");
+    const [isSaving, setIsSaving] = useState(false);
+    const [isLoaded, setIsLoaded] = useState(false);
+
+    // Fetch budget assumptions from admin settings
+    useEffect(() => {
+        (async () => {
+            try {
+                const data = await apiClient("/api/admin/budget-assumptions");
+                if (data && typeof data === "object") {
+                    setAssumptions({ ...DEFAULT_ASSUMPTIONS, ...data });
+                }
+            } catch {
+                // Silently use defaults if API fails
+            }
+        })();
+    }, []);
+
+    // Load saved estimation data from the opportunity record
+    useEffect(() => {
+        if (!opportunityId) { setIsLoaded(true); return; }
+        (async () => {
+            try {
+                const res = await fetch(`${API_URL}/api/opportunities/${opportunityId}`, { headers: getAuthHeaders() });
+                if (!res.ok) { setIsLoaded(true); return; }
+                const opp = await res.json();
+                const saved = opp.presalesData;
+                if (saved && typeof saved === "object" && !Array.isArray(saved)) {
+                    // Restore estimation data (skip if it's the old modal-only format)
+                    if (saved.resources) setResources(saved.resources);
+                    if (saved.travelCosts) setTravelCosts(prev => ({ ...prev, ...saved.travelCosts }));
+                    if (saved.markupPercent != null) setMarkupPercent(saved.markupPercent);
+                    if (saved.currency) setCurrency(saved.currency);
+                    if (saved.selectedYear) setSelectedYear(saved.selectedYear);
+                }
+            } catch {
+                // silently use defaults
+            } finally {
+                setIsLoaded(true);
+            }
+        })();
+    }, [opportunityId]);
+
+    // Save estimation data to the opportunity record
+    const saveEstimation = useCallback(async () => {
+        if (!opportunityId) return;
+        setIsSaving(true);
+        try {
+            const payload = {
+                presalesData: {
+                    resources,
+                    travelCosts,
+                    markupPercent,
+                    currency,
+                    selectedYear,
+                },
+            };
+            await fetch(`${API_URL}/api/opportunities/${opportunityId}`, {
+                method: "PATCH",
+                headers: getAuthHeaders(),
+                body: JSON.stringify(payload),
+            });
+        } finally {
+            setIsSaving(false);
+        }
+    }, [opportunityId, resources, travelCosts, markupPercent, currency, selectedYear]);
 
     // Calculated values
     const [totalResourceCost, setTotalResourceCost] = useState(0);
@@ -230,6 +308,12 @@ export function OpportunityEstimationProvider({ children }: { children: ReactNod
         gomSummary,
         months,
         otherCosts,
+        saveEstimation,
+        isSaving,
+        isLoaded,
+        readOnly,
+        startDate,
+        endDate,
     };
 
     return (

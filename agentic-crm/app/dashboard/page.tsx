@@ -1,142 +1,394 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
+import { useRouter } from "next/navigation";
 import {
-    ArrowUpRight,
-    ArrowDownRight,
     DollarSign,
-    Users,
     Target,
     Activity,
-    MoreHorizontal
+    Clock,
+    AlertTriangle,
+    CheckCircle2,
+    Briefcase,
+    Loader2,
 } from "lucide-react";
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import {
+    BarChart, Bar, PieChart, Pie, Cell,
+    XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
+} from "recharts";
+import { API_URL, getAuthHeaders } from "@/lib/api";
+import { useAuthStore } from "@/lib/auth-store";
 
-const stats = [
-    {
-        title: "Total Revenue",
-        value: "$2,456,000",
-        change: "+12.5%",
-        trend: "up",
-        icon: DollarSign,
-        color: "primary"
-    },
-    {
-        title: "Active Opportunities",
-        value: "45",
-        change: "+5",
-        trend: "up",
-        icon: Target,
-        color: "secondary"
-    },
-    {
-        title: "Win Rate",
-        value: "68%",
-        change: "-2.3%",
-        trend: "down",
-        icon: Activity,
-        color: "success"
-    },
-    {
-        title: "New Leads",
-        value: "128",
-        change: "+14.2%",
-        trend: "up",
-        icon: Users,
-        color: "warning"
-    }
-];
+const STAGE_COLORS: Record<string, string> = {
+    Pipeline: "bg-blue-50 text-blue-700 border-blue-200",
+    Presales: "bg-amber-50 text-amber-700 border-amber-200",
+    Sales: "bg-purple-50 text-purple-700 border-purple-200",
+    Qualification: "bg-amber-50 text-amber-700 border-amber-200",
+    Proposal: "bg-purple-50 text-purple-700 border-purple-200",
+    Negotiation: "bg-indigo-50 text-indigo-700 border-indigo-200",
+    "Closed Won": "bg-emerald-50 text-emerald-700 border-emerald-200",
+    "Closed-Won": "bg-emerald-50 text-emerald-700 border-emerald-200",
+    "Closed Lost": "bg-red-50 text-red-700 border-red-200",
+    "Proposal Lost": "bg-rose-50 text-rose-700 border-rose-200",
+    Delivered: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    Discovery: "bg-sky-50 text-sky-700 border-sky-200",
+    Project: "bg-emerald-50 text-emerald-700 border-emerald-200",
+};
 
-const chartData = [
-    { name: "Mon", value: 4000 },
-    { name: "Tue", value: 3000 },
-    { name: "Wed", value: 2000 },
-    { name: "Thu", value: 2780 },
-    { name: "Fri", value: 1890 },
-    { name: "Sat", value: 2390 },
-    { name: "Sun", value: 3490 },
-];
+const STAGE_DISPLAY: Record<string, string> = {
+    Pipeline: "Pipeline",
+    Qualification: "Presales",
+    Presales: "Presales",
+    Proposal: "Sales",
+    Sales: "Sales",
+    Negotiation: "Sales",
+    "Closed Won": "Project",
+    "Closed-Won": "Project",
+    "Closed Lost": "Lost",
+    "Proposal Lost": "Proposal Lost",
+    Delivered: "Project",
+    Discovery: "Pipeline",
+};
+
+// Consistent colors for pie chart stages
+const PIE_COLOR_MAP: Record<string, string> = {
+    Pipeline: "#6366f1",
+    Qualification: "#f59e0b",
+    Proposal: "#10b981",
+    Negotiation: "#8b5cf6",
+    "Closed Won": "#ef4444",
+    "Closed Lost": "#94a3b8",
+    "Proposal Lost": "#e11d48",
+};
+const PIE_COLORS = ["#6366f1", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#94a3b8", "#06b6d4", "#ec4899"];
+
+interface Analytics {
+    dashboard: {
+        revenueProjection: { name: string; proposed: number; actual: number; lost: number }[];
+        countByStatus: { name: string; value: number }[];
+        countByClient: { name: string; value: number }[];
+    };
+    pipeline: {
+        activeProjects: number;
+        conversionRate: number;
+        pipelineValue: number;
+        avgDealValue: number;
+        totalOpps: number;
+    };
+    presales: {
+        proposalSuccessRate: number;
+        totalPresalesOpps: number;
+    };
+    sales: {
+        avgTimeToClose: number;
+        wonCount: number;
+        lostCount: number;
+    };
+}
+
+interface Opportunity {
+    id: string;
+    name: string;
+    client: string;
+    value: number;
+    stage: string;
+    currentStage: string;
+    probability: number;
+    lastActivity: string;
+    owner: string;
+    status: string;
+    healthScore: number;
+    daysInStage: number;
+    isStalled: boolean;
+}
 
 export default function DashboardPage() {
+    const { user } = useAuthStore();
+    const router = useRouter();
+    const [analytics, setAnalytics] = useState<Analytics | null>(null);
+    const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const fetchData = async () => {
+            const headers = getAuthHeaders();
+            try {
+                const [analyticsRes, oppsRes] = await Promise.all([
+                    fetch(`${API_URL}/api/analytics`, { headers }),
+                    fetch(`${API_URL}/api/opportunities`, { headers }),
+                ]);
+                if (analyticsRes.ok) setAnalytics(await analyticsRes.json());
+                if (oppsRes.ok) {
+                    const oppsJson = await oppsRes.json();
+                    // API now returns paginated { data, total, ... } — extract the array
+                    setOpportunities(Array.isArray(oppsJson) ? oppsJson : (oppsJson.data ?? []));
+                }
+            } catch (err) {
+                console.error("Dashboard fetch error:", err);
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchData();
+    }, []);
+
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center h-96">
+                <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
+            </div>
+        );
+    }
+
+    const pipeline = analytics?.pipeline;
+    const sales = analytics?.sales;
+    const presales = analytics?.presales;
+
+    const stalledDeals = opportunities.filter(o => o.isStalled);
+    const criticalDeals = opportunities.filter(o => o.status === "critical");
+    const healthyDeals = opportunities.filter(o => o.status === "healthy");
+    const atRiskDeals = opportunities.filter(o => o.status === "at-risk");
+
+    const insights: { text: string; type: "warning" | "success" | "neutral" }[] = [];
+
+    // Stalled deal warnings
+    stalledDeals.slice(0, 2).forEach(d => {
+        insights.push({ text: `'${d.name}' (${d.client}) has been idle for ${d.daysInStage} days. Consider following up.`, type: "warning" });
+    });
+
+    // High-value deals progressing well
+    const highValueHealthy = healthyDeals.filter(d => d.value > 0).sort((a, b) => b.value - a.value);
+    highValueHealthy.slice(0, 1).forEach(d => {
+        insights.push({ text: `'${d.name}' (${d.client}) is progressing well — ₹${(d.value / 100000).toFixed(1)}L at ${d.probability}% probability.`, type: "success" });
+    });
+
+    // Critical deals needing attention
+    criticalDeals.slice(0, 2).forEach(d => {
+        insights.push({ text: `'${d.name}' needs attention — health score is ${d.healthScore}%. Last activity: ${d.lastActivity}.`, type: "warning" });
+    });
+
+    // At-risk deals
+    if (atRiskDeals.length > 0 && insights.length < 5) {
+        insights.push({ text: `${atRiskDeals.length} deal${atRiskDeals.length > 1 ? 's are' : ' is'} at risk. Review pipeline to prevent slippage.`, type: "warning" });
+    }
+
+    // Summary insights
+    if (pipeline && pipeline.totalOpps > 0 && insights.length < 5) {
+        insights.push({ text: `Pipeline has ${pipeline.totalOpps} opportunities worth ₹${((pipeline.pipelineValue || 0) / 100000).toFixed(1)}L total.`, type: "neutral" });
+    }
+
+    if (sales && sales.wonCount > 0 && insights.length < 5) {
+        insights.push({ text: `${sales.wonCount} deal${sales.wonCount > 1 ? 's' : ''} won with ${(pipeline?.conversionRate || 0).toFixed(1)}% conversion rate.`, type: "success" });
+    }
+
+    if (insights.length === 0) {
+        insights.push({ text: "All opportunities are on track. No immediate actions required.", type: "neutral" });
+    }
+
+    const recentOpps = opportunities.slice(0, 8);
+    const statusData = analytics?.dashboard.countByStatus || [];
+    const revenueData = analytics?.dashboard.revenueProjection || [];
+
+    const stats = [
+        {
+            title: "Pipeline Value",
+            value: `₹${((pipeline?.pipelineValue || 0) / 100000).toFixed(1)}L`,
+            subtitle: `${pipeline?.totalOpps || 0} opportunities`,
+            icon: DollarSign,
+            iconBg: "bg-indigo-100",
+            iconColor: "text-indigo-600",
+        },
+        {
+            title: "Active Projects",
+            value: String(pipeline?.activeProjects || 0),
+            subtitle: `Avg ₹${((pipeline?.avgDealValue || 0) / 100000).toFixed(1)}L per deal`,
+            icon: Target,
+            iconBg: "bg-emerald-100",
+            iconColor: "text-emerald-600",
+        },
+        {
+            title: "Win Rate",
+            value: `${(pipeline?.conversionRate || 0).toFixed(1)}%`,
+            subtitle: `${sales?.wonCount || 0} won / ${sales?.lostCount || 0} lost`,
+            icon: Activity,
+            iconBg: "bg-amber-100",
+            iconColor: "text-amber-600",
+        },
+        {
+            title: "Avg. Close Time",
+            value: `${(sales?.avgTimeToClose || 0).toFixed(0)}d`,
+            subtitle: `Presales success ${(presales?.proposalSuccessRate || 0).toFixed(0)}%`,
+            icon: Clock,
+            iconBg: "bg-purple-100",
+            iconColor: "text-purple-600",
+        },
+    ];
+
     return (
-        <div className="space-y-8">
-            {/* Header */}
+        <div className="space-y-4 animate-in fade-in duration-500">
             <div>
-                <h1 className="text-3xl font-bold mb-2 text-slate-900">Dashboard</h1>
-                <p className="text-slate-500">Welcome back, here's what's happening today.</p>
+                <h1 className="text-xl font-bold mb-0.5 text-slate-900">Dashboard</h1>
+                <p className="text-slate-500 text-sm">Welcome back{user?.name ? `, ${user.name.split(' ')[0]}` : ''}. Here&apos;s your pipeline overview.</p>
             </div>
 
             {/* Stats Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
                 {stats.map((stat, idx) => (
                     <motion.div
                         key={idx}
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: idx * 0.1 }}
-                        className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm hover:shadow-md transition-shadow"
+                        className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm hover:shadow-md transition-shadow"
                     >
-                        <div className="flex justify-between items-start mb-4">
-                            <div className={`p-3 rounded-xl bg-${stat.color}-500/10`}>
-                                <stat.icon className={`w-6 h-6 text-${stat.color}-400`} />
-                            </div>
-                            <div className={`flex items-center gap-1 text-sm ${stat.trend === "up" ? "text-emerald-600" : "text-rose-600"}`}>
-                                {stat.trend === "up" ? <ArrowUpRight className="w-4 h-4" /> : <ArrowDownRight className="w-4 h-4" />}
-                                {stat.change}
+                        <div className="flex justify-between items-start mb-2">
+                            <div className={`p-2 rounded-lg ${stat.iconBg}`}>
+                                <stat.icon className={`w-4 h-4 ${stat.iconColor}`} />
                             </div>
                         </div>
-                        <h3 className="text-slate-500 text-sm mb-1">{stat.title}</h3>
-                        <p className="text-2xl font-bold text-slate-900">{stat.value}</p>
+                        <h3 className="text-slate-500 text-xs mb-0.5">{stat.title}</h3>
+                        <p className="text-lg font-bold text-slate-900">{stat.value}</p>
+                        <p className="text-[11px] text-slate-400 mt-0.5">{stat.subtitle}</p>
                     </motion.div>
                 ))}
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                {/* Main Chart */}
-                <div className="lg:col-span-2 bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
-                    <div className="flex justify-between items-center mb-6">
-                        <h3 className="font-semibold text-lg text-slate-800">Revenue Overview</h3>
-                        <select className="bg-slate-50 border border-slate-200 text-sm text-slate-600 focus:ring-2 focus:ring-indigo-500/20 rounded-lg outline-none cursor-pointer">
-                            <option>Last 7 Days</option>
-                            <option>Last 30 Days</option>
-                            <option>This Quarter</option>
-                        </select>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                {/* Revenue Projection Chart */}
+                <div className="lg:col-span-2 bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
+                    <div className="flex justify-between items-center mb-3">
+                        <h3 className="font-semibold text-sm text-slate-800">Revenue Projection</h3>
                     </div>
-                    <div className="h-[300px] w-full">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <AreaChart data={chartData}>
-                                <defs>
-                                    <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
-                                        <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
-                                    </linearGradient>
-                                </defs>
-                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b' }} />
-                                <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b' }} />
-                                <Tooltip
-                                    contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                                    itemStyle={{ color: '#1e293b' }}
-                                />
-                                <Area type="monotone" dataKey="value" stroke="#6366f1" strokeWidth={3} fillOpacity={1} fill="url(#colorValue)" />
-                            </AreaChart>
-                        </ResponsiveContainer>
+                    <div className="h-[240px] w-full">
+                        {revenueData.length > 0 ? (
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={revenueData}>
+                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} />
+                                    <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} tickFormatter={(v) => `₹${(v / 100000).toFixed(0)}L`} />
+                                    <Tooltip
+                                        contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                                        formatter={(value: number) => [`₹${(value / 100000).toFixed(1)}L`, undefined]}
+                                    />
+                                    <Legend />
+                                    <Bar dataKey="proposed" name="Proposed" fill="#6366f1" radius={[4, 4, 0, 0]} />
+                                    <Bar dataKey="actual" name="Won" fill="#10b981" radius={[4, 4, 0, 0]} />
+                                    <Bar dataKey="lost" name="Lost" fill="#ef4444" radius={[4, 4, 0, 0]} />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        ) : (
+                            <div className="flex items-center justify-center h-full text-slate-400 text-sm">No revenue data available</div>
+                        )}
                     </div>
                 </div>
 
-                {/* AI Insights / Tasks */}
-                <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
-                    <div className="flex justify-between items-center mb-6">
-                        <h3 className="font-semibold text-lg text-slate-800">AI Insights</h3>
-                        <button className="text-sm text-indigo-600 hover:text-indigo-800 font-medium">View All</button>
+                {/* Pipeline by Stage - Pie */}
+                <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
+                    <div className="flex justify-between items-center mb-3">
+                        <h3 className="font-semibold text-sm text-slate-800">By Stage</h3>
                     </div>
-                    <div className="space-y-4">
-                        {[
-                            { text: "Deal 'Metropolis Corp' has been idle for 14 days.", type: "warning" },
-                            { text: "High probability of closure for 'TechStart Inc' this week.", type: "success" },
-                            { text: "Follow up required with John Doe regarding contract.", type: "neutral" }
-                        ].map((insight, idx) => (
-                            <div key={idx} className="p-4 rounded-xl bg-slate-50 border border-slate-100 hover:border-indigo-200 hover:bg-indigo-50/30 transition-colors">
+                    {statusData.length > 0 ? (
+                        <>
+                            <div className="h-[200px] w-full">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <PieChart>
+                                        <Pie data={statusData} cx="50%" cy="50%" innerRadius={50} outerRadius={80} dataKey="value" paddingAngle={3}>
+                                            {statusData.map((entry, idx) => (
+                                                <Cell key={idx} fill={PIE_COLOR_MAP[entry.name] || PIE_COLORS[idx % PIE_COLORS.length]} />
+                                            ))}
+                                        </Pie>
+                                        <Tooltip
+                                            contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px' }}
+                                            formatter={(value: number, name: string) => [value, name]}
+                                        />
+                                    </PieChart>
+                                </ResponsiveContainer>
+                            </div>
+                            <div className="space-y-2 mt-2">
+                                {statusData.map((s, idx) => (
+                                    <div key={s.name} className="flex items-center justify-between text-sm">
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: PIE_COLOR_MAP[s.name] || PIE_COLORS[idx % PIE_COLORS.length] }} />
+                                            <span className="text-slate-600">{s.name}</span>
+                                        </div>
+                                        <span className="font-medium text-slate-800">{s.value}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </>
+                    ) : (
+                        <div className="flex items-center justify-center h-[200px] text-slate-400 text-sm">No data</div>
+                    )}
+                </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                {/* Recent Opportunities Table */}
+                <div className="lg:col-span-2 bg-white rounded-xl p-4 border border-slate-200 shadow-sm overflow-hidden">
+                    <div className="flex justify-between items-center mb-3">
+                        <h3 className="font-semibold text-sm text-slate-800">Recent Opportunities</h3>
+                        <button
+                            onClick={() => router.push('/dashboard/opportunities')}
+                            className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+                        >
+                            View All
+                        </button>
+                    </div>
+                    {recentOpps.length > 0 ? (
+                        <div className="overflow-x-auto">
+                            <table className="w-full">
+                                <thead>
+                                    <tr className="border-b border-slate-100 text-left text-xs text-slate-500">
+                                        <th className="pb-2 pl-3 font-medium">Opportunity</th>
+                                        <th className="pb-2 font-medium">Value</th>
+                                        <th className="pb-2 font-medium">Stage</th>
+                                        <th className="pb-2 font-medium">Health</th>
+                                        <th className="pb-2 font-medium">Owner</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="text-xs">
+                                    {recentOpps.map((opp) => (
+                                        <tr
+                                            key={opp.id}
+                                            onClick={() => router.push(`/dashboard/opportunities/${opp.id}`)}
+                                            className="border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-colors cursor-pointer"
+                                        >
+                                            <td className="py-2.5 pl-3">
+                                                <div className="font-medium text-slate-900">{opp.name}</div>
+                                                <div className="text-[11px] text-slate-400">{opp.client}</div>
+                                            </td>
+                                            <td className="py-2.5 text-slate-600">{'\u20B9'}{(opp.value / 100000).toFixed(1)}L</td>
+                                            <td className="py-2.5">
+                                                <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium border ${STAGE_COLORS[STAGE_DISPLAY[opp.currentStage] || opp.currentStage] || "bg-slate-50 text-slate-700 border-slate-200"}`}>
+                                                    {STAGE_DISPLAY[opp.currentStage] || opp.currentStage}
+                                                </span>
+                                            </td>
+                                            <td className="py-2.5">
+                                                <div className="flex items-center gap-1.5">
+                                                    <div className={`w-2 h-2 rounded-full ${opp.status === 'healthy' ? 'bg-emerald-500' : opp.status === 'at-risk' ? 'bg-amber-500' : 'bg-red-500'}`} />
+                                                    <span className="text-slate-600">{opp.healthScore}%</span>
+                                                </div>
+                                            </td>
+                                            <td className="py-2.5 text-slate-600">{opp.owner}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    ) : (
+                        <div className="text-center py-4 text-slate-400 text-xs">No opportunities found</div>
+                    )}
+                </div>
+
+                {/* AI Insights */}
+                <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
+                    <div className="flex justify-between items-center mb-3">
+                        <h3 className="font-semibold text-sm text-slate-800">AI Insights</h3>
+                    </div>
+                    <div className="space-y-2">
+                        {insights.map((insight, idx) => (
+                            <div key={idx} className="p-3 rounded-lg bg-slate-50 border border-slate-100 hover:border-indigo-200 hover:bg-indigo-50/30 transition-colors">
                                 <div className="flex gap-3">
                                     <div className={`w-1.5 h-1.5 rounded-full mt-2 flex-shrink-0 ${insight.type === "warning" ? "bg-amber-500" :
                                         insight.type === "success" ? "bg-green-500" : "bg-blue-500"
@@ -146,47 +398,31 @@ export default function DashboardPage() {
                             </div>
                         ))}
                     </div>
-                </div>
-            </div>
 
-            {/* Recent Deals Table */}
-            <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm overflow-hidden">
-                <div className="flex justify-between items-center mb-6">
-                    <h3 className="font-semibold text-lg text-slate-800">Recent Opportunities</h3>
-                    <button className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600"><MoreHorizontal className="w-5 h-5" /></button>
-                </div>
-                <div className="overflow-x-auto">
-                    <table className="w-full">
-                        <thead>
-                            <tr className="border-b border-slate-100 text-left text-sm text-slate-500">
-                                <th className="pb-4 pl-4 font-medium">Opportunity Name</th>
-                                <th className="pb-4 font-medium">Value</th>
-                                <th className="pb-4 font-medium">Stage</th>
-                                <th className="pb-4 font-medium">Probability</th>
-                                <th className="pb-4 font-medium">Owner</th>
-                            </tr>
-                        </thead>
-                        <tbody className="text-sm">
-                            {[
-                                { name: "Enterprise License - Acme Corp", value: "$45,000", stage: "Negotiation", prob: "80%", owner: "Sarah Wilson" },
-                                { name: "Cloud Migration - Globex", value: "$120,000", stage: "Discovery", prob: "20%", owner: "Mike Ross" },
-                                { name: "Q4 Consulting - Stark Ind", value: "$15,000", stage: "Proposal", prob: "60%", owner: "Jessica Pearson" },
-                                { name: "AI Implementation - Cyberdyne", value: "$85,000", stage: "Qualifying", prob: "10%", owner: "John Connor" },
-                            ].map((deal, idx) => (
-                                <tr key={idx} className="border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-colors">
-                                    <td className="py-4 pl-4 font-medium text-slate-900">{deal.name}</td>
-                                    <td className="py-4 text-slate-600">{deal.value}</td>
-                                    <td className="py-4">
-                                        <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-200">
-                                            {deal.stage}
-                                        </span>
-                                    </td>
-                                    <td className="py-4 text-slate-600">{deal.prob}</td>
-                                    <td className="py-4 text-slate-600">{deal.owner}</td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                    {/* Quick Stats */}
+                    <div className="mt-4 pt-4 border-t border-slate-100 space-y-2">
+                        <div className="flex items-center justify-between text-sm">
+                            <div className="flex items-center gap-2 text-slate-500">
+                                <AlertTriangle className="w-4 h-4 text-amber-500" />
+                                Stalled Deals
+                            </div>
+                            <span className="font-semibold text-slate-800">{stalledDeals.length}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-sm">
+                            <div className="flex items-center gap-2 text-slate-500">
+                                <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                                Healthy Deals
+                            </div>
+                            <span className="font-semibold text-slate-800">{healthyDeals.length}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-sm">
+                            <div className="flex items-center gap-2 text-slate-500">
+                                <Briefcase className="w-4 h-4 text-indigo-500" />
+                                In Presales
+                            </div>
+                            <span className="font-semibold text-slate-800">{presales?.totalPresalesOpps || 0}</span>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>

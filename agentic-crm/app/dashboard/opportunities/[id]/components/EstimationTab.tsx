@@ -152,9 +152,9 @@ export function EstimationTab() {
     // Show message if no data
     if (resources.length === 0) {
         return (
-            <div className="flex flex-col items-center justify-center py-16 px-4">
-                <Info className="w-16 h-16 text-slate-300 mb-4" />
-                <h3 className="text-lg font-semibold text-slate-700 mb-2">No Resources Assigned</h3>
+            <div className="flex flex-col items-center justify-center py-12 px-4">
+                <Info className="w-12 h-12 text-slate-300 mb-3" />
+                <h3 className="text-base font-semibold text-slate-700 mb-2">No Resources Assigned</h3>
                 <p className="text-sm text-slate-500 text-center max-w-md">
                     Please go to the <strong>Resource Assignment</strong> tab to add resources and define monthly efforts before viewing the estimation summary.
                 </p>
@@ -163,13 +163,13 @@ export function EstimationTab() {
     }
 
     return (
-        <div className="space-y-8 animate-in fade-in duration-500">
+        <div className="space-y-4 animate-in fade-in duration-500">
 
             {/* Top Bar: Quote Price */}
-            <div className="bg-gradient-to-r from-slate-900 to-slate-800 rounded-lg p-6 text-white shadow-xl flex flex-col md:flex-row justify-between items-center gap-6">
+            <div className="bg-gradient-to-r from-slate-900 to-slate-800 rounded-lg p-4 text-white shadow-xl flex flex-col md:flex-row justify-between items-center gap-4">
                 <div>
-                    <h2 className="text-lg font-light text-slate-300">Total Quote Price (Revenue)</h2>
-                    <div className="text-4xl font-bold mt-1 tracking-tight">
+                    <h2 className="text-sm font-light text-slate-300">Total Quote Price (Revenue)</h2>
+                    <div className="text-2xl font-bold mt-1 tracking-tight">
                         {format(convert(revenue))}
                     </div>
                     <p className="text-sm text-slate-400 mt-2 flex items-center gap-1">
@@ -265,8 +265,8 @@ export function EstimationTab() {
 
             {/* Grid 3: GOM Summary */}
             <div className="border rounded-lg bg-white shadow-sm overflow-hidden">
-                <div className="bg-slate-50 p-4 border-b bg-green-50/50">
-                    <h3 className="font-semibold text-slate-800">3. GOM Analysis ({currency})</h3>
+                <div className="bg-slate-50 p-3 border-b bg-green-50/50">
+                    <h3 className="font-semibold text-slate-800 text-sm">3. GOM Analysis ({currency})</h3>
                 </div>
                 <div className="overflow-x-auto">
                     <table className="w-full text-xs text-left">

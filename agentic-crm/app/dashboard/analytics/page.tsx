@@ -52,14 +52,14 @@ export default function AnalyticsPage() {
     );
 
     return (
-        <div className="space-y-6 pb-20">
+        <div className="space-y-4 pb-8">
             <div>
-                <h1 className="text-3xl font-bold text-slate-900">Business Intelligence</h1>
-                <p className="text-slate-500">Comprehensive analysis of opportunities, revenue, and performance.</p>
+                <h1 className="text-xl font-bold text-slate-900">Business Intelligence</h1>
+                <p className="text-slate-500 text-sm">Comprehensive analysis of opportunities, revenue, and performance.</p>
             </div>
 
             {/* Custom Tabs */}
-            <div className="bg-white border border-slate-200 p-1 rounded-xl inline-flex gap-1 mb-6">
+            <div className="bg-white border border-slate-200 p-1 rounded-lg inline-flex gap-1 mb-4">
                 <TabButton id="dashboard" label="Dashboard" />
                 <TabButton id="pipeline" label="Pipeline Metrics" />
                 <TabButton id="presales" label="Resource & Pre-Sales" />
@@ -68,15 +68,15 @@ export default function AnalyticsPage() {
 
             {/* 1. OPPORTUNITY DASHBOARD */}
             {activeTab === "dashboard" && (
-                <div className="space-y-6 animate-in fade-in">
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div className="space-y-4 animate-in fade-in">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                         {/* Revenue Projection */}
                         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden col-span-1 lg:col-span-2">
-                            <div className="p-6 border-b border-slate-100">
-                                <h3 className="font-bold text-slate-800">Revenue Projection</h3>
-                                <p className="text-sm text-slate-500">Proposed vs Actual Revenue over time</p>
+                            <div className="p-4 border-b border-slate-100">
+                                <h3 className="font-bold text-sm text-slate-800">Revenue Projection</h3>
+                                <p className="text-xs text-slate-500">Proposed vs Won vs Lost Revenue over time</p>
                             </div>
-                            <div className="p-6 h-[300px]">
+                            <div className="p-4 h-[240px]">
                                 <ResponsiveContainer width="100%" height="100%">
                                     <BarChart data={dashboard.revenueProjection || []}>
                                         <CartesianGrid strokeDasharray="3 3" vertical={false} />
@@ -85,7 +85,8 @@ export default function AnalyticsPage() {
                                         <Tooltip formatter={(value: number) => `$${value.toLocaleString()}`} />
                                         <Legend />
                                         <Bar dataKey="proposed" name="Proposed Revenue" stackId="a" fill="#6366f1" radius={[0, 0, 4, 4]} />
-                                        <Bar dataKey="actual" name="Actual Revenue" stackId="a" fill="#10b981" radius={[4, 4, 0, 0]} />
+                                        <Bar dataKey="actual" name="Won Revenue" stackId="a" fill="#10b981" radius={[4, 4, 0, 0]} />
+                                        <Bar dataKey="lost" name="Lost Revenue" fill="#ef4444" radius={[4, 4, 0, 0]} />
                                     </BarChart>
                                 </ResponsiveContainer>
                             </div>
@@ -93,11 +94,11 @@ export default function AnalyticsPage() {
 
                         {/* Opportunity Count Pie */}
                         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-                            <div className="p-6 border-b border-slate-100">
-                                <h3 className="font-bold text-slate-800">Market Mix</h3>
-                                <p className="text-sm text-slate-500">Opportunities by Status</p>
+                            <div className="p-4 border-b border-slate-100">
+                                <h3 className="font-bold text-sm text-slate-800">Market Mix</h3>
+                                <p className="text-xs text-slate-500">Opportunities by Status</p>
                             </div>
-                            <div className="p-6 h-[300px]">
+                            <div className="p-4 h-[240px]">
                                 <ResponsiveContainer width="100%" height="100%">
                                     <PieChart>
                                         <Pie
@@ -120,11 +121,11 @@ export default function AnalyticsPage() {
 
                         {/* Clients Bar */}
                         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden col-span-1 lg:col-span-3">
-                            <div className="p-6 border-b border-slate-100">
-                                <h3 className="font-bold text-slate-800">Top Clients</h3>
-                                <p className="text-sm text-slate-500">Active opportunities by client</p>
+                            <div className="p-4 border-b border-slate-100">
+                                <h3 className="font-bold text-sm text-slate-800">Top Clients</h3>
+                                <p className="text-xs text-slate-500">Active opportunities by client</p>
                             </div>
-                            <div className="p-6 h-[250px]">
+                            <div className="p-4 h-[200px]">
                                 <ResponsiveContainer width="100%" height="100%">
                                     <BarChart data={dashboard.countByClient || []} layout="vertical" margin={{ left: 20 }}>
                                         <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} />
@@ -142,14 +143,14 @@ export default function AnalyticsPage() {
 
             {/* 4. PIPELINE METRICS */}
             {activeTab === "pipeline" && (
-                <div className="space-y-6 animate-in fade-in">
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="space-y-4 animate-in fade-in">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
                         <MetricCard title="Active Projects" value={pipeline.activeProjects} icon={Activity} color="text-blue-600" bg="bg-blue-50" />
                         <MetricCard title="Total Pipeline Value" value={`$${(pipeline.pipelineValue / 1000).toFixed(1)}k`} icon={DollarSign} color="text-emerald-600" bg="bg-emerald-50" />
                         <MetricCard title="Avg Deal Size" value={`$${(pipeline.avgDealValue / 1000).toFixed(1)}k`} icon={Target} color="text-purple-600" bg="bg-purple-50" />
                         <MetricCard title="Win Rate" value={`${pipeline.conversionRate.toFixed(1)}%`} icon={TrendingUp} color="text-amber-600" bg="bg-amber-50" />
                     </div>
-                    <div className="bg-slate-50 p-8 rounded-xl text-center text-slate-500 border border-slate-200 border-dashed">
+                    <div className="bg-slate-50 p-6 rounded-lg text-center text-sm text-slate-500 border border-slate-200 border-dashed">
                         Historical trend charts will appear here as more data is collected.
                     </div>
                 </div>
@@ -157,8 +158,8 @@ export default function AnalyticsPage() {
 
             {/* 5. PRE-SALES */}
             {activeTab === "presales" && (
-                <div className="space-y-6 animate-in fade-in">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="space-y-4 animate-in fade-in">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <MetricCard title="Proposal Success Rate" value={`${presales.proposalSuccessRate.toFixed(1)}%`} icon={CheckCircle} color="text-emerald-600" bg="bg-emerald-50" />
                         <MetricCard title="Avg Effort Cost / Opp" value={`$${Math.round(presales.effortPerOpp).toLocaleString()}`} icon={Users} color="text-indigo-600" bg="bg-indigo-50" />
                         <MetricCard title="Total Presales Opps" value={presales.totalPresalesOpps} icon={FileText} color="text-slate-600" bg="bg-slate-50" />
@@ -168,8 +169,8 @@ export default function AnalyticsPage() {
 
             {/* 6. SALES */}
             {activeTab === "sales" && (
-                <div className="space-y-6 animate-in fade-in">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="space-y-4 animate-in fade-in">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <MetricCard title="Avg Time to Close" value={`${Math.round(sales.avgTimeToClose)} Days`} icon={Clock} color="text-orange-600" bg="bg-orange-50" />
                         <MetricCard title="Won Opportunities" value={sales.wonCount} icon={Trophy} color="text-yellow-600" bg="bg-yellow-50" />
                         <MetricCard title="Lost Opportunities" value={sales.lostCount} icon={XCircle} color="text-red-600" bg="bg-red-50" />
@@ -182,13 +183,13 @@ export default function AnalyticsPage() {
 
 function MetricCard({ title, value, icon: Icon, color, bg }: any) {
     return (
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 flex items-center gap-4">
-            <div className={`w-12 h-12 rounded-xl ${bg} flex items-center justify-center`}>
-                <Icon className={`w-6 h-6 ${color}`} />
+        <div className="bg-white rounded-lg border border-slate-200 shadow-sm p-4 flex items-center gap-3">
+            <div className={`w-10 h-10 rounded-lg ${bg} flex items-center justify-center`}>
+                <Icon className={`w-5 h-5 ${color}`} />
             </div>
             <div>
-                <p className="text-sm font-medium text-slate-500">{title}</p>
-                <h3 className="text-2xl font-bold text-slate-900">{value}</h3>
+                <p className="text-xs font-medium text-slate-500">{title}</p>
+                <h3 className="text-lg font-bold text-slate-900">{value}</h3>
             </div>
         </div>
     );

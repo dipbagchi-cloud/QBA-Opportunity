@@ -6,7 +6,8 @@ import { prisma } from '../lib/prisma';
 export async function createApproval(req: Request, res: Response) {
     try {
         const body = req.body;
-        const { opportunityId, discountPercent, marginPercent, requesterId } = body;
+        const { opportunityId, discountPercent, marginPercent } = body;
+        const requesterId = req.user!.userId;
 
         // Rule: IF Discount > 15% AND Margin < 20% THEN RequireApproval
         const requiresApproval = discountPercent > 15 && marginPercent < 20;

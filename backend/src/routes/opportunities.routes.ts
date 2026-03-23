@@ -6,13 +6,18 @@ import {
     updateOpportunity,
     convertOpportunity,
 } from '../controllers/opportunities.controller';
+import { authenticate, authorize } from '../middleware/auth';
+import { PERMISSIONS } from '../lib/permissions';
 
 const router = Router();
 
-router.get('/', listOpportunities);
-router.post('/', createOpportunity);
-router.get('/:id', getOpportunity);
-router.patch('/:id', updateOpportunity);
-router.post('/:id/convert', convertOpportunity);
+// All routes require authentication
+router.use(authenticate);
+
+router.get('/', authorize(PERMISSIONS.PIPELINE_VIEW), listOpportunities);
+router.post('/', authorize(PERMISSIONS.PIPELINE_WRITE), createOpportunity);
+router.get('/:id', authorize(PERMISSIONS.PIPELINE_VIEW), getOpportunity);
+router.patch('/:id', authorize(PERMISSIONS.PIPELINE_WRITE), updateOpportunity);
+router.post('/:id/convert', authorize(PERMISSIONS.SALES_WRITE), convertOpportunity);
 
 export default router;

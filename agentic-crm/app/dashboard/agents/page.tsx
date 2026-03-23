@@ -128,28 +128,28 @@ export default function AgenticAIPage() {
     };
 
     return (
-        <div className="space-y-8 animate-in fade-in duration-500 relative min-h-screen pb-20">
+        <div className="space-y-4 animate-in fade-in duration-500 relative min-h-screen pb-8">
             {/* Header */}
             <div>
-                <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 to-purple-600">
+                <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 to-purple-600">
                     Agentic AI
                 </h1>
-                <p className="text-slate-500 mt-1">Configure and monitor your autonomous sales agents.</p>
+                <p className="text-slate-500 text-sm mt-1">Configure and monitor your autonomous sales agents.</p>
             </div>
 
             {/* Agent Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {agents.map((agent) => (
-                    <div key={agent.id} className={`bg-white p-6 rounded-2xl border transition-all duration-300 relative overflow-hidden group
+                    <div key={agent.id} className={`bg-white p-4 rounded-xl border transition-all duration-300 relative overflow-hidden group
                         ${agent.active ? 'border-indigo-200 shadow-md shadow-indigo-500/10' : 'border-slate-200 shadow-sm opacity-90'}
                     `}>
                         <div className="absolute top-0 right-0 p-6 opacity-5 group-hover:opacity-10 transition-opacity">
                             <Bot className="w-24 h-24 rotate-12" />
                         </div>
 
-                        <div className="flex justify-between items-start mb-6 relative z-10">
-                            <div className={`p-3 rounded-xl ${agent.active ? 'bg-indigo-50 text-indigo-600' : 'bg-slate-100 text-slate-500'}`}>
-                                <Bot className="w-6 h-6" />
+                        <div className="flex justify-between items-start mb-3 relative z-10">
+                            <div className={`p-2 rounded-lg ${agent.active ? 'bg-indigo-50 text-indigo-600' : 'bg-slate-100 text-slate-500'}`}>
+                                <Bot className="w-5 h-5" />
                             </div>
                             <div className="flex gap-2">
                                 <span className={`px-2 py-1 rounded-full text-xs font-medium border flex items-center gap-1.5
@@ -163,8 +163,8 @@ export default function AgenticAIPage() {
                             </div>
                         </div>
 
-                        <h3 className="text-lg font-bold text-slate-900 mb-2 relative z-10">{agent.name}</h3>
-                        <p className="text-slate-500 text-sm mb-6 h-10 relative z-10 line-clamp-2">{agent.desc}</p>
+                        <h3 className="text-base font-bold text-slate-900 mb-1 relative z-10">{agent.name}</h3>
+                        <p className="text-slate-500 text-xs mb-4 h-8 relative z-10 line-clamp-2">{agent.desc}</p>
 
                         <div className="flex items-center justify-between pt-4 border-t border-slate-100 relative z-10">
                             <span className="text-xs font-medium text-slate-500 flex items-center gap-1">
@@ -183,24 +183,24 @@ export default function AgenticAIPage() {
             </div>
 
             {/* Create New Agent CTA */}
-            <div className="bg-indigo-900 rounded-3xl p-8 md:p-12 text-white relative overflow-hidden shadow-xl shadow-indigo-900/20">
+            <div className="bg-indigo-900 rounded-2xl p-6 md:p-8 text-white relative overflow-hidden shadow-xl shadow-indigo-900/20">
                 <div className="absolute top-0 right-0 w-96 h-96 bg-purple-500/30 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2"></div>
                 <div className="relative z-10 max-w-2xl">
-                    <h2 className="text-2xl md:text-3xl font-bold mb-4">Train Your Custom Agent</h2>
-                    <p className="text-indigo-200 mb-8 text-lg">
+                    <h2 className="text-xl md:text-2xl font-bold mb-3">Train Your Custom Agent</h2>
+                    <p className="text-indigo-200 mb-6 text-sm">
                         Create a bespoke agent tailored to your specific sales playbook. Upload your scripts, objection handlers, and best practices.
                     </p>
 
                     {!isCreating ? (
                         <button
                             onClick={() => setIsCreating(true)}
-                            className="bg-white text-indigo-900 px-6 py-3 rounded-xl font-bold hover:bg-indigo-50 transition-all flex items-center gap-2 shadow-lg shadow-indigo-900/50"
+                            className="bg-white text-indigo-900 px-5 py-2.5 rounded-lg font-bold hover:bg-indigo-50 transition-all flex items-center gap-2 shadow-lg shadow-indigo-900/50"
                         >
-                            <Plus className="w-5 h-5" />
+                            <Plus className="w-4 h-4" />
                             Create New Agent
                         </button>
                     ) : (
-                        <div className="bg-white/10 backdrop-blur-md p-6 rounded-2xl border border-white/10 animate-in fade-in slide-in-from-bottom-4">
+                        <div className="bg-white/10 backdrop-blur-md p-4 rounded-xl border border-white/10 animate-in fade-in slide-in-from-bottom-4">
                             <label className="block text-sm font-medium text-indigo-100 mb-2">Agent Name</label>
                             <div className="flex gap-3">
                                 <input
@@ -232,9 +232,9 @@ export default function AgenticAIPage() {
             {/* Configuration Modal / Overlay */}
             {selectedAgent && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/20 backdrop-blur-sm animate-in fade-in duration-200">
-                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
                         {/* Modal Header */}
-                        <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 shrink-0">
+                        <div className="px-5 py-3 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 shrink-0">
                             <div className="flex items-center gap-3">
                                 <div className={`p-2 rounded-lg ${selectedAgent.active ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-500'}`}>
                                     <Bot className="w-5 h-5" />
@@ -253,9 +253,9 @@ export default function AgenticAIPage() {
                         </div>
 
                         {/* Modal Body */}
-                        <div className="p-6 space-y-6 overflow-y-auto">
+                        <div className="p-5 space-y-4 overflow-y-auto">
                             {/* Toggle Active */}
-                            <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100">
+                            <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg border border-slate-100">
                                 <div>
                                     <p className="font-medium text-slate-900">Agent Status</p>
                                     <p className="text-sm text-slate-500">{selectedAgent.active ? "Agent is running and processing tasks." : "Agent is paused."}</p>

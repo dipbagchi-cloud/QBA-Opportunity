@@ -159,6 +159,17 @@ export async function ingestLead(req: Request, res: Response) {
             }
         });
 
+        // Audit log
+        await prisma.auditLog.create({
+            data: {
+                entity: 'Opportunity',
+                entityId: newLead.id,
+                action: 'LEAD_INGESTED',
+                userId: defaultUser?.id || '',
+                changes: { title: newLead.title, value: newLead.value, client: newLead.client?.name, source: body.source, leadScore: qualification.score },
+            },
+        });
+
         res.json({
             status: 'success',
             lead: newLead,

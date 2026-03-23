@@ -15,20 +15,24 @@ datasource db {
 model User {
   id            String    @id @default(cuid())
   email         String    @unique
+  passwordHash  String?
+  mustChangePassword Boolean @default(false)
   name          String
   image         String?
   title         String?
   department    String?
+  designation   String?
   phone         String?
   isActive      Boolean   @default(true)
   externalId    String?   @unique
+  qpeopleId     String?   @unique
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   lastLoginAt   DateTime?
 
   // Relations
-  role          Role      @relation(fields: [roleId], references: [id])
-  roleId        String
+  roles         Role[]
+  activeRoleId  String?
   team          Team?     @relation(fields: [teamId], references: [id])
   teamId        String?
 
@@ -49,7 +53,6 @@ model User {
   managedProjects         Project[]
 
   @@index([email])
-  @@index([roleId])
   @@index([teamId])
   @@map("users")
 }
@@ -153,6 +156,66 @@ model Resource {
   updatedAt       DateTime  @updatedAt
 
   @@map("resources")
+}
+
+// ============================================================================
+// RATE CARDS (Dynamic Cost Card Table)
+// ============================================================================
+
+model RateCard {
+  id              String   @id @default(cuid())
+  code            String   @unique
+  role            String
+  skill           String   @default("")
+  experienceBand  String   @default("")
+  masterCtc       Float    @default(0)
+  mercerCtc       Float    @default(0)
+  copilot         Float    @default(0)
+  existingCtc     Float    @default(0)
+  maxCtc          Float    @default(0)
+  ctc             Float
+  category        String
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([category])
+  @@index([skill])
+  @@map("rate_cards")
+}
+
+// ============================================================================
+// MASTER DATA (Admin-managed lookup tables)
+// ============================================================================
+
+model Region {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("regions")
+}
+
+model Technology {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("technologies")
+}
+
+model PricingModel {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("pricing_models")
 }
 
 // ============================================================================

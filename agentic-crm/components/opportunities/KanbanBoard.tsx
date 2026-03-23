@@ -10,6 +10,7 @@ const STAGES = [
     { id: 'Discovery', title: 'Discovery', color: 'bg-indigo-500' },
     { id: 'Qualification', title: 'Qualification', color: 'bg-purple-500' },
     { id: 'Proposal', title: 'Proposal', color: 'bg-pink-500' },
+    { id: 'Proposal Lost', title: 'Proposal Lost', color: 'bg-rose-600' },
     { id: 'Negotiation', title: 'Negotiation', color: 'bg-orange-500' },
     { id: 'Closed Won', title: 'Closed Won', color: 'bg-emerald-500' },
     { id: 'Closed Lost', title: 'Closed Lost', color: 'bg-red-500' }
@@ -50,13 +51,13 @@ export default function KanbanBoard() {
     };
 
     return (
-        <div className="h-[calc(100vh-250px)] overflow-x-auto pb-4">
+        <div className="h-[calc(100vh-200px)] overflow-x-auto pb-2">
             <DragDropContext onDragEnd={onDragEnd}>
-                <div className="flex gap-4 h-full min-w-max px-4">
+                <div className="flex gap-3 h-full min-w-max px-2">
                     {STAGES.map((stage) => (
-                        <div key={stage.id} className="w-80 flex-shrink-0 flex flex-col bg-slate-100/50 rounded-xl border border-slate-200/60">
+                        <div key={stage.id} className="w-72 flex-shrink-0 flex flex-col bg-slate-100/50 rounded-lg border border-slate-200/60">
                             {/* Column Header */}
-                            <div className="p-3 flex items-center justify-between border-b border-slate-200/60 bg-white/50 rounded-t-xl backdrop-blur-sm sticky top-0 z-10">
+                            <div className="p-2.5 flex items-center justify-between border-b border-slate-200/60 bg-white/50 rounded-t-lg backdrop-blur-sm sticky top-0 z-10">
                                 <div className="flex items-center gap-2">
                                     <div className={`w-2 h-2 rounded-full ${stage.color}`} />
                                     <h3 className="font-semibold text-slate-700 text-sm">{stage.title}</h3>
@@ -75,7 +76,7 @@ export default function KanbanBoard() {
                                     <div
                                         ref={provided.innerRef}
                                         {...provided.droppableProps}
-                                        className={`flex-1 p-2 space-y-2 overflow-y-auto min-h-[100px] transition-colors ${snapshot.isDraggingOver ? 'bg-indigo-50/50' : ''
+                                        className={`flex-1 p-1.5 space-y-1.5 overflow-y-auto min-h-[80px] transition-colors ${snapshot.isDraggingOver ? 'bg-indigo-50/50' : ''
                                             }`}
                                     >
                                         {columns[stage.id]?.map((opp, index) => (
@@ -85,13 +86,13 @@ export default function KanbanBoard() {
                                                         ref={provided.innerRef}
                                                         {...provided.draggableProps}
                                                         {...dragHandleProps(provided.dragHandleProps)}
-                                                        className={`bg-white p-3 rounded-lg shadow-sm border group hover:shadow-md transition-all ${snapshot.isDragging ? 'shadow-lg rotate-2 ring-2 ring-indigo-500/20 z-50' : ''
+                                                        className={`bg-white p-2.5 rounded-md shadow-sm border group hover:shadow-md transition-all ${snapshot.isDragging ? 'shadow-lg rotate-2 ring-2 ring-indigo-500/20 z-50' : ''
                                                             } ${opp.isStalled ? 'border-amber-300 bg-amber-50/30' : 'border-slate-200'}
                                                             `}
                                                         style={provided.draggableProps.style}
                                                     >
                                                         {/* Header: Name + Icons */}
-                                                        <div className="flex justify-between items-start mb-2 gap-2">
+                                                        <div className="flex justify-between items-start mb-1.5 gap-2">
                                                             <Link href={`/dashboard/opportunities/${opp.id}`} className="text-sm font-semibold text-slate-800 line-clamp-2 leading-tight hover:text-indigo-600 hover:underline cursor-pointer">
                                                                 {opp.name}
                                                             </Link>
@@ -109,13 +110,13 @@ export default function KanbanBoard() {
                                                         </div>
 
                                                         {/* Sub-header: Client */}
-                                                        <div className="flex items-center gap-1 text-xs text-slate-500 mb-3">
+                                                        <div className="flex items-center gap-1 text-xs text-slate-500 mb-2">
                                                             <User className="w-3 h-3" />
                                                             <span className="truncate max-w-[120px]">{opp.client}</span>
                                                         </div>
 
                                                         {/* Metrics Grid */}
-                                                        <div className="grid grid-cols-2 gap-2 mb-3">
+                                                        <div className="grid grid-cols-2 gap-1.5 mb-2">
                                                             <div className="bg-slate-50 p-1.5 rounded border border-slate-100">
                                                                 <p className="text-[10px] text-slate-400 uppercase font-semibold">Value</p>
                                                                 <p className="text-xs font-semibold text-slate-700">${(opp.value / 1000).toFixed(0)}k</p>
@@ -128,7 +129,7 @@ export default function KanbanBoard() {
 
                                                         {/* Health Meter */}
                                                         {opp.healthScore !== undefined && (
-                                                            <div className="mb-3">
+                                                            <div className="mb-2">
                                                                 <div className="flex justify-between items-center mb-1">
                                                                     <span className="text-[10px] text-slate-400 font-medium">Health Score</span>
                                                                     <span className={`text-[10px] font-bold ${getHealthColor(opp.healthScore)}`}>{opp.healthScore}/100</span>

@@ -38,14 +38,14 @@ const contacts = [
 
 export default function ContactsPage() {
     return (
-        <div className="space-y-8 animate-in fade-in duration-500">
+        <div className="space-y-4 animate-in fade-in duration-500">
             {/* Header */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
                 <div>
-                    <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 to-purple-600">
+                    <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 to-purple-600">
                         Contacts
                     </h1>
-                    <p className="text-slate-500 mt-1">Manage your professional network and key stakeholders.</p>
+                    <p className="text-slate-500 text-sm mt-1">Manage your professional network and key stakeholders.</p>
                 </div>
                 <div className="flex gap-3">
                     <button className="btn-ghost bg-white border border-slate-200 text-slate-600 flex items-center gap-2">
@@ -61,20 +61,20 @@ export default function ContactsPage() {
 
             {/* Search */}
             <div className="relative">
-                <Search className="absolute left-4 top-3.5 w-5 h-5 text-slate-400" />
+                <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
                 <input
                     type="text"
                     placeholder="Search contacts..."
-                    className="w-full pl-12 pr-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 shadow-sm"
+                    className="w-full pl-10 pr-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 shadow-sm text-sm"
                 />
             </div>
 
             {/* Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {contacts.map((contact) => (
-                    <div key={contact.id} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow group">
-                        <div className="flex justify-between items-start mb-4">
-                            <div className="w-12 h-12 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-lg">
+                    <div key={contact.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow group">
+                        <div className="flex justify-between items-start mb-3">
+                            <div className="w-10 h-10 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-sm">
                                 {contact.avatar}
                             </div>
                             <button className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -82,8 +82,8 @@ export default function ContactsPage() {
                             </button>
                         </div>
 
-                        <h3 className="text-lg font-bold text-slate-900">{contact.name}</h3>
-                        <p className="text-sm text-slate-500 mb-4">{contact.role} at {contact.company}</p>
+                        <h3 className="text-base font-bold text-slate-900">{contact.name}</h3>
+                        <p className="text-xs text-slate-500 mb-3">{contact.role} at {contact.company}</p>
 
                         <div className="space-y-2 text-sm text-slate-600">
                             <div className="flex items-center gap-2">

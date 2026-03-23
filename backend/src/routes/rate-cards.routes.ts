@@ -1,10 +1,11 @@
 import { Router } from 'express';
-import { listResources } from '../controllers/resources.controller';
 import { authenticate } from '../middleware/auth';
+import { listRateCards } from '../controllers/rate-cards.controller';
 
 const router = Router();
 
+// All authenticated users can list active rate cards
 router.use(authenticate);
-router.get('/', listResources);
+router.get('/', listRateCards);
 
 export default router;

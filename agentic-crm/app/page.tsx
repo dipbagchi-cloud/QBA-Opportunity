@@ -30,17 +30,17 @@ export default function HomePage() {
       {/* Hero Section */}
       <section className="relative min-h-screen flex items-center justify-center px-6">
         <div className="max-w-7xl mx-auto text-center">
-          <div className="space-y-8">
+          <div className="space-y-6">
             {/* Badge */}
-            <div className="inline-flex items-center gap-2 px-6 py-3 glass-dark rounded-full border border-primary-500/30">
-              <Sparkles className="w-5 h-5 text-primary-400" />
+            <div className="inline-flex items-center gap-2 px-4 py-2 glass-dark rounded-full border border-primary-500/30">
+              <Sparkles className="w-4 h-4 text-primary-400" />
               <span className="text-sm font-medium bg-gradient-to-r from-primary-400 to-secondary-400 bg-clip-text text-transparent">
                 Powered by Advanced Agentic AI
               </span>
             </div>
 
             {/* Main Headline */}
-            <h1 className="text-6xl md:text-7xl lg:text-8xl font-bold tracking-tight">
+            <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold tracking-tight">
               <span className="block">Transform Your</span>
               <span className="block bg-gradient-to-r from-primary-400 via-secondary-400 to-accent-400 bg-clip-text text-transparent">
                 Sales Pipeline
@@ -48,35 +48,35 @@ export default function HomePage() {
             </h1>
 
             {/* Subheadline */}
-            <p className="text-xl md:text-2xl text-neutral-300 max-w-3xl mx-auto leading-relaxed">
+            <p className="text-lg md:text-xl text-neutral-300 max-w-3xl mx-auto leading-relaxed">
               AI-powered CRM that automates workflows, predicts outcomes, and
               accelerates deal closure with autonomous intelligent agents.
             </p>
 
             {/* CTA Buttons */}
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-8">
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-6">
               <Link href="/login">
-                <button className="btn-primary px-8 py-4 text-lg group transition-transform hover:scale-105 active:scale-95">
+                <button className="btn-primary px-6 py-3 text-base group transition-transform hover:scale-105 active:scale-95">
                   Get Started
-                  <ArrowRight className="inline-block ml-2 w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                  <ArrowRight className="inline-block ml-2 w-4 h-4 group-hover:translate-x-1 transition-transform" />
                 </button>
               </Link>
               <Link href="#features">
-                <button className="btn-glass px-8 py-4 text-lg transition-transform hover:scale-105 active:scale-95">
+                <button className="btn-glass px-6 py-3 text-base transition-transform hover:scale-105 active:scale-95">
                   Explore Features
                 </button>
               </Link>
             </div>
 
             {/* Stats */}
-            <div className="grid grid-cols-3 gap-8 pt-16 max-w-2xl mx-auto">
+            <div className="grid grid-cols-3 gap-6 pt-12 max-w-2xl mx-auto">
               {[
                 { value: "40%", label: "Time Saved" },
                 { value: "10x", label: "Faster Insights" },
                 { value: "95%", label: "Accuracy" },
               ].map((stat, idx) => (
                 <div key={idx} className="text-center">
-                  <div className="text-4xl font-bold text-gradient">
+                  <div className="text-3xl font-bold text-gradient">
                     {stat.value}
                   </div>
                   <div className="text-sm text-neutral-400 mt-1">
@@ -90,27 +90,27 @@ export default function HomePage() {
       </section>
 
       {/* Features Section */}
-      <section id="features" className="relative py-32 px-6">
+      <section id="features" className="relative py-20 px-6">
         <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-20">
-            <h2 className="text-5xl font-bold mb-6">
+          <div className="text-center mb-12">
+            <h2 className="text-4xl font-bold mb-4">
               <span className="text-gradient">Agentic AI</span> at Your Service
             </h2>
-            <p className="text-xl text-neutral-400 max-w-2xl mx-auto">
+            <p className="text-lg text-neutral-400 max-w-2xl mx-auto">
               Autonomous agents that work 24/7 to optimize your sales operations
             </p>
           </div>
 
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
             {features.map((feature, idx) => (
               <div
                 key={idx}
-                className="glass-card-dark p-8 group cursor-pointer transition-transform hover:-translate-y-2"
+                className="glass-card-dark p-6 group cursor-pointer transition-transform hover:-translate-y-1"
               >
-                <div className="w-14 h-14 rounded-xl gradient-primary flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
-                  <feature.icon className="w-7 h-7 text-white" />
+                <div className="w-12 h-12 rounded-lg gradient-primary flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                  <feature.icon className="w-6 h-6 text-white" />
                 </div>
-                <h3 className="text-2xl font-bold mb-4">{feature.title}</h3>
+                <h3 className="text-xl font-bold mb-3">{feature.title}</h3>
                 <p className="text-neutral-400 leading-relaxed">
                   {feature.description}
                 </p>
@@ -121,13 +121,13 @@ export default function HomePage() {
       </section>
 
       {/* AI Capabilities Section */}
-      <section className="relative py-32 px-6 bg-gradient-to-br from-primary-950/20 via-transparent to-secondary-950/20">
+      <section className="relative py-20 px-6 bg-gradient-to-br from-primary-950/20 via-transparent to-secondary-950/20">
         <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-20">
-            <h2 className="text-5xl font-bold mb-6">
+          <div className="text-center mb-12">
+            <h2 className="text-4xl font-bold mb-4">
               What Our AI Agents Can Do
             </h2>
-            <p className="text-xl text-neutral-400 max-w-2xl mx-auto">
+            <p className="text-lg text-neutral-400 max-w-2xl mx-auto">
               Intelligent automation that feels like magic
             </p>
           </div>
@@ -138,9 +138,9 @@ export default function HomePage() {
                 key={idx}
                 className="glass-dark p-6 rounded-xl border border-white/10 flex items-start gap-4 hover:border-primary-500/50 transition-colors"
               >
-                <CheckCircle2 className="w-6 h-6 text-success-500 flex-shrink-0 mt-1" />
+                <CheckCircle2 className="w-5 h-5 text-success-500 flex-shrink-0 mt-1" />
                 <div>
-                  <h4 className="font-semibold text-lg mb-2">
+                  <h4 className="font-semibold text-base mb-1">
                     {capability.title}
                   </h4>
                   <p className="text-neutral-400 text-sm">
@@ -154,20 +154,20 @@ export default function HomePage() {
       </section>
 
       {/* CTA Section */}
-      <section className="relative py-32 px-6">
+      <section className="relative py-20 px-6">
         <div className="max-w-4xl mx-auto text-center">
-          <div className="glass-card-dark p-12 rounded-3xl border-2 border-primary-500/30">
-            <div className="w-20 h-20 rounded-full gradient-primary flex items-center justify-center mx-auto mb-8">
-              <Bot className="w-10 h-10 text-white" />
+          <div className="glass-card-dark p-8 rounded-2xl border-2 border-primary-500/30">
+            <div className="w-16 h-16 rounded-full gradient-primary flex items-center justify-center mx-auto mb-6">
+              <Bot className="w-8 h-8 text-white" />
             </div>
-            <h2 className="text-4xl md:text-5xl font-bold mb-6">
+            <h2 className="text-3xl md:text-4xl font-bold mb-4">
               Ready to Transform Your Sales?
             </h2>
-            <p className="text-xl text-neutral-400 mb-10 max-w-2xl mx-auto">
+            <p className="text-lg text-neutral-400 mb-8 max-w-2xl mx-auto">
               Join leading teams using AI to close more deals, faster.
             </p>
             <Link href="/login">
-              <button className="btn-primary px-10 py-5 text-xl transition-transform hover:scale-105 active:scale-95">
+              <button className="btn-primary px-8 py-4 text-lg transition-transform hover:scale-105 active:scale-95">
                 Start Free Trial
               </button>
             </Link>
@@ -176,11 +176,11 @@ export default function HomePage() {
       </section>
 
       {/* Footer */}
-      <footer className="relative py-12 px-6 border-t border-white/10 bg-neutral-900/50 backdrop-blur-sm">
+      <footer className="relative py-8 px-6 border-t border-white/10 bg-neutral-900/50 backdrop-blur-sm">
         <div className="max-w-7xl mx-auto">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-8 mb-12">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-8">
             <div>
-              <h3 className="text-lg font-semibold mb-4 text-white">Product</h3>
+              <h3 className="text-base font-semibold mb-3 text-white">Product</h3>
               <ul className="space-y-2 text-neutral-400">
                 <li>
                   <Link
@@ -209,7 +209,7 @@ export default function HomePage() {
               </ul>
             </div>
             <div>
-              <h3 className="text-lg font-semibold mb-4 text-white">Company</h3>
+              <h3 className="text-base font-semibold mb-3 text-white">Company</h3>
               <ul className="space-y-2 text-neutral-400">
                 <li>
                   <Link
@@ -238,7 +238,7 @@ export default function HomePage() {
               </ul>
             </div>
             <div>
-              <h3 className="text-lg font-semibold mb-4 text-white">
+              <h3 className="text-base font-semibold mb-3 text-white">
                 Resources
               </h3>
               <ul className="space-y-2 text-neutral-400">
@@ -269,7 +269,7 @@ export default function HomePage() {
               </ul>
             </div>
             <div>
-              <h3 className="text-lg font-semibold mb-4 text-white">Legal</h3>
+              <h3 className="text-base font-semibold mb-3 text-white">Legal</h3>
               <ul className="space-y-2 text-neutral-400">
                 <li>
                   <Link
@@ -291,7 +291,7 @@ export default function HomePage() {
             </div>
           </div>
 
-          <div className="pt-8 border-t border-white/10 text-center flex flex-col items-center justify-center gap-2">
+          <div className="pt-6 border-t border-white/10 text-center flex flex-col items-center justify-center gap-1">
             <p className="flex items-center gap-1 text-neutral-500">
               Build with{" "}
               <Heart className="w-4 h-4 text-red-500 fill-red-500" /> at

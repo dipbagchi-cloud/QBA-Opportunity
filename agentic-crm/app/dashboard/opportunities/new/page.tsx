@@ -13,21 +13,41 @@ import {
     Code,
     User,
     CheckCircle2,
-    Paperclip
+    Paperclip,
+    X
 } from "lucide-react";
 import { useOpportunityStore } from "@/lib/store";
+import { API_URL, getAuthHeaders } from "@/lib/api";
 
-// Mock Data for Dropdowns
-const REGIONS = ["North America", "EMEA", "APAC", "LATAM"];
-const PRACTICES = ["Cloud Engineering", "Data & AI", "Enterprise Apps", "Cybersecurity", "Digital Experience"];
 const PROJECT_TYPES = ["New Development", "Modernization", "Maintenance", "Consulting"];
-const PRICING_MODELS = ["Time & Material", "Fixed Price", "Retainer", "Hybrid"];
 const DURATIONS = ["3 Months", "6 Months", "9 Months", "12 Months", "> 1 Year"];
+
+// Duration to months mapping for auto-calculation
+const DURATION_MONTHS: Record<string, number> = {
+    "3 Months": 3,
+    "6 Months": 6,
+    "9 Months": 9,
+    "12 Months": 12,
+    "> 1 Year": 18,
+};
 
 export default function NewOpportunityPage() {
     const router = useRouter();
     const { addOpportunity } = useOpportunityStore();
     const [isLoading, setIsLoading] = useState(false);
+
+    // Dynamic dropdown data
+    const [clients, setClients] = useState<{ id: string; name: string }[]>([]);
+    const [regions, setRegions] = useState<string[]>([]);
+    const [technologies, setTechnologies] = useState<string[]>([]);
+    const [pricingModels, setPricingModels] = useState<string[]>([]);
+    const [salespersons, setSalespersons] = useState<{ id: string; name: string }[]>([]);
+    const [departments, setDepartments] = useState<string[]>([]);
+
+    // Add Client modal
+    const [showAddClient, setShowAddClient] = useState(false);
+    const [newClientName, setNewClientName] = useState("");
+    const [addingClient, setAddingClient] = useState(false);
 
     // Form State
     const [formData, setFormData] = useState({
@@ -51,9 +71,78 @@ export default function NewOpportunityPage() {
     const [activeStep, setActiveStep] = useState(0);
     const steps = ["Pipeline", "Presales", "Sales", "Project"];
 
+    // Fetch dropdown data
+    useEffect(() => {
+        const fetchMasterData = async () => {
+            const headers = getAuthHeaders();
+            try {
+                const [clientsRes, regionsRes, techRes, pricingRes, salesRes, deptRes] = await Promise.all([
+                    fetch(`${API_URL}/api/master/clients`, { headers }),
+                    fetch(`${API_URL}/api/master/regions`, { headers }),
+                    fetch(`${API_URL}/api/master/technologies`, { headers }),
+                    fetch(`${API_URL}/api/master/pricing-models`, { headers }),
+                    fetch(`${API_URL}/api/master/salespersons`, { headers }),
+                    fetch(`${API_URL}/api/master/departments`, { headers }),
+                ]);
+                if (clientsRes.ok) setClients(await clientsRes.json());
+                if (regionsRes.ok) setRegions((await regionsRes.json()).map((r: any) => r.name));
+                if (techRes.ok) setTechnologies((await techRes.json()).map((t: any) => t.name));
+                if (pricingRes.ok) setPricingModels((await pricingRes.json()).map((p: any) => p.name));
+                if (salesRes.ok) setSalespersons(await salesRes.json());
+                if (deptRes.ok) setDepartments(await deptRes.json());
+            } catch (err) {
+                console.error("Failed to load master data", err);
+            }
+        };
+        fetchMasterData();
+    }, []);
+
+    // Auto-calculate tentative end date from start date + duration
+    useEffect(() => {
+        if (formData.tentativeStartDate && formData.duration && DURATION_MONTHS[formData.duration]) {
+            const start = new Date(formData.tentativeStartDate);
+            const months = DURATION_MONTHS[formData.duration];
+            const end = new Date(start);
+            end.setMonth(end.getMonth() + months);
+            setFormData(prev => ({ ...prev, tentativeEndDate: end.toISOString().split('T')[0] }));
+        }
+    }, [formData.tentativeStartDate, formData.duration]);
+
+    // Auto-calculate estimated value = Expected Day Rate × 20 working days × Duration months
+    useEffect(() => {
+        const rate = Number(formData.expectedDayRate) || 0;
+        const months = DURATION_MONTHS[formData.duration] || 0;
+        if (rate > 0 && months > 0) {
+            setFormData(prev => ({ ...prev, value: rate * 20 * months }));
+        }
+    }, [formData.expectedDayRate, formData.duration]);
+
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
         const { name, value } = e.target;
         setFormData(prev => ({ ...prev, [name]: value }));
+    };
+
+    const handleAddClient = async () => {
+        if (!newClientName.trim()) return;
+        setAddingClient(true);
+        try {
+            const res = await fetch(`${API_URL}/api/admin/clients`, {
+                method: 'POST',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({ name: newClientName.trim() }),
+            });
+            if (res.ok) {
+                const created = await res.json();
+                setClients(prev => [...prev, created]);
+                setFormData(prev => ({ ...prev, clientName: created.name }));
+                setNewClientName("");
+                setShowAddClient(false);
+            }
+        } catch (err) {
+            console.error("Failed to add client", err);
+        } finally {
+            setAddingClient(false);
+        }
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -94,17 +183,17 @@ export default function NewOpportunityPage() {
     };
 
     return (
-        <div className="max-w-7xl mx-auto space-y-8">
+        <div className="max-w-7xl mx-auto space-y-4">
             {/* Header / Breadcrumb */}
             <div>
-                <h1 className="text-2xl font-semibold text-slate-800">
+                <h1 className="text-lg font-semibold text-slate-800">
                     Opportunity / <span className="text-slate-500 font-normal">New Pipeline</span>
                 </h1>
             </div>
 
             {/* Stepper Navigation */}
-            <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
-                <div className="flex w-full mt-2 h-10 bg-slate-50 rounded-full overflow-hidden border border-slate-200">
+            <div className="bg-white p-3 rounded-lg shadow-sm border border-slate-200">
+                <div className="flex w-full mt-1 h-8 bg-slate-50 rounded-full overflow-hidden border border-slate-200">
                     {steps.map((step, idx) => (
                         <button
                             key={step}
@@ -127,12 +216,12 @@ export default function NewOpportunityPage() {
             </div>
 
             {/* Basic Information Form */}
-            <form onSubmit={handleSubmit} className="bg-white rounded-lg shadow-sm border border-slate-200 p-8">
-                <div className="mb-6">
-                    <h2 className="text-lg font-bold text-slate-900">Basic Information</h2>
+            <form onSubmit={handleSubmit} className="bg-white rounded-lg shadow-sm border border-slate-200 p-5">
+                <div className="mb-4">
+                    <h2 className="text-base font-bold text-slate-900">Basic Information</h2>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-4">
 
                     {/* Row 1 */}
                     <div className="space-y-1.5">
@@ -142,17 +231,16 @@ export default function NewOpportunityPage() {
                                 <select
                                     name="clientName"
                                     required
+                                    value={formData.clientName}
                                     className="w-full pl-3 pr-10 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm
                                              focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                                     onChange={handleChange}
                                 >
                                     <option value="">Select Client</option>
-                                    <option value="Acme Corp">Acme Corp</option>
-                                    <option value="Globex">Globex Inc</option>
-                                    <option value="Stark Ind">Stark Industries</option>
+                                    {clients.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
                                 </select>
                             </div>
-                            <button type="button" className="p-2.5 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors">
+                            <button type="button" onClick={() => setShowAddClient(true)} className="p-2.5 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors">
                                 <Plus className="w-5 h-5" />
                             </button>
                         </div>
@@ -163,11 +251,12 @@ export default function NewOpportunityPage() {
                         <select
                             name="region"
                             required
+                            value={formData.region}
                             className="w-full pl-3 pr-10 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
                             onChange={handleChange}
                         >
                             <option value="">Select Region</option>
-                            {REGIONS.map(r => <option key={r} value={r}>{r}</option>)}
+                            {regions.map(r => <option key={r} value={r}>{r}</option>)}
                         </select>
                     </div>
 
@@ -176,6 +265,7 @@ export default function NewOpportunityPage() {
                         <select
                             name="projectType"
                             required
+                            value={formData.projectType}
                             className="w-full pl-3 pr-10 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
                             onChange={handleChange}
                         >
@@ -201,11 +291,12 @@ export default function NewOpportunityPage() {
                         <label className="block text-sm font-bold text-slate-700">Practice</label>
                         <select
                             name="practice"
+                            value={formData.practice}
                             className="w-full pl-3 pr-10 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
                             onChange={handleChange}
                         >
                             <option value="">Find Practice</option>
-                            {PRACTICES.map(p => <option key={p} value={p}>{p}</option>)}
+                            {departments.map(p => <option key={p} value={p}>{p}</option>)}
                         </select>
                     </div>
 
@@ -215,25 +306,61 @@ export default function NewOpportunityPage() {
                         <select
                             name="salesRep"
                             required
+                            value={formData.salesRep}
                             className="w-full pl-3 pr-10 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
                             onChange={handleChange}
                         >
                             <option value="">Find SalesPerson</option>
-                            <option value="Sarah Wilson">Sarah Wilson</option>
-                            <option value="Mike Ross">Mike Ross</option>
+                            {salespersons.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
                         </select>
                     </div>
 
                     <div className="space-y-1.5">
                         <label className="block text-sm font-bold text-slate-700">Technology *</label>
-                        <input
-                            type="text"
-                            name="technology"
-                            required
-                            placeholder="Technology"
-                            className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
-                            onChange={handleChange}
-                        />
+                        <div className="relative">
+                            <div
+                                className="w-full min-h-[42px] px-3 py-2 bg-white border border-slate-300 rounded-md text-sm shadow-sm flex flex-wrap gap-1 cursor-pointer"
+                                onClick={() => {
+                                    const el = document.getElementById('tech-dropdown-new');
+                                    if (el) el.classList.toggle('hidden');
+                                }}
+                            >
+                                {formData.technology ? formData.technology.split(',').map(t => (
+                                    <span key={t} className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 text-xs px-2 py-0.5 rounded-full border border-indigo-200">
+                                        {t}
+                                        <button type="button" onClick={(e) => {
+                                            e.stopPropagation();
+                                            const newTech = formData.technology.split(',').filter(x => x !== t).join(',');
+                                            setFormData(prev => ({ ...prev, technology: newTech }));
+                                        }} className="hover:text-red-500">
+                                            <X className="w-3 h-3" />
+                                        </button>
+                                    </span>
+                                )) : <span className="text-slate-400">Select Technologies</span>}
+                            </div>
+                            <div id="tech-dropdown-new" className="hidden absolute z-20 top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                                {technologies.map(t => {
+                                    const selected = formData.technology.split(',').filter(Boolean).includes(t);
+                                    return (
+                                        <label key={t} className={`flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-slate-50 ${selected ? 'bg-indigo-50 text-indigo-700' : 'text-slate-700'}`}>
+                                            <input
+                                                type="checkbox"
+                                                className="w-3.5 h-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                                checked={selected}
+                                                onChange={() => {
+                                                    const current = formData.technology.split(',').filter(Boolean);
+                                                    const newTech = selected
+                                                        ? current.filter(x => x !== t).join(',')
+                                                        : [...current, t].join(',');
+                                                    setFormData(prev => ({ ...prev, technology: newTech }));
+                                                }}
+                                            />
+                                            {t}
+                                        </label>
+                                    );
+                                })}
+                            </div>
+                        </div>
                     </div>
 
                     {/* Row 4: Dates & Duration */}
@@ -265,9 +392,11 @@ export default function NewOpportunityPage() {
                         <input
                             type="date"
                             name="tentativeEndDate"
-                            className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm text-slate-500"
-                            onChange={handleChange}
+                            readOnly
+                            value={formData.tentativeEndDate}
+                            className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-md text-sm shadow-sm text-slate-500 cursor-not-allowed"
                         />
+                        <p className="text-[10px] text-slate-400">Auto-calculated from Start Date + Duration</p>
                     </div>
 
                     {/* Row 5: Pricing */}
@@ -280,7 +409,7 @@ export default function NewOpportunityPage() {
                             onChange={handleChange}
                         >
                             <option value="">Select Model</option>
-                            {PRICING_MODELS.map(m => <option key={m} value={m}>{m}</option>)}
+                            {pricingModels.map(m => <option key={m} value={m}>{m}</option>)}
                         </select>
                     </div>
 
@@ -296,8 +425,18 @@ export default function NewOpportunityPage() {
                         />
                     </div>
 
-                    {/* Spacer for 3rd column */}
-                    <div className="hidden lg:block"></div>
+                    <div className="space-y-1.5">
+                        <label className="block text-sm font-bold text-slate-700">Estimated Value ($)</label>
+                        <input
+                            type="number"
+                            name="value"
+                            readOnly
+                            value={formData.value}
+                            placeholder="0.00"
+                            className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-md text-sm shadow-sm text-slate-500 cursor-not-allowed"
+                        />
+                        <p className="text-[10px] text-slate-400">= Day Rate ({formData.expectedDayRate || 0}) × 20 days × {DURATION_MONTHS[formData.duration] || 0} months</p>
+                    </div>
 
                     {/* Row 6: Description & Attachments */}
                     <div className="col-span-1 md:col-span-2 lg:col-span-2 space-y-1.5">
@@ -326,23 +465,49 @@ export default function NewOpportunityPage() {
                 </div>
 
                 {/* Footer Actions */}
-                <div className="mt-12 flex justify-end gap-3 pt-6 border-t border-slate-100">
+                <div className="mt-8 flex justify-end gap-2 pt-4 border-t border-slate-100">
                     <button
                         type="button"
                         onClick={() => router.back()}
-                        className="px-6 py-2 bg-white border border-slate-300 rounded-md text-slate-700 font-medium hover:bg-slate-50 transition-colors"
+                        className="px-4 py-1.5 bg-white border border-slate-300 rounded-md text-sm text-slate-700 font-medium hover:bg-slate-50 transition-colors"
                     >
                         Clear
                     </button>
                     <button
                         type="submit"
                         disabled={isLoading}
-                        className="px-6 py-2 bg-indigo-600 border border-transparent rounded-md text-white font-bold hover:bg-indigo-700 transition-all disabled:opacity-70 disabled:cursor-not-allowed"
+                        className="px-4 py-1.5 bg-indigo-600 border border-transparent rounded-md text-sm text-white font-bold hover:bg-indigo-700 transition-all disabled:opacity-70 disabled:cursor-not-allowed"
                     >
                         {isLoading ? 'Submitting...' : 'Submit Details'}
                     </button>
                 </div>
             </form>
+
+            {/* Add Client Modal */}
+            {showAddClient && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-lg font-bold text-slate-900">Add New Client</h3>
+                            <button onClick={() => setShowAddClient(false)} className="text-slate-400 hover:text-slate-600">
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+                        <input
+                            type="text"
+                            value={newClientName}
+                            onChange={(e) => setNewClientName(e.target.value)}
+                            placeholder="Client Name"
+                            className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm mb-4"
+                            onKeyDown={(e) => e.key === 'Enter' && handleAddClient()}
+                        />
+                        <div className="flex justify-end gap-3">
+                            <button type="button" onClick={() => setShowAddClient(false)} className="px-4 py-2 bg-white border border-slate-300 rounded-md text-sm font-medium hover:bg-slate-50">Cancel</button>
+                            <button type="button" onClick={handleAddClient} disabled={addingClient || !newClientName.trim()} className="px-4 py-2 bg-indigo-600 text-white rounded-md text-sm font-bold hover:bg-indigo-700 disabled:opacity-50">{addingClient ? 'Adding...' : 'Add Client'}</button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

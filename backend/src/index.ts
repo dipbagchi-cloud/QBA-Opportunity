@@ -8,6 +8,10 @@ import analyticsRoutes from './routes/analytics.routes';
 import approvalsRoutes from './routes/approvals.routes';
 import agentsRoutes from './routes/agents.routes';
 import resourcesRoutes from './routes/resources.routes';
+import rateCardsRoutes from './routes/rate-cards.routes';
+import masterDataRoutes from './routes/master-data.routes';
+import authRoutes from './routes/auth.routes';
+import adminRoutes from './routes/admin.routes';
 import { errorHandler } from './middleware/errorHandler';
 
 dotenv.config();
@@ -22,15 +26,23 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// Routes
+// Auth routes (public + protected)
+app.use('/api/auth', authRoutes);
+
+// Admin routes (protected, Admin-only)
+app.use('/api/admin', adminRoutes);
+
+// Protected API routes
 app.use('/api/opportunities', opportunitiesRoutes);
 app.use('/api/leads', leadsRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/approvals', approvalsRoutes);
 app.use('/api', agentsRoutes);  // mounts /api/agents/task and /api/agent/run
 app.use('/api/resources', resourcesRoutes);
+app.use('/api/rate-cards', rateCardsRoutes);
+app.use('/api/master', masterDataRoutes);
 
-// Health check
+// Health check (public)
 app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
