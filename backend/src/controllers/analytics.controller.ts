@@ -49,6 +49,9 @@ export async function getAnalytics(req: Request, res: Response) {
         const countByStatus: any = {};
         const countByClient: any = {};
         const countByOwner: any = {};
+        const revenueByTech: any = {};
+        const revenueByClient: any = {};
+        const revenueByOwner: any = {};
 
         opportunities.forEach(opp => {
             const rev = getRevenue(opp);
@@ -83,12 +86,28 @@ export async function getAnalytics(req: Request, res: Response) {
             countByOwner[ownerName].total += 1;
             if (stageName === 'Closed Won') countByOwner[ownerName].won += 1;
             else if (stageName !== 'Closed Lost' && stageName !== 'Proposal Lost') countByOwner[ownerName].active += 1;
+
+            // Revenue by Technology (Tech Stack)
+            const tech = opp.technology || 'unknown';
+            revenueByTech[tech] = (revenueByTech[tech] || 0) + rev;
+
+            // Revenue by Client
+            revenueByClient[clientName] = (revenueByClient[clientName] || 0) + rev;
+
+            // Revenue by Owner (Sales Rep)
+            if (!revenueByOwner[ownerName]) {
+                revenueByOwner[ownerName] = { name: ownerName, revenue: 0 };
+            }
+            revenueByOwner[ownerName].revenue += rev;
         });
 
         const revenueChartData = Object.values(revenueByMonth);
         const statusPieData = Object.keys(countByStatus).map(k => ({ name: k, value: countByStatus[k] }));
         const clientBarData = Object.keys(countByClient).map(k => ({ name: k, value: countByClient[k] }));
         const ownerBarData = Object.values(countByOwner) as { name: string; total: number; active: number; won: number }[];
+        const techRevenueData = Object.keys(revenueByTech).map(k => ({ name: k, value: revenueByTech[k] })).sort((a, b) => b.value - a.value);
+        const clientRevenueData = Object.keys(revenueByClient).map(k => ({ name: k, value: revenueByClient[k] })).sort((a, b) => b.value - a.value).slice(0, 10);
+        const ownerRevenueData = (Object.values(revenueByOwner) as { name: string; revenue: number }[]).sort((a, b) => b.revenue - a.revenue);
 
         // 4. Pipeline Metrics
         const activeOpps = opportunities.filter(o => {
@@ -147,12 +166,21 @@ export async function getAnalytics(req: Request, res: Response) {
         });
         const avgTimeToClose = closedCount > 0 ? totalDays / closedCount : 0;
 
+        // Total revenue computations
+        const projectedRevenue = activeOpps.reduce((sum, o) => sum + getRevenue(o), 0);
+        const closedRevenue = wonOpps.reduce((sum, o) => sum + getRevenue(o), 0);
+
         res.json({
             dashboard: {
                 revenueProjection: revenueChartData,
                 countByStatus: statusPieData,
                 countByClient: clientBarData,
                 countByOwner: ownerBarData,
+                revenueByTech: techRevenueData,
+                revenueByClient: clientRevenueData,
+                revenueByOwner: ownerRevenueData,
+                projectedRevenue,
+                closedRevenue,
             },
             pipeline: {
                 activeProjects: activeOpps.length,

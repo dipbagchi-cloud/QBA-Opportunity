@@ -11,7 +11,7 @@ const jakarta = Plus_Jakarta_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "Agentic CRM - AI-Powered Lead & Opportunity Management",
+  title: "Q-CRM - AI-Powered Lead & Opportunity Management",
   description:
     "Intelligent CRM system with autonomous AI agents for sales operations automation, predictive analytics, and conversational assistance.",
   keywords: [
@@ -21,7 +21,7 @@ export const metadata: Metadata = {
     "Lead Management",
     "Opportunity Tracking",
     "Sales Automation",
-    "Agentic AI",
+    "Q-CRM",
   ],
   authors: [{ name: "Your Company" }],
   viewport: "width=device-width, initial-scale=1",

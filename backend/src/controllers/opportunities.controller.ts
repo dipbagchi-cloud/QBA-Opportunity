@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
+import { sendNotificationEmail } from '../lib/email';
 
 // GET /api/opportunities
 export async function listOpportunities(req: Request, res: Response) {
@@ -257,7 +258,7 @@ export async function updateOpportunity(req: Request, res: Response) {
         // Fetch current state for audit diff
         const previous = await prisma.opportunity.findUnique({
             where: { id },
-            include: { client: true, stage: true },
+            include: { client: true, stage: true, owner: true },
         });
 
         // Handle Client update if name changed
@@ -341,6 +342,53 @@ export async function updateOpportunity(req: Request, res: Response) {
                 changes,
             },
         });
+
+        // ── Email Notifications (fire-and-forget) ──
+        const emailVars: Record<string, string> = {
+            opportunityTitle: updatedOpp.title,
+            opportunityId: id,
+            clientName: previous?.client?.name || '',
+            stageName: newStageName || previous?.stage?.name || '',
+            previousStage: previous?.stage?.name || previous?.currentStage || '',
+            salesRepName: (updatedOpp as any).salesRepName || previous?.owner?.name || '',
+            managerName: (updatedOpp as any).managerName || '',
+            updatedBy: previous?.owner?.name || 'System',
+            comment: body.presalesData?.comment || body.salesData?.notes || '',
+        };
+
+        const ownerEmail = previous?.owner?.email;
+        const ownerName = previous?.owner?.name || '';
+
+        // Pipeline saved/submitted → salesperson gets notice
+        if (!newStageName || newStageName === 'Pipeline' || newStageName === 'Discovery') {
+            if (ownerEmail) {
+                sendNotificationEmail('pipeline_saved', ownerEmail, ownerName, emailVars);
+            }
+        }
+
+        // Moved to Presales/Qualification → the assigned manager gets email
+        if (newStageName && (newStageName === 'Qualification' || newStageName === 'Presales')) {
+            const managerName = body.managerName || (updatedOpp as any).managerName;
+            if (managerName) {
+                // Try to find a user with that name to get email
+                const managerUser = await prisma.user.findFirst({ where: { name: managerName } });
+                if (managerUser?.email) {
+                    sendNotificationEmail('moved_to_presales', managerUser.email, managerName, emailVars);
+                }
+            }
+            // Also notify the salesperson
+            if (ownerEmail) {
+                sendNotificationEmail('pipeline_saved', ownerEmail, ownerName, emailVars);
+            }
+        }
+
+        // Submitted back from Presales (moved to Proposal/Sales) → presales team gets email
+        if (newStageName && (newStageName === 'Proposal' || newStageName === 'Sales')) {
+            // Notify the salesperson/owner
+            if (ownerEmail) {
+                sendNotificationEmail('presales_submitted_back', ownerEmail, ownerName, emailVars);
+            }
+        }
 
         res.json(updatedOpp);
     } catch (error) {

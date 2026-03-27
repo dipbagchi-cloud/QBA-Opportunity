@@ -219,6 +219,23 @@ model PricingModel {
 }
 
 // ============================================================================
+// EMAIL TEMPLATES (Admin-configurable notification emails)
+// ============================================================================
+
+model EmailTemplate {
+  id          String   @id @default(cuid())
+  eventKey    String   @unique   // e.g. "pipeline_saved", "moved_to_presales", "presales_submitted_back"
+  name        String             // Human-readable name
+  subject     String             // Subject template (supports {{variable}} placeholders)
+  body        String             // HTML body template (supports {{variable}} placeholders)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("email_templates")
+}
+
+// ============================================================================
 // OPPORTUNITIES & LIFECYCLE
 // ============================================================================
 

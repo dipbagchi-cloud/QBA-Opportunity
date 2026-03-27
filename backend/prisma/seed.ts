@@ -352,6 +352,61 @@ async function main() {
     }
 
     console.log('Seeding finished.')
+
+    // ── Seed Email Templates ──
+    const emailTemplates = [
+        {
+            eventKey: 'pipeline_saved',
+            name: 'Pipeline Saved / Submitted',
+            subject: 'Q-CRM: Opportunity "{{opportunityTitle}}" Updated',
+            body: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+<h2 style="color:#4f46e5">Opportunity Update</h2>
+<p>Hi {{recipientName}},</p>
+<p>The opportunity <strong>{{opportunityTitle}}</strong> for client <strong>{{clientName}}</strong> has been saved/submitted in the Pipeline stage.</p>
+<p><strong>Current Stage:</strong> {{stageName}}</p>
+<p><strong>Updated by:</strong> {{updatedBy}}</p>
+<p style="color:#64748b;font-size:12px;margin-top:24px">This is an automated notification from Q-CRM.</p>
+</div>`,
+        },
+        {
+            eventKey: 'moved_to_presales',
+            name: 'Moved to Presales',
+            subject: 'Q-CRM: "{{opportunityTitle}}" moved to Presales — Action Required',
+            body: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+<h2 style="color:#4f46e5">Presales Assignment</h2>
+<p>Hi {{recipientName}},</p>
+<p>The opportunity <strong>{{opportunityTitle}}</strong> for <strong>{{clientName}}</strong> has been moved from <em>{{previousStage}}</em> to <strong>Presales</strong>.</p>
+<p>You have been assigned as the manager for this opportunity.</p>
+<p><strong>Sales Rep:</strong> {{salesRepName}}</p>
+<p>Please review and begin presales activities.</p>
+<p style="color:#64748b;font-size:12px;margin-top:24px">This is an automated notification from Q-CRM.</p>
+</div>`,
+        },
+        {
+            eventKey: 'presales_submitted_back',
+            name: 'Presales Submitted Back to Sales',
+            subject: 'Q-CRM: "{{opportunityTitle}}" ready for Sales',
+            body: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+<h2 style="color:#4f46e5">Presales Complete</h2>
+<p>Hi {{recipientName}},</p>
+<p>Great news! The presales work for <strong>{{opportunityTitle}}</strong> ({{clientName}}) has been completed and moved to the Sales stage.</p>
+<p><strong>Previous Stage:</strong> {{previousStage}}</p>
+<p><strong>Manager:</strong> {{managerName}}</p>
+<p>Please proceed with the sales process.</p>
+<p style="color:#64748b;font-size:12px;margin-top:24px">This is an automated notification from Q-CRM.</p>
+</div>`,
+        },
+    ];
+
+    for (const tmpl of emailTemplates) {
+        await prisma.emailTemplate.upsert({
+            where: { eventKey: tmpl.eventKey },
+            update: {},
+            create: tmpl,
+        });
+    }
+    console.log(`Seeded ${emailTemplates.length} email templates.`);
+
     console.log('Test credentials (all passwords: password123):')
     console.log('  Admin:     dip.bagchi@example.com')
     console.log('  Manager:   manager@example.com')

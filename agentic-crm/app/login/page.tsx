@@ -170,7 +170,7 @@ export default function LoginPage() {
                             <ShieldCheck className="w-6 h-6 text-white" />
                         </div>
                         <h1 className="text-2xl font-bold mb-1 tracking-tight">Welcome Back</h1>
-                        <p className="text-neutral-400 text-sm">Sign in to your Agentic CRM account</p>
+                        <p className="text-neutral-400 text-sm">Sign in to your Q-CRM account</p>
                     </div>
 
                     {/* Form */}

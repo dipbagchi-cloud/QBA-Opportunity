@@ -44,6 +44,12 @@ import {
   listAuditEntities,
   listAuditActions,
 } from '../controllers/audit.controller';
+import {
+  listEmailTemplates,
+  getEmailTemplate,
+  updateEmailTemplate,
+  sendTestEmail,
+} from '../controllers/email-templates.controller';
 
 const router = Router();
 
@@ -104,5 +110,11 @@ router.put('/budget-assumptions', authorize(PERMISSIONS.SETTINGS_MANAGE), update
 router.get('/audit-logs', authorize(PERMISSIONS.AUDITLOGS_VIEW), listAuditLogs);
 router.get('/audit-logs/entities', authorize(PERMISSIONS.AUDITLOGS_VIEW), listAuditEntities);
 router.get('/audit-logs/actions', authorize(PERMISSIONS.AUDITLOGS_VIEW), listAuditActions);
+
+// Email templates (requires settings:manage)
+router.get('/email-templates', authorize(PERMISSIONS.SETTINGS_MANAGE), listEmailTemplates);
+router.get('/email-templates/:id', authorize(PERMISSIONS.SETTINGS_MANAGE), getEmailTemplate);
+router.patch('/email-templates/:id', authorize(PERMISSIONS.SETTINGS_MANAGE), updateEmailTemplate);
+router.post('/email-templates/test', authorize(PERMISSIONS.SETTINGS_MANAGE), sendTestEmail);
 
 export default router;

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { User, Lock, Users, Shield, Plus, X, Check, AlertCircle, RotateCcw, Pencil, ToggleLeft, ToggleRight, DollarSign, Trash2, Globe, Cpu, Tag, Building2, Download, Settings2, ChevronDown, ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, Search, Eye, EyeOff, FileText } from "lucide-react";
+import { User, Lock, Users, Shield, Plus, X, Check, AlertCircle, RotateCcw, Pencil, ToggleLeft, ToggleRight, DollarSign, Trash2, Globe, Cpu, Tag, Building2, Download, Settings2, ChevronDown, ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, Search, Eye, EyeOff, FileText, Mail, Send } from "lucide-react";
 import { useAuthStore } from "@/lib/auth-store";
 import { apiClient } from "@/lib/api";
 
@@ -119,7 +119,7 @@ interface TeamOption {
     name: string;
 }
 
-type Tab = "profile" | "security" | "users" | "roles" | "ratecards" | "budgetassumptions" | "clients" | "regions" | "technologies" | "pricingmodels" | "auditlog";
+type Tab = "profile" | "security" | "users" | "roles" | "ratecards" | "budgetassumptions" | "clients" | "regions" | "technologies" | "pricingmodels" | "auditlog" | "emailtemplates";
 
 export default function SettingsPage() {
     const { user, hasPermission } = useAuthStore();
@@ -168,6 +168,13 @@ export default function SettingsPage() {
             adminOnly: true,
             tabs: [
                 { key: "auditlog", label: "Audit Log", icon: FileText, adminOnly: true },
+            ],
+        },
+        {
+            label: "Notifications",
+            adminOnly: true,
+            tabs: [
+                { key: "emailtemplates", label: "Email Templates", icon: Mail, adminOnly: true },
             ],
         },
     ];
@@ -259,6 +266,7 @@ export default function SettingsPage() {
                     {activeTab === "technologies" && canManageMetadata && <MasterDataTab entity="technologies" label="Technology" />}
                     {activeTab === "pricingmodels" && canManageMetadata && <MasterDataTab entity="pricing-models" label="Pricing Model" />}
                     {activeTab === "auditlog" && canViewAuditLogs && <AuditLogTab />}
+                    {activeTab === "emailtemplates" && isAdmin && <EmailTemplatesTab />}
                 </div>
             </div>
         </div>
@@ -1724,6 +1732,202 @@ function MasterDataTab({ entity, label }: { entity: string; label: string }) {
                     </table>
                 </div>
                 {items.length === 0 && <div className="text-center py-8 text-slate-400">No {label.toLowerCase()}s found.</div>}
+            </div>
+        </div>
+    );
+}
+
+/* ─────────────── Email Templates Tab ─────────────── */
+interface EmailTemplateData {
+    id: string;
+    eventKey: string;
+    name: string;
+    subject: string;
+    body: string;
+    isActive: boolean;
+}
+
+function EmailTemplatesTab() {
+    const [templates, setTemplates] = useState<EmailTemplateData[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [editingId, setEditingId] = useState<string | null>(null);
+    const [form, setForm] = useState({ name: "", subject: "", body: "", isActive: true });
+    const [saving, setSaving] = useState(false);
+    const [status, setStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
+    const [testEmail, setTestEmail] = useState("");
+    const [sendingTest, setSendingTest] = useState(false);
+
+    const fetchTemplates = useCallback(async () => {
+        setLoading(true);
+        try {
+            const data = await apiClient("/api/admin/email-templates");
+            setTemplates(data);
+        } catch {
+            setStatus({ type: "error", message: "Failed to load email templates." });
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    useEffect(() => { fetchTemplates(); }, [fetchTemplates]);
+
+    const openEdit = (t: EmailTemplateData) => {
+        setEditingId(t.id);
+        setForm({ name: t.name, subject: t.subject, body: t.body, isActive: t.isActive });
+        setStatus(null);
+    };
+
+    const handleSave = async () => {
+        if (!editingId) return;
+        setSaving(true);
+        setStatus(null);
+        try {
+            await apiClient(`/api/admin/email-templates/${editingId}`, {
+                method: "PATCH",
+                body: JSON.stringify(form),
+            });
+            setStatus({ type: "success", message: "Template saved." });
+            setEditingId(null);
+            fetchTemplates();
+        } catch (err: any) {
+            setStatus({ type: "error", message: err.message || "Failed to save." });
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleToggleActive = async (t: EmailTemplateData) => {
+        try {
+            await apiClient(`/api/admin/email-templates/${t.id}`, {
+                method: "PATCH",
+                body: JSON.stringify({ isActive: !t.isActive }),
+            });
+            fetchTemplates();
+        } catch {
+            setStatus({ type: "error", message: "Failed to toggle template." });
+        }
+    };
+
+    const handleSendTest = async (templateId: string) => {
+        if (!testEmail.trim()) {
+            setStatus({ type: "error", message: "Enter a test email address." });
+            return;
+        }
+        setSendingTest(true);
+        setStatus(null);
+        try {
+            const result = await apiClient("/api/admin/email-templates/test", {
+                method: "POST",
+                body: JSON.stringify({ templateId, recipientEmail: testEmail }),
+            });
+            setStatus({ type: result.success ? "success" : "error", message: result.message });
+        } catch (err: any) {
+            setStatus({ type: "error", message: err.message || "Failed to send test email." });
+        } finally {
+            setSendingTest(false);
+        }
+    };
+
+    const PLACEHOLDER_HELP = "Available: {{opportunityTitle}}, {{clientName}}, {{stageName}}, {{previousStage}}, {{salesRepName}}, {{managerName}}, {{updatedBy}}, {{comment}}, {{recipientName}}";
+
+    if (loading) return <div className="text-center py-12 text-slate-400">Loading email templates...</div>;
+
+    return (
+        <div className="space-y-4">
+            <div>
+                <h3 className="text-base font-bold text-slate-900">Email Notification Templates</h3>
+                <p className="text-xs text-slate-500 mt-0.5">Configure email notifications sent when opportunities change stage.</p>
+            </div>
+
+            {status && (
+                <div className={`flex items-center gap-2 p-3 rounded-lg text-sm ${status.type === "success" ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>
+                    {status.type === "success" ? <Check className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+                    {status.message}
+                </div>
+            )}
+
+            {editingId && (
+                <div className="bg-white p-4 rounded-xl border border-indigo-200 shadow-sm space-y-3">
+                    <div className="flex items-center justify-between">
+                        <h4 className="font-semibold text-sm text-slate-800">Edit Template</h4>
+                        <button onClick={() => setEditingId(null)} className="p-1 text-slate-400 hover:text-slate-600"><X className="w-4 h-4" /></button>
+                    </div>
+                    <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">Display Name</label>
+                        <input className="w-full px-3 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">Subject</label>
+                        <input className="w-full px-3 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm" value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">Body (HTML)</label>
+                        <textarea rows={8} className="w-full px-3 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm font-mono" value={form.body} onChange={(e) => setForm({ ...form, body: e.target.value })} />
+                    </div>
+                    <p className="text-[11px] text-slate-400">{PLACEHOLDER_HELP}</p>
+                    <div className="flex items-center gap-3">
+                        <label className="flex items-center gap-2 text-xs text-slate-600 cursor-pointer">
+                            <button type="button" onClick={() => setForm({ ...form, isActive: !form.isActive })} className="text-slate-400 hover:text-indigo-600">
+                                {form.isActive ? <ToggleRight className="w-5 h-5 text-indigo-600" /> : <ToggleLeft className="w-5 h-5" />}
+                            </button>
+                            {form.isActive ? "Active" : "Disabled"}
+                        </label>
+                    </div>
+                    <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
+                        <input
+                            type="email"
+                            placeholder="Test email address"
+                            className="flex-1 px-3 py-1.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                            value={testEmail}
+                            onChange={(e) => setTestEmail(e.target.value)}
+                        />
+                        <button
+                            onClick={() => handleSendTest(editingId)}
+                            disabled={sendingTest}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                        >
+                            <Send className="w-3.5 h-3.5" /> {sendingTest ? "Sending..." : "Send Test"}
+                        </button>
+                    </div>
+                    <div className="flex justify-end gap-2 pt-2">
+                        <button onClick={() => setEditingId(null)} className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-600 hover:bg-slate-50">Cancel</button>
+                        <button disabled={saving} onClick={handleSave} className="px-4 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 disabled:opacity-50">
+                            {saving ? "Saving..." : "Save Template"}
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <table className="w-full text-xs">
+                    <thead className="bg-slate-50 border-b border-slate-200">
+                        <tr>
+                            <th className="text-left px-3 py-2 font-medium text-slate-600">Event</th>
+                            <th className="text-left px-3 py-2 font-medium text-slate-600">Name</th>
+                            <th className="text-left px-3 py-2 font-medium text-slate-600">Subject</th>
+                            <th className="text-center px-3 py-2 font-medium text-slate-600">Active</th>
+                            <th className="text-right px-3 py-2 font-medium text-slate-600">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                        {templates.map(t => (
+                            <tr key={t.id} className="hover:bg-slate-50/50">
+                                <td className="px-3 py-2 font-mono text-indigo-600">{t.eventKey}</td>
+                                <td className="px-3 py-2 text-slate-800 font-medium">{t.name}</td>
+                                <td className="px-3 py-2 text-slate-600 truncate max-w-[200px]">{t.subject}</td>
+                                <td className="px-3 py-2 text-center">
+                                    <button onClick={() => handleToggleActive(t)} className="text-slate-400 hover:text-indigo-600">
+                                        {t.isActive ? <ToggleRight className="w-5 h-5 text-indigo-600 inline" /> : <ToggleLeft className="w-5 h-5 inline" />}
+                                    </button>
+                                </td>
+                                <td className="px-3 py-2 text-right">
+                                    <button onClick={() => openEdit(t)} className="p-1.5 text-slate-400 hover:text-indigo-600" title="Edit"><Pencil className="w-3.5 h-3.5" /></button>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+                {templates.length === 0 && <div className="text-center py-8 text-slate-400">No email templates configured. Run the seed script to create default templates.</div>}
             </div>
         </div>
     );

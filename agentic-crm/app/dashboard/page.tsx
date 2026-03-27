@@ -69,6 +69,11 @@ interface Analytics {
         countByStatus: { name: string; value: number }[];
         countByClient: { name: string; value: number }[];
         countByOwner: { name: string; total: number; active: number; won: number }[];
+        revenueByTech: { name: string; value: number }[];
+        revenueByClient: { name: string; value: number }[];
+        revenueByOwner: { name: string; revenue: number }[];
+        projectedRevenue: number;
+        closedRevenue: number;
     };
     pipeline: {
         activeProjects: number;
@@ -193,39 +198,61 @@ export default function DashboardPage() {
     const statusData = analytics?.dashboard.countByStatus || [];
     const revenueData = analytics?.dashboard.revenueProjection || [];
     const ownerData = analytics?.dashboard.countByOwner || [];
+    const techRevenueData = analytics?.dashboard.revenueByTech || [];
+    const clientRevenueData = analytics?.dashboard.revenueByClient || [];
+    const clientCountData = analytics?.dashboard.countByClient || [];
+    const ownerRevenueData = analytics?.dashboard.revenueByOwner || [];
+    const projectedRevenue = analytics?.dashboard.projectedRevenue || 0;
+    const closedRevenue = analytics?.dashboard.closedRevenue || 0;
 
     const stats = [
         {
-            title: "Pipeline Value",
-            value: `₹${((pipeline?.pipelineValue || 0) / 100000).toFixed(1)}L`,
+            title: "Projected Revenue",
+            value: `₹${((projectedRevenue) / 100000).toFixed(1)}L`,
             subtitle: `${pipeline?.totalOpps || 0} opportunities`,
             icon: DollarSign,
             iconBg: "bg-indigo-100",
             iconColor: "text-indigo-600",
         },
         {
-            title: "Active Projects",
-            value: String(pipeline?.activeProjects || 0),
-            subtitle: `Avg ₹${((pipeline?.avgDealValue || 0) / 100000).toFixed(1)}L per deal`,
-            icon: Target,
+            title: "Closed Revenue",
+            value: `₹${((closedRevenue) / 100000).toFixed(1)}L`,
+            subtitle: `${sales?.wonCount || 0} deals won`,
+            icon: CheckCircle2,
             iconBg: "bg-emerald-100",
             iconColor: "text-emerald-600",
+        },
+        {
+            title: "Opportunities",
+            value: String(pipeline?.totalOpps || 0),
+            subtitle: `${pipeline?.activeProjects || 0} active`,
+            icon: Briefcase,
+            iconBg: "bg-blue-100",
+            iconColor: "text-blue-600",
+        },
+        {
+            title: "Pipeline Value",
+            value: `₹${((pipeline?.pipelineValue || 0) / 100000).toFixed(1)}L`,
+            subtitle: `Avg ₹${((pipeline?.avgDealValue || 0) / 100000).toFixed(1)}L per deal`,
+            icon: Target,
+            iconBg: "bg-amber-100",
+            iconColor: "text-amber-600",
         },
         {
             title: "Win Rate",
             value: `${(pipeline?.conversionRate || 0).toFixed(1)}%`,
             subtitle: `${sales?.wonCount || 0} won / ${sales?.lostCount || 0} lost`,
             icon: Activity,
-            iconBg: "bg-amber-100",
-            iconColor: "text-amber-600",
+            iconBg: "bg-purple-100",
+            iconColor: "text-purple-600",
         },
         {
             title: "Avg. Close Time",
             value: `${(sales?.avgTimeToClose || 0).toFixed(0)}d`,
             subtitle: `Presales success ${(presales?.proposalSuccessRate || 0).toFixed(0)}%`,
             icon: Clock,
-            iconBg: "bg-purple-100",
-            iconColor: "text-purple-600",
+            iconBg: "bg-rose-100",
+            iconColor: "text-rose-600",
         },
     ];
 
@@ -237,7 +264,7 @@ export default function DashboardPage() {
             </div>
 
             {/* Stats Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-3">
                 {stats.map((stat, idx) => (
                     <motion.div
                         key={idx}
@@ -351,6 +378,81 @@ export default function DashboardPage() {
                 ) : (
                     <div className="flex items-center justify-center h-[220px] text-slate-400 text-sm">No salesperson data available</div>
                 )}
+            </div>
+
+            {/* Row: Revenue by Tech Stack + Revenue by Client + Count by Client */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                {/* Proposed Revenue by Tech Stack */}
+                <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
+                    <h3 className="font-semibold text-sm text-slate-800 mb-3">Proposed Revenue by Tech Stack</h3>
+                    {techRevenueData.length > 0 ? (
+                        <div className="h-[240px] w-full">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={techRevenueData} layout="vertical" margin={{ left: 10, right: 20 }}>
+                                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
+                                    <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 10 }} tickFormatter={(v) => `₹${(v/100000).toFixed(0)}L`} />
+                                    <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 10 }} width={80} />
+                                    <Tooltip formatter={(v: number) => [`₹${(v/100000).toFixed(1)}L`, 'Revenue']} contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0' }} />
+                                    <Bar dataKey="value" name="Revenue" fill="#6366f1" radius={[0, 4, 4, 0]} />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </div>
+                    ) : <div className="flex items-center justify-center h-[240px] text-slate-400 text-sm">No data</div>}
+                </div>
+
+                {/* Proposed Revenue by Client */}
+                <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
+                    <h3 className="font-semibold text-sm text-slate-800 mb-3">Proposed Revenue by Client</h3>
+                    {clientRevenueData.length > 0 ? (
+                        <div className="h-[240px] w-full">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={clientRevenueData} layout="vertical" margin={{ left: 10, right: 20 }}>
+                                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
+                                    <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 10 }} tickFormatter={(v) => `₹${(v/100000).toFixed(0)}L`} />
+                                    <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 10 }} width={100} />
+                                    <Tooltip formatter={(v: number) => [`₹${(v/100000).toFixed(1)}L`, 'Revenue']} contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0' }} />
+                                    <Bar dataKey="value" name="Revenue" fill="#ec4899" radius={[0, 4, 4, 0]} />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </div>
+                    ) : <div className="flex items-center justify-center h-[240px] text-slate-400 text-sm">No data</div>}
+                </div>
+
+                {/* Opportunity Count by Client */}
+                <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
+                    <h3 className="font-semibold text-sm text-slate-800 mb-3">Opportunity Count by Client</h3>
+                    {clientCountData.length > 0 ? (
+                        <div className="h-[240px] w-full">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={clientCountData.slice(0, 10)} layout="vertical" margin={{ left: 10, right: 20 }}>
+                                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
+                                    <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 10 }} allowDecimals={false} />
+                                    <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 10 }} width={100} />
+                                    <Tooltip contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0' }} />
+                                    <Bar dataKey="value" name="Count" fill="#8b5cf6" radius={[0, 4, 4, 0]} />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </div>
+                    ) : <div className="flex items-center justify-center h-[240px] text-slate-400 text-sm">No data</div>}
+                </div>
+            </div>
+
+            {/* Proposed Revenue by Sales Rep */}
+            <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
+                <h3 className="font-semibold text-sm text-slate-800 mb-3">Proposed Revenue by Sales Rep</h3>
+                {ownerRevenueData.length > 0 ? (
+                    <div className="h-[220px] w-full">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={ownerRevenueData} layout="vertical" margin={{ left: 20, right: 20 }}>
+                                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
+                                <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 11 }} tickFormatter={(v) => `₹${(v/100000).toFixed(0)}L`} />
+                                <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 11 }} width={110} />
+                                <Tooltip formatter={(v: number) => [`₹${(v/100000).toFixed(1)}L`, 'Revenue']} contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0' }} />
+                                <Bar dataKey="revenue" name="Revenue" fill="#0ea5e9" radius={[0, 4, 4, 0]} />
+                            </BarChart>
+                        </ResponsiveContainer>
+                    </div>
+                ) : <div className="flex items-center justify-center h-[220px] text-slate-400 text-sm">No data</div>}
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">

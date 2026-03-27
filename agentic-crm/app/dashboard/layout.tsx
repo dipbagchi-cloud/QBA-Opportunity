@@ -101,7 +101,7 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
                         </div>
                         {isSidebarOpen && (
                             <span className="text-base font-bold tracking-tight text-slate-800 overflow-hidden whitespace-nowrap">
-                                Agentic CRM
+                                Q-CRM
                             </span>
                         )}
                     </div>
