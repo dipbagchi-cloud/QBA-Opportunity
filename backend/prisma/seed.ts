@@ -122,6 +122,24 @@ async function main() {
             ],
             isSystem: true,
         },
+        {
+            name: 'Management',
+            description: 'Senior management view. Read-only access plus analytics export and approval management.',
+            permissions: [
+                'dashboard:view',
+                'pipeline:view',
+                'presales:view',
+                'sales:view',
+                'contacts:view',
+                'analytics:view',
+                'analytics:export',
+                'approvals:manage',
+                'auditlogs:view',
+                'gom:view',
+                'settings:view',
+            ],
+            isSystem: true,
+        },
     ];
 
     const createdRoles: Record<string, string> = {};

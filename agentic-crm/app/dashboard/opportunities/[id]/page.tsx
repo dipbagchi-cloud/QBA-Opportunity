@@ -85,6 +85,9 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const [pricingModels, setPricingModels] = useState<string[]>([]);
     const [salespersons, setSalespersons] = useState<{ id: string; name: string }[]>([]);
     const [departments, setDepartments] = useState<string[]>([]);
+    const [managers, setManagers] = useState<{ id: string; name: string; department: string }[]>([]);
+    const [isLoadingManagers, setIsLoadingManagers] = useState(false);
+    const [opportunityManagerName, setOpportunityManagerName] = useState("");
 
     // Form State
     const [formData, setFormData] = useState({
@@ -107,7 +110,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     // Presales Modal State (Modal for transition)
     const [presalesForm, setPresalesForm] = useState({
         proposalDueDate: "",
-        comments: ""
+        comments: "",
+        managerName: ""
     });
 
     // Presales View State (The detailed view after transition)
@@ -147,6 +151,21 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const [techDropdownOpen, setTechDropdownOpen] = useState(false);
     const [techSearch, setTechSearch] = useState("");
     const techDropdownRef = useRef<HTMLDivElement>(null);
+
+    // Load managers by department when presales modal opens
+    useEffect(() => {
+        if (!showPresalesModal) return;
+        const dept = formData.practice;
+        setIsLoadingManagers(true);
+        const url = dept
+            ? `${API_URL}/api/master/managers?department=${encodeURIComponent(dept)}`
+            : `${API_URL}/api/master/managers`;
+        fetch(url, { headers: getAuthHeaders() })
+            .then(r => r.ok ? r.json() : [])
+            .then((data: any[]) => setManagers(data))
+            .catch(() => setManagers([]))
+            .finally(() => setIsLoadingManagers(false));
+    }, [showPresalesModal, formData.practice]);
 
     // Click-outside handler for tech dropdown
     useEffect(() => {
@@ -191,6 +210,9 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
     // GOM Calculations
     useEffect(() => {
+        // Sync markup from presalesData into gomInputs
+        const effectiveMarkup = presalesData.markup ?? gomInputs.markupPercent;
+
         // Constants (Hardcoded for now as per GOM page)
         const perDiemUSD = 50;
         const perDiemRate = 85;
@@ -216,14 +238,14 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             let profit = 0;
 
             if (gomInputs.calcMode === 'markup') {
-                rev = cost * (1 + gomInputs.markupPercent / 100);
+                rev = cost * (1 + effectiveMarkup / 100);
             } else {
                 rev = gomInputs.targetRevenue;
             }
 
             if (rev > 0) {
                 gom = ((rev - cost) / rev) * 100;
-                profit = (gomInputs.markupPercent / (1 + gomInputs.markupPercent / 100)) * 100;
+                profit = (effectiveMarkup / (1 + effectiveMarkup / 100)) * 100;
             }
             return { rev, gom, profit };
         };
@@ -243,7 +265,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             onsiteProfit: onFin.profit
         });
 
-    }, [gomInputs]);
+    }, [gomInputs, presalesData.markup]);
 
     // Fetch master data for dropdowns
     useEffect(() => {
@@ -317,6 +339,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     description: data.description || "",
                     value: data.value || 0
                 });
+
+                setOpportunityManagerName(data.managerName || "");
 
                 // Update active step based on stage
                 const stageName = data.stage?.name || data.currentStage || '';
@@ -408,6 +432,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 headers: getAuthHeaders(),
                 body: JSON.stringify({
                     stageName: 'Qualification', // Maps to Presales in our workflow
+                    managerName: presalesForm.managerName,
                     presalesData: presalesForm
                 })
             });
@@ -417,6 +442,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 setCurrentStageName('Qualification');
                 setActiveStep(1);
                 setOpportunityStage(1);
+                setOpportunityManagerName(presalesForm.managerName);
                 setShowPresalesModal(false);
                 toast({ title: "Success", description: "Moved to Presales successfully!" });
             } else {
@@ -578,12 +604,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     >
                         <ArrowLeft className="w-4 h-4" /> Back
                     </button>
-                    {opportunityStage < 3 && !isLost && (
-                        <button className="px-4 py-2 bg-white border border-red-200 text-red-600 rounded-md font-medium hover:bg-red-50">
-                            Cancel Opportunity
-                        </button>
-                    )}
-                    {opportunityStage === 0 && (
+                    {opportunityStage === 0 && !isLost && (
                         <button
                             onClick={() => setShowPresalesModal(true)}
                             className="px-4 py-2 bg-blue-600 text-white rounded-md font-medium hover:bg-blue-700"
@@ -591,14 +612,23 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             Move to Presales
                         </button>
                     )}
-                    {opportunityStage === 1 && (
-                        <button
-                            onClick={handleMoveToSales}
-                            disabled={isSaving}
-                            className="px-4 py-2 bg-blue-600 text-white rounded-md font-medium hover:bg-blue-700 disabled:opacity-50"
-                        >
-                            {isSaving ? 'Moving...' : 'Move to Sales'}
-                        </button>
+                    {opportunityStage === 1 && !isLost && (
+                        <>
+                            <button
+                                onClick={() => { setLostModalType('Proposal Lost'); setShowLostModal(true); }}
+                                disabled={isSaving}
+                                className="px-4 py-2 bg-white border border-rose-300 text-rose-600 rounded-md font-medium hover:bg-rose-50 disabled:opacity-50"
+                            >
+                                <span className="flex items-center gap-1.5"><XCircle className="w-4 h-4" /> Proposal Lost</span>
+                            </button>
+                            <button
+                                onClick={handleMoveToSales}
+                                disabled={isSaving}
+                                className="px-4 py-2 bg-blue-600 text-white rounded-md font-medium hover:bg-blue-700 disabled:opacity-50"
+                            >
+                                {isSaving ? 'Moving...' : 'Move to Sales'}
+                            </button>
+                        </>
                     )}
                     {opportunityStage === 2 && !isLost && currentStageName === 'Proposal' && (
                         <>
@@ -701,11 +731,19 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             </div>
 
             {/* PIPELINE VIEW (Step 0) */}
-            {activeStep === 0 && (
+            {activeStep === 0 && (() => {
+                const isPipelineEditable = opportunityStage === 0 && !isLost;
+                const disabledClass = !isPipelineEditable ? "bg-slate-50 cursor-not-allowed opacity-70" : "bg-white";
+                return (
                 <form onSubmit={handleSubmit} className="bg-white rounded-lg shadow-sm border border-slate-200 p-5">
                     {/* ... Existing Pipeline Form Code ... */}
                     <div className="mb-4 flex items-center gap-3">
                         <h2 className="text-base font-bold text-slate-900">Basic Information</h2>
+                        {!isPipelineEditable && !isLost && (
+                            <span className="px-3 py-1 rounded-full bg-slate-100 text-slate-500 text-xs font-semibold border border-slate-200">
+                                Read Only
+                            </span>
+                        )}
                         {isLost && (
                             <span className="px-3 py-1 rounded-full bg-red-100 text-red-600 text-xs font-semibold border border-red-200">
                                 {currentStageName === 'Proposal Lost' ? 'Proposal Lost' : 'Closed Lost'}
@@ -746,7 +784,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 name="clientName"
                                 required
                                 value={formData.clientName}
-                                className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
+                                disabled={!isPipelineEditable}
+                                className={`w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm shadow-sm ${disabledClass}`}
                                 onChange={handleChange}
                             >
                                 <option value="">Select Client</option>
@@ -760,7 +799,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 name="region"
                                 required
                                 value={formData.region}
-                                className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
+                                disabled={!isPipelineEditable}
+                                className={`w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm shadow-sm ${disabledClass}`}
                                 onChange={handleChange}
                             >
                                 <option value="">Select Region</option>
@@ -774,7 +814,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 name="projectType"
                                 required
                                 value={formData.projectType}
-                                className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
+                                disabled={!isPipelineEditable}
+                                className={`w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm shadow-sm ${disabledClass}`}
                                 onChange={handleChange}
                             >
                                 <option value="">Select Project Type</option>
@@ -792,7 +833,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 required
                                 value={formData.projectName}
                                 placeholder="XXX--XXX- Project Details"
-                                className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
+                                disabled={!isPipelineEditable}
+                                className={`w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm shadow-sm ${disabledClass}`}
                                 onChange={handleChange}
                             />
                         </div>
@@ -802,7 +844,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             <select
                                 name="practice"
                                 value={formData.practice}
-                                className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
+                                disabled={!isPipelineEditable}
+                                className={`w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm shadow-sm ${disabledClass}`}
                                 onChange={handleChange}
                             >
                                 <option value="">Find Practice</option>
@@ -817,7 +860,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 name="salesRep"
                                 required
                                 value={formData.salesRep}
-                                className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
+                                disabled={!isPipelineEditable}
+                                className={`w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm shadow-sm ${disabledClass}`}
                                 onChange={handleChange}
                             >
                                 <option value="">Find SalesPerson</option>
@@ -829,8 +873,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             <label className="block text-sm font-bold text-slate-700">Technology *</label>
                             <div className="relative" ref={techDropdownRef}>
                                 <div
-                                    className="w-full min-h-[42px] px-3 py-2 bg-white border border-slate-300 rounded-md text-sm shadow-sm flex flex-wrap gap-1 cursor-pointer"
-                                    onClick={() => setTechDropdownOpen(!techDropdownOpen)}
+                                    className={`w-full min-h-[42px] px-3 py-2 border border-slate-300 rounded-md text-sm shadow-sm flex flex-wrap gap-1 ${isPipelineEditable ? 'bg-white cursor-pointer' : 'bg-slate-50 cursor-not-allowed opacity-70'}`}
+                                    onClick={() => { if (isPipelineEditable) setTechDropdownOpen(!techDropdownOpen); }}
                                 >
                                     {formData.technology ? formData.technology.split(',').filter(Boolean).map(t => (
                                         <span key={t} className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 text-xs px-2 py-0.5 rounded-full border border-indigo-200">
@@ -912,9 +956,10 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 name="tentativeStartDate"
                                 required
                                 value={formData.tentativeStartDate}
-                                className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm text-slate-500 cursor-pointer"
+                                disabled={!isPipelineEditable}
+                                className={`w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm shadow-sm text-slate-500 ${isPipelineEditable ? 'cursor-pointer' : 'cursor-not-allowed bg-slate-50 opacity-70'}`}
                                 onChange={handleChange}
-                                onClick={(e) => (e.target as HTMLInputElement).showPicker?.()}
+                                onClick={(e) => { if (isPipelineEditable) (e.target as HTMLInputElement).showPicker?.(); }}
                             />
                         </div>
 
@@ -923,7 +968,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             <select
                                 name="duration"
                                 value={formData.duration}
-                                className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
+                                disabled={!isPipelineEditable}
+                                className={`w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm shadow-sm ${disabledClass}`}
                                 onChange={handleChange}
                             >
                                 <option value="">Select Duration</option>
@@ -946,6 +992,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     </div>
 
                     {/* Footer Actions */}
+                    {isPipelineEditable && (
                     <div className="mt-8 flex justify-end gap-3 pt-4 border-t border-slate-100">
                         <button
                             type="submit"
@@ -955,8 +1002,10 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             {isSaving ? 'Saving...' : 'Submit Details'}
                         </button>
                     </div>
+                    )}
                 </form>
-            )}
+                );
+            })()}
 
             {/* PRESALES VIEW (Step 1) */}
             {activeStep === 1 && (
@@ -1035,6 +1084,10 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     <div>
                                         <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Sales Representative</label>
                                         <div className="font-semibold text-slate-800">{formData.salesRep}</div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Manager</label>
+                                        <div className="font-semibold text-slate-800">{opportunityManagerName || <span className="text-slate-400">—</span>}</div>
                                     </div>
 
                                     <div>
@@ -1662,6 +1715,10 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                         <p className="font-medium text-slate-800 mt-1">{formData.salesRep || "N/A"}</p>
                                     </div>
                                     <div>
+                                        <span className="text-xs text-slate-500 uppercase tracking-wide">Manager</span>
+                                        <p className="font-medium text-slate-800 mt-1">{opportunityManagerName || "N/A"}</p>
+                                    </div>
+                                    <div>
                                         <span className="text-xs text-slate-500 uppercase tracking-wide">Technology</span>
                                         <div className="flex flex-wrap gap-1 mt-1">
                                             {formData.technology
@@ -1832,6 +1889,34 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                         </div>
 
                         <form onSubmit={handlePresalesSubmit} className="p-5 space-y-4">
+
+                            {formData.practice && (
+                                <div className="px-3 py-2 bg-indigo-50 border border-indigo-100 rounded-md text-sm text-indigo-700">
+                                    <span className="font-medium">Department / Practice:</span> {formData.practice}
+                                </div>
+                            )}
+
+                            <div className="space-y-1.5">
+                                <label className="block text-sm font-bold text-slate-700">Manager *</label>
+                                {isLoadingManagers ? (
+                                    <div className="text-xs text-slate-400 py-2">Loading managers…</div>
+                                ) : (
+                                    <select
+                                        required
+                                        className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
+                                        value={presalesForm.managerName}
+                                        onChange={(e) => setPresalesForm({ ...presalesForm, managerName: e.target.value })}
+                                    >
+                                        <option value="">Select Manager</option>
+                                        {managers.length > 0
+                                            ? managers.map(m => (
+                                                <option key={m.id} value={m.name}>{m.name}{m.department ? ` (${m.department})` : ''}</option>
+                                            ))
+                                            : <option value="" disabled>No managers found for this department</option>
+                                        }
+                                    </select>
+                                )}
+                            </div>
 
                             <div className="space-y-1.5">
                                 <label className="block text-sm font-bold text-slate-700">Proposal Due Date *</label>

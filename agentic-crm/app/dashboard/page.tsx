@@ -68,6 +68,7 @@ interface Analytics {
         revenueProjection: { name: string; proposed: number; actual: number; lost: number }[];
         countByStatus: { name: string; value: number }[];
         countByClient: { name: string; value: number }[];
+        countByOwner: { name: string; total: number; active: number; won: number }[];
     };
     pipeline: {
         activeProjects: number;
@@ -97,6 +98,8 @@ interface Opportunity {
     probability: number;
     lastActivity: string;
     owner: string;
+    salesRepName?: string;
+    managerName?: string;
     status: string;
     healthScore: number;
     daysInStage: number;
@@ -189,6 +192,7 @@ export default function DashboardPage() {
     const recentOpps = opportunities.slice(0, 8);
     const statusData = analytics?.dashboard.countByStatus || [];
     const revenueData = analytics?.dashboard.revenueProjection || [];
+    const ownerData = analytics?.dashboard.countByOwner || [];
 
     const stats = [
         {
@@ -323,6 +327,32 @@ export default function DashboardPage() {
                 </div>
             </div>
 
+            {/* Opportunities by Salesperson */}
+            <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
+                <div className="flex justify-between items-center mb-3">
+                    <h3 className="font-semibold text-sm text-slate-800">Opportunities by Salesperson</h3>
+                </div>
+                {ownerData.length > 0 ? (
+                    <div className="h-[220px] w-full">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={ownerData} layout="vertical" margin={{ left: 20, right: 20 }}>
+                                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
+                                <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 11 }} allowDecimals={false} />
+                                <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 11 }} width={110} />
+                                <Tooltip
+                                    contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                                />
+                                <Legend />
+                                <Bar dataKey="active" name="Active" fill="#6366f1" radius={[0, 0, 0, 0]} stackId="a" />
+                                <Bar dataKey="won" name="Won" fill="#10b981" radius={[0, 4, 4, 0]} stackId="a" />
+                            </BarChart>
+                        </ResponsiveContainer>
+                    </div>
+                ) : (
+                    <div className="flex items-center justify-center h-[220px] text-slate-400 text-sm">No salesperson data available</div>
+                )}
+            </div>
+
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                 {/* Recent Opportunities Table */}
                 <div className="lg:col-span-2 bg-white rounded-xl p-4 border border-slate-200 shadow-sm overflow-hidden">
@@ -344,7 +374,8 @@ export default function DashboardPage() {
                                         <th className="pb-2 font-medium">Value</th>
                                         <th className="pb-2 font-medium">Stage</th>
                                         <th className="pb-2 font-medium">Health</th>
-                                        <th className="pb-2 font-medium">Owner</th>
+                                        <th className="pb-2 font-medium">Sales Rep</th>
+                                        <th className="pb-2 font-medium">Manager</th>
                                     </tr>
                                 </thead>
                                 <tbody className="text-xs">
@@ -356,7 +387,7 @@ export default function DashboardPage() {
                                         >
                                             <td className="py-2.5 pl-3">
                                                 <div className="font-medium text-slate-900">{opp.name}</div>
-                                                <div className="text-[11px] text-slate-400">{opp.client}</div>
+                                                <div className="text-[11px] text-slate-400">{opp.client} • {opp.owner}</div>
                                             </td>
                                             <td className="py-2.5 text-slate-600">{'\u20B9'}{(opp.value / 100000).toFixed(1)}L</td>
                                             <td className="py-2.5">
@@ -370,7 +401,8 @@ export default function DashboardPage() {
                                                     <span className="text-slate-600">{opp.healthScore}%</span>
                                                 </div>
                                             </td>
-                                            <td className="py-2.5 text-slate-600">{opp.owner}</td>
+                                            <td className="py-2.5 text-slate-600">{opp.salesRepName || opp.owner}</td>
+                                            <td className="py-2.5 text-slate-600">{opp.managerName || <span className="text-slate-300">—</span>}</td>
                                         </tr>
                                     ))}
                                 </tbody>

@@ -118,6 +118,8 @@ export default function OpportunitiesPage() {
                                     <th className="text-left py-2.5 px-4 font-semibold text-slate-600 text-xs">Stage</th>
                                     <th className="text-left py-2.5 px-4 font-semibold text-slate-600 text-xs">Value</th>
                                     <th className="text-left py-2.5 px-4 font-semibold text-slate-600 text-xs">Probability</th>
+                                    <th className="text-left py-2.5 px-4 font-semibold text-slate-600 text-xs">Sales Rep</th>
+                                    <th className="text-left py-2.5 px-4 font-semibold text-slate-600 text-xs">Manager</th>
                                     <th className="text-left py-2.5 px-4 font-semibold text-slate-600 text-xs">Last Activity</th>
                                     <th className="w-10"></th>
                                 </tr>
@@ -125,7 +127,7 @@ export default function OpportunitiesPage() {
                             <tbody className="divide-y divide-slate-100">
                                 {opportunities.length === 0 ? (
                                     <tr>
-                                        <td colSpan={6} className="py-8 text-center text-slate-400 text-sm">
+                                        <td colSpan={8} className="py-8 text-center text-slate-400 text-sm">
                                             No opportunities found. Click "New Opportunity" to add one.
                                         </td>
                                     </tr>
@@ -175,6 +177,12 @@ export default function OpportunitiesPage() {
                                                     </div>
                                                     <span className="text-xs font-medium text-slate-600">{opp.probability}%</span>
                                                 </div>
+                                            </td>
+                                            <td className="py-2.5 px-4 text-xs text-slate-600">
+                                                {opp.salesRepName || <span className="text-slate-300">—</span>}
+                                            </td>
+                                            <td className="py-2.5 px-4 text-xs text-slate-600">
+                                                {opp.managerName || <span className="text-slate-300">—</span>}
                                             </td>
                                             <td className="py-2.5 px-4 text-xs text-slate-500">
                                                 {opp.lastActivity}

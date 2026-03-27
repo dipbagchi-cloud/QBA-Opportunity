@@ -7,6 +7,7 @@ import {
     listPricingModels,
     listSalespersons,
     listDepartments,
+    listManagersByDepartment,
 } from '../controllers/master-data.controller';
 
 const router = Router();
@@ -20,5 +21,6 @@ router.get('/technologies', listTechnologies);
 router.get('/pricing-models', listPricingModels);
 router.get('/salespersons', listSalespersons);
 router.get('/departments', listDepartments);
+router.get('/managers', listManagersByDepartment);
 
 export default router;

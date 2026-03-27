@@ -168,15 +168,15 @@ export async function deletePricingModel(req: Request, res: Response) {
     res.json({ message: 'Pricing model deleted.' });
 }
 
-// ── Salespersons (users with Sales/Manager role) ──
+// ── Salespersons (users with Sales/Manager/Management role) ──
 export async function listSalespersons(req: Request, res: Response) {
     const users = await prisma.user.findMany({
         where: {
             isActive: true,
-            roles: { some: { name: { in: ['Sales', 'Manager', 'Admin'] } } },
+            roles: { some: { name: { in: ['Sales', 'Manager', 'Admin', 'Management'] } } },
         },
         orderBy: { name: 'asc' },
-        select: { id: true, name: true, email: true, roles: { select: { name: true } } },
+        select: { id: true, name: true, email: true, department: true, roles: { select: { name: true } } },
     });
     res.json(users);
 }
@@ -198,5 +198,30 @@ export async function listDepartments(req: Request, res: Response) {
     } catch (error) {
         console.error('QPeople API error:', error);
         res.status(502).json({ error: 'Failed to fetch departments from HRMS.' });
+    }
+}
+
+// ── Managers by Department from QPeople ──
+export async function listManagersByDepartment(req: Request, res: Response) {
+    const { department } = req.query;
+    try {
+        const response = await fetch(
+            'https://hr.qbadvisory.com/api/method/hrms.api.employee.get_all_managers_with_departments',
+            { headers: { 'Authorization': 'token 762913b0eb9f140:1205f410c1b7b31' } }
+        );
+        const json: any = await response.json();
+        const all: any[] = json.message?.data || [];
+        const filtered = department
+            ? all.filter((e: any) => (e.department || e.department_name) === department)
+            : all;
+        const managers = filtered.map((e: any) => ({
+            id: e.name || e.employee,
+            name: e.employee_name || e.full_name || e.name,
+            department: e.department || e.department_name,
+        })).filter((m: any) => m.name);
+        res.json(managers);
+    } catch (error) {
+        console.error('QPeople managers API error:', error);
+        res.status(502).json({ error: 'Failed to fetch managers from HRMS.' });
     }
 }

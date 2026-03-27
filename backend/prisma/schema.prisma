@@ -244,6 +244,7 @@ model Opportunity {
   // -- New Lifecycle Fields --
   geolocation       String?
   salesRepName      String?
+  managerName       String?
   
   // Detailed Fields from UI
   region            String?

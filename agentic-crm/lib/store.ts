@@ -10,6 +10,8 @@ export interface Opportunity {
     probability: number;
     lastActivity: string;
     owner: string;
+    salesRepName?: string;
+    managerName?: string;
     status: 'healthy' | 'at-risk' | 'critical';
     description?: string;
     // Epic 3 Intelligence Fields

@@ -48,6 +48,7 @@ export async function getAnalytics(req: Request, res: Response) {
         const revenueByMonth: any = {};
         const countByStatus: any = {};
         const countByClient: any = {};
+        const countByOwner: any = {};
 
         opportunities.forEach(opp => {
             const rev = getRevenue(opp);
@@ -73,11 +74,21 @@ export async function getAnalytics(req: Request, res: Response) {
             // Count by Client
             const clientName = opp.client?.name || 'Unknown';
             countByClient[clientName] = (countByClient[clientName] || 0) + 1;
+
+            // Count by Owner (Salesperson)
+            const ownerName = opp.owner?.name || 'Unassigned';
+            if (!countByOwner[ownerName]) {
+                countByOwner[ownerName] = { name: ownerName, total: 0, active: 0, won: 0 };
+            }
+            countByOwner[ownerName].total += 1;
+            if (stageName === 'Closed Won') countByOwner[ownerName].won += 1;
+            else if (stageName !== 'Closed Lost' && stageName !== 'Proposal Lost') countByOwner[ownerName].active += 1;
         });
 
         const revenueChartData = Object.values(revenueByMonth);
         const statusPieData = Object.keys(countByStatus).map(k => ({ name: k, value: countByStatus[k] }));
         const clientBarData = Object.keys(countByClient).map(k => ({ name: k, value: countByClient[k] }));
+        const ownerBarData = Object.values(countByOwner) as { name: string; total: number; active: number; won: number }[];
 
         // 4. Pipeline Metrics
         const activeOpps = opportunities.filter(o => {
@@ -140,7 +151,8 @@ export async function getAnalytics(req: Request, res: Response) {
             dashboard: {
                 revenueProjection: revenueChartData,
                 countByStatus: statusPieData,
-                countByClient: clientBarData
+                countByClient: clientBarData,
+                countByOwner: ownerBarData,
             },
             pipeline: {
                 activeProjects: activeOpps.length,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { User, Lock, Users, Shield, Plus, X, Check, AlertCircle, RotateCcw, Pencil, ToggleLeft, ToggleRight, DollarSign, Trash2, Globe, Cpu, Tag, Building2, Download, Settings2, ChevronDown, ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, Search, Eye, EyeOff, FileText } from "lucide-react";
 import { useAuthStore } from "@/lib/auth-store";
 import { apiClient } from "@/lib/api";
@@ -1537,9 +1537,8 @@ function AuditLogTab() {
                         </thead>
                         <tbody>
                             {logs.map(log => (
-                                <>
+                                <React.Fragment key={log.id}>
                                     <tr
-                                        key={log.id}
                                         onClick={() => setExpandedRow(expandedRow === log.id ? null : log.id)}
                                         className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer transition-colors"
                                     >
@@ -1556,7 +1555,7 @@ function AuditLogTab() {
                                         </td>
                                     </tr>
                                     {expandedRow === log.id && (
-                                        <tr key={`${log.id}-detail`} className="bg-slate-50/50">
+                                        <tr className="bg-slate-50/50">
                                             <td colSpan={5} className="px-4 py-3">
                                                 <div className="space-y-1">
                                                     <div className="text-xs text-slate-400">Entity ID: {log.entityId}</div>
@@ -1565,7 +1564,7 @@ function AuditLogTab() {
                                             </td>
                                         </tr>
                                     )}
-                                </>
+                                </React.Fragment>
                             ))}
                         </tbody>
                     </table>
