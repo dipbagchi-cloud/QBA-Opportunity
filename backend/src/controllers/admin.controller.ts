@@ -824,7 +824,7 @@ export async function applyQPeopleMappings(req: Request, res: Response) {
     const designationToDept = new Map<string, string>(mappings.filter((m: any) => m.department).map((m: any) => [m.qpeopleDesignation, m.department]));
 
     const users = await prisma.user.findMany({
-      where: { designation: { not: null }, qpeopleId: { not: null } },
+      where: { designation: { not: null } },
       include: { roles: { select: { id: true } } },
     });
 
