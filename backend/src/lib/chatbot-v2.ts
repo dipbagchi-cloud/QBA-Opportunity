@@ -482,12 +482,12 @@ function nlpParseIntent(message: string, conv: ConversationState): LLMParsedInte
     // Mark as Lost (before generic UPDATE)
     if (/\b(mark|set|move|close)\b/i.test(lower) && /\b(lost|close.?lost|proposal.?lost|dead|rejected|declined)\b/i.test(lower)) {
         const lostType = /\bproposal.?lost\b/i.test(lower) ? 'Proposal Lost' : 'Closed Lost';
-        const remarksMatch = lower.match(/(?:reason|because|remark|due to|:\s*)["']?(.{5,})["']?\s*$/i);
+        const remarksMatch = lower.match(/(?:reason|because|remark|due to|:\s*)[:\s,]*["']?(.{5,})["']?\s*$/i);
         return { intent: 'mark_lost', params: { nameOrId: extractEntityName(lower), lostType, remarks: remarksMatch?.[1]?.trim() || '' }, confidence: 0.9 };
     }
 
     // Send back for Re-estimate (before generic UPDATE)
-    if (/\b(re[\s-]?estimat|send\s*back|return\s*(for|to)|revert|revision)\b/i.test(lower) &&
+    if ((/\bre[\s-]?estimat\w*/i.test(lower) || /\bsend\b.{0,60}\bback\b/i.test(lower) || /\b(return\s+(for|to)|revert|revision)\b/i.test(lower)) &&
         !(/\b(create|add|new)\b/i.test(lower))) {
         const commentMatch = lower.match(/(?:reason|because|comment|:\s*)["']?(.{5,})["']?\s*$/i);
         return { intent: 'reestimate', params: { nameOrId: extractEntityName(lower), comment: commentMatch?.[1]?.trim() || '' }, confidence: 0.9 };
