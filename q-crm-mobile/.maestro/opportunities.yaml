@@ -1,0 +1,46 @@
+appId: com.qcrm.mobile
+---
+# ─── Pre-condition: user is already logged in ────────────────────────────────
+- launchApp
+
+# ─── Navigate to Opportunities tab ──────────────────────────────────────────
+- tapOn:
+    id: "tab-opportunities"
+- assertVisible: "Opportunities"
+
+# ─── Search interaction ──────────────────────────────────────────────────────
+- tapOn:
+    placeholder: "Search opportunities..."
+- inputText: "Digital"
+- waitForAnimationToEnd
+- assertVisible: "Digital Transformation Programme"
+
+# ─── Clear search ─────────────────────────────────────────────────────────────
+- tapOn: "✕"
+- assertVisible: "Opportunities"
+
+# ─── Stage filter ─────────────────────────────────────────────────────────────
+- tapOn: "Lead"
+- waitForAnimationToEnd
+- assertNotVisible: "Closed Won"
+
+- tapOn: "All"
+- waitForAnimationToEnd
+
+# ─── Open first opportunity ──────────────────────────────────────────────────
+- tapOn:
+    index: 0
+    id: "opportunity-card"
+- waitForAnimationToEnd
+- assertVisible: "Details"
+- assertVisible: "GOM"
+
+# ─── Navigate GOM tab ────────────────────────────────────────────────────────
+- tapOn: "GOM"
+- waitForAnimationToEnd
+- assertVisible: "GOM %"
+
+# ─── Go back to list ─────────────────────────────────────────────────────────
+- tapOn:
+    id: "header-back-button"
+- assertVisible: "Opportunities"

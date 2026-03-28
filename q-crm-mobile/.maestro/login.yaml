@@ -1,0 +1,36 @@
+appId: com.qcrm.mobile
+---
+# ─── Launch ──────────────────────────────────────────────────────────────────
+- launchApp:
+    clearState: true
+
+# ─── Assert Login screen is visible ─────────────────────────────────────────
+- assertVisible: "Sign In"
+- assertVisible: "Q\u2011CRM"
+
+# ─── Enter email ─────────────────────────────────────────────────────────────
+- tapOn:
+    placeholder: "you@company.com"
+- inputText: "dip.bagchi@example.com"
+- assertVisible: "dip.bagchi@example.com"
+
+# ─── Enter password ──────────────────────────────────────────────────────────
+- tapOn:
+    placeholder: "Enter your password"
+- inputText: "password123"
+
+# ─── Submit ───────────────────────────────────────────────────────────────────
+- tapOn: "Sign In"
+
+# ─── Wait for dashboard ──────────────────────────────────────────────────────
+- waitForAnimationToEnd
+- assertVisible:
+    text: "Dashboard"
+    timeout: 5000
+
+# ─── Logout smoke test ────────────────────────────────────────────────────────
+- tapOn:
+    id: "tab-settings"
+- assertVisible: "Settings"
+- tapOn: "Logout"
+- assertVisible: "Sign In"

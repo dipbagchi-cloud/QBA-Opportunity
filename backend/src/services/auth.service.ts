@@ -1,9 +1,13 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'agentic-crm-jwt-secret-change-in-production';
 const JWT_EXPIRES_IN = '24h';
 const BCRYPT_ROUNDS = 12;
+
+// Boot ID: changes on every server restart, invalidating all existing tokens
+export const SERVER_BOOT_ID = crypto.randomBytes(8).toString('hex');
 
 export interface TokenPayload {
   userId: string;
@@ -12,6 +16,7 @@ export interface TokenPayload {
   roleName: string;
   permissions: string[];
   roles: { id: string; name: string; permissions: string[] }[];
+  bootId?: string;
 }
 
 export async function hashPassword(password: string): Promise<string> {
@@ -23,9 +28,13 @@ export async function comparePassword(password: string, hash: string): Promise<b
 }
 
 export function generateToken(payload: TokenPayload): string {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+  return jwt.sign({ ...payload, bootId: SERVER_BOOT_ID }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 }
 
 export function verifyToken(token: string): TokenPayload {
-  return jwt.verify(token, JWT_SECRET) as TokenPayload;
+  const decoded = jwt.verify(token, JWT_SECRET) as TokenPayload;
+  if (decoded.bootId && decoded.bootId !== SERVER_BOOT_ID) {
+    throw new Error('Session expired due to server restart');
+  }
+  return decoded;
 }

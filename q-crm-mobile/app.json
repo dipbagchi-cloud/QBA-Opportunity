@@ -1,0 +1,21 @@
+{
+  "expo": {
+    "name": "Q-CRM",
+    "slug": "q-crm-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "platforms": ["ios", "android", "web"],
+    "web": {
+      "bundler": "metro",
+      "output": "single"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.qbalux.qcrm"
+    },
+    "android": {
+      "package": "com.qbalux.qcrm"
+    }
+  }
+}

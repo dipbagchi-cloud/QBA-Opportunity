@@ -467,7 +467,15 @@ function UsersTab() {
     const [userTotal, setUserTotal] = useState(0);
     const [userTotalPages, setUserTotalPages] = useState(0);
     const [userSearch, setUserSearch] = useState("");
-    const userLimit = 10;
+    const [userLimit, setUserLimit] = useState(10);
+
+    // Column filters
+    const [filterDept, setFilterDept] = useState("");
+    const [filterDesig, setFilterDesig] = useState("");
+    const [filterRole, setFilterRole] = useState("");
+    const [filterStatus, setFilterStatus] = useState("");
+    const [filterManager, setFilterManager] = useState("");
+    const [filterOptions, setFilterOptions] = useState<{ departments: string[]; designations: string[]; managers: string[]; roles: string[]; statuses: string[] }>({ departments: [], designations: [], managers: [], roles: [], statuses: ['active', 'inactive'] });
 
     // Reset password
     const [resetUserId, setResetUserId] = useState<string | null>(null);
@@ -475,10 +483,16 @@ function UsersTab() {
     const [resetting, setResetting] = useState(false);
     const [showResetPw, setShowResetPw] = useState(false);
 
-    const fetchUsers = useCallback(async (pg = 1, search = "") => {
+    const fetchUsers = useCallback(async (pg = 1, search = "", lim?: number) => {
         try {
-            const qp = new URLSearchParams({ page: String(pg), limit: String(userLimit) });
+            const effectiveLimit = lim ?? userLimit;
+            const qp = new URLSearchParams({ page: String(pg), limit: String(effectiveLimit) });
             if (search) qp.set("search", search);
+            if (filterDept) qp.set("department", filterDept);
+            if (filterDesig) qp.set("designation", filterDesig);
+            if (filterRole) qp.set("role", filterRole);
+            if (filterStatus) qp.set("status", filterStatus);
+            if (filterManager) qp.set("reportingManager", filterManager);
             const res = await apiClient<any>(`/api/admin/users?${qp.toString()}`);
             // Support paginated { data, total } or legacy array
             if (res.data && Array.isArray(res.data)) {
@@ -486,6 +500,7 @@ function UsersTab() {
                 setUserTotal(res.total ?? res.data.length);
                 setUserPage(res.page ?? pg);
                 setUserTotalPages(res.totalPages ?? 1);
+                if (res.filters) setFilterOptions(res.filters);
             } else if (Array.isArray(res)) {
                 setUsers(res);
                 setUserTotal(res.length);
@@ -495,7 +510,7 @@ function UsersTab() {
         } catch {
             setStatus({ type: "error", message: "Failed to load users." });
         }
-    }, []);
+    }, [userLimit, filterDept, filterDesig, filterRole, filterStatus, filterManager]);
 
     const fetchData = useCallback(async () => {
         setLoading(true);
@@ -584,10 +599,7 @@ function UsersTab() {
             fetchUsers(1, userSearch);
         }, 400);
         return () => clearTimeout(timer);
-    }, [userSearch, fetchUsers]);
-
-    const userStart = userTotal === 0 ? 0 : (userPage - 1) * userLimit + 1;
-    const userEnd = Math.min(userPage * userLimit, userTotal);
+    }, [userSearch, fetchUsers, filterDept, filterDesig, filterRole, filterStatus, filterManager]);
 
     if (loading) {
         return <div className="text-center py-12 text-slate-400">Loading users...</div>;
@@ -648,6 +660,19 @@ function UsersTab() {
                 </div>
             )}
 
+            {/* Active column filters */}
+            {(filterDept || filterDesig || filterRole || filterStatus || filterManager) && (
+                <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                    <span className="text-slate-400">Filters:</span>
+                    {filterDept && <span className="bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full flex items-center gap-1">{filterDept}<button onClick={() => setFilterDept("")}><X className="w-3 h-3" /></button></span>}
+                    {filterDesig && <span className="bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full flex items-center gap-1">{filterDesig}<button onClick={() => setFilterDesig("")}><X className="w-3 h-3" /></button></span>}
+                    {filterManager && <span className="bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full flex items-center gap-1">{filterManager}<button onClick={() => setFilterManager("")}><X className="w-3 h-3" /></button></span>}
+                    {filterRole && <span className="bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full flex items-center gap-1">{filterRole}<button onClick={() => setFilterRole("")}><X className="w-3 h-3" /></button></span>}
+                    {filterStatus && <span className="bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full flex items-center gap-1">{filterStatus}<button onClick={() => setFilterStatus("")}><X className="w-3 h-3" /></button></span>}
+                    <button onClick={() => { setFilterDept(""); setFilterDesig(""); setFilterRole(""); setFilterStatus(""); setFilterManager(""); }} className="text-red-500 hover:underline ml-1">Clear all</button>
+                </div>
+            )}
+
             {/* Users table */}
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm">
                 <div className="overflow-x-auto overflow-y-visible">
@@ -656,11 +681,21 @@ function UsersTab() {
                             <tr>
                                 <th className="text-left px-3 py-2 font-medium text-slate-600">Name</th>
                                 <th className="text-left px-3 py-2 font-medium text-slate-600">Email</th>
-                                <th className="text-left px-3 py-2 font-medium text-slate-600">Department</th>
-                                <th className="text-left px-3 py-2 font-medium text-slate-600">Designation</th>
-                                <th className="text-left px-3 py-2 font-medium text-slate-600">Reporting Manager</th>
-                                <th className="text-left px-3 py-2 font-medium text-slate-600">Role</th>
-                                <th className="text-left px-3 py-2 font-medium text-slate-600">Status</th>
+                                <th className="text-left px-3 py-2 font-medium text-slate-600">
+                                    <ColumnFilter label="Department" value={filterDept} options={filterOptions.departments} onChange={setFilterDept} />
+                                </th>
+                                <th className="text-left px-3 py-2 font-medium text-slate-600">
+                                    <ColumnFilter label="Designation" value={filterDesig} options={filterOptions.designations} onChange={setFilterDesig} />
+                                </th>
+                                <th className="text-left px-3 py-2 font-medium text-slate-600">
+                                    <ColumnFilter label="Reporting Manager" value={filterManager} options={filterOptions.managers} onChange={setFilterManager} />
+                                </th>
+                                <th className="text-left px-3 py-2 font-medium text-slate-600">
+                                    <ColumnFilter label="Role" value={filterRole} options={filterOptions.roles} onChange={setFilterRole} />
+                                </th>
+                                <th className="text-left px-3 py-2 font-medium text-slate-600">
+                                    <ColumnFilter label="Status" value={filterStatus} options={filterOptions.statuses} onChange={setFilterStatus} />
+                                </th>
                                 <th className="text-right px-3 py-2 font-medium text-slate-600">Actions</th>
                             </tr>
                         </thead>
@@ -674,7 +709,7 @@ function UsersTab() {
                                     <td className="px-3 py-2 text-slate-500">{u.email}</td>
                                     <td className="px-3 py-2 text-slate-600 text-xs">{u.department || '-'}</td>
                                     <td className="px-3 py-2 text-slate-600 text-xs">{u.designation || '-'}</td>
-                                    <td className="px-3 py-2 text-slate-600 text-xs">{u.reportingManagerName || '-'}</td>
+                                    <td className="px-3 py-2 text-slate-600 text-xs">{(u as any).reportingManagerName || '-'}</td>
                                     <td className="px-3 py-2">
                                         <RoleMultiSelect
                                             roles={roles}
@@ -711,34 +746,112 @@ function UsersTab() {
                         </tbody>
                     </table>
                 </div>
-                {users.length === 0 && <div className="text-center py-8 text-slate-400">No users found. Click "Sync from QPeople" to import.</div>}
+                {users.length === 0 && <div className="text-center py-8 text-slate-400">No users found. Click &quot;Sync from QPeople&quot; to import.</div>}
             </div>
 
-            {/* Pagination Footer */}
-            {userTotalPages > 0 && (
-                <div className="flex items-center justify-between px-1 py-2">
-                    <span className="text-sm text-slate-500">
-                        {userTotal === 0 ? 'No users' : `Showing ${userStart}–${userEnd} of ${userTotal} users`}
-                    </span>
-                    {userTotalPages > 1 && (
-                        <div className="flex items-center gap-2">
-                            <button
-                                disabled={userPage <= 1}
-                                onClick={() => { setUserPage(userPage - 1); fetchUsers(userPage - 1, userSearch); }}
-                                className="inline-flex items-center gap-1 px-3 py-1 text-sm border border-slate-200 rounded-lg bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
-                            >
-                                <ChevronLeft className="w-4 h-4" /> Previous
+            {/* Advanced Pagination Footer */}
+            <PaginationControls
+                page={userPage}
+                totalPages={userTotalPages}
+                total={userTotal}
+                limit={userLimit}
+                onPageChange={(pg) => { setUserPage(pg); fetchUsers(pg, userSearch); }}
+                onLimitChange={(lim) => { setUserLimit(lim); setUserPage(1); fetchUsers(1, userSearch, lim); }}
+            />
+        </div>
+    );
+}
+
+/* ─────────────── Column Filter Dropdown ─────────────── */
+function ColumnFilter({ label, value, options, onChange }: { label: string; value: string; options: string[]; onChange: (v: string) => void }) {
+    const [open, setOpen] = useState(false);
+    const [filterText, setFilterText] = useState("");
+    const ref = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+        const handler = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+        document.addEventListener("mousedown", handler);
+        return () => document.removeEventListener("mousedown", handler);
+    }, []);
+    const filtered = filterText ? options.filter(o => o.toLowerCase().includes(filterText.toLowerCase())) : options;
+    return (
+        <div ref={ref} className="relative inline-flex items-center gap-1">
+            <span>{label}</span>
+            <button onClick={() => { setOpen(!open); setFilterText(""); }} className={`p-0.5 rounded ${value ? 'text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}>
+                <ChevronDown className="w-3 h-3" />
+            </button>
+            {open && (
+                <div className="absolute top-full left-0 z-50 mt-1 w-48 max-h-60 bg-white rounded-lg border border-slate-200 shadow-lg overflow-hidden animate-in fade-in duration-150">
+                    <div className="p-1.5 border-b border-slate-100">
+                        <input autoFocus value={filterText} onChange={e => setFilterText(e.target.value)} placeholder="Search..." className="w-full px-2 py-1 text-xs border border-slate-200 rounded" />
+                    </div>
+                    <div className="max-h-44 overflow-y-auto">
+                        <button onClick={() => { onChange(""); setOpen(false); }} className={`w-full text-left px-3 py-1.5 text-xs hover:bg-slate-50 ${!value ? 'text-indigo-600 font-medium' : 'text-slate-500'}`}>
+                            All
+                        </button>
+                        {filtered.map(opt => (
+                            <button key={opt} onClick={() => { onChange(opt); setOpen(false); }}
+                                className={`w-full text-left px-3 py-1.5 text-xs hover:bg-slate-50 truncate ${value === opt ? 'text-indigo-600 font-medium bg-indigo-50' : 'text-slate-700'}`}>
+                                {opt}
                             </button>
-                            <span className="text-sm text-slate-600 font-medium px-2">Page {userPage} of {userTotalPages}</span>
-                            <button
-                                disabled={userPage >= userTotalPages}
-                                onClick={() => { setUserPage(userPage + 1); fetchUsers(userPage + 1, userSearch); }}
-                                className="inline-flex items-center gap-1 px-3 py-1 text-sm border border-slate-200 rounded-lg bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
-                            >
-                                Next <ChevronRight className="w-4 h-4" />
+                        ))}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
+/* ─────────────── Advanced Pagination ─────────────── */
+function PaginationControls({ page, totalPages, total, limit, onPageChange, onLimitChange }: {
+    page: number; totalPages: number; total: number; limit: number;
+    onPageChange: (pg: number) => void; onLimitChange: (lim: number) => void;
+}) {
+    const start = total === 0 ? 0 : (page - 1) * limit + 1;
+    const end = Math.min(page * limit, total);
+
+    // Generate page buttons: show first, last, and nearby pages
+    const pageButtons: (number | '...')[] = [];
+    if (totalPages <= 7) {
+        for (let i = 1; i <= totalPages; i++) pageButtons.push(i);
+    } else {
+        pageButtons.push(1);
+        if (page > 3) pageButtons.push('...');
+        for (let i = Math.max(2, page - 1); i <= Math.min(totalPages - 1, page + 1); i++) pageButtons.push(i);
+        if (page < totalPages - 2) pageButtons.push('...');
+        pageButtons.push(totalPages);
+    }
+
+    return (
+        <div className="flex flex-wrap items-center justify-between gap-3 px-1 py-2">
+            <div className="flex items-center gap-3">
+                <span className="text-xs text-slate-500">
+                    {total === 0 ? 'No results' : `${start}–${end} of ${total}`}
+                </span>
+                <select value={limit} onChange={e => onLimitChange(Number(e.target.value))}
+                    className="text-xs border border-slate-200 rounded px-1.5 py-1 bg-white text-slate-600">
+                    {[10, 25, 50, 100].map(n => <option key={n} value={n}>{n} / page</option>)}
+                </select>
+            </div>
+            {totalPages > 1 && (
+                <div className="flex items-center gap-1">
+                    <button disabled={page <= 1} onClick={() => onPageChange(page - 1)}
+                        className="px-2 py-1 text-xs border border-slate-200 rounded bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed">
+                        <ChevronLeft className="w-3.5 h-3.5" />
+                    </button>
+                    {pageButtons.map((btn, idx) =>
+                        btn === '...' ? (
+                            <span key={`dots-${idx}`} className="px-1.5 text-xs text-slate-400">…</span>
+                        ) : (
+                            <button key={btn} onClick={() => onPageChange(btn as number)}
+                                className={`px-2.5 py-1 text-xs rounded border ${page === btn ? 'bg-indigo-600 text-white border-indigo-600' : 'border-slate-200 bg-white hover:bg-slate-50 text-slate-600'}`}>
+                                {btn}
                             </button>
-                        </div>
+                        )
                     )}
+                    <button disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}
+                        className="px-2 py-1 text-xs border border-slate-200 rounded bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed">
+                        <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
                 </div>
             )}
         </div>
@@ -2604,7 +2717,7 @@ function QPeopleMappingTab() {
     const [saving, setSaving] = useState(false);
     const [applying, setApplying] = useState(false);
     const [search, setSearch] = useState("");
-    const [editRow, setEditRow] = useState<{ designation: string; crmRoleId: string; jobBand: string } | null>(null);
+    const [editRow, setEditRow] = useState<{ designation: string; crmRoleIds: string[]; jobBand: string } | null>(null);
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -2627,19 +2740,19 @@ function QPeopleMappingTab() {
     const mappingMap = new Map(mappings.map((m: any) => [m.qpeopleDesignation, m]));
     const unmappedDesignations = designations.filter(d => !mappingMap.has(d));
     const filtered = search
-        ? mappings.filter((m: any) => m.qpeopleDesignation.toLowerCase().includes(search.toLowerCase()) || m.crmRole?.name?.toLowerCase().includes(search.toLowerCase()))
+        ? mappings.filter((m: any) => m.qpeopleDesignation.toLowerCase().includes(search.toLowerCase()) || m.crmRoles?.some((r: any) => r.name?.toLowerCase().includes(search.toLowerCase())))
         : mappings;
     const filteredUnmapped = search
         ? unmappedDesignations.filter(d => d.toLowerCase().includes(search.toLowerCase()))
         : unmappedDesignations;
 
-    async function handleSave(designation: string, crmRoleId: string, jobBand: string) {
-        if (!crmRoleId) return;
+    async function handleSave(designation: string, crmRoleIds: string[], jobBand: string) {
+        if (crmRoleIds.length === 0) return;
         setSaving(true);
         try {
             await apiClient("/api/admin/qpeople-mappings", {
                 method: "POST",
-                body: JSON.stringify({ qpeopleDesignation: designation, crmRoleId, jobBand: jobBand || null }),
+                body: JSON.stringify({ qpeopleDesignation: designation, crmRoleIds, jobBand: jobBand || null }),
             });
             setEditRow(null);
             await load();
@@ -2665,6 +2778,16 @@ function QPeopleMappingTab() {
         setApplying(false);
     }
 
+    function toggleEditRole(roleId: string) {
+        if (!editRow) return;
+        setEditRow({
+            ...editRow,
+            crmRoleIds: editRow.crmRoleIds.includes(roleId)
+                ? editRow.crmRoleIds.filter(id => id !== roleId)
+                : [...editRow.crmRoleIds, roleId],
+        });
+    }
+
     if (loading) return <div className="flex items-center justify-center py-16"><RefreshCw className="w-5 h-5 animate-spin text-slate-400" /></div>;
 
     return (
@@ -2672,7 +2795,7 @@ function QPeopleMappingTab() {
             <div className="flex items-center justify-between gap-3">
                 <div>
                     <h2 className="text-lg font-bold text-slate-800">QPeople Role Mapping</h2>
-                    <p className="text-xs text-slate-500">Map QPeople designations to Q-CRM roles. During sync, users are auto-assigned the mapped role.</p>
+                    <p className="text-xs text-slate-500">Map QPeople designations to one or more Q-CRM roles. During sync, users are auto-assigned the mapped roles.</p>
                 </div>
                 <button onClick={handleApplyAll} disabled={applying || mappings.length === 0}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700 disabled:opacity-50">
@@ -2703,7 +2826,7 @@ function QPeopleMappingTab() {
                             <tr>
                                 <th className="text-left py-2 px-3 font-semibold text-slate-600">QPeople Designation</th>
                                 <th className="text-left py-2 px-3 font-semibold text-slate-600">Job Band</th>
-                                <th className="text-left py-2 px-3 font-semibold text-slate-600">CRM Role</th>
+                                <th className="text-left py-2 px-3 font-semibold text-slate-600">CRM Roles</th>
                                 <th className="text-right py-2 px-3 font-semibold text-slate-600">Actions</th>
                             </tr>
                         </thead>
@@ -2718,15 +2841,21 @@ function QPeopleMappingTab() {
                                                     placeholder="e.g. Band 3" className="w-full px-2 py-1 border border-slate-200 rounded text-xs" />
                                             </td>
                                             <td className="py-2 px-3">
-                                                <select value={editRow.crmRoleId} onChange={e => setEditRow({ ...editRow, crmRoleId: e.target.value })}
-                                                    className="w-full px-2 py-1 border border-slate-200 rounded text-xs">
-                                                    <option value="">Select role...</option>
-                                                    {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-                                                </select>
+                                                <div className="flex flex-wrap gap-1">
+                                                    {roles.map(r => {
+                                                        const checked = editRow.crmRoleIds.includes(r.id);
+                                                        return (
+                                                            <button key={r.id} onClick={() => toggleEditRole(r.id)}
+                                                                className={`px-2 py-0.5 rounded-full text-[10px] font-medium border transition-colors ${checked ? 'bg-indigo-100 text-indigo-700 border-indigo-300' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-indigo-300'}`}>
+                                                                {checked && <Check className="w-2.5 h-2.5 inline mr-0.5" />}{r.name}
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
                                             </td>
                                             <td className="py-2 px-3 text-right space-x-1">
-                                                <button onClick={() => handleSave(editRow.designation, editRow.crmRoleId, editRow.jobBand)} disabled={saving}
-                                                    className="p-1 text-green-600 hover:text-green-800"><Check className="w-3.5 h-3.5" /></button>
+                                                <button onClick={() => handleSave(editRow.designation, editRow.crmRoleIds, editRow.jobBand)} disabled={saving || editRow.crmRoleIds.length === 0}
+                                                    className="p-1 text-green-600 hover:text-green-800 disabled:opacity-30"><Check className="w-3.5 h-3.5" /></button>
                                                 <button onClick={() => setEditRow(null)} className="p-1 text-slate-400 hover:text-slate-600"><X className="w-3.5 h-3.5" /></button>
                                             </td>
                                         </>
@@ -2734,9 +2863,15 @@ function QPeopleMappingTab() {
                                         <>
                                             <td className="py-2 px-3 font-medium text-slate-800">{m.qpeopleDesignation}</td>
                                             <td className="py-2 px-3 text-slate-500">{m.jobBand || "—"}</td>
-                                            <td className="py-2 px-3"><span className="bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full text-[10px] font-medium">{m.crmRole?.name}</span></td>
+                                            <td className="py-2 px-3">
+                                                <div className="flex flex-wrap gap-1">
+                                                    {(m.crmRoles || []).map((r: any) => (
+                                                        <span key={r.id} className="bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full text-[10px] font-medium">{r.name}</span>
+                                                    ))}
+                                                </div>
+                                            </td>
                                             <td className="py-2 px-3 text-right space-x-1">
-                                                <button onClick={() => setEditRow({ designation: m.qpeopleDesignation, crmRoleId: m.crmRoleId, jobBand: m.jobBand || "" })}
+                                                <button onClick={() => setEditRow({ designation: m.qpeopleDesignation, crmRoleIds: m.crmRoleIds || [], jobBand: m.jobBand || "" })}
                                                     className="p-1 text-slate-400 hover:text-indigo-600"><Pencil className="w-3.5 h-3.5" /></button>
                                                 <button onClick={() => handleDelete(m.id)} className="p-1 text-slate-400 hover:text-red-500"><Trash2 className="w-3.5 h-3.5" /></button>
                                             </td>
@@ -2759,7 +2894,7 @@ function QPeopleMappingTab() {
                                 <tr>
                                     <th className="text-left py-2 px-3 font-semibold text-amber-700">QPeople Designation</th>
                                     <th className="text-left py-2 px-3 font-semibold text-amber-700">Job Band</th>
-                                    <th className="text-left py-2 px-3 font-semibold text-amber-700">Assign CRM Role</th>
+                                    <th className="text-left py-2 px-3 font-semibold text-amber-700">Assign CRM Roles</th>
                                     <th className="text-right py-2 px-3 font-semibold text-amber-700"></th>
                                 </tr>
                             </thead>
@@ -2774,14 +2909,20 @@ function QPeopleMappingTab() {
                                                         placeholder="e.g. Band 3" className="w-full px-2 py-1 border border-slate-200 rounded text-xs" />
                                                 </td>
                                                 <td className="py-2 px-3">
-                                                    <select value={editRow.crmRoleId} onChange={e => setEditRow({ ...editRow, crmRoleId: e.target.value })}
-                                                        className="w-full px-2 py-1 border border-slate-200 rounded text-xs">
-                                                        <option value="">Select role...</option>
-                                                        {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-                                                    </select>
+                                                    <div className="flex flex-wrap gap-1">
+                                                        {roles.map(r => {
+                                                            const checked = editRow.crmRoleIds.includes(r.id);
+                                                            return (
+                                                                <button key={r.id} onClick={() => toggleEditRole(r.id)}
+                                                                    className={`px-2 py-0.5 rounded-full text-[10px] font-medium border transition-colors ${checked ? 'bg-indigo-100 text-indigo-700 border-indigo-300' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-indigo-300'}`}>
+                                                                    {checked && <Check className="w-2.5 h-2.5 inline mr-0.5" />}{r.name}
+                                                                </button>
+                                                            );
+                                                        })}
+                                                    </div>
                                                 </td>
                                                 <td className="py-2 px-3 text-right space-x-1">
-                                                    <button onClick={() => handleSave(editRow.designation, editRow.crmRoleId, editRow.jobBand)} disabled={saving || !editRow.crmRoleId}
+                                                    <button onClick={() => handleSave(editRow.designation, editRow.crmRoleIds, editRow.jobBand)} disabled={saving || editRow.crmRoleIds.length === 0}
                                                         className="p-1 text-green-600 hover:text-green-800 disabled:opacity-30"><Check className="w-3.5 h-3.5" /></button>
                                                     <button onClick={() => setEditRow(null)} className="p-1 text-slate-400 hover:text-slate-600"><X className="w-3.5 h-3.5" /></button>
                                                 </td>
@@ -2792,7 +2933,7 @@ function QPeopleMappingTab() {
                                                 <td className="py-2 px-3 text-slate-400">—</td>
                                                 <td className="py-2 px-3 text-slate-400">Not mapped</td>
                                                 <td className="py-2 px-3 text-right">
-                                                    <button onClick={() => setEditRow({ designation: d, crmRoleId: "", jobBand: "" })}
+                                                    <button onClick={() => setEditRow({ designation: d, crmRoleIds: [], jobBand: "" })}
                                                         className="text-[10px] font-semibold text-indigo-600 hover:text-indigo-800">Map</button>
                                                 </td>
                                             </>
