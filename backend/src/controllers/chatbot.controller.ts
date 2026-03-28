@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { processChat, UserContext } from '../lib/chatbot';
+import { processChat, logInteraction, UserContext } from '../lib/chatbot-v2';
 
 // POST /api/chatbot/message
 export async function chatMessage(req: Request, res: Response) {
@@ -18,10 +18,12 @@ export async function chatMessage(req: Request, res: Response) {
             email: user.email,
             roleName: user.roleName,
             permissions: user.permissions || [],
-            userName: user.email.split('@')[0],
+            userName: user.name || user.email.split('@')[0],
         };
 
         const response = await processChat(message.trim(), ctx);
+        // Log async — don't block response
+        logInteraction(message.trim(), response, ctx);
         res.json(response);
     } catch (error: any) {
         console.error('Chatbot error:', error);

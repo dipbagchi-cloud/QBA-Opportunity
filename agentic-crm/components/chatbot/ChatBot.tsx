@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { MessageSquare, X, Send, Sparkles, ChevronDown, BarChart3, Table, AlertTriangle, FileText, Loader2 } from "lucide-react";
+import { MessageSquare, X, Send, Sparkles, ChevronDown, BarChart3, Table, AlertTriangle, FileText, Loader2, CheckCircle2, XCircle, RotateCcw } from "lucide-react";
 import { apiClient } from "@/lib/api";
 
 // ───── Types ─────
@@ -11,6 +11,7 @@ interface ChatMsg {
     content: string;
     data?: any;
     actions?: { tool: string; success: boolean; summary: string }[];
+    pendingFields?: string[];
     timestamp: Date;
 }
 
@@ -102,11 +103,19 @@ function OpportunityDetail({ data }: { data: any }) {
         ['Technology', opp.technology],
         ['Region', opp.region],
         ['Priority', opp.priority],
-        ['Probability', `${opp.probability}%`],
-        ['GOM Approved', opp.gomApproved ? 'Yes' : 'No'],
+        ['Probability', opp.probability != null ? `${opp.probability}%` : null],
+        ['GOM Approved', opp.gomApproved != null ? (opp.gomApproved ? 'Yes' : 'No') : null],
         ['Pricing Model', opp.pricingModel],
         ['Sales Rep', opp.salesRepName],
-    ].filter(([, v]) => v && v !== '—');
+        ['Manager', opp.managerName],
+        ['Day Rate', opp.expectedDayRate ? `$${Number(opp.expectedDayRate).toLocaleString()}` : null],
+        ['Start Date', opp.tentativeStartDate ? new Date(opp.tentativeStartDate).toLocaleDateString() : null],
+        ['Duration', opp.tentativeDuration ? `${opp.tentativeDuration} ${opp.tentativeDurationUnit || ''}` : null],
+        ['Close Date', opp.expectedCloseDate ? new Date(opp.expectedCloseDate).toLocaleDateString() : null],
+        ['Re-estimates', opp.reEstimateCount > 0 ? String(opp.reEstimateCount) : null],
+        ['Status', opp.detailedStatus],
+        ['Description', opp.description],
+    ].filter(([, v]) => v && v !== '—' && v !== 'null');
 
     return (
         <div className="mt-2 space-y-2">
@@ -207,6 +216,11 @@ export default function ChatBot() {
         if (isOpen && inputRef.current) inputRef.current.focus();
     }, [isOpen]);
 
+    // Re-focus input after loading completes
+    useEffect(() => {
+        if (!loading && isOpen && inputRef.current) inputRef.current.focus();
+    }, [loading, isOpen]);
+
     const sendMessage = useCallback(async (text: string) => {
         if (!text.trim() || loading) return;
         const userMsg: ChatMsg = { role: "user", content: text.trim(), timestamp: new Date() };
@@ -224,6 +238,7 @@ export default function ChatBot() {
                 content: res.content,
                 data: res.data,
                 actions: res.actions,
+                pendingFields: res.pendingFields,
                 timestamp: new Date(),
             };
             setMessages(prev => [...prev, botMsg]);
@@ -235,6 +250,8 @@ export default function ChatBot() {
             }]);
         }
         setLoading(false);
+        // Re-focus input after bot responds
+        setTimeout(() => { inputRef.current?.focus(); }, 50);
     }, [loading]);
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -318,10 +335,11 @@ export default function ChatBot() {
                                     )}
                                     <div className="text-xs whitespace-pre-wrap leading-relaxed">
                                         {msg.content.split('\n').map((line, j) => {
-                                            // Bold text
+                                            // Bold text + bullet rendering
                                             const parts = line.split(/(\*\*[^*]+\*\*)/g);
+                                            const isBullet = line.trimStart().startsWith('•') || line.trimStart().startsWith('-');
                                             return (
-                                                <div key={j}>
+                                                <div key={j} className={isBullet ? 'ml-2' : ''}>
                                                     {parts.map((part, k) =>
                                                         part.startsWith('**') && part.endsWith('**')
                                                             ? <strong key={k}>{part.slice(2, -2)}</strong>
@@ -332,6 +350,27 @@ export default function ChatBot() {
                                         })}
                                     </div>
                                     {msg.data && <DataBlock data={msg.data} />}
+
+                                    {/* Confirmation quick-actions */}
+                                    {msg.role === "assistant" && msg.content.includes('**"yes"**') && i === messages.length - 1 && !loading && (
+                                        <div className="flex gap-2 mt-2">
+                                            <button onClick={() => sendMessage("yes")} className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-green-500 text-white text-[11px] font-medium hover:bg-green-600 transition-colors">
+                                                <CheckCircle2 className="w-3.5 h-3.5" /> Confirm
+                                            </button>
+                                            <button onClick={() => sendMessage("no")} className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-red-500 text-white text-[11px] font-medium hover:bg-red-600 transition-colors">
+                                                <XCircle className="w-3.5 h-3.5" /> Cancel
+                                            </button>
+                                        </div>
+                                    )}
+
+                                    {/* Pending fields indicator */}
+                                    {msg.role === "assistant" && msg.pendingFields && msg.pendingFields.length > 0 && i === messages.length - 1 && (
+                                        <div className="mt-2 flex items-center gap-1 text-[9px] text-indigo-500">
+                                            <RotateCcw className="w-3 h-3" />
+                                            <span>{msg.pendingFields.length} field{msg.pendingFields.length > 1 ? 's' : ''} remaining</span>
+                                        </div>
+                                    )}
+
                                     <div className={`text-[9px] mt-1 ${msg.role === "user" ? "text-white/50" : "text-slate-400"}`}>
                                         {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                     </div>
@@ -367,13 +406,30 @@ export default function ChatBot() {
 
                     {/* Input */}
                     <div className="px-3 py-3 border-t border-slate-200 bg-white">
+                        {/* Cancel button when in interactive mode */}
+                        {messages.length > 0 && messages[messages.length - 1]?.pendingFields?.length && !loading && (
+                            <div className="flex items-center gap-2 mb-2">
+                                <button
+                                    onClick={() => sendMessage("cancel")}
+                                    className="text-[10px] text-red-500 hover:text-red-600 flex items-center gap-1"
+                                >
+                                    <XCircle className="w-3 h-3" /> Cancel data entry
+                                </button>
+                                <button
+                                    onClick={() => sendMessage("skip")}
+                                    className="text-[10px] text-slate-400 hover:text-slate-500 flex items-center gap-1"
+                                >
+                                    Skip this field
+                                </button>
+                            </div>
+                        )}
                         <div className="flex items-center gap-2">
                             <input
                                 ref={inputRef}
                                 value={input}
                                 onChange={e => setInput(e.target.value)}
                                 onKeyDown={handleKeyDown}
-                                placeholder="Ask about opportunities, analytics..."
+                                placeholder={messages.length > 0 && messages[messages.length - 1]?.pendingFields?.length ? "Type your answer or 'skip'..." : "Ask about opportunities, analytics..."}
                                 className="flex-1 bg-slate-100 rounded-xl px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 border border-slate-200"
                                 disabled={loading}
                                 maxLength={2000}

@@ -1,4 +1,4 @@
-import { PrismaClient, Prisma } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
@@ -86,7 +86,7 @@ function parseUserIntent(message: string): ParsedIntent[] {
     const intents: ParsedIntent[] = [];
 
     // ── CREATE ──
-    if (/\b(create|add|new)\b.*\b(opportunity|deal|opp)\b/i.test(lower)) {
+    if (/\b(create|add|new)\b.*\b(opportunities?|deals?|opps?)\b/i.test(lower)) {
         const params: Record<string, any> = {};
         // Extract title after "called/named/titled"
         const titleMatch = lower.match(/(?:called|named|titled|name)\s+["']?([^"',]+)["']?/i);
@@ -110,7 +110,7 @@ function parseUserIntent(message: string): ParsedIntent[] {
     }
 
     // ── UPDATE / MOVE STAGE ──
-    if (/\b(move|update|change|set|advance|promote)\b/i.test(lower) && /\b(opportunity|deal|opp|stage|value|status)\b/i.test(lower)) {
+    if (/\b(move|update|change|set|advance|promote)\b/i.test(lower) && /\b(opportunities?|deals?|opps?|stage|value|status)\b/i.test(lower)) {
         const params: Record<string, any> = {};
         // Extract opportunity name (in quotes or after "opportunity/deal")
         const nameMatch = lower.match(/(?:opportunity|deal|opp)\s+["']([^"']+)["']/i) ||
@@ -142,7 +142,7 @@ function parseUserIntent(message: string): ParsedIntent[] {
     }
 
     // ── LIST / SEARCH ──
-    if (/\b(list|show|find|search|get|display|what are|give me)\b/i.test(lower) && /\b(opportunit|deal|pipeline|opp)\b/i.test(lower)) {
+    if (/\b(list|show|find|search|get|display|what are|give me)\b/i.test(lower) && /\b(opportunities?|deals?|pipeline|opps?)\b/i.test(lower)) {
         const params: Record<string, any> = {};
         // Stage filter
         for (const stage of STAGE_NAMES) {
@@ -173,7 +173,7 @@ function parseUserIntent(message: string): ParsedIntent[] {
     }
 
     // ── SPECIFIC OPPORTUNITY DETAILS ──
-    if (/\b(details?|info|about|tell me about)\b/i.test(lower) && /\b(opportunity|deal|opp)\b/i.test(lower)) {
+    if (/\b(details?|info|about|tell me about)\b/i.test(lower) && /\b(opportunities?|deals?|opps?)\b/i.test(lower)) {
         const nameMatch = lower.match(/(?:opportunity|deal|opp)\s+["']([^"']+)["']/i) ||
             lower.match(/about\s+["']([^"']+)["']/i);
         if (nameMatch) {
@@ -187,12 +187,12 @@ function parseUserIntent(message: string): ParsedIntent[] {
     }
 
     // ── ANALYTICS: Revenue ──
-    if (/\b(revenue|top\s*clients|revenue\s*by|monthly\s*revenue|earning|income)\b/i.test(lower)) {
+    if (/\b(revenue|top\s*clients?|revenue\s*by|monthly\s*revenue|earning|income)\b/i.test(lower)) {
         const params: Record<string, any> = {};
-        if (/\b(tech|technology|stack)\b/i.test(lower)) params.groupBy = 'technology';
-        else if (/\b(client|customer|account)\b/i.test(lower)) params.groupBy = 'client';
-        else if (/\b(owner|rep|sales\s*rep)\b/i.test(lower)) params.groupBy = 'owner';
-        else if (/\b(month|monthly|trend)\b/i.test(lower)) params.groupBy = 'month';
+        if (/\b(tech(nology)?|stack)\b/i.test(lower)) params.groupBy = 'technology';
+        else if (/\b(clients?|customers?|accounts?)\b/i.test(lower)) params.groupBy = 'client';
+        else if (/\b(owners?|reps?|sales\s*reps?)\b/i.test(lower)) params.groupBy = 'owner';
+        else if (/\b(months?|monthly|trend)\b/i.test(lower)) params.groupBy = 'month';
         intents.push({ tool: 'get_revenue_analytics', params, confidence: 0.85 });
     }
 
