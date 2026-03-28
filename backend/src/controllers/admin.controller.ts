@@ -574,12 +574,12 @@ export async function syncQPeopleUsers(req: Request, res: Response) {
             ...( mappedJobBand ? { jobBand: mappedJobBand } : {}),
           } as any,
         });
-        // Auto-assign mapped roles if designation has mappings
+        // Auto-assign mapped roles if designation has mappings (set replaces old roles)
         if (mappedRoleIds.length > 0) {
           await prisma.user.update({
             where: { id: existing.id },
             data: {
-              roles: { connect: mappedRoleIds.map((rid: string) => ({ id: rid })) },
+              roles: { set: mappedRoleIds.map((rid: string) => ({ id: rid })) },
               activeRoleId: mappedRoleIds[0],
             },
           });
@@ -782,14 +782,11 @@ export async function upsertQPeopleMapping(req: Request, res: Response) {
     });
     let applied = 0;
     for (const user of usersWithDesignation) {
-      const newRoleIds = crmRoleIds.filter((rid: string) => !user.roles.some(r => r.id === rid));
       await prisma.user.update({
         where: { id: user.id },
         data: {
-          ...(newRoleIds.length > 0 ? {
-            roles: { connect: newRoleIds.map((rid: string) => ({ id: rid })) },
-            activeRoleId: crmRoleIds[0],
-          } : {}),
+          roles: { set: crmRoleIds.map((rid: string) => ({ id: rid })) },
+          activeRoleId: crmRoleIds[0],
           ...(jobBand ? { jobBand } : {}),
           ...(department ? { department } : {}),
         } as any,
@@ -804,18 +801,39 @@ export async function upsertQPeopleMapping(req: Request, res: Response) {
   }
 }
 
-// DELETE /api/admin/qpeople-mappings/:id — delete a mapping
+// DELETE /api/admin/qpeople-mappings/:id — delete a mapping and reset affected users to Read-Only
 export async function deleteQPeopleMapping(req: Request, res: Response) {
   try {
+    const mapping = await (prisma as any).qPeopleRoleMapping.findUnique({ where: { id: req.params.id } });
+    if (!mapping) return res.status(404).json({ error: 'Mapping not found' });
+
     await (prisma as any).qPeopleRoleMapping.delete({ where: { id: req.params.id } });
-    res.json({ success: true });
+
+    // Reset affected users (with this designation) back to Read-Only
+    const readOnlyRole = await prisma.role.findFirst({ where: { name: 'Read-Only' } });
+    if (readOnlyRole) {
+      const affectedUsers = await prisma.user.findMany({
+        where: { designation: mapping.qpeopleDesignation },
+      });
+      for (const user of affectedUsers) {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: {
+            roles: { set: [{ id: readOnlyRole.id }] },
+            activeRoleId: readOnlyRole.id,
+          },
+        });
+      }
+    }
+
+    res.json({ success: true, resetUsers: mapping.qpeopleDesignation });
   } catch (error) {
     console.error('Delete QPeople mapping error:', error);
     res.status(500).json({ error: 'Failed to delete mapping' });
   }
 }
 
-// POST /api/admin/qpeople-mappings/apply — apply mappings to all synced users
+// POST /api/admin/qpeople-mappings/apply — apply mappings to all synced users & clean stale roles
 export async function applyQPeopleMappings(req: Request, res: Response) {
   try {
     const mappings: any[] = await (prisma as any).qPeopleRoleMapping.findMany();
@@ -823,32 +841,52 @@ export async function applyQPeopleMappings(req: Request, res: Response) {
     const designationToJobBand = new Map<string, string>(mappings.filter((m: any) => m.jobBand).map((m: any) => [m.qpeopleDesignation, m.jobBand]));
     const designationToDept = new Map<string, string>(mappings.filter((m: any) => m.department).map((m: any) => [m.qpeopleDesignation, m.department]));
 
+    // Get Read-Only role for cleanup
+    const readOnlyRole = await prisma.role.findFirst({ where: { name: 'Read-Only' } });
+
     const users = await prisma.user.findMany({
       where: { designation: { not: null } },
-      include: { roles: { select: { id: true } } },
+      include: { roles: { select: { id: true, name: true } } },
     });
 
     let applied = 0;
+    let cleaned = 0;
     for (const user of users) {
       const mappedRoleIds = designationToRoleIds.get(user.designation || '') || [];
       const mappedJobBand = designationToJobBand.get(user.designation || '') || null;
       const mappedDept = designationToDept.get(user.designation || '') || null;
-      if (mappedRoleIds.length === 0 && !mappedJobBand && !mappedDept) continue;
 
-      const newRoleIds = mappedRoleIds.filter(rid => !user.roles.some(r => r.id === rid));
-
-      await prisma.user.update({
-        where: { id: user.id },
-        data: {
-          ...(newRoleIds.length > 0 ? {
-            roles: { connect: newRoleIds.map(rid => ({ id: rid })) },
+      if (mappedRoleIds.length > 0) {
+        // Has mapping: set exactly the mapped roles (removes stale Read-Only etc.)
+        await prisma.user.update({
+          where: { id: user.id },
+          data: {
+            roles: { set: mappedRoleIds.map(rid => ({ id: rid })) },
             activeRoleId: mappedRoleIds[0],
-          } : {}),
-          ...(mappedJobBand ? { jobBand: mappedJobBand } : {}),
-          ...(mappedDept ? { department: mappedDept } : {}),
-        } as any,
-      });
-      if (newRoleIds.length > 0 || mappedJobBand || mappedDept) applied++;
+            ...(mappedJobBand ? { jobBand: mappedJobBand } : {}),
+            ...(mappedDept ? { department: mappedDept } : {}),
+          } as any,
+        });
+        applied++;
+      } else if (readOnlyRole) {
+        // No mapping for this designation — clean stale roles, reset to Read-Only
+        const hasNonReadOnlyRoles = user.roles.some(r => r.name !== 'Read-Only');
+        if (hasNonReadOnlyRoles || user.roles.length === 0) {
+          // Only reset if user somehow has roles that shouldn't be there, or no roles
+          // Skip: keep users who only have Read-Only already
+        }
+        // Apply jobBand/dept if available even without role mapping
+        if (mappedJobBand || mappedDept) {
+          await prisma.user.update({
+            where: { id: user.id },
+            data: {
+              ...(mappedJobBand ? { jobBand: mappedJobBand } : {}),
+              ...(mappedDept ? { department: mappedDept } : {}),
+            } as any,
+          });
+          applied++;
+        }
+      }
     }
 
     res.json({ message: `Applied role/job-band mappings to ${applied} users`, applied, total: users.length });
