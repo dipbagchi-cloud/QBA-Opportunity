@@ -115,9 +115,12 @@ export async function getAnalytics(req: Request, res: Response) {
             if (stageName === 'Closed Won') countByOwner[ownerName].won += 1;
             else if (stageName !== 'Closed Lost' && stageName !== 'Proposal Lost') countByOwner[ownerName].active += 1;
 
-            // Revenue by Technology (Tech Stack)
-            const tech = opp.technology || 'unknown';
-            revenueByTech[tech] = (revenueByTech[tech] || 0) + rev;
+            // Revenue by Technology (Tech Stack) — split comma-separated into individual techs
+            const techStr = opp.technology || 'unknown';
+            const techs = techStr.split(',').map((t: string) => t.trim()).filter(Boolean);
+            for (const t of techs.length > 0 ? techs : ['unknown']) {
+                revenueByTech[t] = (revenueByTech[t] || 0) + rev;
+            }
 
             // Revenue by Client
             revenueByClient[clientName] = (revenueByClient[clientName] || 0) + rev;
