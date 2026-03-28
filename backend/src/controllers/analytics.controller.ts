@@ -220,6 +220,94 @@ export async function getAnalytics(req: Request, res: Response) {
         // Total revenue computations
         const projectedRevenue = activeOpps.reduce((sum, o) => sum + getRevenue(o), 0);
         const closedRevenue = wonOpps.reduce((sum, o) => sum + getRevenue(o), 0);
+        const lostRevenue = lostOpps.reduce((sum, o) => sum + getRevenue(o), 0);
+        const wonRevenue = closedRevenue;
+        const totalOpportunities = opportunities.length;
+        const winRate = closedOpps > 0 ? (wonOpps.length / closedOpps) * 100 : 0;
+        const avgDealSize = totalOpportunities > 0 ? (projectedRevenue + closedRevenue) / totalOpportunities : 0;
+
+        // Stage distribution with stage/count format (for mobile analytics)
+        const stageDistribution = statusPieData.map(s => ({ stage: s.name, name: s.name, count: s.value, value: s.value }));
+
+        // Revenue by technology with technology/revenue format
+        const revenueByTechnology = techRevenueData.map(t => ({ technology: t.name, name: t.name, revenue: t.value, value: t.value }));
+
+        // Revenue by client with client/revenue format
+        const revenueByClientFull = clientRevenueData.map(c => ({ client: c.name, name: c.name, revenue: c.value, value: c.value }));
+
+        // Pipeline stages breakdown
+        const pipelineStages: Record<string, { stage: string; count: number; value: number }> = {};
+        activeOpps.forEach(o => {
+            const stageName = o.stage?.name || o.currentStage || 'Pipeline';
+            if (!pipelineStages[stageName]) pipelineStages[stageName] = { stage: stageName, count: 0, value: 0 };
+            pipelineStages[stageName].count += 1;
+            pipelineStages[stageName].value += getRevenue(o);
+        });
+        const stageBreakdown = Object.values(pipelineStages).map(s => ({ stage: s.stage, name: s.stage, count: s.count, value: s.value }));
+
+        // Pipeline by region
+        const regionMap: Record<string, { name: string; count: number; value: number }> = {};
+        activeOpps.forEach(o => {
+            const region = o.region || 'Unknown';
+            if (!regionMap[region]) regionMap[region] = { name: region, count: 0, value: 0 };
+            regionMap[region].count += 1;
+            regionMap[region].value += getRevenue(o);
+        });
+        const byRegion = Object.values(regionMap);
+
+        // Pipeline by sales owner
+        const salesOwnerMap: Record<string, { name: string; count: number; value: number }> = {};
+        activeOpps.forEach(o => {
+            const owner = o.salesRepName || o.owner?.name || 'Unassigned';
+            if (!salesOwnerMap[owner]) salesOwnerMap[owner] = { name: owner, count: 0, value: 0 };
+            salesOwnerMap[owner].count += 1;
+            salesOwnerMap[owner].value += getRevenue(o);
+        });
+        const bySalesOwner = Object.values(salesOwnerMap);
+
+        // Sales by sales owner (won/lost)
+        const salesByOwner: Record<string, { name: string; wonRevenue: number; wonCount: number; lostCount: number }> = {};
+        [...wonOpps, ...lostOpps].forEach(o => {
+            const owner = o.salesRepName || o.owner?.name || 'Unassigned';
+            if (!salesByOwner[owner]) salesByOwner[owner] = { name: owner, wonRevenue: 0, wonCount: 0, lostCount: 0 };
+            const sn = o.stage?.name || o.currentStage;
+            if (sn === 'Closed Won') { salesByOwner[owner].wonRevenue += getRevenue(o); salesByOwner[owner].wonCount += 1; }
+            else { salesByOwner[owner].lostCount += 1; }
+        });
+        const salesBySalesOwner = Object.values(salesByOwner);
+
+        // Loss reasons
+        const lossReasonMap: Record<string, number> = {};
+        lostOpps.forEach(o => {
+            const reason = (o as any).lossReason || 'Unspecified';
+            lossReasonMap[reason] = (lossReasonMap[reason] || 0) + 1;
+        });
+        const lossReasons = Object.entries(lossReasonMap).map(([reason, count]) => ({ reason, name: reason, count }));
+
+        // Conversion funnel
+        const pipelineCount = opportunities.length;
+        const presalesCount = presalesOpps.length;
+        const salesPhaseCount = opportunities.filter(o => {
+            const sn = o.stage?.name || o.currentStage;
+            return sn === 'Negotiation' || sn === 'Closed Won' || sn === 'Closed Lost' || sn === 'Proposal Lost';
+        }).length;
+        const pipelineToPresales = pipelineCount > 0 ? (presalesCount / pipelineCount) * 100 : 0;
+        const presalesToSales = presalesCount > 0 ? (salesPhaseCount / presalesCount) * 100 : 0;
+        const salesToWon = salesPhaseCount > 0 ? (wonOpps.length / salesPhaseCount) * 100 : 0;
+        const overallConversion = pipelineCount > 0 ? (wonOpps.length / pipelineCount) * 100 : 0;
+
+        // GOM metrics for presales
+        let gomApprovedCount = 0;
+        let gomPendingCount = 0;
+        let totalGomPercent = 0;
+        let gomEligibleCount = 0;
+        presalesOpps.forEach(o => {
+            if ((o as any).gomApproved) gomApprovedCount++;
+            else gomPendingCount++;
+            const pData = typeof o.presalesData === 'string' ? JSON.parse(o.presalesData) : o.presalesData;
+            if (pData?.gomPercent != null) { totalGomPercent += Number(pData.gomPercent) || 0; gomEligibleCount++; }
+        });
+        const avgGomPercent = gomEligibleCount > 0 ? totalGomPercent / gomEligibleCount : 0;
 
         // Re-estimate iterations KPI
         const totalReEstimateCount = opportunities.reduce((sum, o) => sum + ((o as any).reEstimateCount || 0), 0);
@@ -261,12 +349,23 @@ export async function getAnalytics(req: Request, res: Response) {
                 countByClient: clientBarData,
                 countByOwner: ownerBarData,
                 revenueByTech: techRevenueData,
-                revenueByClient: clientRevenueData,
+                revenueByClient: revenueByClientFull,
                 revenueByOwner: ownerRevenueData,
                 countBySalesRep: salesRepBarData,
                 revenueBySalesRep: salesRepRevenueData,
                 projectedRevenue,
                 closedRevenue,
+                // Additional fields for mobile analytics
+                totalOpportunities,
+                pipelineValue,
+                winRate,
+                avgDealSize,
+                avgCloseDays: Math.round(avgTimeToClose),
+                stageDistribution,
+                revenueByTechnology,
+                wonCount: wonOpps.length,
+                lostCount: lostOpps.length,
+                activeCount: activeOpps.length,
             },
             pipeline: {
                 activeProjects: activeOpps.length,
@@ -274,7 +373,17 @@ export async function getAnalytics(req: Request, res: Response) {
                 pipelineValue,
                 weightedPipeline,
                 avgDealValue,
-                totalOpps: opportunities.length
+                totalOpps: opportunities.length,
+                // Additional fields for mobile analytics
+                totalValue: pipelineValue,
+                totalCount: activeOpps.length,
+                avgProbability: activeOpps.length > 0 ? activeOpps.reduce((sum, o) => sum + getStageProbability(o.stage?.name || o.currentStage || 'Pipeline'), 0) / activeOpps.length : 0,
+                weightedValue: weightedPipeline,
+                stageBreakdown,
+                stages: stageBreakdown,
+                byRegion,
+                bySalesOwner,
+                byOwner: bySalesOwner,
             },
             presales: {
                 proposalSuccessRate,
@@ -283,12 +392,43 @@ export async function getAnalytics(req: Request, res: Response) {
                 oppsWithReEstimates,
                 avgReEstimateIterations,
                 effortPerOpp,
+                // Additional fields for mobile analytics
+                successRate: proposalSuccessRate,
+                reEstimateCount: totalReEstimateCount,
+                totalCount: presalesOpps.length,
+                avgGomPercent,
+                avgReEstimates: avgReEstimateIterations,
+                managerKpis: managerKpiData.map(m => ({
+                    name: m.name,
+                    managerName: m.name,
+                    total: m.totalAssigned,
+                    count: m.totalAssigned,
+                    won: m.responded,
+                    lost: m.totalAssigned - m.responded,
+                    avgDays: m.avgResponseDays,
+                    avgResponseDays: m.avgResponseDays,
+                })),
+                managers: managerKpiData,
+                gomApprovedCount,
+                gomPendingCount,
+                targetGomPercent: 25,
             },
             sales: {
                 avgTimeToClose,
                 wonCount: wonOpps.length,
                 lostCount: lostOpps.length,
                 managerKpi: managerKpiData,
+                // Additional fields for mobile analytics
+                winRate,
+                avgCloseDays: Math.round(avgTimeToClose),
+                wonRevenue,
+                lostRevenue,
+                lossReasons,
+                pipelineToPresales,
+                presalesToSales,
+                salesToWon,
+                overallConversion,
+                bySalesOwner: salesBySalesOwner,
             }
         });
 

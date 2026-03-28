@@ -38,6 +38,7 @@ export async function listUsers(req: Request, res: Response) {
         title: u.title,
         department: u.department,
         designation: (u as any).designation,
+        reportingManagerName: (u as any).reportingManagerName,
         phone: u.phone,
         qpeopleId: (u as any).qpeopleId,
         isActive: u.isActive,
@@ -489,15 +490,21 @@ export async function syncQPeopleUsers(req: Request, res: Response) {
       return res.status(500).json({ error: 'No roles exist. Create at least one role first.' });
     }
 
+    // Load QPeople designation-to-role mappings
+    const roleMappings = await (prisma as any).qPeopleRoleMapping.findMany();
+    const designationToRole = new Map<string, string>(roleMappings.map((m: any) => [m.qpeopleDesignation, m.crmRoleId]));
+
     let created = 0;
     let updated = 0;
     let skipped = 0;
+    let roleMapped = 0;
 
     for (const emp of employees) {
       const empName = emp.employee_name || emp.name || '';
       const empEmail = emp.user_id || emp.prefered_email || emp.company_email || '';
       const empDept = emp.department || emp.department_name || '';
       const empDesignation = emp.designation || '';
+      const empReportingManager = emp.reporting_manager_name || '';
       const empId = emp.employee || emp.name || '';
 
       if (!empEmail || !empName) {
@@ -522,11 +529,26 @@ export async function syncQPeopleUsers(req: Request, res: Response) {
           data: {
             department: empDept || existing.department,
             designation: empDesignation || existing.designation,
+            reportingManagerName: empReportingManager || (existing as any).reportingManagerName,
             qpeopleId: empId || existing.qpeopleId,
           },
         });
+        // Auto-assign mapped role if designation has a mapping
+        const mappedRoleId = designationToRole.get(empDesignation);
+        if (mappedRoleId) {
+          await prisma.user.update({
+            where: { id: existing.id },
+            data: { roles: { connect: { id: mappedRoleId } }, activeRoleId: mappedRoleId },
+          });
+          roleMapped++;
+        }
         updated++;
       } else {
+        // Determine role: use mapped role if available, otherwise default Read-Only
+        const mappedRoleId = designationToRole.get(empDesignation);
+        const assignRoleId = mappedRoleId || defaultRole.id;
+        if (mappedRoleId) roleMapped++;
+
         // Create new user (no password — they can't login until admin sets one)
         await prisma.user.create({
           data: {
@@ -534,9 +556,10 @@ export async function syncQPeopleUsers(req: Request, res: Response) {
             name: empName,
             department: empDept || undefined,
             designation: empDesignation || undefined,
+            reportingManagerName: empReportingManager || undefined,
             qpeopleId: empId || undefined,
-            roles: { connect: [{ id: defaultRole.id }] },
-            activeRoleId: defaultRole.id,
+            roles: { connect: [{ id: assignRoleId }] },
+            activeRoleId: assignRoleId,
             isActive: true,
           },
         });
@@ -550,15 +573,16 @@ export async function syncQPeopleUsers(req: Request, res: Response) {
         entityId: 'bulk-sync',
         action: 'SYNC_QPEOPLE',
         userId: req.user!.userId,
-        changes: { totalFetched: employees.length, created, updated, skipped },
+        changes: { totalFetched: employees.length, created, updated, skipped, roleMapped },
       },
     });
 
     res.json({
-      message: `QPeople sync complete. Created: ${created}, Updated: ${updated}, Skipped: ${skipped}`,
+      message: `QPeople sync complete. Created: ${created}, Updated: ${updated}, Skipped: ${skipped}, Role-mapped: ${roleMapped}`,
       created,
       updated,
       skipped,
+      roleMapped,
       total: employees.length,
     });
   } catch (error) {
@@ -629,5 +653,118 @@ export async function updateBudgetAssumptions(req: Request, res: Response) {
   } catch (error) {
     console.error('Update budget assumptions error:', error);
     res.status(500).json({ error: 'Failed to update budget assumptions' });
+  }
+}
+
+// ── QPeople Role Mappings ──
+
+// GET /api/admin/qpeople-mappings — list all mappings
+export async function listQPeopleMappings(req: Request, res: Response) {
+  try {
+    const mappings = await (prisma as any).qPeopleRoleMapping.findMany({
+      include: { crmRole: { select: { id: true, name: true } } },
+      orderBy: { qpeopleDesignation: 'asc' },
+    });
+    res.json(mappings);
+  } catch (error) {
+    console.error('List QPeople mappings error:', error);
+    res.status(500).json({ error: 'Failed to fetch QPeople mappings' });
+  }
+}
+
+// GET /api/admin/qpeople-mappings/designations — get distinct designations from synced users
+export async function listQPeopleDesignations(req: Request, res: Response) {
+  try {
+    const rows = await prisma.user.findMany({
+      where: { designation: { not: null } },
+      select: { designation: true },
+      distinct: ['designation'],
+      orderBy: { designation: 'asc' },
+    });
+    const designations = rows.map(r => r.designation).filter(Boolean);
+    res.json(designations);
+  } catch (error) {
+    console.error('List QPeople designations error:', error);
+    res.status(500).json({ error: 'Failed to fetch designations' });
+  }
+}
+
+// POST /api/admin/qpeople-mappings — create or update a mapping
+export async function upsertQPeopleMapping(req: Request, res: Response) {
+  try {
+    const { qpeopleDesignation, crmRoleId, jobBand } = req.body;
+    if (!qpeopleDesignation || !crmRoleId) {
+      return res.status(400).json({ error: 'qpeopleDesignation and crmRoleId are required' });
+    }
+    // Verify role exists
+    const role = await prisma.role.findUnique({ where: { id: crmRoleId } });
+    if (!role) return res.status(404).json({ error: 'Role not found' });
+
+    const mapping = await (prisma as any).qPeopleRoleMapping.upsert({
+      where: { qpeopleDesignation },
+      create: { qpeopleDesignation, crmRoleId, jobBand: jobBand || null },
+      update: { crmRoleId, jobBand: jobBand || null },
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        entity: 'QPeopleRoleMapping',
+        entityId: mapping.id,
+        action: 'UPSERT',
+        userId: req.user!.userId,
+        changes: { qpeopleDesignation, crmRoleId, jobBand },
+      },
+    });
+
+    res.json(mapping);
+  } catch (error) {
+    console.error('Upsert QPeople mapping error:', error);
+    res.status(500).json({ error: 'Failed to save mapping' });
+  }
+}
+
+// DELETE /api/admin/qpeople-mappings/:id — delete a mapping
+export async function deleteQPeopleMapping(req: Request, res: Response) {
+  try {
+    await (prisma as any).qPeopleRoleMapping.delete({ where: { id: req.params.id } });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Delete QPeople mapping error:', error);
+    res.status(500).json({ error: 'Failed to delete mapping' });
+  }
+}
+
+// POST /api/admin/qpeople-mappings/apply — apply mappings to all synced users
+export async function applyQPeopleMappings(req: Request, res: Response) {
+  try {
+    const mappings: any[] = await (prisma as any).qPeopleRoleMapping.findMany();
+    const designationToRole = new Map<string, string>(mappings.map((m: any) => [m.qpeopleDesignation, m.crmRoleId]));
+
+    const users = await prisma.user.findMany({
+      where: { designation: { not: null }, qpeopleId: { not: null } },
+      include: { roles: { select: { id: true } } },
+    });
+
+    let applied = 0;
+    for (const user of users) {
+      const mappedRoleId = designationToRole.get(user.designation || '');
+      if (!mappedRoleId) continue;
+      const alreadyHas = user.roles.some(r => r.id === mappedRoleId);
+      if (alreadyHas) continue;
+
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          roles: { connect: { id: mappedRoleId as string } },
+          activeRoleId: mappedRoleId as string,
+        },
+      });
+      applied++;
+    }
+
+    res.json({ message: `Applied role mappings to ${applied} users`, applied, total: users.length });
+  } catch (error) {
+    console.error('Apply QPeople mappings error:', error);
+    res.status(500).json({ error: 'Failed to apply mappings' });
   }
 }

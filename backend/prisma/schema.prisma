@@ -22,6 +22,7 @@ model User {
   title         String?
   department    String?
   designation   String?
+  reportingManagerName String?
   phone         String?
   isActive      Boolean   @default(true)
   externalId    String?   @unique
@@ -67,8 +68,21 @@ model Role {
   updatedAt   DateTime @updatedAt
 
   users User[]
+  qpeopleMappings QPeopleRoleMapping[]
 
   @@map("roles")
+}
+
+model QPeopleRoleMapping {
+  id                  String   @id @default(cuid())
+  qpeopleDesignation  String   @unique
+  jobBand             String?
+  crmRoleId           String
+  crmRole             Role     @relation(fields: [crmRoleId], references: [id])
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@map("qpeople_role_mappings")
 }
 
 model Team {

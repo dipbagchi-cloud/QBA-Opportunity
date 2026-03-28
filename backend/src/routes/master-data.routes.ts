@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { authenticate } from '../middleware/auth';
 import {
     listClients,
+    createClient,
     listRegions,
     listTechnologies,
     listPricingModels,
@@ -17,6 +18,7 @@ const router = Router();
 router.use(authenticate);
 
 router.get('/clients', listClients);
+router.post('/clients', createClient);
 router.get('/regions', listRegions);
 router.get('/technologies', listTechnologies);
 router.get('/pricing-models', listPricingModels);

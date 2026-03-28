@@ -16,6 +16,11 @@ import {
   addUserToRole,
   removeUserFromRole,
   listTeams,
+  listQPeopleMappings,
+  listQPeopleDesignations,
+  upsertQPeopleMapping,
+  deleteQPeopleMapping,
+  applyQPeopleMappings,
 } from '../controllers/admin.controller';
 import {
   listAllRateCards,
@@ -148,5 +153,12 @@ router.post('/currency-rates/seed', authorize(PERMISSIONS.SETTINGS_MANAGE), seed
 router.patch('/currency-rates/:id', authorize(PERMISSIONS.SETTINGS_MANAGE), updateCurrencyRate);
 router.patch('/currency-rates/:id/toggle', authorize(PERMISSIONS.SETTINGS_MANAGE), toggleCurrencyRate);
 router.delete('/currency-rates/:id', authorize(PERMISSIONS.SETTINGS_MANAGE), deleteCurrencyRate);
+
+// QPeople Role Mappings (requires roles:manage)
+router.get('/qpeople-mappings', authorize(PERMISSIONS.ROLES_MANAGE), listQPeopleMappings);
+router.get('/qpeople-mappings/designations', authorize(PERMISSIONS.ROLES_MANAGE), listQPeopleDesignations);
+router.post('/qpeople-mappings', authorize(PERMISSIONS.ROLES_MANAGE), upsertQPeopleMapping);
+router.post('/qpeople-mappings/apply', authorize(PERMISSIONS.ROLES_MANAGE), applyQPeopleMappings);
+router.delete('/qpeople-mappings/:id', authorize(PERMISSIONS.ROLES_MANAGE), deleteQPeopleMapping);
 
 export default router;

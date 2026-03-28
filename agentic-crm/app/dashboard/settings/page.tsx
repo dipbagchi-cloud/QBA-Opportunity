@@ -99,6 +99,7 @@ interface AdminUser {
     title?: string;
     department?: string;
     designation?: string;
+    reportingManagerName?: string;
     qpeopleId?: string;
     isActive: boolean;
     roles: { id: string; name: string }[];
@@ -121,7 +122,7 @@ interface TeamOption {
     name: string;
 }
 
-type Tab = "profile" | "security" | "users" | "roles" | "ratecards" | "budgetassumptions" | "currencyrates" | "gomcalculator" | "clients" | "regions" | "technologies" | "pricingmodels" | "projecttypes" | "auditlog" | "emailtemplates";
+type Tab = "profile" | "security" | "users" | "roles" | "qpeoplemapping" | "ratecards" | "budgetassumptions" | "currencyrates" | "gomcalculator" | "clients" | "regions" | "technologies" | "pricingmodels" | "projecttypes" | "auditlog" | "emailtemplates";
 
 export default function SettingsPage() {
     const { user, hasPermission } = useAuthStore();
@@ -145,6 +146,7 @@ export default function SettingsPage() {
             tabs: [
                 { key: "users", label: "Users", icon: Users, adminOnly: true },
                 { key: "roles", label: "Roles", icon: Shield, adminOnly: true },
+                { key: "qpeoplemapping", label: "QPeople Role Mapping", icon: RefreshCw, adminOnly: true },
             ],
         },
         {
@@ -264,6 +266,7 @@ export default function SettingsPage() {
                     {activeTab === "security" && <SecurityTab />}
                     {activeTab === "users" && isAdmin && <UsersTab />}
                     {activeTab === "roles" && canManageRoles && <RolesTab />}
+                    {activeTab === "qpeoplemapping" && isAdmin && <QPeopleMappingTab />}
                     {activeTab === "ratecards" && canManageCostCards && <RateCardsTab />}
                     {activeTab === "budgetassumptions" && isAdmin && <BudgetAssumptionsTab />}
                     {activeTab === "currencyrates" && isAdmin && <CurrencyRatesTab />}
@@ -655,6 +658,7 @@ function UsersTab() {
                                 <th className="text-left px-3 py-2 font-medium text-slate-600">Email</th>
                                 <th className="text-left px-3 py-2 font-medium text-slate-600">Department</th>
                                 <th className="text-left px-3 py-2 font-medium text-slate-600">Designation</th>
+                                <th className="text-left px-3 py-2 font-medium text-slate-600">Reporting Manager</th>
                                 <th className="text-left px-3 py-2 font-medium text-slate-600">Role</th>
                                 <th className="text-left px-3 py-2 font-medium text-slate-600">Status</th>
                                 <th className="text-right px-3 py-2 font-medium text-slate-600">Actions</th>
@@ -670,6 +674,7 @@ function UsersTab() {
                                     <td className="px-3 py-2 text-slate-500">{u.email}</td>
                                     <td className="px-3 py-2 text-slate-600 text-xs">{u.department || '-'}</td>
                                     <td className="px-3 py-2 text-slate-600 text-xs">{u.designation || '-'}</td>
+                                    <td className="px-3 py-2 text-slate-600 text-xs">{u.reportingManagerName || '-'}</td>
                                     <td className="px-3 py-2">
                                         <RoleMultiSelect
                                             roles={roles}
@@ -2586,6 +2591,219 @@ function CurrencyRatesTab() {
                     </div>
                 )}
             </div>
+        </div>
+    );
+}
+
+/* ─────────────── QPeople Role Mapping Tab ─────────────── */
+function QPeopleMappingTab() {
+    const [mappings, setMappings] = useState<any[]>([]);
+    const [designations, setDesignations] = useState<string[]>([]);
+    const [roles, setRoles] = useState<{ id: string; name: string }[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
+    const [applying, setApplying] = useState(false);
+    const [search, setSearch] = useState("");
+    const [editRow, setEditRow] = useState<{ designation: string; crmRoleId: string; jobBand: string } | null>(null);
+
+    const load = useCallback(async () => {
+        setLoading(true);
+        try {
+            const [m, d, r] = await Promise.all([
+                apiClient("/api/admin/qpeople-mappings"),
+                apiClient("/api/admin/qpeople-mappings/designations"),
+                apiClient("/api/admin/roles"),
+            ]);
+            setMappings(m);
+            setDesignations(d);
+            const roleList = (r.roles || r || []).map((x: any) => ({ id: x.id, name: x.name }));
+            setRoles(roleList);
+        } catch (e) { console.error(e); }
+        setLoading(false);
+    }, []);
+
+    useEffect(() => { load(); }, [load]);
+
+    const mappingMap = new Map(mappings.map((m: any) => [m.qpeopleDesignation, m]));
+    const unmappedDesignations = designations.filter(d => !mappingMap.has(d));
+    const filtered = search
+        ? mappings.filter((m: any) => m.qpeopleDesignation.toLowerCase().includes(search.toLowerCase()) || m.crmRole?.name?.toLowerCase().includes(search.toLowerCase()))
+        : mappings;
+    const filteredUnmapped = search
+        ? unmappedDesignations.filter(d => d.toLowerCase().includes(search.toLowerCase()))
+        : unmappedDesignations;
+
+    async function handleSave(designation: string, crmRoleId: string, jobBand: string) {
+        if (!crmRoleId) return;
+        setSaving(true);
+        try {
+            await apiClient("/api/admin/qpeople-mappings", {
+                method: "POST",
+                body: JSON.stringify({ qpeopleDesignation: designation, crmRoleId, jobBand: jobBand || null }),
+            });
+            setEditRow(null);
+            await load();
+        } catch (e: any) { alert(e.message || "Failed to save"); }
+        setSaving(false);
+    }
+
+    async function handleDelete(id: string) {
+        if (!confirm("Remove this mapping?")) return;
+        try {
+            await apiClient(`/api/admin/qpeople-mappings/${id}`, { method: "DELETE" });
+            await load();
+        } catch (e: any) { alert(e.message || "Failed to delete"); }
+    }
+
+    async function handleApplyAll() {
+        if (!confirm("Apply role mappings to all synced QPeople users? This will assign mapped CRM roles based on their QPeople designation.")) return;
+        setApplying(true);
+        try {
+            const res = await apiClient("/api/admin/qpeople-mappings/apply", { method: "POST" });
+            alert(res.message || `Applied to ${res.applied} users`);
+        } catch (e: any) { alert(e.message || "Failed to apply"); }
+        setApplying(false);
+    }
+
+    if (loading) return <div className="flex items-center justify-center py-16"><RefreshCw className="w-5 h-5 animate-spin text-slate-400" /></div>;
+
+    return (
+        <div className="space-y-4">
+            <div className="flex items-center justify-between gap-3">
+                <div>
+                    <h2 className="text-lg font-bold text-slate-800">QPeople Role Mapping</h2>
+                    <p className="text-xs text-slate-500">Map QPeople designations to Q-CRM roles. During sync, users are auto-assigned the mapped role.</p>
+                </div>
+                <button onClick={handleApplyAll} disabled={applying || mappings.length === 0}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700 disabled:opacity-50">
+                    {applying ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                    Apply Mappings to Users
+                </button>
+            </div>
+
+            {/* Search */}
+            <div className="relative">
+                <Search className="absolute left-2.5 top-2 w-3.5 h-3.5 text-slate-400" />
+                <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search designations or roles..."
+                    className="w-full pl-8 pr-3 py-1.5 border border-slate-200 rounded-lg text-xs" />
+            </div>
+
+            {/* Stats */}
+            <div className="flex gap-3 text-xs">
+                <span className="bg-green-50 text-green-700 px-2 py-0.5 rounded-full font-medium">{mappings.length} mapped</span>
+                <span className="bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full font-medium">{unmappedDesignations.length} unmapped</span>
+                <span className="bg-slate-50 text-slate-500 px-2 py-0.5 rounded-full font-medium">{designations.length} total designations</span>
+            </div>
+
+            {/* Mapped designations table */}
+            {filtered.length > 0 && (
+                <div className="border border-slate-200 rounded-xl overflow-hidden">
+                    <table className="w-full text-xs">
+                        <thead className="bg-slate-50 border-b border-slate-200">
+                            <tr>
+                                <th className="text-left py-2 px-3 font-semibold text-slate-600">QPeople Designation</th>
+                                <th className="text-left py-2 px-3 font-semibold text-slate-600">Job Band</th>
+                                <th className="text-left py-2 px-3 font-semibold text-slate-600">CRM Role</th>
+                                <th className="text-right py-2 px-3 font-semibold text-slate-600">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {filtered.map((m: any) => (
+                                <tr key={m.id} className="border-b border-slate-100 hover:bg-slate-50/50">
+                                    {editRow?.designation === m.qpeopleDesignation ? (
+                                        <>
+                                            <td className="py-2 px-3 font-medium text-slate-800">{m.qpeopleDesignation}</td>
+                                            <td className="py-2 px-3">
+                                                <input value={editRow.jobBand} onChange={e => setEditRow({ ...editRow, jobBand: e.target.value })}
+                                                    placeholder="e.g. Band 3" className="w-full px-2 py-1 border border-slate-200 rounded text-xs" />
+                                            </td>
+                                            <td className="py-2 px-3">
+                                                <select value={editRow.crmRoleId} onChange={e => setEditRow({ ...editRow, crmRoleId: e.target.value })}
+                                                    className="w-full px-2 py-1 border border-slate-200 rounded text-xs">
+                                                    <option value="">Select role...</option>
+                                                    {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                                                </select>
+                                            </td>
+                                            <td className="py-2 px-3 text-right space-x-1">
+                                                <button onClick={() => handleSave(editRow.designation, editRow.crmRoleId, editRow.jobBand)} disabled={saving}
+                                                    className="p-1 text-green-600 hover:text-green-800"><Check className="w-3.5 h-3.5" /></button>
+                                                <button onClick={() => setEditRow(null)} className="p-1 text-slate-400 hover:text-slate-600"><X className="w-3.5 h-3.5" /></button>
+                                            </td>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <td className="py-2 px-3 font-medium text-slate-800">{m.qpeopleDesignation}</td>
+                                            <td className="py-2 px-3 text-slate-500">{m.jobBand || "—"}</td>
+                                            <td className="py-2 px-3"><span className="bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full text-[10px] font-medium">{m.crmRole?.name}</span></td>
+                                            <td className="py-2 px-3 text-right space-x-1">
+                                                <button onClick={() => setEditRow({ designation: m.qpeopleDesignation, crmRoleId: m.crmRoleId, jobBand: m.jobBand || "" })}
+                                                    className="p-1 text-slate-400 hover:text-indigo-600"><Pencil className="w-3.5 h-3.5" /></button>
+                                                <button onClick={() => handleDelete(m.id)} className="p-1 text-slate-400 hover:text-red-500"><Trash2 className="w-3.5 h-3.5" /></button>
+                                            </td>
+                                        </>
+                                    )}
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+
+            {/* Unmapped designations */}
+            {filteredUnmapped.length > 0 && (
+                <div>
+                    <h3 className="text-sm font-semibold text-amber-700 mb-2">Unmapped Designations ({filteredUnmapped.length})</h3>
+                    <div className="border border-amber-200 rounded-xl overflow-hidden bg-amber-50/30">
+                        <table className="w-full text-xs">
+                            <thead className="bg-amber-50 border-b border-amber-200">
+                                <tr>
+                                    <th className="text-left py-2 px-3 font-semibold text-amber-700">QPeople Designation</th>
+                                    <th className="text-left py-2 px-3 font-semibold text-amber-700">Job Band</th>
+                                    <th className="text-left py-2 px-3 font-semibold text-amber-700">Assign CRM Role</th>
+                                    <th className="text-right py-2 px-3 font-semibold text-amber-700"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {filteredUnmapped.map(d => (
+                                    <tr key={d} className="border-b border-amber-100">
+                                        {editRow?.designation === d ? (
+                                            <>
+                                                <td className="py-2 px-3 font-medium text-slate-800">{d}</td>
+                                                <td className="py-2 px-3">
+                                                    <input value={editRow.jobBand} onChange={e => setEditRow({ ...editRow, jobBand: e.target.value })}
+                                                        placeholder="e.g. Band 3" className="w-full px-2 py-1 border border-slate-200 rounded text-xs" />
+                                                </td>
+                                                <td className="py-2 px-3">
+                                                    <select value={editRow.crmRoleId} onChange={e => setEditRow({ ...editRow, crmRoleId: e.target.value })}
+                                                        className="w-full px-2 py-1 border border-slate-200 rounded text-xs">
+                                                        <option value="">Select role...</option>
+                                                        {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                                                    </select>
+                                                </td>
+                                                <td className="py-2 px-3 text-right space-x-1">
+                                                    <button onClick={() => handleSave(editRow.designation, editRow.crmRoleId, editRow.jobBand)} disabled={saving || !editRow.crmRoleId}
+                                                        className="p-1 text-green-600 hover:text-green-800 disabled:opacity-30"><Check className="w-3.5 h-3.5" /></button>
+                                                    <button onClick={() => setEditRow(null)} className="p-1 text-slate-400 hover:text-slate-600"><X className="w-3.5 h-3.5" /></button>
+                                                </td>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <td className="py-2 px-3 text-slate-600">{d}</td>
+                                                <td className="py-2 px-3 text-slate-400">—</td>
+                                                <td className="py-2 px-3 text-slate-400">Not mapped</td>
+                                                <td className="py-2 px-3 text-right">
+                                                    <button onClick={() => setEditRow({ designation: d, crmRoleId: "", jobBand: "" })}
+                                                        className="text-[10px] font-semibold text-indigo-600 hover:text-indigo-800">Map</button>
+                                                </td>
+                                            </>
+                                        )}
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
