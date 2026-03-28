@@ -906,6 +906,12 @@ function RolesTab() {
     const [showCreate, setShowCreate] = useState(false);
     const [status, setStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
+    // Search and sort
+    const [roleSearch, setRoleSearch] = useState("");
+    const [roleSortKey, setRoleSortKey] = useState("name");
+    const [roleSortDir, setRoleSortDir] = useState<SortDir>("asc");
+    const handleRoleSort = (key: string, dir: SortDir) => { setRoleSortKey(dir ? key : "name"); setRoleSortDir(dir); };
+
     // Form state
     const [formName, setFormName] = useState("");
     const [formDescription, setFormDescription] = useState("");
@@ -1132,9 +1138,21 @@ function RolesTab() {
                 </div>
             )}
 
+            {/* Search */}
+            <div className="relative max-w-md">
+                <Search className="absolute left-3 top-2 w-4 h-4 text-slate-400" />
+                <input
+                    type="text"
+                    placeholder="Search roles..."
+                    className="w-full pl-9 pr-4 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm"
+                    value={roleSearch}
+                    onChange={(e) => setRoleSearch(e.target.value)}
+                />
+            </div>
+
             {/* Roles list */}
             <div className="grid grid-cols-1 gap-3">
-                {roles.map((role) => {
+                {sortData(roles.filter(r => !roleSearch || r.name.toLowerCase().includes(roleSearch.toLowerCase()) || (r.description || '').toLowerCase().includes(roleSearch.toLowerCase())), roleSortKey, roleSortDir).map((role) => {
                     const isExpanded = expandedRoleId === role.id;
                     const roleUsers = role.users || [];
                     const assignedUserIds = new Set(roleUsers.map(u => u.id));
@@ -1986,6 +2004,10 @@ function MasterDataTab({ entity, label }: { entity: string; label: string }) {
     const [saving, setSaving] = useState(false);
     const [status, setStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
     const [showInactive, setShowInactive] = useState(false);
+    const [searchTerm, setSearchTerm] = useState("");
+    const [mdSortKey, setMdSortKey] = useState("name");
+    const [mdSortDir, setMdSortDir] = useState<SortDir>("asc");
+    const handleMdSort = (key: string, dir: SortDir) => { setMdSortKey(dir ? key : "name"); setMdSortDir(dir); };
 
     const fetchData = useCallback(async () => {
         setLoading(true);
@@ -2001,8 +2023,10 @@ function MasterDataTab({ entity, label }: { entity: string; label: string }) {
 
     useEffect(() => { fetchData(); }, [fetchData]);
 
-    // Filter: show only active items by default, toggle to see all
-    const displayItems = showInactive ? items : items.filter(i => i.isActive !== false);
+    // Filter: show only active items by default, toggle to see all; also apply search
+    const filteredItems = (showInactive ? items : items.filter(i => i.isActive !== false))
+        .filter(i => !searchTerm || i.name.toLowerCase().includes(searchTerm.toLowerCase()));
+    const displayItems = sortData(filteredItems, mdSortKey, mdSortDir);
 
     const resetForm = () => { setFormName(""); setEditingId(null); setShowCreate(false); };
 
@@ -2088,12 +2112,24 @@ function MasterDataTab({ entity, label }: { entity: string; label: string }) {
                 </div>
             )}
 
+            {/* Search */}
+            <div className="relative max-w-md">
+                <Search className="absolute left-3 top-2 w-4 h-4 text-slate-400" />
+                <input
+                    type="text"
+                    placeholder={`Search ${label.toLowerCase()}s...`}
+                    className="w-full pl-9 pr-4 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                />
+            </div>
+
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                 <div className="overflow-x-auto">
                     <table className="w-full text-xs">
                         <thead className="bg-slate-50 border-b border-slate-200">
                             <tr>
-                                <th className="text-left px-3 py-2 font-medium text-slate-600">Name</th>
+                                <SortableHeader label="Name" sortKey="name" currentSort={mdSortKey} currentDir={mdSortDir} onSort={handleMdSort} className="text-left px-3 text-slate-600" />
                                 <th className="text-right px-3 py-2 font-medium text-slate-600">Actions</th>
                             </tr>
                         </thead>

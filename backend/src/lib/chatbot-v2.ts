@@ -259,54 +259,115 @@ function parseDuration(text: string): { duration: string; unit: string } | null 
 //   OPENAI_API_KEY=sk-...             (OpenAI)
 //   LLM_API_URL=https://api.groq.com/openai/v1  LLM_API_KEY=gsk_...  LLM_MODEL=llama-3.1-70b-versatile  (Groq — free)
 //   LLM_API_URL=https://generativelanguage.googleapis.com/v1beta/openai  LLM_API_KEY=...  LLM_MODEL=gemini-2.0-flash  (Gemini — free)
+//   OLLAMA_API_URL=http://localhost:11434/v1  OLLAMA_MODEL=llama3.2  (Ollama — local fallback, free)
 //
 
+// Primary LLM (OpenAI/Groq/Gemini)
 const LLM_API_URL = process.env.LLM_API_URL || process.env.OPENAI_API_URL || process.env.OPENAI_BASE_URL || '';
 const LLM_API_KEY = process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || '';
 const LLM_MODEL = process.env.LLM_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini';
 
-// Circuit breaker: stop calling LLM after repeated failures to avoid latency
-let llmFailureCount = 0;
-let llmCircuitOpenUntil = 0;
+// Ollama fallback (local LLM)
+const OLLAMA_API_URL = process.env.OLLAMA_API_URL || 'http://localhost:11434/v1';
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.2';
+const OLLAMA_ENABLED = process.env.OLLAMA_ENABLED !== 'false'; // enabled by default if available
+
+// Circuit breakers: separate for primary and Ollama
+let primaryLLMFailureCount = 0;
+let primaryLLMCircuitOpenUntil = 0;
+let ollamaFailureCount = 0;
+let ollamaCircuitOpenUntil = 0;
 const LLM_CIRCUIT_THRESHOLD = 3;   // failures before opening circuit
 const LLM_CIRCUIT_COOLDOWN = 5 * 60 * 1000; // 5 min cooldown
 
-let openaiClient: OpenAI | null = null;
-function getOpenAIClient(): OpenAI | null {
+let primaryClient: OpenAI | null = null;
+let ollamaClient: OpenAI | null = null;
+
+function getPrimaryLLMClient(): OpenAI | null {
     if (!LLM_API_KEY) return null;
     // Circuit breaker open?
-    if (llmFailureCount >= LLM_CIRCUIT_THRESHOLD && Date.now() < llmCircuitOpenUntil) {
+    if (primaryLLMFailureCount >= LLM_CIRCUIT_THRESHOLD && Date.now() < primaryLLMCircuitOpenUntil) {
         return null;
     }
-    if (!openaiClient) {
-        openaiClient = new OpenAI({
+    if (!primaryClient) {
+        primaryClient = new OpenAI({
             apiKey: LLM_API_KEY,
             ...(LLM_API_URL ? { baseURL: LLM_API_URL.replace(/\/chat\/completions\/?$/, '') } : {}),
         });
     }
-    return openaiClient;
+    return primaryClient;
 }
 
-function recordLLMSuccess() {
-    llmFailureCount = 0;
-    llmCircuitOpenUntil = 0;
+function getOllamaClient(): OpenAI | null {
+    if (!OLLAMA_ENABLED) return null;
+    // Circuit breaker open?
+    if (ollamaFailureCount >= LLM_CIRCUIT_THRESHOLD && Date.now() < ollamaCircuitOpenUntil) {
+        return null;
+    }
+    if (!ollamaClient) {
+        ollamaClient = new OpenAI({
+            apiKey: 'ollama', // Ollama doesn't require API key, but SDK needs something
+            baseURL: OLLAMA_API_URL,
+        });
+    }
+    return ollamaClient;
 }
 
-function recordLLMFailure() {
-    llmFailureCount++;
-    if (llmFailureCount >= LLM_CIRCUIT_THRESHOLD) {
-        llmCircuitOpenUntil = Date.now() + LLM_CIRCUIT_COOLDOWN;
-        console.warn(`[Chatbot] LLM circuit breaker OPEN — ${llmFailureCount} failures. Cooling down until ${new Date(llmCircuitOpenUntil).toISOString()}`);
+// For backward compatibility
+function getOpenAIClient(): OpenAI | null {
+    return getPrimaryLLMClient() || getOllamaClient();
+}
+
+function recordPrimaryLLMSuccess() {
+    primaryLLMFailureCount = 0;
+    primaryLLMCircuitOpenUntil = 0;
+}
+
+function recordPrimaryLLMFailure() {
+    primaryLLMFailureCount++;
+    if (primaryLLMFailureCount >= LLM_CIRCUIT_THRESHOLD) {
+        primaryLLMCircuitOpenUntil = Date.now() + LLM_CIRCUIT_COOLDOWN;
+        console.warn(`[Chatbot] Primary LLM circuit breaker OPEN — ${primaryLLMFailureCount} failures. Cooling down until ${new Date(primaryLLMCircuitOpenUntil).toISOString()}`);
     }
 }
 
-export function getLLMStatus(): { available: boolean; provider: string; model: string; circuitOpen: boolean; failures: number } {
+function recordOllamaSuccess() {
+    ollamaFailureCount = 0;
+    ollamaCircuitOpenUntil = 0;
+}
+
+function recordOllamaFailure() {
+    ollamaFailureCount++;
+    if (ollamaFailureCount >= LLM_CIRCUIT_THRESHOLD) {
+        ollamaCircuitOpenUntil = Date.now() + LLM_CIRCUIT_COOLDOWN;
+        console.warn(`[Chatbot] Ollama circuit breaker OPEN — ${ollamaFailureCount} failures. Cooling down until ${new Date(ollamaCircuitOpenUntil).toISOString()}`);
+    }
+}
+
+// Backward compatibility aliases
+function recordLLMSuccess() { recordPrimaryLLMSuccess(); }
+function recordLLMFailure() { recordPrimaryLLMFailure(); }
+
+export function getLLMStatus(): { 
+    available: boolean; 
+    provider: string; 
+    model: string; 
+    circuitOpen: boolean; 
+    failures: number;
+    ollama: { available: boolean; model: string; circuitOpen: boolean; failures: number };
+} {
     return {
         available: !!LLM_API_KEY,
         provider: LLM_API_URL ? new URL(LLM_API_URL).hostname : 'api.openai.com',
         model: LLM_MODEL,
-        circuitOpen: llmFailureCount >= LLM_CIRCUIT_THRESHOLD && Date.now() < llmCircuitOpenUntil,
-        failures: llmFailureCount,
+        circuitOpen: primaryLLMFailureCount >= LLM_CIRCUIT_THRESHOLD && Date.now() < primaryLLMCircuitOpenUntil,
+        failures: primaryLLMFailureCount,
+        ollama: {
+            available: OLLAMA_ENABLED,
+            model: OLLAMA_MODEL,
+            circuitOpen: ollamaFailureCount >= LLM_CIRCUIT_THRESHOLD && Date.now() < ollamaCircuitOpenUntil,
+            failures: ollamaFailureCount,
+        },
     };
 }
 
@@ -361,61 +422,105 @@ Extract as many fields as possible from the natural language. The first unrecogn
 
 IMPORTANT: Return ONLY the JSON object, no markdown or extra text.`;
 
-async function callLLM(userMessage: string, conversationContext: string): Promise<LLMParsedIntent | null> {
-    const client = getOpenAIClient();
-    if (!client) return null;
-    try {
-        const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-            { role: 'system', content: SYSTEM_PROMPT },
-            ...(conversationContext ? [{ role: 'system' as const, content: `Current conversation state: ${conversationContext}` }] : []),
-            { role: 'user', content: userMessage },
-        ];
-        const completion = await client.chat.completions.create({
-            model: LLM_MODEL, messages, temperature: 0.1, max_tokens: 500,
-        });
-        const content = completion.choices?.[0]?.message?.content?.trim();
-        if (!content) return null;
-        const jsonStr = content.replace(/^```json?\n?/, '').replace(/\n?```$/, '').trim();
-        const parsed = JSON.parse(jsonStr);
-        recordLLMSuccess();
-        return parsed;
-    } catch (e) {
-        recordLLMFailure();
-        console.error('[Chatbot] LLM call failed, falling back to NLP:', (e as Error).message);
-        return null;
-    }
+async function callLLMWithClient(client: OpenAI, model: string, userMessage: string, conversationContext: string): Promise<LLMParsedIntent | null> {
+    const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+        { role: 'system', content: SYSTEM_PROMPT },
+        ...(conversationContext ? [{ role: 'system' as const, content: `Current conversation state: ${conversationContext}` }] : []),
+        { role: 'user', content: userMessage },
+    ];
+    const completion = await client.chat.completions.create({
+        model, messages, temperature: 0.1, max_tokens: 500,
+    });
+    const content = completion.choices?.[0]?.message?.content?.trim();
+    if (!content) return null;
+    const jsonStr = content.replace(/^```json?\n?/, '').replace(/\n?```$/, '').trim();
+    return JSON.parse(jsonStr);
 }
 
-/** Use LLM for free-form conversational response (general_chat) */
-async function llmGeneralChat(userMessage: string, ctx: UserContext, conversationHistory: { role: string; content: string }[]): Promise<string | null> {
-    const client = getOpenAIClient();
-    if (!client) return null;
-    try {
-        const historyMsgs: OpenAI.Chat.ChatCompletionMessageParam[] = conversationHistory.slice(-6).map(h => ({
-            role: h.role as 'user' | 'assistant', content: h.content,
-        }));
-        const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-            {
-                role: 'system',
-                content: `You are Q-CRM AI Assistant, a helpful and concise CRM chatbot for a sales pipeline management tool.
+async function callLLM(userMessage: string, conversationContext: string): Promise<LLMParsedIntent | null> {
+    // Try primary LLM first
+    const primaryClient = getPrimaryLLMClient();
+    if (primaryClient) {
+        try {
+            const result = await callLLMWithClient(primaryClient, LLM_MODEL, userMessage, conversationContext);
+            recordPrimaryLLMSuccess();
+            return result;
+        } catch (e) {
+            recordPrimaryLLMFailure();
+            console.error('[Chatbot] Primary LLM failed:', (e as Error).message);
+        }
+    }
+
+    // Fallback to Ollama
+    const ollamaClientInstance = getOllamaClient();
+    if (ollamaClientInstance) {
+        try {
+            console.log('[Chatbot] Falling back to Ollama...');
+            const result = await callLLMWithClient(ollamaClientInstance, OLLAMA_MODEL, userMessage, conversationContext);
+            recordOllamaSuccess();
+            return result;
+        } catch (e) {
+            recordOllamaFailure();
+            console.error('[Chatbot] Ollama fallback failed:', (e as Error).message);
+        }
+    }
+
+    console.error('[Chatbot] All LLM providers failed, falling back to NLP');
+    return null;
+}
+
+async function generalChatWithClient(client: OpenAI, model: string, userMessage: string, ctx: UserContext, conversationHistory: { role: string; content: string }[]): Promise<string | null> {
+    const historyMsgs: OpenAI.Chat.ChatCompletionMessageParam[] = conversationHistory.slice(-6).map(h => ({
+        role: h.role as 'user' | 'assistant', content: h.content,
+    }));
+    const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+        {
+            role: 'system',
+            content: `You are Q-CRM AI Assistant, a helpful and concise CRM chatbot for a sales pipeline management tool.
 User: ${ctx.userName} (${ctx.roleName}). Respond naturally, helpfully, and briefly.
 If the user's message seems to be a CRM action you can't parse, suggest the correct command format.
 Do NOT make up data — only use what you know about the system's capabilities.
 Keep responses under 3 sentences unless detail is needed. Use markdown for formatting.`
-            },
-            ...historyMsgs,
-            { role: 'user', content: userMessage },
-        ];
-        const completion = await client.chat.completions.create({
-            model: LLM_MODEL, messages, temperature: 0.7, max_tokens: 300,
-        });
-        const content = completion.choices?.[0]?.message?.content?.trim();
-        recordLLMSuccess();
-        return content || null;
-    } catch (e) {
-        recordLLMFailure();
-        return null;
+        },
+        ...historyMsgs,
+        { role: 'user', content: userMessage },
+    ];
+    const completion = await client.chat.completions.create({
+        model, messages, temperature: 0.7, max_tokens: 300,
+    });
+    return completion.choices?.[0]?.message?.content?.trim() || null;
+}
+
+/** Use LLM for free-form conversational response (general_chat) */
+async function llmGeneralChat(userMessage: string, ctx: UserContext, conversationHistory: { role: string; content: string }[]): Promise<string | null> {
+    // Try primary LLM first
+    const primaryClient = getPrimaryLLMClient();
+    if (primaryClient) {
+        try {
+            const result = await generalChatWithClient(primaryClient, LLM_MODEL, userMessage, ctx, conversationHistory);
+            recordPrimaryLLMSuccess();
+            return result;
+        } catch (e) {
+            recordPrimaryLLMFailure();
+            console.error('[Chatbot] Primary LLM general chat failed:', (e as Error).message);
+        }
     }
+
+    // Fallback to Ollama
+    const ollamaClientInstance = getOllamaClient();
+    if (ollamaClientInstance) {
+        try {
+            console.log('[Chatbot] General chat falling back to Ollama...');
+            const result = await generalChatWithClient(ollamaClientInstance, OLLAMA_MODEL, userMessage, ctx, conversationHistory);
+            recordOllamaSuccess();
+            return result;
+        } catch (e) {
+            recordOllamaFailure();
+            console.error('[Chatbot] Ollama general chat failed:', (e as Error).message);
+        }
+    }
+
+    return null;
 }
 
 // ─── NLP FALLBACK ───────────────────────────────────────────────────────────

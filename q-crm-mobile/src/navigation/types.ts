@@ -45,6 +45,7 @@ export type MainTabParamList = {
   Opportunities: undefined;
   Contacts: undefined;
   Analytics: undefined;
+  AI: undefined;
   GOM: undefined;
   Settings: undefined;
 };

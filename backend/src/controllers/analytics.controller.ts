@@ -116,20 +116,27 @@ export async function getAnalytics(req: Request, res: Response) {
             else if (stageName !== 'Closed Lost' && stageName !== 'Proposal Lost') countByOwner[ownerName].active += 1;
 
             // Revenue by Technology (Tech Stack) — split comma-separated into individual techs
+            // Only count Closed Won deals for actual revenue
             const techStr = opp.technology || 'unknown';
             const techs = techStr.split(',').map((t: string) => t.trim()).filter(Boolean);
-            for (const t of techs.length > 0 ? techs : ['unknown']) {
-                revenueByTech[t] = (revenueByTech[t] || 0) + rev;
+            if (stageName === 'Closed Won') {
+                for (const t of techs.length > 0 ? techs : ['unknown']) {
+                    revenueByTech[t] = (revenueByTech[t] || 0) + rev;
+                }
             }
 
-            // Revenue by Client
-            revenueByClient[clientName] = (revenueByClient[clientName] || 0) + rev;
-
-            // Revenue by Owner (Sales Rep)
-            if (!revenueByOwner[ownerName]) {
-                revenueByOwner[ownerName] = { name: ownerName, revenue: 0 };
+            // Revenue by Client — only Closed Won deals
+            if (stageName === 'Closed Won') {
+                revenueByClient[clientName] = (revenueByClient[clientName] || 0) + rev;
             }
-            revenueByOwner[ownerName].revenue += rev;
+
+            // Revenue by Owner (Sales Rep) — only Closed Won deals
+            if (stageName === 'Closed Won') {
+                if (!revenueByOwner[ownerName]) {
+                    revenueByOwner[ownerName] = { name: ownerName, revenue: 0 };
+                }
+                revenueByOwner[ownerName].revenue += rev;
+            }
 
             // Count & Revenue by Sales Rep Name (explicit salesRepName field)
             const salesRepName = opp.salesRepName || ownerName;
@@ -140,10 +147,13 @@ export async function getAnalytics(req: Request, res: Response) {
             if (stageName === 'Closed Won') countBySalesRep[salesRepName].won += 1;
             else if (stageName !== 'Closed Lost' && stageName !== 'Proposal Lost') countBySalesRep[salesRepName].active += 1;
 
-            if (!revenueBySalesRep[salesRepName]) {
-                revenueBySalesRep[salesRepName] = { name: salesRepName, revenue: 0 };
+            // Revenue by Sales Rep — only Closed Won deals
+            if (stageName === 'Closed Won') {
+                if (!revenueBySalesRep[salesRepName]) {
+                    revenueBySalesRep[salesRepName] = { name: salesRepName, revenue: 0 };
+                }
+                revenueBySalesRep[salesRepName].revenue += rev;
             }
-            revenueBySalesRep[salesRepName].revenue += rev;
         });
 
         // Sort revenue chart data chronologically
