@@ -202,7 +202,7 @@ export async function createOpportunity(req: Request, res: Response) {
                 tentativeDurationUnit: body.tentativeDurationUnit,
                 tentativeEndDate: body.tentativeEndDate ? new Date(body.tentativeEndDate) : undefined,
                 pricingModel: body.pricingModel,
-                expectedDayRate: body.expectedDayRate,
+                expectedDayRate: body.expectedDayRate ? body.expectedDayRate : null,
                 salesRepName: body.salesRepName,
 
                 // Relations
@@ -356,8 +356,8 @@ export async function updateOpportunity(req: Request, res: Response) {
                 tentativeDuration: body.tentativeDuration || body.duration,
                 tentativeDurationUnit: body.tentativeDurationUnit || body.durationUnit,
                 pricingModel: body.pricingModel,
-                expectedDayRate: body.expectedDayRate,
-                adjustedEstimatedValue: body.adjustedEstimatedValue,
+                expectedDayRate: body.expectedDayRate ? body.expectedDayRate : null,
+                adjustedEstimatedValue: body.adjustedEstimatedValue ? body.adjustedEstimatedValue : null,
 
                 // Complex Data
                 presalesData: body.presalesData,

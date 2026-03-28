@@ -1,0 +1,797 @@
+import { PrismaClient, Prisma } from '@prisma/client';
+
+const prisma = new PrismaClient();
+
+// ───── Types ─────
+
+export interface ChatMessage {
+    role: 'user' | 'assistant';
+    content: string;
+    data?: any;           // chart data, tables, etc.
+    actions?: ActionResult[];
+}
+
+export interface ActionResult {
+    tool: string;
+    success: boolean;
+    summary: string;
+    data?: any;
+}
+
+export interface UserContext {
+    userId: string;
+    email: string;
+    roleName: string;
+    permissions: string[];
+    userName: string;
+}
+
+// ───── Tool definitions the LLM can call ─────
+
+const TOOL_DEFINITIONS = [
+    {
+        name: 'list_opportunities',
+        description: 'Search and list opportunities with optional filters. Use for queries like "show my opportunities", "list deals in Proposal stage", "find opportunities for client X".',
+        parameters: ['search', 'stage', 'client', 'owner', 'limit', 'minValue', 'maxValue', 'technology', 'region'],
+    },
+    {
+        name: 'get_opportunity_details',
+        description: 'Get full details of a specific opportunity by name or ID. Use when user asks about a specific deal.',
+        parameters: ['nameOrId'],
+    },
+    {
+        name: 'update_opportunity',
+        description: 'Update fields on an opportunity. Use for "move deal to Negotiation", "change value to 500K", "update stage".',
+        parameters: ['nameOrId', 'stage', 'value', 'description', 'technology', 'region', 'salesRepName', 'priority'],
+    },
+    {
+        name: 'create_opportunity',
+        description: 'Create a new opportunity. Use for "create a new deal", "add opportunity for client X".',
+        parameters: ['title', 'value', 'client', 'technology', 'region', 'description', 'salesRepName'],
+    },
+    {
+        name: 'get_pipeline_analytics',
+        description: 'Get pipeline analytics - counts per stage, total value, conversion rates. Use for "how is our pipeline", "show funnel", "what is conversion rate".',
+        parameters: [],
+    },
+    {
+        name: 'get_revenue_analytics',
+        description: 'Get revenue breakdowns - by tech, client, owner, month. Use for "revenue by technology", "top clients", "monthly revenue trend".',
+        parameters: ['groupBy'],
+    },
+    {
+        name: 'get_deal_health',
+        description: 'Analyze deal health - stalled deals, at-risk opportunities, aging analysis. Use for "show stalled deals", "which deals are at risk", "deal health".',
+        parameters: [],
+    },
+    {
+        name: 'get_forecast',
+        description: 'Get weighted pipeline forecast. Use for "forecast", "expected revenue", "weighted pipeline".',
+        parameters: [],
+    },
+];
+
+// ───── Intent extraction via keyword matching + heuristics ─────
+
+interface ParsedIntent {
+    tool: string;
+    params: Record<string, any>;
+    confidence: number;
+}
+
+const STAGE_NAMES = ['discovery', 'qualification', 'proposal', 'negotiation', 'closed won', 'closed lost', 'proposal lost'];
+
+function parseUserIntent(message: string): ParsedIntent[] {
+    const lower = message.toLowerCase().trim();
+    const intents: ParsedIntent[] = [];
+
+    // ── CREATE ──
+    if (/\b(create|add|new)\b.*\b(opportunities?|deals?|opps?)\b/i.test(lower)) {
+        const params: Record<string, any> = {};
+        // Extract title after "called/named/titled"
+        const titleMatch = lower.match(/(?:called|named|titled|name)\s+["']?([^"',]+)["']?/i);
+        if (titleMatch) params.title = titleMatch[1].trim();
+        // Extract value
+        const valMatch = lower.match(/(?:value|worth|for)\s+\$?([\d,.]+)\s*(k|m|thousand|million)?/i);
+        if (valMatch) {
+            let v = parseFloat(valMatch[1].replace(/,/g, ''));
+            if (valMatch[2]?.toLowerCase() === 'k' || valMatch[2]?.toLowerCase() === 'thousand') v *= 1000;
+            if (valMatch[2]?.toLowerCase() === 'm' || valMatch[2]?.toLowerCase() === 'million') v *= 1000000;
+            params.value = v;
+        }
+        // Extract client
+        const clientMatch = lower.match(/(?:client|for|with)\s+["']?([A-Z][a-zA-Z\s&]+)/);
+        if (clientMatch) params.client = clientMatch[1].trim();
+        // Extract tech
+        const techMatch = lower.match(/(?:tech(?:nology)?|stack)\s+["']?([^"',]+)/i);
+        if (techMatch) params.technology = techMatch[1].trim();
+
+        intents.push({ tool: 'create_opportunity', params, confidence: 0.9 });
+    }
+
+    // ── UPDATE / MOVE STAGE ──
+    if (/\b(move|update|change|set|advance|promote)\b/i.test(lower) && /\b(opportunities?|deals?|opps?|stage|value|status)\b/i.test(lower)) {
+        const params: Record<string, any> = {};
+        // Extract opportunity name (in quotes or after "opportunity/deal")
+        const nameMatch = lower.match(/(?:opportunity|deal|opp)\s+["']([^"']+)["']/i) ||
+            lower.match(/["']([^"']+)["']/);
+        if (nameMatch) params.nameOrId = nameMatch[1].trim();
+
+        // Extract stage
+        for (const stage of STAGE_NAMES) {
+            if (lower.includes(stage)) {
+                params.stage = stage.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                break;
+            }
+        }
+        // Extract value change
+        const valMatch = lower.match(/value\s+(?:to\s+)?\$?([\d,.]+)\s*(k|m)?/i);
+        if (valMatch) {
+            let v = parseFloat(valMatch[1].replace(/,/g, ''));
+            if (valMatch[2]?.toLowerCase() === 'k') v *= 1000;
+            if (valMatch[2]?.toLowerCase() === 'm') v *= 1000000;
+            params.value = v;
+        }
+        // Extract priority
+        const prioMatch = lower.match(/priority\s+(?:to\s+)?(low|medium|high|critical)/i);
+        if (prioMatch) params.priority = prioMatch[1].charAt(0).toUpperCase() + prioMatch[1].slice(1);
+
+        if (Object.keys(params).length > 0) {
+            intents.push({ tool: 'update_opportunity', params, confidence: 0.85 });
+        }
+    }
+
+    // ── LIST / SEARCH ──
+    if (/\b(list|show|find|search|get|display|what are|give me)\b/i.test(lower) && /\b(opportunities?|deals?|pipeline|opps?)\b/i.test(lower)) {
+        const params: Record<string, any> = {};
+        // Stage filter
+        for (const stage of STAGE_NAMES) {
+            if (lower.includes(stage)) {
+                params.stage = stage.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                break;
+            }
+        }
+        // "my" = owned by user
+        if (/\bmy\b/.test(lower)) params.owner = '__SELF__';
+        // Client filter
+        const clientMatch = lower.match(/(?:for|from|client)\s+["']?([A-Z][a-zA-Z\s&]+)/);
+        if (clientMatch) params.client = clientMatch[1].trim();
+        // Tech filter
+        const techMatch = lower.match(/(?:tech(?:nology)?|using|in)\s+(?:stack\s+)?["']?([a-zA-Z.#+\s]+)/i);
+        if (techMatch && !STAGE_NAMES.some(s => techMatch[1].toLowerCase().includes(s))) {
+            params.technology = techMatch[1].trim();
+        }
+        // Value filter
+        const valMatch = lower.match(/(?:above|over|more than|greater than|>)\s+\$?([\d,.]+)\s*(k|m)?/i);
+        if (valMatch) {
+            let v = parseFloat(valMatch[1].replace(/,/g, ''));
+            if (valMatch[2]?.toLowerCase() === 'k') v *= 1000;
+            if (valMatch[2]?.toLowerCase() === 'm') v *= 1000000;
+            params.minValue = v;
+        }
+        intents.push({ tool: 'list_opportunities', params, confidence: 0.85 });
+    }
+
+    // ── SPECIFIC OPPORTUNITY DETAILS ──
+    if (/\b(details?|info|about|tell me about)\b/i.test(lower) && /\b(opportunities?|deals?|opps?)\b/i.test(lower)) {
+        const nameMatch = lower.match(/(?:opportunity|deal|opp)\s+["']([^"']+)["']/i) ||
+            lower.match(/about\s+["']([^"']+)["']/i);
+        if (nameMatch) {
+            intents.push({ tool: 'get_opportunity_details', params: { nameOrId: nameMatch[1].trim() }, confidence: 0.9 });
+        }
+    }
+
+    // ── ANALYTICS: Pipeline ──
+    if (/\b(pipeline|funnel|stage\s*breakdown|conversion\s*rate|how\s*(?:is|are)\s*(?:our|the)\s*pipeline|stage\s*distribution)\b/i.test(lower)) {
+        intents.push({ tool: 'get_pipeline_analytics', params: {}, confidence: 0.9 });
+    }
+
+    // ── ANALYTICS: Revenue ──
+    if (/\b(revenue|top\s*clients?|revenue\s*by|monthly\s*revenue|earning|income)\b/i.test(lower)) {
+        const params: Record<string, any> = {};
+        if (/\b(tech(nology)?|stack)\b/i.test(lower)) params.groupBy = 'technology';
+        else if (/\b(clients?|customers?|accounts?)\b/i.test(lower)) params.groupBy = 'client';
+        else if (/\b(owners?|reps?|sales\s*reps?)\b/i.test(lower)) params.groupBy = 'owner';
+        else if (/\b(months?|monthly|trend)\b/i.test(lower)) params.groupBy = 'month';
+        intents.push({ tool: 'get_revenue_analytics', params, confidence: 0.85 });
+    }
+
+    // ── ANALYTICS: Deal Health ──
+    if (/\b(health|stalled|at.risk|risk|aging|stuck|inactive|dormant)\b/i.test(lower)) {
+        intents.push({ tool: 'get_deal_health', params: {}, confidence: 0.85 });
+    }
+
+    // ── ANALYTICS: Forecast ──
+    if (/\b(forecast|predict|expected\s*revenue|weighted\s*pipeline|projection)\b/i.test(lower)) {
+        intents.push({ tool: 'get_forecast', params: {}, confidence: 0.9 });
+    }
+
+    // Deduplicate by tool name, keep highest confidence
+    const seen = new Map<string, ParsedIntent>();
+    for (const intent of intents) {
+        const existing = seen.get(intent.tool);
+        if (!existing || intent.confidence > existing.confidence) {
+            seen.set(intent.tool, intent);
+        }
+    }
+
+    return Array.from(seen.values()).sort((a, b) => b.confidence - a.confidence);
+}
+
+// ───── Permission checks ─────
+
+function canExecuteTool(tool: string, permissions: string[]): boolean {
+    const isAdmin = permissions.includes('*');
+    if (isAdmin) return true;
+    switch (tool) {
+        case 'list_opportunities':
+        case 'get_opportunity_details':
+        case 'get_deal_health':
+            return permissions.includes('pipeline:view');
+        case 'update_opportunity':
+        case 'create_opportunity':
+            return permissions.includes('pipeline:write');
+        case 'get_pipeline_analytics':
+        case 'get_revenue_analytics':
+        case 'get_forecast':
+            return permissions.includes('analytics:view');
+        default:
+            return false;
+    }
+}
+
+// ───── Tool executors ─────
+
+async function execListOpportunities(params: any, ctx: UserContext): Promise<ActionResult> {
+    const where: any = { isArchived: false };
+    if (params.stage) {
+        const stage = await prisma.stage.findFirst({ where: { name: { contains: params.stage, mode: 'insensitive' } } });
+        if (stage) where.stageId = stage.id;
+    }
+    if (params.client) {
+        where.client = { name: { contains: params.client, mode: 'insensitive' } };
+    }
+    if (params.owner === '__SELF__') {
+        where.ownerId = ctx.userId;
+    }
+    if (params.technology) {
+        where.technology = { contains: params.technology, mode: 'insensitive' };
+    }
+    if (params.minValue) {
+        where.value = { gte: params.minValue };
+    }
+    if (params.maxValue) {
+        where.value = { ...where.value, lte: params.maxValue };
+    }
+    if (params.search) {
+        where.OR = [
+            { title: { contains: params.search, mode: 'insensitive' } },
+            { client: { name: { contains: params.search, mode: 'insensitive' } } },
+        ];
+    }
+
+    const opps = await prisma.opportunity.findMany({
+        where,
+        take: Math.min(params.limit || 20, 50),
+        orderBy: { updatedAt: 'desc' },
+        include: { client: true, stage: true, owner: { select: { name: true } } },
+    });
+
+    const data = opps.map(o => ({
+        id: o.id,
+        title: o.title,
+        client: o.client?.name || '—',
+        stage: o.stage?.name || '—',
+        value: Number(o.value),
+        owner: o.owner?.name || '—',
+        technology: o.technology || '—',
+        region: o.region || '—',
+        updatedAt: o.updatedAt,
+    }));
+
+    return {
+        tool: 'list_opportunities',
+        success: true,
+        summary: `Found ${data.length} opportunities.`,
+        data: { type: 'table', columns: ['Title', 'Client', 'Stage', 'Value', 'Owner', 'Technology'], rows: data },
+    };
+}
+
+async function execGetOpportunityDetails(params: any): Promise<ActionResult> {
+    let opp: any = null;
+    // Try by ID first
+    if (params.nameOrId?.length === 36) {
+        opp = await prisma.opportunity.findUnique({
+            where: { id: params.nameOrId },
+            include: { client: true, stage: true, owner: { select: { name: true, email: true } }, notes: { take: 5, orderBy: { createdAt: 'desc' }, include: { author: { select: { name: true } } } } },
+        });
+    }
+    if (!opp) {
+        opp = await prisma.opportunity.findFirst({
+            where: { title: { contains: params.nameOrId, mode: 'insensitive' }, isArchived: false },
+            include: { client: true, stage: true, owner: { select: { name: true, email: true } }, notes: { take: 5, orderBy: { createdAt: 'desc' }, include: { author: { select: { name: true } } } } },
+        });
+    }
+    if (!opp) return { tool: 'get_opportunity_details', success: false, summary: `Could not find opportunity matching "${params.nameOrId}".` };
+
+    return {
+        tool: 'get_opportunity_details',
+        success: true,
+        summary: `Details for "${opp.title}"`,
+        data: {
+            type: 'detail',
+            opportunity: {
+                id: opp.id,
+                title: opp.title,
+                client: opp.client?.name,
+                stage: opp.stage?.name,
+                value: Number(opp.value),
+                currency: opp.currency,
+                owner: opp.owner?.name,
+                description: opp.description,
+                technology: opp.technology,
+                region: opp.region,
+                priority: opp.priority,
+                probability: opp.probability,
+                gomApproved: opp.gomApproved,
+                expectedCloseDate: opp.expectedCloseDate,
+                tentativeStartDate: opp.tentativeStartDate,
+                tentativeEndDate: opp.tentativeEndDate,
+                pricingModel: opp.pricingModel,
+                salesRepName: opp.salesRepName,
+                reEstimateCount: opp.reEstimateCount,
+                createdAt: opp.createdAt,
+                updatedAt: opp.updatedAt,
+                recentComments: opp.notes?.map((n: any) => ({ author: n.author?.name, content: n.content, date: n.createdAt })),
+            },
+        },
+    };
+}
+
+async function execUpdateOpportunity(params: any, ctx: UserContext): Promise<ActionResult> {
+    // Find the opportunity
+    let opp: any = null;
+    if (params.nameOrId?.length === 36) {
+        opp = await prisma.opportunity.findUnique({ where: { id: params.nameOrId }, include: { stage: true } });
+    }
+    if (!opp) {
+        opp = await prisma.opportunity.findFirst({
+            where: { title: { contains: params.nameOrId, mode: 'insensitive' }, isArchived: false },
+            include: { stage: true },
+        });
+    }
+    if (!opp) return { tool: 'update_opportunity', success: false, summary: `Could not find opportunity matching "${params.nameOrId}".` };
+
+    const update: any = {};
+    const changes: string[] = [];
+
+    if (params.stage) {
+        const newStage = await prisma.stage.findFirst({ where: { name: { contains: params.stage, mode: 'insensitive' } } });
+        if (newStage) {
+            // Check GOM requirement for Qualification → Proposal
+            if (newStage.name === 'Proposal' && !opp.gomApproved) {
+                return { tool: 'update_opportunity', success: false, summary: `Cannot move "${opp.title}" to Proposal — GOM approval is required first.` };
+            }
+            update.stageId = newStage.id;
+            update.currentStage = newStage.name;
+            update.probability = newStage.probability;
+            changes.push(`stage: ${opp.stage?.name} → ${newStage.name}`);
+
+            // Create stage history
+            await prisma.stageHistory.create({
+                data: { opportunityId: opp.id, stageId: newStage.id },
+            });
+
+            if (newStage.isClosed) update.actualCloseDate = new Date();
+        }
+    }
+    if (params.value !== undefined) {
+        update.value = params.value;
+        changes.push(`value: ${Number(opp.value)} → ${params.value}`);
+    }
+    if (params.priority) {
+        update.priority = params.priority;
+        changes.push(`priority: ${opp.priority} → ${params.priority}`);
+    }
+    if (params.description) {
+        update.description = params.description;
+        changes.push('description updated');
+    }
+    if (params.technology) {
+        update.technology = params.technology;
+        changes.push(`technology: ${opp.technology || '—'} → ${params.technology}`);
+    }
+    if (params.salesRepName) {
+        update.salesRepName = params.salesRepName;
+        changes.push(`salesRep: → ${params.salesRepName}`);
+    }
+
+    if (Object.keys(update).length === 0) {
+        return { tool: 'update_opportunity', success: false, summary: 'No valid fields to update.' };
+    }
+
+    await prisma.opportunity.update({ where: { id: opp.id }, data: update });
+
+    // Audit log
+    await prisma.auditLog.create({
+        data: {
+            entity: 'Opportunity',
+            entityId: opp.id,
+            action: params.stage ? 'STAGE_CHANGE' : 'UPDATE',
+            changes: changes.join('; '),
+            userId: ctx.userId,
+        },
+    });
+
+    return { tool: 'update_opportunity', success: true, summary: `Updated "${opp.title}": ${changes.join(', ')}`, data: { opportunityId: opp.id } };
+}
+
+async function execCreateOpportunity(params: any, ctx: UserContext): Promise<ActionResult> {
+    if (!params.title) return { tool: 'create_opportunity', success: false, summary: 'A title is required to create an opportunity.' };
+
+    // Find or create client
+    let clientId: string | undefined;
+    if (params.client) {
+        let client = await prisma.client.findFirst({ where: { name: { contains: params.client, mode: 'insensitive' } } });
+        if (!client) {
+            client = await prisma.client.create({ data: { name: params.client, industry: 'Unknown' } });
+        }
+        clientId = client.id;
+    }
+
+    // Get Discovery stage
+    const discoveryStage = await prisma.stage.findFirst({ where: { name: { contains: 'Discovery', mode: 'insensitive' } } });
+    // Get default type
+    const defaultType = await prisma.opportunityType.findFirst();
+
+    if (!discoveryStage || !defaultType) {
+        return { tool: 'create_opportunity', success: false, summary: 'System configuration error: missing stage or type.' };
+    }
+
+    const opp = await prisma.opportunity.create({
+        data: {
+            title: params.title,
+            value: params.value || 0,
+            description: params.description || '',
+            technology: params.technology || null,
+            region: params.region || null,
+            salesRepName: params.salesRepName || null,
+            tags: '',
+            stageId: discoveryStage.id,
+            currentStage: discoveryStage.name,
+            probability: discoveryStage.probability || 10,
+            priority: 'Medium',
+            ownerId: ctx.userId,
+            typeId: defaultType.id,
+            clientId: clientId || (await prisma.client.findFirst())?.id || '',
+        },
+    });
+
+    await prisma.auditLog.create({
+        data: { entity: 'Opportunity', entityId: opp.id, action: 'CREATE', changes: `Created via AI Chat: ${params.title}`, userId: ctx.userId },
+    });
+
+    return { tool: 'create_opportunity', success: true, summary: `Created opportunity "${params.title}" in Discovery stage.`, data: { opportunityId: opp.id } };
+}
+
+async function execPipelineAnalytics(): Promise<ActionResult> {
+    const stages = await prisma.stage.findMany({ orderBy: { order: 'asc' } });
+    const opps = await prisma.opportunity.findMany({ where: { isArchived: false }, include: { stage: true } });
+
+    const countByStage: Record<string, number> = {};
+    const valueByStage: Record<string, number> = {};
+    let activeCount = 0, wonCount = 0, lostCount = 0, totalClosedCount = 0;
+    let pipelineValue = 0, weightedValue = 0;
+
+    for (const stage of stages) {
+        countByStage[stage.name] = 0;
+        valueByStage[stage.name] = 0;
+    }
+
+    for (const opp of opps) {
+        const sName = opp.stage?.name || 'Unknown';
+        countByStage[sName] = (countByStage[sName] || 0) + 1;
+        valueByStage[sName] = (valueByStage[sName] || 0) + Number(opp.value);
+
+        if (opp.stage?.isClosed) {
+            totalClosedCount++;
+            if (opp.stage.isWon) wonCount++;
+            else lostCount++;
+        } else {
+            activeCount++;
+            pipelineValue += Number(opp.value);
+            weightedValue += Number(opp.value) * (opp.probability / 100);
+        }
+    }
+
+    const conversionRate = totalClosedCount > 0 ? ((wonCount / totalClosedCount) * 100).toFixed(1) : '0';
+
+    return {
+        tool: 'get_pipeline_analytics',
+        success: true,
+        summary: `Pipeline: ${activeCount} active deals worth $${(pipelineValue / 1000).toFixed(0)}K. Conversion rate: ${conversionRate}%.`,
+        data: {
+            type: 'chart',
+            chartType: 'bar',
+            title: 'Pipeline by Stage',
+            labels: Object.keys(countByStage),
+            datasets: [
+                { label: 'Count', data: Object.values(countByStage) },
+                { label: 'Value ($K)', data: Object.values(valueByStage).map(v => Math.round(v / 1000)) },
+            ],
+            metrics: { activeCount, wonCount, lostCount, conversionRate: `${conversionRate}%`, pipelineValue, weightedPipeline: Math.round(weightedValue), avgDealValue: activeCount > 0 ? Math.round(pipelineValue / activeCount) : 0 },
+        },
+    };
+}
+
+async function execRevenueAnalytics(params: any): Promise<ActionResult> {
+    const opps = await prisma.opportunity.findMany({
+        where: { isArchived: false },
+        include: { client: true, owner: { select: { name: true } }, stage: true },
+    });
+
+    const groupBy = params.groupBy || 'technology';
+    const grouped: Record<string, { count: number; value: number }> = {};
+
+    for (const opp of opps) {
+        let key = '—';
+        if (groupBy === 'technology') {
+            // Split comma-separated tech stacks
+            const techs = (opp.technology || 'Unknown').split(',').map(t => t.trim()).filter(Boolean);
+            for (const tech of techs) {
+                if (!grouped[tech]) grouped[tech] = { count: 0, value: 0 };
+                grouped[tech].count++;
+                grouped[tech].value += Number(opp.value);
+            }
+            continue;
+        } else if (groupBy === 'client') key = opp.client?.name || 'Unknown';
+        else if (groupBy === 'owner') key = opp.owner?.name || 'Unknown';
+        else if (groupBy === 'month') {
+            const d = opp.createdAt;
+            key = `${d.toLocaleString('default', { month: 'short' })} ${d.getFullYear()}`;
+        }
+        if (!grouped[key]) grouped[key] = { count: 0, value: 0 };
+        grouped[key].count++;
+        grouped[key].value += Number(opp.value);
+    }
+
+    // Sort by value desc and take top 15
+    const sorted = Object.entries(grouped).sort((a, b) => b[1].value - a[1].value).slice(0, 15);
+    const labels = sorted.map(e => e[0]);
+    const values = sorted.map(e => Math.round(e[1].value / 1000));
+    const counts = sorted.map(e => e[1].count);
+
+    return {
+        tool: 'get_revenue_analytics',
+        success: true,
+        summary: `Revenue by ${groupBy}: ${labels.length} groups. Top: ${labels[0]} ($${values[0]}K).`,
+        data: {
+            type: 'chart',
+            chartType: groupBy === 'month' ? 'line' : 'bar',
+            title: `Revenue by ${groupBy.charAt(0).toUpperCase() + groupBy.slice(1)}`,
+            labels,
+            datasets: [
+                { label: 'Value ($K)', data: values },
+                { label: 'Count', data: counts },
+            ],
+        },
+    };
+}
+
+async function execDealHealth(): Promise<ActionResult> {
+    const now = new Date();
+    const opps = await prisma.opportunity.findMany({
+        where: { isArchived: false, stage: { isClosed: false } },
+        include: { client: true, stage: true, owner: { select: { name: true } } },
+    });
+
+    const stalled: any[] = [];
+    const atRisk: any[] = [];
+
+    for (const opp of opps) {
+        const daysSinceUpdate = Math.floor((now.getTime() - opp.updatedAt.getTime()) / (1000 * 60 * 60 * 24));
+        const item = {
+            id: opp.id,
+            title: opp.title,
+            client: opp.client?.name || '—',
+            stage: opp.stage?.name || '—',
+            value: Number(opp.value),
+            owner: opp.owner?.name || '—',
+            daysSinceUpdate,
+        };
+        if (daysSinceUpdate > 30) stalled.push(item);
+        else if (daysSinceUpdate > 14) atRisk.push(item);
+    }
+
+    stalled.sort((a, b) => b.daysSinceUpdate - a.daysSinceUpdate);
+    atRisk.sort((a, b) => b.daysSinceUpdate - a.daysSinceUpdate);
+
+    return {
+        tool: 'get_deal_health',
+        success: true,
+        summary: `${stalled.length} stalled deals (30+ days), ${atRisk.length} at-risk (14-30 days).`,
+        data: {
+            type: 'health',
+            stalled: stalled.slice(0, 10),
+            atRisk: atRisk.slice(0, 10),
+            totalActive: opps.length,
+        },
+    };
+}
+
+async function execForecast(): Promise<ActionResult> {
+    const opps = await prisma.opportunity.findMany({
+        where: { isArchived: false, stage: { isClosed: false } },
+        include: { stage: true },
+    });
+
+    let pipelineValue = 0;
+    let weightedValue = 0;
+    const byStage: Record<string, { count: number; value: number; weighted: number }> = {};
+
+    for (const opp of opps) {
+        const val = Number(opp.value);
+        const prob = opp.probability || 0;
+        pipelineValue += val;
+        weightedValue += val * (prob / 100);
+
+        const sn = opp.stage?.name || 'Unknown';
+        if (!byStage[sn]) byStage[sn] = { count: 0, value: 0, weighted: 0 };
+        byStage[sn].count++;
+        byStage[sn].value += val;
+        byStage[sn].weighted += val * (prob / 100);
+    }
+
+    return {
+        tool: 'get_forecast',
+        success: true,
+        summary: `Pipeline: $${(pipelineValue / 1000).toFixed(0)}K total, $${(weightedValue / 1000).toFixed(0)}K weighted forecast (${((weightedValue / pipelineValue) * 100 || 0).toFixed(1)}% confidence).`,
+        data: {
+            type: 'chart',
+            chartType: 'bar',
+            title: 'Weighted Pipeline Forecast',
+            labels: Object.keys(byStage),
+            datasets: [
+                { label: 'Pipeline Value ($K)', data: Object.values(byStage).map(s => Math.round(s.value / 1000)) },
+                { label: 'Weighted Forecast ($K)', data: Object.values(byStage).map(s => Math.round(s.weighted / 1000)) },
+            ],
+            metrics: { totalPipeline: pipelineValue, weightedForecast: Math.round(weightedValue), confidence: `${((weightedValue / pipelineValue) * 100 || 0).toFixed(1)}%`, dealCount: opps.length },
+        },
+    };
+}
+
+// ───── Response generation ─────
+
+function generateResponse(message: string, results: ActionResult[], userName: string): string {
+    if (results.length === 0) {
+        return `I can help you with opportunities and analytics. Try asking me to:\n• **List opportunities** (e.g., "Show my deals in Proposal stage")\n• **Get details** on a specific deal (e.g., "Tell me about deal 'Acme CRM Migration'")\n• **Update an opportunity** (e.g., "Move 'Acme Deal' to Negotiation")\n• **Create a new opportunity** (e.g., "Create a deal called 'New Project' worth $500K for client TechCorp")\n• **Pipeline analytics** (e.g., "Show me pipeline breakdown")\n• **Revenue analysis** (e.g., "Revenue by technology")\n• **Deal health check** (e.g., "Which deals are stalled?")\n• **Forecast** (e.g., "Show weighted forecast")`;
+    }
+
+    const parts: string[] = [];
+    for (const r of results) {
+        if (!r.success) {
+            parts.push(`⚠️ ${r.summary}`);
+            continue;
+        }
+        parts.push(r.summary);
+        // Add contextual hints
+        if (r.tool === 'list_opportunities' && r.data?.rows?.length > 0) {
+            parts.push(`\nYou can ask about any specific deal for more details, or ask me to update one.`);
+        }
+        if (r.tool === 'get_pipeline_analytics' && r.data?.metrics) {
+            const m = r.data.metrics;
+            parts.push(`\n📊 **Pipeline Summary:**\n• Active deals: ${m.activeCount}\n• Won: ${m.wonCount} | Lost: ${m.lostCount}\n• Conversion rate: ${m.conversionRate}\n• Pipeline value: $${(m.pipelineValue / 1000).toFixed(0)}K\n• Weighted pipeline: $${(m.weightedPipeline / 1000).toFixed(0)}K\n• Avg deal value: $${(m.avgDealValue / 1000).toFixed(0)}K`);
+        }
+        if (r.tool === 'get_forecast' && r.data?.metrics) {
+            const m = r.data.metrics;
+            parts.push(`\n📈 **Forecast:**\n• Total pipeline: $${(m.totalPipeline / 1000).toFixed(0)}K\n• Weighted forecast: $${(m.weightedForecast / 1000).toFixed(0)}K\n• Confidence: ${m.confidence}\n• Active deals: ${m.dealCount}`);
+        }
+        if (r.tool === 'get_deal_health') {
+            const d = r.data;
+            if (d.stalled?.length > 0) {
+                parts.push(`\n🔴 **Stalled Deals (30+ days):**`);
+                d.stalled.slice(0, 5).forEach((s: any) => parts.push(`  • ${s.title} (${s.client}) — ${s.daysSinceUpdate} days, $${(s.value / 1000).toFixed(0)}K`));
+            }
+            if (d.atRisk?.length > 0) {
+                parts.push(`\n🟡 **At Risk (14-30 days):**`);
+                d.atRisk.slice(0, 5).forEach((s: any) => parts.push(`  • ${s.title} (${s.client}) — ${s.daysSinceUpdate} days, $${(s.value / 1000).toFixed(0)}K`));
+            }
+        }
+    }
+    return parts.join('\n');
+}
+
+// ───── Main chat handler ─────
+
+export async function processChat(message: string, ctx: UserContext): Promise<ChatMessage> {
+    const intents = parseUserIntent(message);
+
+    if (intents.length === 0) {
+        return {
+            role: 'assistant',
+            content: generateResponse(message, [], ctx.userName),
+        };
+    }
+
+    const results: ActionResult[] = [];
+
+    for (const intent of intents) {
+        // Permission check
+        if (!canExecuteTool(intent.tool, ctx.permissions)) {
+            results.push({
+                tool: intent.tool,
+                success: false,
+                summary: `You don't have permission to ${intent.tool.replace(/_/g, ' ')}. Your role: ${ctx.roleName}.`,
+            });
+            continue;
+        }
+
+        // Resolve __SELF__ owner
+        if (intent.params.owner === '__SELF__') {
+            intent.params.owner = ctx.userId;
+        }
+
+        try {
+            let result: ActionResult;
+            switch (intent.tool) {
+                case 'list_opportunities':
+                    result = await execListOpportunities(intent.params, ctx);
+                    break;
+                case 'get_opportunity_details':
+                    result = await execGetOpportunityDetails(intent.params);
+                    break;
+                case 'update_opportunity':
+                    result = await execUpdateOpportunity(intent.params, ctx);
+                    break;
+                case 'create_opportunity':
+                    result = await execCreateOpportunity(intent.params, ctx);
+                    break;
+                case 'get_pipeline_analytics':
+                    result = await execPipelineAnalytics();
+                    break;
+                case 'get_revenue_analytics':
+                    result = await execRevenueAnalytics(intent.params);
+                    break;
+                case 'get_deal_health':
+                    result = await execDealHealth();
+                    break;
+                case 'get_forecast':
+                    result = await execForecast();
+                    break;
+                default:
+                    result = { tool: intent.tool, success: false, summary: 'Unknown action.' };
+            }
+            results.push(result);
+        } catch (err: any) {
+            results.push({ tool: intent.tool, success: false, summary: `Error: ${err.message}` });
+        }
+    }
+
+    // Log AI interaction
+    try {
+        await prisma.aIInteraction.create({
+            data: {
+                type: 'CHAT',
+                prompt: message,
+                response: generateResponse(message, results, ctx.userName),
+                status: results.every(r => r.success) ? 'Completed' : 'Partial',
+                toolsCalled: results.map(r => ({ tool: r.tool, success: r.success })),
+                userId: ctx.userId,
+                opportunityId: results.find(r => r.data?.opportunityId)?.data?.opportunityId || null,
+            },
+        });
+    } catch {}
+
+    const content = generateResponse(message, results, ctx.userName);
+    const chartData = results.find(r => r.data?.type === 'chart')?.data;
+    const tableData = results.find(r => r.data?.type === 'table')?.data;
+    const detailData = results.find(r => r.data?.type === 'detail')?.data;
+    const healthData = results.find(r => r.data?.type === 'health')?.data;
+
+    return {
+        role: 'assistant',
+        content,
+        data: chartData || tableData || detailData || healthData || undefined,
+        actions: results,
+    };
+}
