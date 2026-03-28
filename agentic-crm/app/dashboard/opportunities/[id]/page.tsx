@@ -1611,10 +1611,16 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                             />
                                         </div>
                                         <div className="grid grid-cols-3 gap-4 items-center">
-                                            <div className="col-span-3 flex justify-end">
-                                                {opportunityStage < 2 && (
-                                                    <button className="px-4 py-2 bg-blue-600 text-white font-bold rounded-md hover:bg-blue-700 text-sm">
-                                                        Send GOM Approval
+                                            <div className="col-span-3 flex justify-end gap-3 items-center">
+                                                {gomApproved && (
+                                                    <span className="flex items-center gap-1.5 text-sm text-green-700 font-semibold">
+                                                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
+                                                        GOM Approved
+                                                    </span>
+                                                )}
+                                                {opportunityStage < 2 && !gomApproved && (
+                                                    <button onClick={() => handleApproveGom(true)} className="px-4 py-2 bg-blue-600 text-white font-bold rounded-md hover:bg-blue-700 text-sm">
+                                                        Approve GOM
                                                     </button>
                                                 )}
                                             </div>
