@@ -130,6 +130,13 @@ export async function listOpportunities(req: Request, res: Response) {
                 managerName: (opp as any).managerName || '',
                 status: finalHealth > 70 ? 'healthy' : (finalHealth > 40 ? 'at-risk' : 'critical'),
                 description: opp.description,
+                technology: opp.technology || '',
+                region: opp.region || '',
+                expectedCloseDate: opp.expectedCloseDate ? new Date(opp.expectedCloseDate).toISOString().slice(0, 10) : '',
+                actualCloseDate: opp.actualCloseDate ? new Date(opp.actualCloseDate).toISOString().slice(0, 10) : '',
+                tentativeStartDate: opp.tentativeStartDate ? new Date(opp.tentativeStartDate).toISOString().slice(0, 10) : '',
+                tentativeEndDate: opp.tentativeEndDate ? new Date(opp.tentativeEndDate).toISOString().slice(0, 10) : '',
+                createdAt: new Date(opp.createdAt).toISOString().slice(0, 10),
                 daysInStage,
                 isStalled,
                 healthScore: finalHealth
@@ -401,7 +408,14 @@ export async function updateOpportunity(req: Request, res: Response) {
         if (body.salesData !== undefined) {
             const prevSales = JSON.stringify(previous?.salesData || '');
             const newSales = JSON.stringify(body.salesData);
-            if (prevSales !== newSales) changes.push('Sales data updated');
+            if (prevSales !== newSales) {
+                const sd = body.salesData;
+                if (sd.lostRemarks) {
+                    changes.push(`Lost Reason: ${sd.lostRemarks}`);
+                } else {
+                    changes.push('Sales data updated');
+                }
+            }
         }
 
         if (changes.length > 0) {
@@ -413,6 +427,49 @@ export async function updateOpportunity(req: Request, res: Response) {
                     action,
                     userId: req.user!.userId,
                     changes: changes.join('; '),
+                },
+            });
+        }
+
+        // Dedicated audit entries for special stage transitions
+        const prevStageName2 = previous?.stage?.name || previous?.currentStage || '';
+        if (newStageName === 'Qualification' && (prevStageName2 === 'Proposal' || prevStageName2 === 'Negotiation')) {
+            // Re-estimate: write a SEND_BACK_REESTIMATE audit entry
+            const reEstComment = body.reEstimateComment ? `Re-estimate Comment: ${body.reEstimateComment}` : 'Sent back for re-estimation';
+            await prisma.auditLog.create({
+                data: {
+                    entity: 'Opportunity',
+                    entityId: id,
+                    action: 'SEND_BACK_REESTIMATE',
+                    userId: req.user!.userId,
+                    changes: reEstComment,
+                },
+            });
+        }
+        if (newStageName === 'Proposal' && prevStageName2 === 'Qualification') {
+            // Presales submitted estimation: write ESTIMATION_SUBMITTED entry
+            const estDetails: string[] = [];
+            if (body.presalesData?.managerName) estDetails.push(`Manager: ${body.presalesData.managerName}`);
+            if (body.presalesData?.comments) estDetails.push(`Comments: ${body.presalesData.comments}`);
+            await prisma.auditLog.create({
+                data: {
+                    entity: 'Opportunity',
+                    entityId: id,
+                    action: 'ESTIMATION_SUBMITTED',
+                    userId: req.user!.userId,
+                    changes: estDetails.length > 0 ? estDetails.join('; ') : 'Estimation submitted to sales',
+                },
+            });
+        }
+        if (body.salesData?.lostRemarks) {
+            // Mark as lost: write MARK_LOST audit entry
+            await prisma.auditLog.create({
+                data: {
+                    entity: 'Opportunity',
+                    entityId: id,
+                    action: 'MARK_LOST',
+                    userId: req.user!.userId,
+                    changes: `Lost Reason: ${body.salesData.lostRemarks}`,
                 },
             });
         }
@@ -486,7 +543,7 @@ export async function approveGom(req: Request, res: Response) {
             data: {
                 entity: 'Opportunity',
                 entityId: id,
-                action: 'UPDATE',
+                action: approved ? 'GOM_APPROVED' : 'GOM_REVOKED',
                 userId: req.user!.userId,
                 changes: approved ? 'GOM Approved' : 'GOM Approval Revoked',
             },
@@ -619,17 +676,6 @@ export async function addComment(req: Request, res: Response) {
                 authorId: req.user!.userId,
             } as any,
             include: { author: { select: { id: true, name: true, email: true } } },
-        });
-
-        // Audit log
-        await prisma.auditLog.create({
-            data: {
-                entity: 'Opportunity',
-                entityId: id,
-                action: 'COMMENT_ADDED',
-                userId: req.user!.userId,
-                changes: { content: content.trim(), stage: stage || 'General' },
-            },
         });
 
         res.json(comment);

@@ -1429,6 +1429,7 @@ interface BudgetAssumptionsData {
     trainingPerFte: number;
     autoSaveIntervalMinutes: number;
     minGomPercent: number;
+    gomAutoApprovePercent: number;
     defaultCurrency: string;
     supportedCurrencies: string;
 }
@@ -1447,6 +1448,7 @@ const DEFAULT_ASSUMPTIONS: BudgetAssumptionsData = {
     trainingPerFte: 0,
     autoSaveIntervalMinutes: 2,
     minGomPercent: 20,
+    gomAutoApprovePercent: 0,
     defaultCurrency: "INR",
     supportedCurrencies: "INR,USD,EUR,GBP,AED,SGD",
 };
@@ -1471,7 +1473,7 @@ function BudgetAssumptionsTab() {
     }, []);
 
     const handleChange = (name: keyof BudgetAssumptionsData, value: string) => {
-        const numericFields = ['marginPercent', 'workingDaysPerYear', 'deliveryMgmtPercent', 'benchPercent', 'leaveEligibilityPercent', 'annualGrowthBufferPercent', 'averageIncrementPercent', 'bonusPercent', 'indirectCostPercent', 'welfarePerFte', 'trainingPerFte', 'autoSaveIntervalMinutes', 'minGomPercent'];
+        const numericFields = ['marginPercent', 'workingDaysPerYear', 'deliveryMgmtPercent', 'benchPercent', 'leaveEligibilityPercent', 'annualGrowthBufferPercent', 'averageIncrementPercent', 'bonusPercent', 'indirectCostPercent', 'welfarePerFte', 'trainingPerFte', 'autoSaveIntervalMinutes', 'minGomPercent', 'gomAutoApprovePercent'];
         if (numericFields.includes(name)) {
             setData(prev => ({ ...prev, [name]: parseFloat(value) || 0 }));
         } else {
@@ -1561,6 +1563,7 @@ function BudgetAssumptionsTab() {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-lg">
                         <InputField label="Auto-Save Interval (minutes)" name="autoSaveIntervalMinutes" desc="How often opportunity forms auto-save (0 = disabled)." />
                         <InputField label="Min GOM % for Sales Submission" name="minGomPercent" desc="Presales cannot submit to Sales unless GOM meets this % (0 = no check)." />
+                        <InputField label="GOM Auto-Approve Above %" name="gomAutoApprovePercent" desc="Auto-approve GOM when GOM % is at or above this threshold (0 = manual only)." />
                     </div>
                 </div>
 
@@ -1815,6 +1818,7 @@ function MasterDataTab({ entity, label }: { entity: string; label: string }) {
     const [formName, setFormName] = useState("");
     const [saving, setSaving] = useState(false);
     const [status, setStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
+    const [showInactive, setShowInactive] = useState(false);
 
     const fetchData = useCallback(async () => {
         setLoading(true);
@@ -1829,6 +1833,9 @@ function MasterDataTab({ entity, label }: { entity: string; label: string }) {
     }, [entity, label]);
 
     useEffect(() => { fetchData(); }, [fetchData]);
+
+    // Filter: show only active items by default, toggle to see all
+    const displayItems = showInactive ? items : items.filter(i => i.isActive !== false);
 
     const resetForm = () => { setFormName(""); setEditingId(null); setShowCreate(false); };
 
@@ -1875,11 +1882,17 @@ function MasterDataTab({ entity, label }: { entity: string; label: string }) {
         <div className="space-y-4">
             <div className="flex items-center justify-between">
                 <h3 className="text-base font-bold text-slate-900">{label} Management</h3>
-                {!showCreate && !editingId && (
-                    <button onClick={() => { resetForm(); setShowCreate(true); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 transition-colors">
-                        <Plus className="w-3.5 h-3.5" /> Add {label}
-                    </button>
-                )}
+                <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-1.5 text-xs text-slate-500 cursor-pointer select-none">
+                        <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5" />
+                        Show history
+                    </label>
+                    {!showCreate && !editingId && (
+                        <button onClick={() => { resetForm(); setShowCreate(true); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 transition-colors">
+                            <Plus className="w-3.5 h-3.5" /> Add {label}
+                        </button>
+                    )}
+                </div>
             </div>
 
             {status && (
@@ -1918,21 +1931,28 @@ function MasterDataTab({ entity, label }: { entity: string; label: string }) {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                            {items.map(item => (
-                                <tr key={item.id} className="hover:bg-slate-50/50">
-                                    <td className="px-3 py-2 font-medium text-slate-800">{item.name}</td>
+                            {displayItems.map(item => (
+                                <tr key={item.id} className={`hover:bg-slate-50/50 ${item.isActive === false ? 'opacity-50' : ''}`}>
+                                    <td className="px-3 py-2 font-medium text-slate-800">
+                                        {item.name}
+                                        {item.isActive === false && (
+                                            <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-400 border border-slate-200">inactive</span>
+                                        )}
+                                    </td>
                                     <td className="px-3 py-2 text-right">
+                                        {item.isActive !== false && (
                                         <div className="flex items-center justify-end gap-2">
                                             <button onClick={() => openEdit(item)} className="p-1.5 text-slate-400 hover:text-indigo-600 transition-colors" title="Edit"><Pencil className="w-3.5 h-3.5" /></button>
                                             <button onClick={() => handleDelete(item.id)} className="p-1.5 text-slate-400 hover:text-red-600 transition-colors" title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>
                                         </div>
+                                        )}
                                     </td>
                                 </tr>
                             ))}
                         </tbody>
                     </table>
                 </div>
-                {items.length === 0 && <div className="text-center py-8 text-slate-400">No {label.toLowerCase()}s found.</div>}
+                {displayItems.length === 0 && <div className="text-center py-8 text-slate-400">No {label.toLowerCase()}s found.</div>}
             </div>
         </div>
     );

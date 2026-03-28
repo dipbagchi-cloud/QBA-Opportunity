@@ -112,6 +112,9 @@ interface Opportunity {
     owner: string;
     salesRepName?: string;
     managerName?: string;
+    technology?: string;
+    region?: string;
+    expectedCloseDate?: string;
     status: string;
     healthScore: number;
     daysInStage: number;
@@ -133,7 +136,7 @@ export default function DashboardPage() {
             try {
                 const [analyticsRes, oppsRes] = await Promise.all([
                     fetch(`${API_URL}/api/analytics`, { headers }),
-                    fetch(`${API_URL}/api/opportunities`, { headers }),
+                    fetch(`${API_URL}/api/opportunities?limit=100`, { headers }),
                 ]);
                 if (analyticsRes.ok) setAnalytics(await analyticsRes.json());
                 if (oppsRes.ok) {
@@ -276,14 +279,18 @@ export default function DashboardPage() {
     /* ── Drill-down configs for each visual ────────────────────────── */
 
     const revenueDrill: DrillDownConfig = {
-        title: "Revenue Projection – Monthly Breakdown",
+        title: "Revenue Projection – All Opportunities",
         columns: [
-            { key: "name", label: "Month", format: "text" },
-            { key: "proposed", label: "Proposed", format: "currency" },
-            { key: "actual", label: "Won", format: "currency" },
-            { key: "lost", label: "Lost", format: "currency" },
+            { key: "name", label: "Opportunity", format: "text" },
+            { key: "client", label: "Client", format: "text" },
+            { key: "value", label: "Value", format: "currency" },
+            { key: "currentStage", label: "Stage", format: "text" },
+            { key: "probability", label: "Probability", format: "percent" },
+            { key: "expectedCloseDate", label: "Expected Close", format: "text" },
+            { key: "owner", label: "Owner", format: "text" },
+            { key: "salesRepName", label: "Sales Rep", format: "text" },
         ],
-        data: revenueData,
+        data: opportunities,
         chart: (
             <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={revenueData} barSize={20}>
@@ -303,10 +310,18 @@ export default function DashboardPage() {
     const stageDrill: DrillDownConfig = {
         title: "Opportunities by Stage",
         columns: [
-            { key: "name", label: "Stage", format: "text" },
-            { key: "value", label: "Count", format: "number" },
+            { key: "name", label: "Opportunity", format: "text" },
+            { key: "client", label: "Client", format: "text" },
+            { key: "currentStage", label: "Stage", format: "text" },
+            { key: "value", label: "Value", format: "currency" },
+            { key: "owner", label: "Owner", format: "text" },
+            { key: "salesRepName", label: "Sales Rep", format: "text" },
+            { key: "healthScore", label: "Health %", format: "number" },
         ],
-        data: statusData,
+        data: [...opportunities].sort((a, b) => {
+            const order = ['Pipeline', 'Discovery', 'Qualification', 'Proposal', 'Negotiation', 'Closed Won', 'Closed-Won', 'Closed Lost', 'Proposal Lost'];
+            return (order.indexOf(a.currentStage) - order.indexOf(b.currentStage));
+        }),
         chart: (
             <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
@@ -325,12 +340,15 @@ export default function DashboardPage() {
     const salespersonDrill: DrillDownConfig = {
         title: "Opportunities by Salesperson",
         columns: [
-            { key: "name", label: "Salesperson", format: "text" },
-            { key: "active", label: "Active", format: "number" },
-            { key: "won", label: "Won", format: "number" },
-            { key: "total", label: "Total", format: "number" },
+            { key: "name", label: "Opportunity", format: "text" },
+            { key: "client", label: "Client", format: "text" },
+            { key: "value", label: "Value", format: "currency" },
+            { key: "currentStage", label: "Stage", format: "text" },
+            { key: "owner", label: "Owner", format: "text" },
+            { key: "salesRepName", label: "Sales Rep", format: "text" },
+            { key: "probability", label: "Probability", format: "percent" },
         ],
-        data: ownerData,
+        data: opportunities,
         chart: (
             <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={ownerData} layout="vertical" margin={{ left: 10, right: 20 }} barSize={14}>
@@ -349,10 +367,14 @@ export default function DashboardPage() {
     const techRevDrill: DrillDownConfig = {
         title: "Revenue by Tech Stack",
         columns: [
-            { key: "name", label: "Technology", format: "text" },
-            { key: "value", label: "Revenue", format: "currency" },
+            { key: "name", label: "Opportunity", format: "text" },
+            { key: "client", label: "Client", format: "text" },
+            { key: "technology", label: "Technology", format: "text" },
+            { key: "value", label: "Value", format: "currency" },
+            { key: "currentStage", label: "Stage", format: "text" },
+            { key: "owner", label: "Owner", format: "text" },
         ],
-        data: techRevenueData,
+        data: opportunities.filter(o => o.technology),
         chart: (
             <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={techRevenueData} layout="vertical" margin={{ left: 10, right: 20 }} barSize={14}>
@@ -369,10 +391,14 @@ export default function DashboardPage() {
     const clientRevDrill: DrillDownConfig = {
         title: "Revenue by Client",
         columns: [
-            { key: "name", label: "Client", format: "text" },
-            { key: "value", label: "Revenue", format: "currency" },
+            { key: "name", label: "Opportunity", format: "text" },
+            { key: "client", label: "Client", format: "text" },
+            { key: "value", label: "Value", format: "currency" },
+            { key: "currentStage", label: "Stage", format: "text" },
+            { key: "owner", label: "Owner", format: "text" },
+            { key: "salesRepName", label: "Sales Rep", format: "text" },
         ],
-        data: clientRevenueData,
+        data: [...opportunities].sort((a, b) => a.client.localeCompare(b.client)),
         chart: (
             <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={clientRevenueData} layout="vertical" margin={{ left: 10, right: 20 }} barSize={14}>
@@ -389,10 +415,14 @@ export default function DashboardPage() {
     const salesRepRevDrill: DrillDownConfig = {
         title: "Revenue by Sales Rep",
         columns: [
-            { key: "name", label: "Sales Rep", format: "text" },
-            { key: "revenue", label: "Revenue", format: "currency" },
+            { key: "name", label: "Opportunity", format: "text" },
+            { key: "client", label: "Client", format: "text" },
+            { key: "value", label: "Value", format: "currency" },
+            { key: "currentStage", label: "Stage", format: "text" },
+            { key: "salesRepName", label: "Sales Rep", format: "text" },
+            { key: "probability", label: "Probability", format: "percent" },
         ],
-        data: ownerRevenueData,
+        data: opportunities,
         chart: (
             <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={ownerRevenueData} layout="vertical" margin={{ left: 10, right: 20 }} barSize={14}>
@@ -409,10 +439,14 @@ export default function DashboardPage() {
     const clientCountDrill: DrillDownConfig = {
         title: "Opportunities by Client",
         columns: [
-            { key: "name", label: "Client", format: "text" },
-            { key: "value", label: "Count", format: "number" },
+            { key: "name", label: "Opportunity", format: "text" },
+            { key: "client", label: "Client", format: "text" },
+            { key: "value", label: "Value", format: "currency" },
+            { key: "currentStage", label: "Stage", format: "text" },
+            { key: "owner", label: "Owner", format: "text" },
+            { key: "healthScore", label: "Health %", format: "number" },
         ],
-        data: clientCountData,
+        data: [...opportunities].sort((a, b) => a.client.localeCompare(b.client)),
         chart: (
             <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={clientCountData} layout="vertical" margin={{ left: 10, right: 20 }} barSize={14}>
@@ -478,7 +512,9 @@ export default function DashboardPage() {
                 { key: "value", label: "Value", format: "currency" },
                 { key: "currentStage", label: "Stage", format: "text" },
                 { key: "probability", label: "Probability", format: "percent" },
+                { key: "expectedCloseDate", label: "Expected Close", format: "text" },
                 { key: "owner", label: "Owner", format: "text" },
+                { key: "salesRepName", label: "Sales Rep", format: "text" },
             ],
             data: opportunities.filter(o => o.status !== "won" && o.status !== "lost"),
         },
@@ -488,7 +524,10 @@ export default function DashboardPage() {
                 { key: "name", label: "Opportunity", format: "text" },
                 { key: "client", label: "Client", format: "text" },
                 { key: "value", label: "Value", format: "currency" },
+                { key: "currentStage", label: "Stage", format: "text" },
                 { key: "owner", label: "Owner", format: "text" },
+                { key: "salesRepName", label: "Sales Rep", format: "text" },
+                { key: "technology", label: "Technology", format: "text" },
             ],
             data: opportunities.filter(o => {
                 const s = STAGE_DISPLAY[o.currentStage] || o.currentStage;
@@ -504,6 +543,9 @@ export default function DashboardPage() {
                 { key: "currentStage", label: "Stage", format: "text" },
                 { key: "status", label: "Health", format: "text" },
                 { key: "owner", label: "Owner", format: "text" },
+                { key: "salesRepName", label: "Sales Rep", format: "text" },
+                { key: "technology", label: "Technology", format: "text" },
+                { key: "region", label: "Region", format: "text" },
             ],
             data: opportunities,
         },
@@ -515,6 +557,8 @@ export default function DashboardPage() {
                 { key: "value", label: "Value", format: "currency" },
                 { key: "currentStage", label: "Stage", format: "text" },
                 { key: "probability", label: "Probability", format: "percent" },
+                { key: "owner", label: "Owner", format: "text" },
+                { key: "expectedCloseDate", label: "Expected Close", format: "text" },
             ],
             data: opportunities.filter(o => {
                 const s = o.currentStage;
@@ -529,6 +573,8 @@ export default function DashboardPage() {
                 { key: "value", label: "Value", format: "currency" },
                 { key: "currentStage", label: "Stage", format: "text" },
                 { key: "owner", label: "Owner", format: "text" },
+                { key: "salesRepName", label: "Sales Rep", format: "text" },
+                { key: "technology", label: "Technology", format: "text" },
             ],
             data: opportunities.filter(o => ['Closed Won', 'Closed-Won', 'Closed Lost', 'Proposal Lost'].includes(o.currentStage)),
         },
@@ -540,6 +586,8 @@ export default function DashboardPage() {
                 { key: "value", label: "Value", format: "currency" },
                 { key: "currentStage", label: "Stage", format: "text" },
                 { key: "daysInStage", label: "Days in Stage", format: "number" },
+                { key: "lastActivity", label: "Last Activity", format: "text" },
+                { key: "status", label: "Health", format: "text" },
             ],
             data: opportunities,
         },

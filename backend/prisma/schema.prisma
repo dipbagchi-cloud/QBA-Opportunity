@@ -190,11 +190,12 @@ model RateCard {
 
 model Region {
   id        String   @id @default(cuid())
-  name      String   @unique
+  name      String
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([name])
   @@map("regions")
 }
 
@@ -218,31 +219,34 @@ model CurrencyRate {
 
 model Technology {
   id        String   @id @default(cuid())
-  name      String   @unique
+  name      String
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([name])
   @@map("technologies")
 }
 
 model PricingModel {
   id        String   @id @default(cuid())
-  name      String   @unique
+  name      String
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([name])
   @@map("pricing_models")
 }
 
 model ProjectType {
   id        String   @id @default(cuid())
-  name      String   @unique
+  name      String
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([name])
   @@map("project_types")
 }
 

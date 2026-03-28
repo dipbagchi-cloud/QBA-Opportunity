@@ -203,6 +203,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     // GOM percent from estimation context (for threshold check)
     const [contextGomPercent, setContextGomPercent] = useState(0);
     const [minGomPercent, setMinGomPercent] = useState(0);
+    const [gomAutoApprovePercent, setGomAutoApprovePercent] = useState(0);
     const [gomApproved, setGomApproved] = useState(false);
 
     // Load managers by department when presales modal opens
@@ -350,6 +351,9 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     if (budgetData.minGomPercent !== undefined) {
                         setMinGomPercent(budgetData.minGomPercent);
                     }
+                    if (budgetData.gomAutoApprovePercent !== undefined) {
+                        setGomAutoApprovePercent(budgetData.gomAutoApprovePercent);
+                    }
                 }
             } catch (err) {
                 console.error("Failed to load master data", err);
@@ -357,6 +361,13 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         };
         fetchMasterData();
     }, []);
+
+    // Auto-approve GOM when GOM % reaches configured threshold
+    useEffect(() => {
+        if (gomAutoApprovePercent > 0 && contextGomPercent >= gomAutoApprovePercent && !gomApproved && id) {
+            handleApproveGom(true);
+        }
+    }, [contextGomPercent, gomAutoApprovePercent]);
 
     // Auto-calculate tentative end date
     useEffect(() => {
@@ -917,6 +928,35 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     )}
                 </div>
             </div>
+
+            {/* Detailed Status Banner */}
+            {detailedStatus === 'Sent for Re-estimate' && (
+                <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-amber-800">
+                    <RefreshCw className="w-4 h-4 flex-shrink-0 text-amber-500" />
+                    <div>
+                        <span className="font-semibold text-sm">Sent for Re-estimation</span>
+                        <span className="text-xs ml-2 text-amber-600">— This opportunity was sent back for re-estimation by the Sales team</span>
+                    </div>
+                </div>
+            )}
+            {detailedStatus === 'Estimation Submitted' && (
+                <div className="flex items-center gap-3 bg-indigo-50 border border-indigo-200 rounded-lg px-4 py-3 text-indigo-800">
+                    <Check className="w-4 h-4 flex-shrink-0 text-indigo-500" />
+                    <div>
+                        <span className="font-semibold text-sm">Estimation Submitted</span>
+                        <span className="text-xs ml-2 text-indigo-600">— Estimation has been submitted to the Sales team for review</span>
+                    </div>
+                </div>
+            )}
+            {detailedStatus === 'Re-estimation Submitted' && (
+                <div className="flex items-center gap-3 bg-purple-50 border border-purple-200 rounded-lg px-4 py-3 text-purple-800">
+                    <Check className="w-4 h-4 flex-shrink-0 text-purple-500" />
+                    <div>
+                        <span className="font-semibold text-sm">Re-estimation Submitted</span>
+                        <span className="text-xs ml-2 text-purple-600">— Updated re-estimation has been submitted to Sales</span>
+                    </div>
+                </div>
+            )}
 
             {/* Stepper Navigation */}
             <div className="bg-white p-3 rounded-lg shadow-sm border border-slate-200">

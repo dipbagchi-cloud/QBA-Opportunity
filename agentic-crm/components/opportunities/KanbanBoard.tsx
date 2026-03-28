@@ -3,7 +3,7 @@
 import React, { useMemo } from 'react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { useOpportunityStore, Opportunity } from '@/lib/store';
-import { MoreHorizontal, DollarSign, User, AlertCircle, Clock } from 'lucide-react';
+import { MoreHorizontal, DollarSign, User, AlertCircle, Clock, Calendar, CalendarCheck, CalendarClock } from 'lucide-react';
 import Link from 'next/link';
 import { useCurrency } from '@/components/providers/currency-provider';
 
@@ -92,7 +92,7 @@ export default function KanbanBoard() {
                                                             } ${opp.isStalled ? 'border-amber-300 bg-amber-50/30' : 'border-slate-200'}
                                                             `}
                                                         style={provided.draggableProps.style}
-                                                        title={`${opp.name}\nClient: ${opp.client}\nOwner: ${opp.owner || 'N/A'}\nStage: ${stage.title}\nValue: ${(opp.value || 0).toLocaleString()}\nProbability: ${opp.probability}%\nDays in Stage: ${opp.daysInStage || 0}\nHealth: ${opp.healthScore ?? 'N/A'}/100\nStatus: ${opp.status}\nSales Rep: ${opp.salesRepName || 'N/A'}\nManager: ${opp.managerName || 'N/A'}`}
+                                                        title={`${opp.name}\nClient: ${opp.client}\nOwner: ${opp.owner || 'N/A'}\nStage: ${stage.title}\nValue: ${(opp.value || 0).toLocaleString()}\nProbability: ${opp.probability}%\nDays in Stage: ${opp.daysInStage || 0}\nHealth: ${opp.healthScore ?? 'N/A'}/100\nStatus: ${opp.status}\nSales Rep: ${opp.salesRepName || 'N/A'}\nManager: ${opp.managerName || 'N/A'}\nCreated: ${opp.createdAt || 'N/A'}\nExpected Close: ${opp.expectedCloseDate || 'N/A'}\nStart Date: ${opp.tentativeStartDate || 'N/A'}\nEnd Date: ${opp.tentativeEndDate || 'N/A'}`}
                                                     >
                                                         {/* Header: Name + Icons */}
                                                         <div className="flex justify-between items-start mb-1.5 gap-2">
@@ -153,6 +153,39 @@ export default function KanbanBoard() {
                                                                 {opp.probability}%
                                                             </div>
                                                         </div>
+
+                                                        {/* Dates */}
+                                                        {(opp.expectedCloseDate || opp.tentativeStartDate || opp.actualCloseDate) && (
+                                                            <div className="mt-2 pt-2 border-t border-slate-50 space-y-1">
+                                                                {opp.tentativeStartDate && (
+                                                                    <div className="flex items-center gap-1 text-[10px] text-indigo-600">
+                                                                        <CalendarClock className="w-3 h-3 flex-shrink-0" />
+                                                                        <span className="text-slate-400">Start:</span>
+                                                                        <span className="font-medium">{opp.tentativeStartDate}</span>
+                                                                    </div>
+                                                                )}
+                                                                {opp.tentativeEndDate && !opp.actualCloseDate && (
+                                                                    <div className="flex items-center gap-1 text-[10px] text-slate-500">
+                                                                        <CalendarClock className="w-3 h-3 flex-shrink-0" />
+                                                                        <span className="text-slate-400">Est. End:</span>
+                                                                        <span className="font-medium">{opp.tentativeEndDate}</span>
+                                                                    </div>
+                                                                )}
+                                                                {opp.actualCloseDate ? (
+                                                                    <div className="flex items-center gap-1 text-[10px] text-emerald-600">
+                                                                        <CalendarCheck className="w-3 h-3 flex-shrink-0" />
+                                                                        <span className="text-slate-400">Closed:</span>
+                                                                        <span className="font-medium">{opp.actualCloseDate}</span>
+                                                                    </div>
+                                                                ) : opp.expectedCloseDate ? (
+                                                                    <div className="flex items-center gap-1 text-[10px] text-amber-600">
+                                                                        <CalendarCheck className="w-3 h-3 flex-shrink-0" />
+                                                                        <span className="text-slate-400">Exp. Close:</span>
+                                                                        <span className="font-medium">{opp.expectedCloseDate}</span>
+                                                                    </div>
+                                                                ) : null}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 )}
                                             </Draggable>

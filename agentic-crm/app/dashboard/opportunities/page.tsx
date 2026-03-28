@@ -13,11 +13,17 @@ import {
     Trash2,
     Edit,
     ChevronLeft,
-    ChevronRight
+    ChevronRight,
+    Calendar,
+    CalendarCheck,
+    CalendarClock,
+    ArrowUpDown,
+    ArrowUp,
+    ArrowDown
 } from "lucide-react";
 import Link from "next/link";
 import { useOpportunityStore } from "@/lib/store";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import KanbanBoard from "@/components/opportunities/KanbanBoard";
 import { useCurrency } from "@/components/providers/currency-provider";
 
@@ -30,6 +36,53 @@ export default function OpportunitiesPage() {
 
     const [viewMode, setViewMode] = useState<'list' | 'kanban'>('list');
     const { format: fmtCurrency } = useCurrency();
+
+    const [sortKey, setSortKey] = useState<string | null>(null);
+    const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+
+    const handleSort = (key: string) => {
+        if (sortKey === key) {
+            setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+        } else {
+            setSortKey(key);
+            setSortDir('asc');
+        }
+    };
+
+    const SortIcon = ({ col }: { col: string }) => {
+        if (sortKey !== col) return <ArrowUpDown className="w-3 h-3 opacity-40" />;
+        return sortDir === 'asc' ? <ArrowUp className="w-3 h-3 text-indigo-600" /> : <ArrowDown className="w-3 h-3 text-indigo-600" />;
+    };
+
+    const sortedOpportunities = useMemo(() => {
+        if (!sortKey) return opportunities;
+        return [...opportunities].sort((a, b) => {
+            let av: string | number | null | undefined;
+            let bv: string | number | null | undefined;
+            switch (sortKey) {
+                case 'name': av = a.name; bv = b.name; break;
+                case 'stage': av = a.stage; bv = b.stage; break;
+                case 'value': av = typeof a.value === 'number' ? a.value : Number(a.value) || 0; bv = typeof b.value === 'number' ? b.value : Number(b.value) || 0; break;
+                case 'probability': av = a.probability; bv = b.probability; break;
+                case 'salesRep': av = a.salesRepName ?? ''; bv = b.salesRepName ?? ''; break;
+                case 'manager': av = a.managerName ?? ''; bv = b.managerName ?? ''; break;
+                case 'createdAt': av = a.createdAt ?? ''; bv = b.createdAt ?? ''; break;
+                case 'startDate': av = a.tentativeStartDate ?? ''; bv = b.tentativeStartDate ?? ''; break;
+                case 'endDate': av = a.tentativeEndDate ?? ''; bv = b.tentativeEndDate ?? ''; break;
+                case 'closeDate': av = a.actualCloseDate ?? a.expectedCloseDate ?? ''; bv = b.actualCloseDate ?? b.expectedCloseDate ?? ''; break;
+                case 'lastActivity': av = a.lastActivity ?? ''; bv = b.lastActivity ?? ''; break;
+                default: return 0;
+            }
+            if (av == null) av = '';
+            if (bv == null) bv = '';
+            if (typeof av === 'number' && typeof bv === 'number') {
+                return sortDir === 'asc' ? av - bv : bv - av;
+            }
+            const as = String(av).toLowerCase();
+            const bs = String(bv).toLowerCase();
+            return sortDir === 'asc' ? as.localeCompare(bs) : bs.localeCompare(as);
+        });
+    }, [opportunities, sortKey, sortDir]);
 
     const loadPage = useCallback((pg: number, search?: string) => {
         setCurrentPage(pg);
@@ -116,13 +169,11 @@ export default function OpportunitiesPage() {
                         <table className="w-full">
                             <thead className="bg-slate-50 border-b border-slate-200">
                                 <tr>
-                                    <th className="text-left py-2.5 px-4 font-semibold text-slate-600 text-xs">Opportunity Name</th>
-                                    <th className="text-left py-2.5 px-4 font-semibold text-slate-600 text-xs">Stage</th>
-                                    <th className="text-left py-2.5 px-4 font-semibold text-slate-600 text-xs">Value</th>
-                                    <th className="text-left py-2.5 px-4 font-semibold text-slate-600 text-xs">Probability</th>
-                                    <th className="text-left py-2.5 px-4 font-semibold text-slate-600 text-xs">Sales Rep</th>
-                                    <th className="text-left py-2.5 px-4 font-semibold text-slate-600 text-xs">Manager</th>
-                                    <th className="text-left py-2.5 px-4 font-semibold text-slate-600 text-xs">Last Activity</th>
+                                    {[['name','Opportunity Name'],['stage','Stage'],['value','Value'],['probability','Prob.'],['salesRep','Sales Rep'],['manager','Manager'],['createdAt','Created'],['startDate','Start Date'],['endDate','Est. End'],['closeDate','Close Date'],['lastActivity','Last Activity']].map(([key, label]) => (
+                                        <th key={key} className="text-left py-2.5 px-4 font-semibold text-slate-600 text-xs cursor-pointer select-none hover:bg-slate-100" onClick={() => handleSort(key)}>
+                                            <span className="flex items-center gap-1">{label}<SortIcon col={key} /></span>
+                                        </th>
+                                    ))}
                                     <th className="w-10"></th>
                                 </tr>
                             </thead>
@@ -134,9 +185,9 @@ export default function OpportunitiesPage() {
                                         </td>
                                     </tr>
                                 ) : (
-                                    opportunities.map((opp) => (
+                                    sortedOpportunities.map((opp) => (
                                         <tr key={opp.id} className="hover:bg-slate-50/80 transition-colors group"
-                                            title={`${opp.name}\nClient: ${opp.client}\nOwner: ${opp.owner}\nStage: ${opp.stage}\nValue: ${(typeof opp.value === 'number' ? opp.value : Number(opp.value) || 0).toLocaleString()}\nProbability: ${opp.probability}%\nSales Rep: ${opp.salesRepName || 'N/A'}\nManager: ${opp.managerName || 'N/A'}\nHealth: ${opp.healthScore ?? 'N/A'}/100\nStatus: ${opp.status}\nLast Activity: ${opp.lastActivity}`}
+                                            title={`${opp.name}\nClient: ${opp.client}\nOwner: ${opp.owner}\nStage: ${opp.stage}\nValue: ${(typeof opp.value === 'number' ? opp.value : Number(opp.value) || 0).toLocaleString()}\nProbability: ${opp.probability}%\nSales Rep: ${opp.salesRepName || 'N/A'}\nManager: ${opp.managerName || 'N/A'}\nHealth: ${opp.healthScore ?? 'N/A'}/100\nStatus: ${opp.status}\nLast Activity: ${opp.lastActivity}\nCreated: ${opp.createdAt || 'N/A'}\nExpected Close: ${opp.expectedCloseDate || 'N/A'}\nStart Date: ${opp.tentativeStartDate || 'N/A'}\nEnd Date: ${opp.tentativeEndDate || 'N/A'}`}
                                         >
                                             <td className="py-2.5 px-4">
                                                 <div className="flex items-center gap-2">
@@ -187,6 +238,30 @@ export default function OpportunitiesPage() {
                                             </td>
                                             <td className="py-2.5 px-4 text-xs text-slate-600">
                                                 {opp.managerName || <span className="text-slate-300">—</span>}
+                                            </td>
+                                            <td className="py-2.5 px-4 text-xs text-slate-500 whitespace-nowrap">
+                                                {opp.createdAt
+                                                    ? <span className="flex items-center gap-1"><Calendar className="w-3 h-3 text-slate-400" />{opp.createdAt}</span>
+                                                    : <span className="text-slate-300">—</span>}
+                                            </td>
+                                            <td className="py-2.5 px-4 text-xs whitespace-nowrap">
+                                                {opp.tentativeStartDate
+                                                    ? <span className="flex items-center gap-1 text-indigo-600"><CalendarClock className="w-3 h-3" />{opp.tentativeStartDate}</span>
+                                                    : <span className="text-slate-300">—</span>}
+                                            </td>
+                                            <td className="py-2.5 px-4 text-xs whitespace-nowrap">
+                                                {opp.actualCloseDate
+                                                    ? <span className="flex items-center gap-1 text-purple-600 font-medium"><CalendarClock className="w-3 h-3" />{opp.actualCloseDate}</span>
+                                                    : opp.tentativeEndDate
+                                                        ? <span className="flex items-center gap-1 text-slate-500"><CalendarClock className="w-3 h-3 text-slate-400" />Est. {opp.tentativeEndDate}</span>
+                                                        : <span className="text-slate-300">—</span>}
+                                            </td>
+                                            <td className="py-2.5 px-4 text-xs whitespace-nowrap">
+                                                {opp.actualCloseDate
+                                                    ? <span className="flex items-center gap-1 text-emerald-600 font-medium"><CalendarCheck className="w-3 h-3" />{opp.actualCloseDate}</span>
+                                                    : opp.expectedCloseDate
+                                                        ? <span className="flex items-center gap-1 text-amber-600"><CalendarCheck className="w-3 h-3" />{opp.expectedCloseDate}</span>
+                                                        : <span className="text-slate-300">—</span>}
                                             </td>
                                             <td className="py-2.5 px-4 text-xs text-slate-500">
                                                 {opp.lastActivity}

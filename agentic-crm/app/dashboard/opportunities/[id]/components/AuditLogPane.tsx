@@ -25,6 +25,8 @@ const actionLabels: Record<string, string> = {
     ESTIMATION_SUBMITTED: "Estimation Submitted",
     CONVERT_TO_PROJECT: "Converted to Project",
     MARK_LOST: "Marked as Lost",
+    GOM_APPROVED: "GOM Approved",
+    GOM_REVOKED: "GOM Approval Revoked",
 };
 
 export function AuditLogPane({ opportunityId }: AuditLogPaneProps) {

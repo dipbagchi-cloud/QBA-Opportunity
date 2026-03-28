@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo, ReactNode } from "react";
+import { useState, useCallback, useEffect, useMemo, ReactNode } from "react";
 import { X, Download, Maximize2, Table2, BarChart3, Search, ChevronLeft, ChevronRight, Filter, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import {
     BarChart, Bar, PieChart, Pie, Cell,
@@ -127,7 +127,7 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
     }, [sortedData, page, pageSize]);
 
     // Reset page when search/filter changes
-    useMemo(() => { setPage(1); }, [search, filterCol, filterVal, pageSize]);
+    useEffect(() => { setPage(1); }, [search, filterCol, filterVal, pageSize]);
 
     const handleSort = (key: string) => {
         if (sortKey === key) {
@@ -251,7 +251,7 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
                                                     {sortKey === col.key ? (
                                                         sortDir === "asc" ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
                                                     ) : (
-                                                        <ArrowUpDown className="w-3 h-3 opacity-30" />
+                                                        <ArrowUpDown className="w-3 h-3 opacity-50" />
                                                     )}
                                                 </span>
                                             </th>

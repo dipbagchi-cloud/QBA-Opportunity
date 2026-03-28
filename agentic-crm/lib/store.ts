@@ -12,6 +12,13 @@ export interface Opportunity {
     owner: string;
     salesRepName?: string;
     managerName?: string;
+    technology?: string;
+    region?: string;
+    expectedCloseDate?: string;
+    actualCloseDate?: string;
+    tentativeStartDate?: string;
+    tentativeEndDate?: string;
+    createdAt?: string;
     status: 'healthy' | 'at-risk' | 'critical';
     description?: string;
     // Epic 3 Intelligence Fields
