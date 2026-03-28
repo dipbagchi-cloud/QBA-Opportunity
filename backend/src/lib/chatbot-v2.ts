@@ -253,15 +253,31 @@ function parseDuration(text: string): { duration: string; unit: string } | null 
     return { duration: match[1], unit: match[2] + 's' };
 }
 
-// ─── LLM INTEGRATION (OpenAI SDK) ──────────────────────────────────────────
+// ─── LLM INTEGRATION (OpenAI SDK — supports OpenAI, Groq, Gemini, any OpenAI-compatible API) ──
+//
+// Configure via .env:
+//   OPENAI_API_KEY=sk-...             (OpenAI)
+//   LLM_API_URL=https://api.groq.com/openai/v1  LLM_API_KEY=gsk_...  LLM_MODEL=llama-3.1-70b-versatile  (Groq — free)
+//   LLM_API_URL=https://generativelanguage.googleapis.com/v1beta/openai  LLM_API_KEY=...  LLM_MODEL=gemini-2.0-flash  (Gemini — free)
+//
 
 const LLM_API_URL = process.env.LLM_API_URL || process.env.OPENAI_API_URL || process.env.OPENAI_BASE_URL || '';
 const LLM_API_KEY = process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || '';
 const LLM_MODEL = process.env.LLM_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini';
 
+// Circuit breaker: stop calling LLM after repeated failures to avoid latency
+let llmFailureCount = 0;
+let llmCircuitOpenUntil = 0;
+const LLM_CIRCUIT_THRESHOLD = 3;   // failures before opening circuit
+const LLM_CIRCUIT_COOLDOWN = 5 * 60 * 1000; // 5 min cooldown
+
 let openaiClient: OpenAI | null = null;
 function getOpenAIClient(): OpenAI | null {
     if (!LLM_API_KEY) return null;
+    // Circuit breaker open?
+    if (llmFailureCount >= LLM_CIRCUIT_THRESHOLD && Date.now() < llmCircuitOpenUntil) {
+        return null;
+    }
     if (!openaiClient) {
         openaiClient = new OpenAI({
             apiKey: LLM_API_KEY,
@@ -269,6 +285,29 @@ function getOpenAIClient(): OpenAI | null {
         });
     }
     return openaiClient;
+}
+
+function recordLLMSuccess() {
+    llmFailureCount = 0;
+    llmCircuitOpenUntil = 0;
+}
+
+function recordLLMFailure() {
+    llmFailureCount++;
+    if (llmFailureCount >= LLM_CIRCUIT_THRESHOLD) {
+        llmCircuitOpenUntil = Date.now() + LLM_CIRCUIT_COOLDOWN;
+        console.warn(`[Chatbot] LLM circuit breaker OPEN — ${llmFailureCount} failures. Cooling down until ${new Date(llmCircuitOpenUntil).toISOString()}`);
+    }
+}
+
+export function getLLMStatus(): { available: boolean; provider: string; model: string; circuitOpen: boolean; failures: number } {
+    return {
+        available: !!LLM_API_KEY,
+        provider: LLM_API_URL ? new URL(LLM_API_URL).hostname : 'api.openai.com',
+        model: LLM_MODEL,
+        circuitOpen: llmFailureCount >= LLM_CIRCUIT_THRESHOLD && Date.now() < llmCircuitOpenUntil,
+        failures: llmFailureCount,
+    };
 }
 
 interface LLMParsedIntent {
@@ -281,7 +320,7 @@ interface LLMParsedIntent {
 
 const SYSTEM_PROMPT = `You are an AI assistant for Q-CRM, a sales pipeline management system.
 Analyze the user message and determine their intent. Return a JSON object with:
-- "intent": one of [create_opportunity, update_opportunity, list_opportunities, get_details, pipeline_analytics, revenue_analytics, deal_health, forecast, create_lead, list_contacts, create_contact, get_contact, update_contact, delete_contact, add_comment, list_comments, approve_gom, review_gom, gom_status, list_users, list_audit_logs, my_profile, list_resources, convert_opportunity, general_chat, confirm_yes, confirm_no, provide_field_value, cancel]
+- "intent": one of [create_opportunity, update_opportunity, list_opportunities, get_details, pipeline_analytics, revenue_analytics, deal_health, forecast, create_lead, list_contacts, create_contact, get_contact, update_contact, delete_contact, add_comment, list_comments, approve_gom, review_gom, gom_status, list_users, list_audit_logs, my_profile, list_resources, convert_opportunity, move_to_presales, move_to_sales, proposal_sent, mark_lost, reestimate, general_chat, confirm_yes, confirm_no, provide_field_value, cancel]
 - "params": extracted parameters as key-value pairs
 - "confidence": 0-1 confidence score
 
@@ -299,8 +338,16 @@ For approve_gom / review_gom / gom_status: nameOrId (deal name)
 For list_users: search, department, role
 For list_audit_logs: entity, action
 For convert_opportunity: nameOrId (deal name)
+For move_to_presales: nameOrId (deal name) — moves from Pipeline/Discovery to Presales/Qualification
+For move_to_sales: nameOrId (deal name) — moves from Presales/Qualification to Sales/Proposal (requires GOM approval)
+For proposal_sent: nameOrId (deal name) — marks proposal as sent, moves from Proposal to Negotiation
+For mark_lost: nameOrId (deal name), lostType ("Closed Lost" or "Proposal Lost"), remarks (reason for losing)
+For reestimate: nameOrId (deal name), comment (why re-estimation needed), adjustedValue (optional new value)
 For revenue_analytics: groupBy (technology, client, owner, month)
 For provide_field_value: fieldName, fieldValue
+
+Opportunity Lifecycle: Pipeline (Discovery) → Presales (Qualification) → Sales (Proposal → Negotiation) → Project (Closed Won)
+The words "presales" and "qualification" refer to the same stage. "sales" and "proposal" refer to the same stage.
 
 Value parsing: "500K" = 500000, "2M" = 2000000, "1.5 crore" = 15000000
 Date formats: accept any format
@@ -323,9 +370,44 @@ async function callLLM(userMessage: string, conversationContext: string): Promis
         const content = completion.choices?.[0]?.message?.content?.trim();
         if (!content) return null;
         const jsonStr = content.replace(/^```json?\n?/, '').replace(/\n?```$/, '').trim();
-        return JSON.parse(jsonStr);
+        const parsed = JSON.parse(jsonStr);
+        recordLLMSuccess();
+        return parsed;
     } catch (e) {
+        recordLLMFailure();
         console.error('[Chatbot] LLM call failed, falling back to NLP:', (e as Error).message);
+        return null;
+    }
+}
+
+/** Use LLM for free-form conversational response (general_chat) */
+async function llmGeneralChat(userMessage: string, ctx: UserContext, conversationHistory: { role: string; content: string }[]): Promise<string | null> {
+    const client = getOpenAIClient();
+    if (!client) return null;
+    try {
+        const historyMsgs: OpenAI.Chat.ChatCompletionMessageParam[] = conversationHistory.slice(-6).map(h => ({
+            role: h.role as 'user' | 'assistant', content: h.content,
+        }));
+        const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+            {
+                role: 'system',
+                content: `You are Q-CRM AI Assistant, a helpful and concise CRM chatbot for a sales pipeline management tool.
+User: ${ctx.userName} (${ctx.roleName}). Respond naturally, helpfully, and briefly.
+If the user's message seems to be a CRM action you can't parse, suggest the correct command format.
+Do NOT make up data — only use what you know about the system's capabilities.
+Keep responses under 3 sentences unless detail is needed. Use markdown for formatting.`
+            },
+            ...historyMsgs,
+            { role: 'user', content: userMessage },
+        ];
+        const completion = await client.chat.completions.create({
+            model: LLM_MODEL, messages, temperature: 0.7, max_tokens: 300,
+        });
+        const content = completion.choices?.[0]?.message?.content?.trim();
+        recordLLMSuccess();
+        return content || null;
+    } catch (e) {
+        recordLLMFailure();
         return null;
     }
 }
@@ -333,6 +415,16 @@ async function callLLM(userMessage: string, conversationContext: string): Promis
 // ─── NLP FALLBACK ───────────────────────────────────────────────────────────
 
 const STAGE_NAMES = ['discovery', 'qualification', 'proposal', 'negotiation', 'closed won', 'closed lost', 'proposal lost'];
+
+// Lifecycle phase aliases → actual DB stage names
+const LIFECYCLE_ALIASES: Record<string, string> = {
+    'presales': 'Qualification',
+    'pre-sales': 'Qualification',
+    'pre sales': 'Qualification',
+    'sales': 'Proposal',
+    'pipeline': 'Discovery',
+    'project': 'Closed Won',
+};
 
 /** Extract entity name from message — tries quotes first, then "for/on/of <name>" */
 function extractEntityName(msg: string): string {
@@ -369,7 +461,39 @@ function nlpParseIntent(message: string, conv: ConversationState): LLMParsedInte
         return { intent: 'create_opportunity', params: extractOpportunityParams(lower), confidence: 0.9 };
     }
 
-    // UPDATE / MOVE STAGE
+    // ─── LIFECYCLE ACTIONS (before generic UPDATE to take priority) ───
+
+    // Move to Presales
+    if (/\b(move|send|advance|promote|push|transition)\b/i.test(lower) && /\b(presales?|pre[\s-]?sales?)\b/i.test(lower)) {
+        return { intent: 'move_to_presales', params: { nameOrId: extractEntityName(lower) }, confidence: 0.9 };
+    }
+
+    // Move to Sales
+    if (/\b(move|send|advance|promote|push|submit|transition)\b/i.test(lower) && /\b(sales)\b/i.test(lower) &&
+        !/\b(proposal\s*(sent|lost|rejected))\b/i.test(lower) && !/\b(sales\s*rep)\b/i.test(lower)) {
+        return { intent: 'move_to_sales', params: { nameOrId: extractEntityName(lower) }, confidence: 0.9 };
+    }
+
+    // Proposal Sent
+    if (/\b(proposal\s*(sent|submitted|delivered)|send\s*proposal|submit\s*proposal|mark\s*proposal\s*(as\s*)?(sent|submitted))\b/i.test(lower)) {
+        return { intent: 'proposal_sent', params: { nameOrId: extractEntityName(lower) }, confidence: 0.9 };
+    }
+
+    // Mark as Lost (before generic UPDATE)
+    if (/\b(mark|set|move|close)\b/i.test(lower) && /\b(lost|close.?lost|proposal.?lost|dead|rejected|declined)\b/i.test(lower)) {
+        const lostType = /\bproposal.?lost\b/i.test(lower) ? 'Proposal Lost' : 'Closed Lost';
+        const remarksMatch = lower.match(/(?:reason|because|remark|due to|:\s*)["']?(.{5,})["']?\s*$/i);
+        return { intent: 'mark_lost', params: { nameOrId: extractEntityName(lower), lostType, remarks: remarksMatch?.[1]?.trim() || '' }, confidence: 0.9 };
+    }
+
+    // Send back for Re-estimate (before generic UPDATE)
+    if (/\b(re[\s-]?estimat|send\s*back|return\s*(for|to)|revert|revision)\b/i.test(lower) &&
+        !(/\b(create|add|new)\b/i.test(lower))) {
+        const commentMatch = lower.match(/(?:reason|because|comment|:\s*)["']?(.{5,})["']?\s*$/i);
+        return { intent: 'reestimate', params: { nameOrId: extractEntityName(lower), comment: commentMatch?.[1]?.trim() || '' }, confidence: 0.9 };
+    }
+
+    // UPDATE / MOVE STAGE (generic — fallback for other stage moves)
     if (/\b(move|update|change|set|advance|promote|edit|modify)\b/i.test(lower) &&
         /\b(opportunit(?:y|ies)|deals?|opps?|stage|value|status|priority)\b/i.test(lower)) {
         const params = extractUpdateParams(lower);
@@ -491,6 +615,20 @@ function nlpParseIntent(message: string, conv: ConversationState): LLMParsedInte
         return { intent: 'list_resources', params: {}, confidence: 0.85 };
     }
 
+    // ─── GREETINGS & SMALL TALK ───
+    if (/^(hi|hello|hey|hola|greetings|good\s*(morning|afternoon|evening|day)|howdy|yo|sup|what'?s up)[!?.\s]*$/i.test(lower)) {
+        return { intent: 'greeting', params: {}, confidence: 0.95 };
+    }
+    if (/\b(thank|thanks|thx|ty|cheers|appreciate)\b/i.test(lower)) {
+        return { intent: 'thanks', params: {}, confidence: 0.9 };
+    }
+    if (/\b(bye|goodbye|see you|later|gtg|cya)\b/i.test(lower)) {
+        return { intent: 'farewell', params: {}, confidence: 0.9 };
+    }
+    if (/\b(how are you|how do you do|how's it going|what can you do|capabilities|features)\b/i.test(lower)) {
+        return { intent: 'about_bot', params: {}, confidence: 0.85 };
+    }
+
     return { intent: 'general_chat', params: {}, confidence: 0.3 };
 }
 
@@ -511,10 +649,20 @@ function extractUpdateParams(lower: string): Record<string, any> {
     const params: Record<string, any> = {};
     const nameMatch = lower.match(/(?:opportunity|deal|opp)\s+["']([^"']+)["']/i) || lower.match(/["']([^"']+)["']/);
     if (nameMatch) params.nameOrId = nameMatch[1].trim();
-    for (const stage of STAGE_NAMES) {
-        if (lower.includes(stage)) {
-            params.stage = stage.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    // Check lifecycle aliases first
+    for (const [alias, dbStage] of Object.entries(LIFECYCLE_ALIASES)) {
+        if (lower.includes(alias)) {
+            params.stage = dbStage;
             break;
+        }
+    }
+    // Then check standard DB stage names
+    if (!params.stage) {
+        for (const stage of STAGE_NAMES) {
+            if (lower.includes(stage)) {
+                params.stage = stage.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                break;
+            }
         }
     }
     const valMatch = lower.match(/value\s+(?:to\s+)?\$?([\d,.]+)\s*(k|m|thousand|million)?/i);
@@ -550,6 +698,8 @@ function canExecute(intent: string, permissions: string[]): boolean {
             return permissions.includes('pipeline:view');
         case 'update_opportunity': case 'create_opportunity':
         case 'add_comment': case 'convert_opportunity':
+        case 'move_to_presales': case 'move_to_sales': case 'proposal_sent':
+        case 'mark_lost': case 'reestimate':
             return permissions.includes('pipeline:write');
         case 'approve_gom':
             return permissions.includes('presales:write');
@@ -1147,6 +1297,162 @@ async function execConvertOpportunity(params: any, ctx: UserContext): Promise<Ac
     };
 }
 
+// ─── LIFECYCLE EXECUTORS ────────────────────────────────────────────────────
+
+/** Helper to find an opportunity by name or ID */
+async function findOpportunity(nameOrId: string): Promise<any> {
+    let opp: any = null;
+    if (nameOrId?.length === 36)
+        opp = await prisma.opportunity.findUnique({ where: { id: nameOrId }, include: { stage: true, client: true } });
+    if (!opp)
+        opp = await prisma.opportunity.findFirst({ where: { title: { contains: nameOrId, mode: 'insensitive' }, isArchived: false }, include: { stage: true, client: true } });
+    return opp;
+}
+
+/** Move to Presales (Discovery → Qualification) */
+async function execMoveToPresales(params: any, ctx: UserContext): Promise<ActionResult> {
+    if (!params.nameOrId) return { tool: 'move_to_presales', success: false, summary: 'Which opportunity? Provide the name in quotes (e.g., move "Project Alpha" to presales).' };
+    const opp = await findOpportunity(params.nameOrId);
+    if (!opp) return { tool: 'move_to_presales', success: false, summary: `Opportunity "${params.nameOrId}" not found.` };
+
+    const currentStage = opp.stage?.name || '';
+    if (currentStage !== 'Discovery') {
+        return { tool: 'move_to_presales', success: false, summary: `**"${opp.title}"** is currently in **${currentStage}** stage. Move to Presales is only available from Discovery (Pipeline) stage.` };
+    }
+
+    const qualStage = await prisma.stage.findFirst({ where: { name: { contains: 'Qualification', mode: 'insensitive' } } });
+    if (!qualStage) return { tool: 'move_to_presales', success: false, summary: 'System error: Qualification stage not found.' };
+
+    await prisma.opportunity.update({ where: { id: opp.id }, data: { stageId: qualStage.id, currentStage: qualStage.name, probability: qualStage.probability || 30 } });
+    await prisma.stageHistory.create({ data: { opportunityId: opp.id, stageId: qualStage.id } });
+    await prisma.auditLog.create({ data: { entity: 'Opportunity', entityId: opp.id, action: 'STAGE_CHANGE', userId: ctx.userId, changes: `Moved to Presales (Qualification) via Chat — from Discovery` } });
+    return {
+        tool: 'move_to_presales', success: true,
+        summary: `**"${opp.title}"** moved to **Presales** (Qualification)!\n- Client: ${opp.client?.name || '-'}\n- Previous: Discovery → **Qualification**\n- Probability: ${qualStage.probability || 30}%\n\nNext step: Fill in estimation details and get GOM approval, then move to Sales.`,
+    };
+}
+
+/** Move to Sales (Qualification → Proposal, requires GOM approval) */
+async function execMoveToSales(params: any, ctx: UserContext): Promise<ActionResult> {
+    if (!params.nameOrId) return { tool: 'move_to_sales', success: false, summary: 'Which opportunity? Provide the name in quotes (e.g., move "Project Alpha" to sales).' };
+    const opp = await findOpportunity(params.nameOrId);
+    if (!opp) return { tool: 'move_to_sales', success: false, summary: `Opportunity "${params.nameOrId}" not found.` };
+
+    const currentStage = opp.stage?.name || '';
+    if (currentStage !== 'Qualification') {
+        return { tool: 'move_to_sales', success: false, summary: `**"${opp.title}"** is currently in **${currentStage}** stage. Move to Sales is only available from Presales (Qualification) stage.` };
+    }
+
+    if (!opp.gomApproved) {
+        return { tool: 'move_to_sales', success: false, summary: `Cannot move **"${opp.title}"** to Sales — **GOM approval is required first**.\n\nUse: "approve GOM for '${opp.title}'" or get it approved via the GOM Calculator in the UI.` };
+    }
+
+    const proposalStage = await prisma.stage.findFirst({ where: { name: { contains: 'Proposal', mode: 'insensitive' } }, orderBy: { order: 'asc' } });
+    if (!proposalStage) return { tool: 'move_to_sales', success: false, summary: 'System error: Proposal stage not found.' };
+
+    await prisma.opportunity.update({ where: { id: opp.id }, data: { stageId: proposalStage.id, currentStage: proposalStage.name, probability: proposalStage.probability || 50 } });
+    await prisma.stageHistory.create({ data: { opportunityId: opp.id, stageId: proposalStage.id } });
+    await prisma.auditLog.create({ data: { entity: 'Opportunity', entityId: opp.id, action: 'STAGE_CHANGE', userId: ctx.userId, changes: `Moved to Sales (Proposal) via Chat — from Qualification` } });
+    return {
+        tool: 'move_to_sales', success: true,
+        summary: `**"${opp.title}"** moved to **Sales** (Proposal)!\n- Client: ${opp.client?.name || '-'}\n- Previous: Qualification → **Proposal**\n- Probability: ${proposalStage.probability || 50}%\n\nNext: Submit the proposal to the client, then use "proposal sent for '${opp.title}'" to advance to Negotiation.`,
+    };
+}
+
+/** Proposal Sent (Proposal → Negotiation) */
+async function execProposalSent(params: any, ctx: UserContext): Promise<ActionResult> {
+    if (!params.nameOrId) return { tool: 'proposal_sent', success: false, summary: 'Which opportunity? Provide the name in quotes (e.g., proposal sent for "Project Alpha").' };
+    const opp = await findOpportunity(params.nameOrId);
+    if (!opp) return { tool: 'proposal_sent', success: false, summary: `Opportunity "${params.nameOrId}" not found.` };
+
+    const currentStage = opp.stage?.name || '';
+    if (currentStage !== 'Proposal') {
+        return { tool: 'proposal_sent', success: false, summary: `**"${opp.title}"** is currently in **${currentStage}** stage. "Proposal Sent" is only available from the Proposal stage.` };
+    }
+
+    const negStage = await prisma.stage.findFirst({ where: { name: { contains: 'Negotiation', mode: 'insensitive' } } });
+    if (!negStage) return { tool: 'proposal_sent', success: false, summary: 'System error: Negotiation stage not found.' };
+
+    await prisma.opportunity.update({ where: { id: opp.id }, data: { stageId: negStage.id, currentStage: negStage.name, probability: negStage.probability || 80 } });
+    await prisma.stageHistory.create({ data: { opportunityId: opp.id, stageId: negStage.id } });
+    await prisma.auditLog.create({ data: { entity: 'Opportunity', entityId: opp.id, action: 'STAGE_CHANGE', userId: ctx.userId, changes: `Proposal sent — moved to Negotiation via Chat` } });
+    return {
+        tool: 'proposal_sent', success: true,
+        summary: `Proposal marked as sent for **"${opp.title}"** — moved to **Negotiation**!\n- Client: ${opp.client?.name || '-'}\n- Previous: Proposal → **Negotiation**\n- Probability: ${negStage.probability || 80}%\n\nNext: Convert to project when won, or mark as lost if declined.`,
+    };
+}
+
+/** Mark as Lost (→ Closed Lost or Proposal Lost) */
+async function execMarkLost(params: any, ctx: UserContext): Promise<ActionResult> {
+    if (!params.nameOrId) return { tool: 'mark_lost', success: false, summary: 'Which opportunity? Provide the name in quotes (e.g., mark "Project Alpha" as lost).' };
+    const opp = await findOpportunity(params.nameOrId);
+    if (!opp) return { tool: 'mark_lost', success: false, summary: `Opportunity "${params.nameOrId}" not found.` };
+
+    const currentStage = opp.stage?.name || '';
+    if (currentStage === 'Closed Won' || currentStage === 'Closed Lost' || currentStage === 'Proposal Lost') {
+        return { tool: 'mark_lost', success: false, summary: `**"${opp.title}"** is already in **${currentStage}** — cannot change.` };
+    }
+
+    // Determine lost type based on current stage
+    let lostType = params.lostType || 'Closed Lost';
+    if (currentStage === 'Qualification' || currentStage === 'Proposal') {
+        lostType = 'Proposal Lost';
+    }
+
+    const lostStage = await prisma.stage.findFirst({ where: { name: { equals: lostType, mode: 'insensitive' } } });
+    if (!lostStage) return { tool: 'mark_lost', success: false, summary: `System error: ${lostType} stage not found.` };
+
+    const remarks = params.remarks || 'Marked as lost via chatbot';
+    await prisma.opportunity.update({
+        where: { id: opp.id },
+        data: {
+            stageId: lostStage.id, currentStage: lostStage.name, probability: 0,
+            detailedStatus: 'Lost', actualCloseDate: new Date(),
+            salesData: { lostRemarks: remarks },
+        },
+    });
+    await prisma.stageHistory.create({ data: { opportunityId: opp.id, stageId: lostStage.id } });
+    await prisma.auditLog.create({ data: { entity: 'Opportunity', entityId: opp.id, action: 'STAGE_CHANGE', userId: ctx.userId, changes: `Marked as ${lostType} via Chat: ${remarks}` } });
+    return {
+        tool: 'mark_lost', success: true,
+        summary: `**"${opp.title}"** marked as **${lostType}**.\n- Client: ${opp.client?.name || '-'}\n- Previous: ${currentStage} → **${lostType}**\n- Remarks: ${remarks}`,
+    };
+}
+
+/** Send Back for Re-estimate (Proposal/Negotiation → Qualification) */
+async function execReestimate(params: any, ctx: UserContext): Promise<ActionResult> {
+    if (!params.nameOrId) return { tool: 'reestimate', success: false, summary: 'Which opportunity? Provide the name in quotes (e.g., send back "Project Alpha" for re-estimate).' };
+    const opp = await findOpportunity(params.nameOrId);
+    if (!opp) return { tool: 'reestimate', success: false, summary: `Opportunity "${params.nameOrId}" not found.` };
+
+    const currentStage = opp.stage?.name || '';
+    if (currentStage !== 'Proposal' && currentStage !== 'Negotiation') {
+        return { tool: 'reestimate', success: false, summary: `**"${opp.title}"** is in **${currentStage}** stage. Re-estimate is only available from Proposal or Negotiation stages.` };
+    }
+
+    const qualStage = await prisma.stage.findFirst({ where: { name: { contains: 'Qualification', mode: 'insensitive' } } });
+    if (!qualStage) return { tool: 'reestimate', success: false, summary: 'System error: Qualification stage not found.' };
+
+    const comment = params.comment || 'Sent back for re-estimation via chatbot';
+    const update: any = {
+        stageId: qualStage.id, currentStage: qualStage.name, probability: qualStage.probability || 30,
+        reEstimateCount: { increment: 1 }, detailedStatus: 'Sent for Re-estimate', gomApproved: false,
+    };
+    if (params.adjustedValue && Number(params.adjustedValue) > 0) {
+        update.adjustedEstimatedValue = Number(params.adjustedValue);
+    }
+
+    await prisma.opportunity.update({ where: { id: opp.id }, data: update });
+    await prisma.stageHistory.create({ data: { opportunityId: opp.id, stageId: qualStage.id } });
+    // Add a comment/note for the re-estimate reason
+    await prisma.note.create({ data: { content: `[Re-estimate] ${comment}`, mentions: '', opportunityId: opp.id, authorId: ctx.userId } as any });
+    await prisma.auditLog.create({ data: { entity: 'Opportunity', entityId: opp.id, action: 'STAGE_CHANGE', userId: ctx.userId, changes: `Sent back for re-estimation via Chat — from ${currentStage}: ${comment}` } });
+    return {
+        tool: 'reestimate', success: true,
+        summary: `**"${opp.title}"** sent back for **re-estimation**!\n- Previous: ${currentStage} → **Qualification (Presales)**\n- GOM approval has been reset\n- Re-estimate count incremented\n- Comment: ${comment}\n\nThe presales team needs to update the estimation and get GOM re-approved.`,
+    };
+}
+
 // ─── ADMIN EXECUTORS ────────────────────────────────────────────────────────
 
 async function execListUsers(params: any): Promise<ActionResult> {
@@ -1642,6 +1948,48 @@ export async function processChat(message: string, ctx: UserContext): Promise<Ch
         return reply(result.summary, result.data, undefined, [result]);
     }
 
+    // ─── LIFECYCLE ACTIONS ───────────────────────────────────────────────────────
+
+    if (intent.intent === 'move_to_presales') {
+        if (!canExecute('move_to_presales', ctx.permissions))
+            return reply(`You don't have permission to move opportunities. Your role: **${ctx.roleName}**.`);
+        if (!intent.params.nameOrId) return reply('Which opportunity to move to Presales? Provide the name in quotes (e.g., move "Project Alpha" to presales).');
+        const result = await execMoveToPresales(intent.params, ctx);
+        return reply(result.summary, result.data, undefined, [result]);
+    }
+
+    if (intent.intent === 'move_to_sales') {
+        if (!canExecute('move_to_sales', ctx.permissions))
+            return reply(`You don't have permission to move opportunities. Your role: **${ctx.roleName}**.`);
+        if (!intent.params.nameOrId) return reply('Which opportunity to move to Sales? Provide the name in quotes (e.g., move "Project Alpha" to sales).');
+        const result = await execMoveToSales(intent.params, ctx);
+        return reply(result.summary, result.data, undefined, [result]);
+    }
+
+    if (intent.intent === 'proposal_sent') {
+        if (!canExecute('proposal_sent', ctx.permissions))
+            return reply(`You don't have permission to update opportunities. Your role: **${ctx.roleName}**.`);
+        if (!intent.params.nameOrId) return reply('Which opportunity\'s proposal was sent? Provide the name in quotes (e.g., proposal sent for "Project Alpha").');
+        const result = await execProposalSent(intent.params, ctx);
+        return reply(result.summary, result.data, undefined, [result]);
+    }
+
+    if (intent.intent === 'mark_lost') {
+        if (!canExecute('mark_lost', ctx.permissions))
+            return reply(`You don't have permission to update opportunities. Your role: **${ctx.roleName}**.`);
+        if (!intent.params.nameOrId) return reply('Which opportunity to mark as lost? Provide the name in quotes (e.g., mark "Project Alpha" as lost).');
+        const result = await execMarkLost(intent.params, ctx);
+        return reply(result.summary, result.data, undefined, [result]);
+    }
+
+    if (intent.intent === 'reestimate') {
+        if (!canExecute('reestimate', ctx.permissions))
+            return reply(`You don't have permission to update opportunities. Your role: **${ctx.roleName}**.`);
+        if (!intent.params.nameOrId) return reply('Which opportunity to send back for re-estimate? Provide the name in quotes (e.g., send back "Project Alpha" for re-estimate).');
+        const result = await execReestimate(intent.params, ctx);
+        return reply(result.summary, result.data, undefined, [result]);
+    }
+
     // ─── ADMIN ───────────────────────────────────────────────────────────────────
 
     if (intent.intent === 'list_users') {
@@ -1670,6 +2018,32 @@ export async function processChat(message: string, ctx: UserContext): Promise<Ch
         return reply(result.summary, result.data, undefined, [result]);
     }
 
+    // ─── GREETINGS & SMALL TALK (handled before general_chat LLM call) ───
+    if (intent.intent === 'greeting') {
+        const timeH = new Date().getUTCHours() + 5.5; // IST approximate
+        const timeOfDay = timeH < 12 ? 'morning' : timeH < 17 ? 'afternoon' : 'evening';
+        return reply(`Good ${timeOfDay}, **${ctx.userName}**! How can I help you today?\n\nTry saying things like:\n- "Show my opportunities"\n- "Create a new deal"\n- "Pipeline analytics"\n- "Help" for full list of commands`);
+    }
+    if (intent.intent === 'thanks') {
+        return reply(`You're welcome, **${ctx.userName}**! Let me know if you need anything else.`);
+    }
+    if (intent.intent === 'farewell') {
+        return reply(`Goodbye, **${ctx.userName}**! Have a great day. I'm always here when you need me.`);
+    }
+    if (intent.intent === 'about_bot') {
+        const status = getLLMStatus();
+        const llmInfo = status.available && !status.circuitOpen
+            ? `\n\n*Powered by LLM (${status.provider} / ${status.model}) + NLP fallback*`
+            : `\n\n*Running on built-in NLP engine${status.available ? ' (LLM temporarily unavailable)' : ''}*`;
+        return reply(getHelpText(ctx) + llmInfo);
+    }
+
+    // ─── GENERAL CHAT (LLM-enriched conversational fallback) ───
+    if (intent.intent === 'general_chat') {
+        const llmResponse = await llmGeneralChat(message, ctx, conv.history);
+        if (llmResponse) return reply(llmResponse);
+    }
+
     return reply(getHelpText(ctx));
 }
 
@@ -1694,6 +2068,14 @@ function getHelpText(ctx: UserContext): string {
         lines.push('  - "Create a deal called \'ABC Project\' worth 500K for Acme Corp"');
         lines.push('  - "Move \'Project Alpha\' to Negotiation"');
         lines.push('  - "Convert \'Project Alpha\' to Closed Won"');
+        lines.push('');
+        lines.push('**Opportunity Lifecycle**');
+        lines.push('  - "Move \'Project Alpha\' to Presales" — Pipeline → Presales');
+        lines.push('  - "Move \'Project Alpha\' to Sales" — Presales → Sales (needs GOM)');
+        lines.push('  - "Proposal sent for \'Project Alpha\'" — Proposal → Negotiation');
+        lines.push('  - "Mark \'Project Alpha\' as lost" — Close as Lost');
+        lines.push('  - "Send back \'Project Alpha\' for re-estimate" — Back to Presales');
+        lines.push('  - "Convert \'Project Alpha\' to project" — Won → Project');
     }
     if (isAdmin || p.includes('leads:manage')) {
         lines.push('');

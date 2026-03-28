@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { processChat, logInteraction, UserContext } from '../lib/chatbot-v2';
+import { processChat, logInteraction, UserContext, getLLMStatus } from '../lib/chatbot-v2';
 
 // POST /api/chatbot/message
 export async function chatMessage(req: Request, res: Response) {
@@ -82,4 +82,9 @@ export async function chatSuggestions(req: Request, res: Response) {
     }
 
     res.json({ suggestions: suggestions.slice(0, 8) });
+}
+
+// GET /api/chatbot/llm-status
+export async function chatLLMStatus(req: Request, res: Response) {
+    res.json(getLLMStatus());
 }
