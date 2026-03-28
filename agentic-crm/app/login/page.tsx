@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
@@ -9,6 +9,14 @@ import { useAuthStore } from "@/lib/auth-store";
 import { API_URL, getAuthHeaders } from "@/lib/api";
 
 export default function LoginPage() {
+    return (
+        <Suspense fallback={<div className="min-h-screen bg-neutral-950" />}>
+            <LoginContent />
+        </Suspense>
+    );
+}
+
+function LoginContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const { login, ssoLogin, ssoCallback, isLoading, error, clearError, mustChangePassword } = useAuthStore();
