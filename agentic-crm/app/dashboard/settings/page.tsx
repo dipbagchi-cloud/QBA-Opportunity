@@ -2710,7 +2710,7 @@ function QPeopleMappingTab() {
                         <tbody>
                             {filtered.map((m: any) => (
                                 <tr key={m.id} className="border-b border-slate-100 hover:bg-slate-50/50">
-                                    {editRow?.designation === m.qpeopleDesignation ? (
+                                    {editRow !== null && editRow.designation === m.qpeopleDesignation ? (
                                         <>
                                             <td className="py-2 px-3 font-medium text-slate-800">{m.qpeopleDesignation}</td>
                                             <td className="py-2 px-3">
@@ -2766,7 +2766,7 @@ function QPeopleMappingTab() {
                             <tbody>
                                 {filteredUnmapped.map(d => (
                                     <tr key={d} className="border-b border-amber-100">
-                                        {editRow?.designation === d ? (
+                                        {editRow !== null && editRow.designation === d ? (
                                             <>
                                                 <td className="py-2 px-3 font-medium text-slate-800">{d}</td>
                                                 <td className="py-2 px-3">
