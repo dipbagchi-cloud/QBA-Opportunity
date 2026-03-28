@@ -748,7 +748,7 @@ export async function listQPeopleDesignations(req: Request, res: Response) {
 // POST /api/admin/qpeople-mappings — create or update a mapping
 export async function upsertQPeopleMapping(req: Request, res: Response) {
   try {
-    const { qpeopleDesignation, crmRoleIds, jobBand } = req.body;
+    const { qpeopleDesignation, crmRoleIds, jobBand, department } = req.body;
     if (!qpeopleDesignation || !crmRoleIds || !Array.isArray(crmRoleIds) || crmRoleIds.length === 0) {
       return res.status(400).json({ error: 'qpeopleDesignation and crmRoleIds (array) are required' });
     }
@@ -760,8 +760,8 @@ export async function upsertQPeopleMapping(req: Request, res: Response) {
 
     const mapping = await (prisma as any).qPeopleRoleMapping.upsert({
       where: { qpeopleDesignation },
-      create: { qpeopleDesignation, crmRoleIds, jobBand: jobBand || null },
-      update: { crmRoleIds, jobBand: jobBand || null },
+      create: { qpeopleDesignation, crmRoleIds, jobBand: jobBand || null, department: department || null },
+      update: { crmRoleIds, jobBand: jobBand || null, department: department || null },
     });
 
     await prisma.auditLog.create({
@@ -770,11 +770,33 @@ export async function upsertQPeopleMapping(req: Request, res: Response) {
         entityId: mapping.id,
         action: 'UPSERT',
         userId: req.user!.userId,
-        changes: { qpeopleDesignation, crmRoleIds, jobBand },
+        changes: { qpeopleDesignation, crmRoleIds, jobBand, department },
       },
     });
 
-    res.json(mapping);
+    // Auto-apply: update all users with this designation
+    const usersWithDesignation = await prisma.user.findMany({
+      where: { designation: qpeopleDesignation },
+      include: { roles: { select: { id: true } } },
+    });
+    let applied = 0;
+    for (const user of usersWithDesignation) {
+      const newRoleIds = crmRoleIds.filter((rid: string) => !user.roles.some(r => r.id === rid));
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          ...(newRoleIds.length > 0 ? {
+            roles: { connect: newRoleIds.map((rid: string) => ({ id: rid })) },
+            activeRoleId: crmRoleIds[0],
+          } : {}),
+          ...(jobBand ? { jobBand } : {}),
+          ...(department ? { department } : {}),
+        } as any,
+      });
+      applied++;
+    }
+
+    res.json({ ...mapping, applied });
   } catch (error) {
     console.error('Upsert QPeople mapping error:', error);
     res.status(500).json({ error: 'Failed to save mapping' });
@@ -798,6 +820,7 @@ export async function applyQPeopleMappings(req: Request, res: Response) {
     const mappings: any[] = await (prisma as any).qPeopleRoleMapping.findMany();
     const designationToRoleIds = new Map<string, string[]>(mappings.map((m: any) => [m.qpeopleDesignation, m.crmRoleIds || []]));
     const designationToJobBand = new Map<string, string>(mappings.filter((m: any) => m.jobBand).map((m: any) => [m.qpeopleDesignation, m.jobBand]));
+    const designationToDept = new Map<string, string>(mappings.filter((m: any) => m.department).map((m: any) => [m.qpeopleDesignation, m.department]));
 
     const users = await prisma.user.findMany({
       where: { designation: { not: null }, qpeopleId: { not: null } },
@@ -808,7 +831,8 @@ export async function applyQPeopleMappings(req: Request, res: Response) {
     for (const user of users) {
       const mappedRoleIds = designationToRoleIds.get(user.designation || '') || [];
       const mappedJobBand = designationToJobBand.get(user.designation || '') || null;
-      if (mappedRoleIds.length === 0 && !mappedJobBand) continue;
+      const mappedDept = designationToDept.get(user.designation || '') || null;
+      if (mappedRoleIds.length === 0 && !mappedJobBand && !mappedDept) continue;
 
       const newRoleIds = mappedRoleIds.filter(rid => !user.roles.some(r => r.id === rid));
 
@@ -820,9 +844,10 @@ export async function applyQPeopleMappings(req: Request, res: Response) {
             activeRoleId: mappedRoleIds[0],
           } : {}),
           ...(mappedJobBand ? { jobBand: mappedJobBand } : {}),
+          ...(mappedDept ? { department: mappedDept } : {}),
         } as any,
       });
-      if (newRoleIds.length > 0 || mappedJobBand) applied++;
+      if (newRoleIds.length > 0 || mappedJobBand || mappedDept) applied++;
     }
 
     res.json({ message: `Applied role/job-band mappings to ${applied} users`, applied, total: users.length });

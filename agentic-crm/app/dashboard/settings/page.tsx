@@ -2717,7 +2717,7 @@ function QPeopleMappingTab() {
     const [saving, setSaving] = useState(false);
     const [applying, setApplying] = useState(false);
     const [search, setSearch] = useState("");
-    const [editRow, setEditRow] = useState<{ designation: string; crmRoleIds: string[]; jobBand: string } | null>(null);
+    const [editRow, setEditRow] = useState<{ designation: string; crmRoleIds: string[]; jobBand: string; department: string } | null>(null);
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -2746,14 +2746,17 @@ function QPeopleMappingTab() {
         ? unmappedDesignations.filter(d => d.toLowerCase().includes(search.toLowerCase()))
         : unmappedDesignations;
 
-    async function handleSave(designation: string, crmRoleIds: string[], jobBand: string) {
+    async function handleSave(designation: string, crmRoleIds: string[], jobBand: string, department: string) {
         if (crmRoleIds.length === 0) return;
         setSaving(true);
         try {
-            await apiClient("/api/admin/qpeople-mappings", {
+            const res = await apiClient<any>("/api/admin/qpeople-mappings", {
                 method: "POST",
-                body: JSON.stringify({ qpeopleDesignation: designation, crmRoleIds, jobBand: jobBand || null }),
+                body: JSON.stringify({ qpeopleDesignation: designation, crmRoleIds, jobBand: jobBand || null, department: department || null }),
             });
+            if (res.applied > 0) {
+                alert(`Mapping saved. ${res.applied} user(s) updated automatically.`);
+            }
             setEditRow(null);
             await load();
         } catch (e: any) { alert(e.message || "Failed to save"); }
@@ -2825,6 +2828,7 @@ function QPeopleMappingTab() {
                         <thead className="bg-slate-50 border-b border-slate-200">
                             <tr>
                                 <th className="text-left py-2 px-3 font-semibold text-slate-600">QPeople Designation</th>
+                                <th className="text-left py-2 px-3 font-semibold text-slate-600">Department</th>
                                 <th className="text-left py-2 px-3 font-semibold text-slate-600">Job Band</th>
                                 <th className="text-left py-2 px-3 font-semibold text-slate-600">CRM Roles</th>
                                 <th className="text-right py-2 px-3 font-semibold text-slate-600">Actions</th>
@@ -2836,6 +2840,10 @@ function QPeopleMappingTab() {
                                     {editRow !== null && editRow.designation === m.qpeopleDesignation ? (
                                         <>
                                             <td className="py-2 px-3 font-medium text-slate-800">{m.qpeopleDesignation}</td>
+                                            <td className="py-2 px-3">
+                                                <input value={editRow.department} onChange={e => setEditRow({ ...editRow, department: e.target.value })}
+                                                    placeholder="e.g. Enterprise Apps" className="w-full px-2 py-1 border border-slate-200 rounded text-xs" />
+                                            </td>
                                             <td className="py-2 px-3">
                                                 <input value={editRow.jobBand} onChange={e => setEditRow({ ...editRow, jobBand: e.target.value })}
                                                     placeholder="e.g. Band 3" className="w-full px-2 py-1 border border-slate-200 rounded text-xs" />
@@ -2854,7 +2862,7 @@ function QPeopleMappingTab() {
                                                 </div>
                                             </td>
                                             <td className="py-2 px-3 text-right space-x-1">
-                                                <button onClick={() => handleSave(editRow.designation, editRow.crmRoleIds, editRow.jobBand)} disabled={saving || editRow.crmRoleIds.length === 0}
+                                                <button onClick={() => handleSave(editRow.designation, editRow.crmRoleIds, editRow.jobBand, editRow.department)} disabled={saving || editRow.crmRoleIds.length === 0}
                                                     className="p-1 text-green-600 hover:text-green-800 disabled:opacity-30"><Check className="w-3.5 h-3.5" /></button>
                                                 <button onClick={() => setEditRow(null)} className="p-1 text-slate-400 hover:text-slate-600"><X className="w-3.5 h-3.5" /></button>
                                             </td>
@@ -2862,6 +2870,7 @@ function QPeopleMappingTab() {
                                     ) : (
                                         <>
                                             <td className="py-2 px-3 font-medium text-slate-800">{m.qpeopleDesignation}</td>
+                                            <td className="py-2 px-3 text-slate-500">{m.department || "—"}</td>
                                             <td className="py-2 px-3 text-slate-500">{m.jobBand || "—"}</td>
                                             <td className="py-2 px-3">
                                                 <div className="flex flex-wrap gap-1">
@@ -2871,7 +2880,7 @@ function QPeopleMappingTab() {
                                                 </div>
                                             </td>
                                             <td className="py-2 px-3 text-right space-x-1">
-                                                <button onClick={() => setEditRow({ designation: m.qpeopleDesignation, crmRoleIds: m.crmRoleIds || [], jobBand: m.jobBand || "" })}
+                                                <button onClick={() => setEditRow({ designation: m.qpeopleDesignation, crmRoleIds: m.crmRoleIds || [], jobBand: m.jobBand || "", department: m.department || "" })}
                                                     className="p-1 text-slate-400 hover:text-indigo-600"><Pencil className="w-3.5 h-3.5" /></button>
                                                 <button onClick={() => handleDelete(m.id)} className="p-1 text-slate-400 hover:text-red-500"><Trash2 className="w-3.5 h-3.5" /></button>
                                             </td>
@@ -2891,8 +2900,9 @@ function QPeopleMappingTab() {
                     <div className="border border-amber-200 rounded-xl overflow-hidden bg-amber-50/30">
                         <table className="w-full text-xs">
                             <thead className="bg-amber-50 border-b border-amber-200">
-                                <tr>
+                            <tr>
                                     <th className="text-left py-2 px-3 font-semibold text-amber-700">QPeople Designation</th>
+                                    <th className="text-left py-2 px-3 font-semibold text-amber-700">Department</th>
                                     <th className="text-left py-2 px-3 font-semibold text-amber-700">Job Band</th>
                                     <th className="text-left py-2 px-3 font-semibold text-amber-700">Assign CRM Roles</th>
                                     <th className="text-right py-2 px-3 font-semibold text-amber-700"></th>
@@ -2904,6 +2914,10 @@ function QPeopleMappingTab() {
                                         {editRow !== null && editRow.designation === d ? (
                                             <>
                                                 <td className="py-2 px-3 font-medium text-slate-800">{d}</td>
+                                                <td className="py-2 px-3">
+                                                    <input value={editRow.department} onChange={e => setEditRow({ ...editRow, department: e.target.value })}
+                                                        placeholder="e.g. Enterprise Apps" className="w-full px-2 py-1 border border-slate-200 rounded text-xs" />
+                                                </td>
                                                 <td className="py-2 px-3">
                                                     <input value={editRow.jobBand} onChange={e => setEditRow({ ...editRow, jobBand: e.target.value })}
                                                         placeholder="e.g. Band 3" className="w-full px-2 py-1 border border-slate-200 rounded text-xs" />
@@ -2922,7 +2936,7 @@ function QPeopleMappingTab() {
                                                     </div>
                                                 </td>
                                                 <td className="py-2 px-3 text-right space-x-1">
-                                                    <button onClick={() => handleSave(editRow.designation, editRow.crmRoleIds, editRow.jobBand)} disabled={saving || editRow.crmRoleIds.length === 0}
+                                                    <button onClick={() => handleSave(editRow.designation, editRow.crmRoleIds, editRow.jobBand, editRow.department)} disabled={saving || editRow.crmRoleIds.length === 0}
                                                         className="p-1 text-green-600 hover:text-green-800 disabled:opacity-30"><Check className="w-3.5 h-3.5" /></button>
                                                     <button onClick={() => setEditRow(null)} className="p-1 text-slate-400 hover:text-slate-600"><X className="w-3.5 h-3.5" /></button>
                                                 </td>
@@ -2931,9 +2945,10 @@ function QPeopleMappingTab() {
                                             <>
                                                 <td className="py-2 px-3 text-slate-600">{d}</td>
                                                 <td className="py-2 px-3 text-slate-400">—</td>
+                                                <td className="py-2 px-3 text-slate-400">—</td>
                                                 <td className="py-2 px-3 text-slate-400">Not mapped</td>
                                                 <td className="py-2 px-3 text-right">
-                                                    <button onClick={() => setEditRow({ designation: d, crmRoleIds: [], jobBand: "" })}
+                                                    <button onClick={() => setEditRow({ designation: d, crmRoleIds: [], jobBand: "", department: "" })}
                                                         className="text-[10px] font-semibold text-indigo-600 hover:text-indigo-800">Map</button>
                                                 </td>
                                             </>

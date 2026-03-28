@@ -76,6 +76,7 @@ model Role {
 model QPeopleRoleMapping {
   id                  String   @id @default(cuid())
   qpeopleDesignation  String   @unique
+  department          String?
   jobBand             String?
   crmRoleIds          String[]
   createdAt           DateTime @default(now())
