@@ -488,7 +488,7 @@ function nlpParseIntent(message: string, conv: ConversationState): LLMParsedInte
 
     // Send back for Re-estimate (before generic UPDATE)
     if ((/\bre[\s-]?estimat\w*/i.test(lower) || /\bsend\b.{0,60}\bback\b/i.test(lower) || /\b(return\s+(for|to)|revert|revision)\b/i.test(lower)) &&
-        !(/\b(create|add|new)\b/i.test(lower))) {
+        !(/\b(create|add)\b/i.test(lower))) {
         const commentMatch = lower.match(/(?:reason|because|comment|:\s*)["']?(.{5,})["']?\s*$/i);
         return { intent: 'reestimate', params: { nameOrId: extractEntityName(lower), comment: commentMatch?.[1]?.trim() || '' }, confidence: 0.9 };
     }
