@@ -96,7 +96,7 @@ export function ResourceAssignmentTab() {
         const dailyRate = rateCardResult.dailyCost * (1 + (markupPercent / 100));
 
         const newRow: ResourceRow = {
-            id: crypto.randomUUID(),
+            id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : (Date.now() + '-' + Math.random().toString(36).slice(2)),
             role: roleItem.role,
             baseLocation: "India",
             deliveryFrom: "Hyderabad",
