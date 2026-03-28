@@ -711,13 +711,30 @@ export async function listQPeopleMappings(req: Request, res: Response) {
     const allRoles = await prisma.role.findMany({ select: { id: true, name: true } });
     const roleMap = new Map(allRoles.map(r => [r.id, r.name]));
 
+    // Also get department from User records for mappings missing department
+    const desigDeptRows = await prisma.user.findMany({
+      where: { designation: { not: null }, department: { not: null } },
+      select: { designation: true, department: true },
+      distinct: ['designation'],
+    });
+    const desigToDept = new Map(desigDeptRows.map(r => [r.designation, r.department]));
+
+    // Get user counts per designation
+    const userCountRows = await prisma.user.groupBy({
+      by: ['designation'],
+      _count: { id: true },
+      where: { designation: { not: null } },
+    });
+    const desigToCount = new Map(userCountRows.map(r => [r.designation, r._count.id]));
+
     const result = mappings.map((m: any) => ({
       id: m.id,
       qpeopleDesignation: m.qpeopleDesignation,
-      department: m.department,
+      department: m.department || desigToDept.get(m.qpeopleDesignation) || null,
       jobBand: m.jobBand,
       crmRoleIds: m.crmRoleIds || [],
       crmRoles: (m.crmRoleIds || []).map((rid: string) => ({ id: rid, name: roleMap.get(rid) || 'Unknown' })),
+      userCount: desigToCount.get(m.qpeopleDesignation) || 0,
       createdAt: m.createdAt,
       updatedAt: m.updatedAt,
     }));
@@ -729,17 +746,33 @@ export async function listQPeopleMappings(req: Request, res: Response) {
   }
 }
 
-// GET /api/admin/qpeople-mappings/designations — get distinct designations from synced users
+// GET /api/admin/qpeople-mappings/designations — get distinct designations with department & user count
 export async function listQPeopleDesignations(req: Request, res: Response) {
   try {
     const rows = await prisma.user.findMany({
       where: { designation: { not: null } },
-      select: { designation: true },
-      distinct: ['designation'],
-      orderBy: { designation: 'asc' },
+      select: { designation: true, department: true },
     });
-    const designations = rows.map(r => r.designation).filter(Boolean);
-    res.json(designations);
+    // Group by designation: pick most common department, count users
+    const desigMap = new Map<string, { departments: Map<string, number>; count: number }>();
+    for (const r of rows) {
+      if (!r.designation) continue;
+      if (!desigMap.has(r.designation)) desigMap.set(r.designation, { departments: new Map(), count: 0 });
+      const entry = desigMap.get(r.designation)!;
+      entry.count++;
+      const dept = r.department || '';
+      entry.departments.set(dept, (entry.departments.get(dept) || 0) + 1);
+    }
+    const result = Array.from(desigMap.entries()).map(([designation, info]) => {
+      // Pick the most common non-empty department
+      let bestDept = '';
+      let bestCount = 0;
+      for (const [dept, cnt] of info.departments.entries()) {
+        if (dept && cnt > bestCount) { bestDept = dept; bestCount = cnt; }
+      }
+      return { designation, department: bestDept || null, userCount: info.count };
+    }).sort((a, b) => a.designation.localeCompare(b.designation));
+    res.json(result);
   } catch (error) {
     console.error('List QPeople designations error:', error);
     res.status(500).json({ error: 'Failed to fetch designations' });
@@ -759,10 +792,20 @@ export async function upsertQPeopleMapping(req: Request, res: Response) {
       return res.status(404).json({ error: 'One or more roles not found' });
     }
 
+    // Auto-resolve department from User records if not provided
+    let resolvedDept = department || null;
+    if (!resolvedDept) {
+      const userWithDept = await prisma.user.findFirst({
+        where: { designation: qpeopleDesignation, department: { not: null } },
+        select: { department: true },
+      });
+      resolvedDept = userWithDept?.department || null;
+    }
+
     const mapping = await (prisma as any).qPeopleRoleMapping.upsert({
       where: { qpeopleDesignation },
-      create: { qpeopleDesignation, crmRoleIds, jobBand: jobBand || null, department: department || null },
-      update: { crmRoleIds, jobBand: jobBand || null, department: department || null },
+      create: { qpeopleDesignation, crmRoleIds, jobBand: jobBand || null, department: resolvedDept },
+      update: { crmRoleIds, jobBand: jobBand || null, department: resolvedDept },
     });
 
     await prisma.auditLog.create({
