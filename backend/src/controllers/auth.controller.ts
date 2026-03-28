@@ -2,6 +2,18 @@ import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { hashPassword, comparePassword, generateToken } from '../services/auth.service';
 
+const SSO_DOMAIN = '@qbadvisory.com';
+
+// Microsoft Entra ID (Azure AD) configuration
+const AZURE_TENANT_ID = process.env.AZURE_AD_TENANT_ID || '';
+const AZURE_CLIENT_ID = process.env.AZURE_AD_CLIENT_ID || '';
+const AZURE_CLIENT_SECRET = process.env.AZURE_AD_CLIENT_SECRET || '';
+const AZURE_REDIRECT_URI = process.env.AZURE_AD_REDIRECT_URI || 'http://localhost:3000/login';
+
+export function isSSOUser(email: string): boolean {
+  return email.toLowerCase().endsWith(SSO_DOMAIN);
+}
+
 // POST /api/auth/login
 export async function login(req: Request, res: Response) {
   try {
@@ -214,6 +226,11 @@ export async function changePassword(req: Request, res: Response) {
     const userId = req.user?.userId;
     const { currentPassword, newPassword } = req.body;
 
+    // Block password change for SSO users
+    if (req.user?.email && isSSOUser(req.user.email)) {
+      return res.status(403).json({ error: 'SSO users cannot change password. Use your organization SSO to manage credentials.' });
+    }
+
     if (!currentPassword || !newPassword) {
       return res.status(400).json({ error: 'Current and new password are required' });
     }
@@ -260,6 +277,11 @@ export async function setPassword(req: Request, res: Response) {
     const userId = req.user?.userId;
     const { newPassword } = req.body;
 
+    // Block for SSO users
+    if (req.user?.email && isSSOUser(req.user.email)) {
+      return res.status(403).json({ error: 'SSO users cannot set password.' });
+    }
+
     if (!newPassword || newPassword.length < 6) {
       return res.status(400).json({ error: 'Password must be at least 6 characters' });
     }
@@ -290,5 +312,159 @@ export async function setPassword(req: Request, res: Response) {
   } catch (error) {
     console.error('Set password error:', error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+}
+
+// GET /api/auth/sso/url — Returns Microsoft OAuth2 authorization URL
+export async function getSSOUrl(req: Request, res: Response) {
+  try {
+    if (!AZURE_TENANT_ID || !AZURE_CLIENT_ID) {
+      return res.status(503).json({ error: 'SSO is not configured. Set AZURE_AD_TENANT_ID and AZURE_AD_CLIENT_ID in environment.' });
+    }
+
+    const state = Buffer.from(JSON.stringify({ ts: Date.now() })).toString('base64');
+
+    const params = new URLSearchParams({
+      client_id: AZURE_CLIENT_ID,
+      response_type: 'code',
+      redirect_uri: AZURE_REDIRECT_URI,
+      response_mode: 'query',
+      scope: 'openid email profile',
+      state,
+    });
+
+    const authUrl = `https://login.microsoftonline.com/${AZURE_TENANT_ID}/oauth2/v2.0/authorize?${params.toString()}`;
+
+    res.json({ url: authUrl, state });
+  } catch (error) {
+    console.error('SSO URL error:', error);
+    res.status(500).json({ error: 'Failed to generate SSO URL' });
+  }
+}
+
+// POST /api/auth/sso/callback — Exchange Microsoft auth code for tokens, then issue JWT
+export async function ssoCallback(req: Request, res: Response) {
+  try {
+    const { code } = req.body;
+
+    if (!code) {
+      return res.status(400).json({ error: 'Authorization code is required' });
+    }
+
+    if (!AZURE_TENANT_ID || !AZURE_CLIENT_ID || !AZURE_CLIENT_SECRET) {
+      return res.status(503).json({ error: 'SSO is not configured on the server.' });
+    }
+
+    // Exchange authorization code for tokens with Microsoft
+    const tokenUrl = `https://login.microsoftonline.com/${AZURE_TENANT_ID}/oauth2/v2.0/token`;
+    const tokenParams = new URLSearchParams({
+      client_id: AZURE_CLIENT_ID,
+      client_secret: AZURE_CLIENT_SECRET,
+      code,
+      redirect_uri: AZURE_REDIRECT_URI,
+      grant_type: 'authorization_code',
+      scope: 'openid email profile',
+    });
+
+    const tokenRes = await fetch(tokenUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: tokenParams.toString(),
+    });
+
+    if (!tokenRes.ok) {
+      const errData = await tokenRes.json().catch(() => ({}));
+      console.error('Microsoft token exchange failed:', errData);
+      return res.status(401).json({ error: 'SSO authentication failed. Could not verify with Microsoft.' });
+    }
+
+    const tokenData: any = await tokenRes.json();
+
+    // Decode ID token to get user email (JWT payload is base64 encoded)
+    const idToken = tokenData.id_token;
+    if (!idToken) {
+      return res.status(401).json({ error: 'No ID token received from Microsoft.' });
+    }
+
+    const payloadBase64 = idToken.split('.')[1];
+    const payload = JSON.parse(Buffer.from(payloadBase64, 'base64').toString('utf-8'));
+
+    const msEmail = (payload.email || payload.preferred_username || '').toLowerCase();
+    if (!msEmail) {
+      return res.status(401).json({ error: 'Could not determine email from Microsoft account.' });
+    }
+
+    if (!isSSOUser(msEmail)) {
+      return res.status(403).json({ error: 'SSO login is only available for @qbadvisory.com users.' });
+    }
+
+    // Find user in our database
+    const user = await prisma.user.findFirst({
+      where: { email: { equals: msEmail, mode: 'insensitive' } },
+      include: { roles: true, team: true },
+    });
+
+    if (!user || !user.isActive) {
+      return res.status(401).json({ error: 'User not found or inactive in Q-CRM. Contact admin.' });
+    }
+
+    // Update lastLoginAt
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { lastLoginAt: new Date() },
+    });
+
+    const allRoles = user.roles.map((r) => ({
+      id: r.id,
+      name: r.name,
+      permissions: Array.isArray(r.permissions) ? (r.permissions as string[]) : [],
+    }));
+
+    const activeRole = allRoles.find((r) => r.id === user.activeRoleId) || allRoles[0];
+    if (!activeRole) {
+      return res.status(401).json({ error: 'User has no roles assigned. Contact admin.' });
+    }
+
+    const token = generateToken({
+      userId: user.id,
+      email: user.email,
+      roleId: activeRole.id,
+      roleName: activeRole.name,
+      permissions: activeRole.permissions,
+      roles: allRoles,
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        entity: 'User',
+        entityId: user.id,
+        action: 'SSO_LOGIN',
+        userId: user.id,
+        changes: { provider: 'microsoft', msEmail },
+      },
+    });
+
+    res.json({
+      token,
+      mustChangePassword: false,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        title: user.title,
+        department: user.department,
+        image: user.image,
+        role: {
+          id: activeRole.id,
+          name: activeRole.name,
+          permissions: activeRole.permissions,
+        },
+        roles: allRoles,
+        team: user.team ? { id: user.team.id, name: user.team.name } : null,
+      },
+    });
+  } catch (error) {
+    console.error('SSO callback error:', error);
+    res.status(500).json({ error: 'SSO authentication failed.' });
   }
 }

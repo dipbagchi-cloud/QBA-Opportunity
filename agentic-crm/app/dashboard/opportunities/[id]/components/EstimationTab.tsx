@@ -3,13 +3,7 @@
 import { useMemo } from "react";
 import { Info } from "lucide-react";
 import { useOpportunityEstimation } from "../context/OpportunityEstimationContext";
-
-const EXCHANGE_RATES: Record<string, number> = {
-    INR: 1,
-    USD: 84.5,
-    EUR: 91.2,
-    GBP: 106.8
-};
+import { useCurrency } from "@/components/providers/currency-provider";
 
 const DateFormat = (dateStr: string) => {
     const d = new Date(dateStr + "-01");
@@ -29,8 +23,11 @@ export function EstimationTab() {
         otherCosts,
     } = useOpportunityEstimation();
 
+    const { currencies, getRate, getSymbol } = useCurrency();
+
     const convert = (valInInr: number) => {
-        return valInInr / EXCHANGE_RATES[currency];
+        const rate = getRate(currency);
+        return rate > 0 ? valInInr / rate : valInInr;
     };
 
     const format = (val: number, isCurrency = true) => {
@@ -184,10 +181,9 @@ export function EstimationTab() {
                         value={currency}
                         onChange={(e) => setCurrency(e.target.value)}
                     >
-                        <option value="INR">INR (₹)</option>
-                        <option value="USD">USD ($)</option>
-                        <option value="EUR">EUR (€)</option>
-                        <option value="GBP">GBP (£)</option>
+                        {currencies.map(c => (
+                            <option key={c.code} value={c.code}>{c.code} ({c.symbol})</option>
+                        ))}
                     </select>
                 </div>
             </div>

@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
 import {
     DollarSign,
@@ -15,10 +14,12 @@ import {
 } from "lucide-react";
 import {
     BarChart, Bar, PieChart, Pie, Cell,
-    XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
+    XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from "recharts";
 import { API_URL, getAuthHeaders } from "@/lib/api";
 import { useAuthStore } from "@/lib/auth-store";
+import { useCurrency } from "@/components/providers/currency-provider";
+import { ExpandableCard, DrillDownConfig } from "@/components/ui/drill-down-modal";
 
 const STAGE_COLORS: Record<string, string> = {
     Pipeline: "bg-blue-50 text-blue-700 border-blue-200",
@@ -69,9 +70,11 @@ interface Analytics {
         countByStatus: { name: string; value: number }[];
         countByClient: { name: string; value: number }[];
         countByOwner: { name: string; total: number; active: number; won: number }[];
+        countBySalesRep?: { name: string; total: number; active: number; won: number }[];
         revenueByTech: { name: string; value: number }[];
         revenueByClient: { name: string; value: number }[];
         revenueByOwner: { name: string; revenue: number }[];
+        revenueBySalesRep?: { name: string; revenue: number }[];
         projectedRevenue: number;
         closedRevenue: number;
     };
@@ -85,11 +88,15 @@ interface Analytics {
     presales: {
         proposalSuccessRate: number;
         totalPresalesOpps: number;
+        totalReEstimateCount?: number;
+        oppsWithReEstimates?: number;
+        avgReEstimateIterations?: number;
     };
     sales: {
         avgTimeToClose: number;
         wonCount: number;
         lostCount: number;
+        managerKpi?: { name: string; totalAssigned: number; responded: number; avgResponseDays: number }[];
     };
 }
 
@@ -114,9 +121,11 @@ interface Opportunity {
 export default function DashboardPage() {
     const { user } = useAuthStore();
     const router = useRouter();
+    const { format: fmtCurrency, symbol: cSym, convert: convertCurrency } = useCurrency();
     const [analytics, setAnalytics] = useState<Analytics | null>(null);
     const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
     const [loading, setLoading] = useState(true);
+
 
     useEffect(() => {
         const fetchData = async () => {
@@ -168,7 +177,7 @@ export default function DashboardPage() {
     // High-value deals progressing well
     const highValueHealthy = healthyDeals.filter(d => d.value > 0).sort((a, b) => b.value - a.value);
     highValueHealthy.slice(0, 1).forEach(d => {
-        insights.push({ text: `'${d.name}' (${d.client}) is progressing well — ₹${(d.value / 100000).toFixed(1)}L at ${d.probability}% probability.`, type: "success" });
+        insights.push({ text: `'${d.name}' (${d.client}) is progressing well — ${fmtCurrency(d.value, { compact: true })} at ${d.probability}% probability.`, type: "success" });
     });
 
     // Critical deals needing attention
@@ -183,7 +192,7 @@ export default function DashboardPage() {
 
     // Summary insights
     if (pipeline && pipeline.totalOpps > 0 && insights.length < 5) {
-        insights.push({ text: `Pipeline has ${pipeline.totalOpps} opportunities worth ₹${((pipeline.pipelineValue || 0) / 100000).toFixed(1)}L total.`, type: "neutral" });
+        insights.push({ text: `Pipeline has ${pipeline.totalOpps} opportunities worth ${fmtCurrency(pipeline.pipelineValue || 0, { compact: true })} total.`, type: "neutral" });
     }
 
     if (sales && sales.wonCount > 0 && insights.length < 5) {
@@ -197,18 +206,18 @@ export default function DashboardPage() {
     const recentOpps = opportunities.slice(0, 8);
     const statusData = analytics?.dashboard.countByStatus || [];
     const revenueData = analytics?.dashboard.revenueProjection || [];
-    const ownerData = analytics?.dashboard.countByOwner || [];
+    const ownerData = analytics?.dashboard.countBySalesRep || analytics?.dashboard.countByOwner || [];
     const techRevenueData = analytics?.dashboard.revenueByTech || [];
     const clientRevenueData = analytics?.dashboard.revenueByClient || [];
     const clientCountData = analytics?.dashboard.countByClient || [];
-    const ownerRevenueData = analytics?.dashboard.revenueByOwner || [];
+    const ownerRevenueData = analytics?.dashboard.revenueBySalesRep || analytics?.dashboard.revenueByOwner || [];
     const projectedRevenue = analytics?.dashboard.projectedRevenue || 0;
     const closedRevenue = analytics?.dashboard.closedRevenue || 0;
 
     const stats = [
         {
             title: "Projected Revenue",
-            value: `₹${((projectedRevenue) / 100000).toFixed(1)}L`,
+            value: fmtCurrency(projectedRevenue, { compact: true }),
             subtitle: `${pipeline?.totalOpps || 0} opportunities`,
             icon: DollarSign,
             iconBg: "bg-indigo-100",
@@ -216,7 +225,7 @@ export default function DashboardPage() {
         },
         {
             title: "Closed Revenue",
-            value: `₹${((closedRevenue) / 100000).toFixed(1)}L`,
+            value: fmtCurrency(closedRevenue, { compact: true }),
             subtitle: `${sales?.wonCount || 0} deals won`,
             icon: CheckCircle2,
             iconBg: "bg-emerald-100",
@@ -232,8 +241,8 @@ export default function DashboardPage() {
         },
         {
             title: "Pipeline Value",
-            value: `₹${((pipeline?.pipelineValue || 0) / 100000).toFixed(1)}L`,
-            subtitle: `Avg ₹${((pipeline?.avgDealValue || 0) / 100000).toFixed(1)}L per deal`,
+            value: fmtCurrency(pipeline?.pipelineValue || 0, { compact: true }),
+            subtitle: `Avg ${fmtCurrency(pipeline?.avgDealValue || 0, { compact: true })} per deal`,
             icon: Target,
             iconBg: "bg-amber-100",
             iconColor: "text-amber-600",
@@ -254,310 +263,572 @@ export default function DashboardPage() {
             iconBg: "bg-rose-100",
             iconColor: "text-rose-600",
         },
+        {
+            title: "Re-estimate Iterations",
+            value: String(presales?.totalReEstimateCount || 0),
+            subtitle: `${presales?.oppsWithReEstimates || 0} opps, avg ${(presales?.avgReEstimateIterations || 0).toFixed(1)} rounds`,
+            icon: AlertTriangle,
+            iconBg: "bg-orange-100",
+            iconColor: "text-orange-600",
+        },
+    ];
+
+    /* ── Drill-down configs for each visual ────────────────────────── */
+
+    const revenueDrill: DrillDownConfig = {
+        title: "Revenue Projection – Monthly Breakdown",
+        columns: [
+            { key: "name", label: "Month", format: "text" },
+            { key: "proposed", label: "Proposed", format: "currency" },
+            { key: "actual", label: "Won", format: "currency" },
+            { key: "lost", label: "Lost", format: "currency" },
+        ],
+        data: revenueData,
+        chart: (
+            <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={revenueData} barSize={20}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                    <XAxis dataKey="name" tick={{ fill: '#64748b', fontSize: 11 }} />
+                    <YAxis tickFormatter={(v) => fmtCurrency(v, { compact: true })} tick={{ fill: '#64748b', fontSize: 11 }} />
+                    <Tooltip formatter={(v: number) => [fmtCurrency(v, { compact: true }), undefined]} />
+                    <Legend />
+                    <Bar dataKey="proposed" name="Proposed" fill="#6366f1" radius={[3, 3, 0, 0]} />
+                    <Bar dataKey="actual" name="Won" fill="#10b981" radius={[3, 3, 0, 0]} />
+                    <Bar dataKey="lost" name="Lost" fill="#ef4444" radius={[3, 3, 0, 0]} />
+                </BarChart>
+            </ResponsiveContainer>
+        ),
+    };
+
+    const stageDrill: DrillDownConfig = {
+        title: "Opportunities by Stage",
+        columns: [
+            { key: "name", label: "Stage", format: "text" },
+            { key: "value", label: "Count", format: "number" },
+        ],
+        data: statusData,
+        chart: (
+            <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                    <Pie data={statusData} cx="50%" cy="50%" innerRadius={80} outerRadius={150} dataKey="value" paddingAngle={3} label={({ name, value }) => `${name}: ${value}`}>
+                        {statusData.map((entry, idx) => (
+                            <Cell key={idx} fill={PIE_COLOR_MAP[entry.name] || PIE_COLORS[idx % PIE_COLORS.length]} />
+                        ))}
+                    </Pie>
+                    <Tooltip />
+                    <Legend />
+                </PieChart>
+            </ResponsiveContainer>
+        ),
+    };
+
+    const salespersonDrill: DrillDownConfig = {
+        title: "Opportunities by Salesperson",
+        columns: [
+            { key: "name", label: "Salesperson", format: "text" },
+            { key: "active", label: "Active", format: "number" },
+            { key: "won", label: "Won", format: "number" },
+            { key: "total", label: "Total", format: "number" },
+        ],
+        data: ownerData,
+        chart: (
+            <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={ownerData} layout="vertical" margin={{ left: 10, right: 20 }} barSize={14}>
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
+                    <XAxis type="number" tick={{ fill: '#64748b', fontSize: 11 }} allowDecimals={false} />
+                    <YAxis type="category" dataKey="name" tick={{ fill: '#64748b', fontSize: 11 }} width={120} />
+                    <Tooltip />
+                    <Legend />
+                    <Bar dataKey="active" name="Active" fill="#6366f1" stackId="a" />
+                    <Bar dataKey="won" name="Won" fill="#10b981" stackId="a" radius={[0, 3, 3, 0]} />
+                </BarChart>
+            </ResponsiveContainer>
+        ),
+    };
+
+    const techRevDrill: DrillDownConfig = {
+        title: "Revenue by Tech Stack",
+        columns: [
+            { key: "name", label: "Technology", format: "text" },
+            { key: "value", label: "Revenue", format: "currency" },
+        ],
+        data: techRevenueData,
+        chart: (
+            <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={techRevenueData} layout="vertical" margin={{ left: 10, right: 20 }} barSize={14}>
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
+                    <XAxis type="number" tickFormatter={(v) => fmtCurrency(v, { compact: true })} tick={{ fill: '#64748b', fontSize: 11 }} />
+                    <YAxis type="category" dataKey="name" tick={{ fill: '#64748b', fontSize: 11 }} width={100} />
+                    <Tooltip formatter={(v: number) => [fmtCurrency(v, { compact: true }), 'Revenue']} />
+                    <Bar dataKey="value" fill="#8b5cf6" radius={[0, 3, 3, 0]} />
+                </BarChart>
+            </ResponsiveContainer>
+        ),
+    };
+
+    const clientRevDrill: DrillDownConfig = {
+        title: "Revenue by Client",
+        columns: [
+            { key: "name", label: "Client", format: "text" },
+            { key: "value", label: "Revenue", format: "currency" },
+        ],
+        data: clientRevenueData,
+        chart: (
+            <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={clientRevenueData} layout="vertical" margin={{ left: 10, right: 20 }} barSize={14}>
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
+                    <XAxis type="number" tickFormatter={(v) => fmtCurrency(v, { compact: true })} tick={{ fill: '#64748b', fontSize: 11 }} />
+                    <YAxis type="category" dataKey="name" tick={{ fill: '#64748b', fontSize: 11 }} width={120} />
+                    <Tooltip formatter={(v: number) => [fmtCurrency(v, { compact: true }), 'Revenue']} />
+                    <Bar dataKey="value" fill="#ec4899" radius={[0, 3, 3, 0]} />
+                </BarChart>
+            </ResponsiveContainer>
+        ),
+    };
+
+    const salesRepRevDrill: DrillDownConfig = {
+        title: "Revenue by Sales Rep",
+        columns: [
+            { key: "name", label: "Sales Rep", format: "text" },
+            { key: "revenue", label: "Revenue", format: "currency" },
+        ],
+        data: ownerRevenueData,
+        chart: (
+            <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={ownerRevenueData} layout="vertical" margin={{ left: 10, right: 20 }} barSize={14}>
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
+                    <XAxis type="number" tickFormatter={(v) => fmtCurrency(v, { compact: true })} tick={{ fill: '#64748b', fontSize: 11 }} />
+                    <YAxis type="category" dataKey="name" tick={{ fill: '#64748b', fontSize: 11 }} width={120} />
+                    <Tooltip formatter={(v: number) => [fmtCurrency(v, { compact: true }), 'Revenue']} />
+                    <Bar dataKey="revenue" fill="#0ea5e9" radius={[0, 3, 3, 0]} />
+                </BarChart>
+            </ResponsiveContainer>
+        ),
+    };
+
+    const clientCountDrill: DrillDownConfig = {
+        title: "Opportunities by Client",
+        columns: [
+            { key: "name", label: "Client", format: "text" },
+            { key: "value", label: "Count", format: "number" },
+        ],
+        data: clientCountData,
+        chart: (
+            <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={clientCountData} layout="vertical" margin={{ left: 10, right: 20 }} barSize={14}>
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
+                    <XAxis type="number" tick={{ fill: '#64748b', fontSize: 11 }} allowDecimals={false} />
+                    <YAxis type="category" dataKey="name" tick={{ fill: '#64748b', fontSize: 11 }} width={120} />
+                    <Tooltip />
+                    <Bar dataKey="value" name="Count" fill="#f59e0b" radius={[0, 3, 3, 0]} />
+                </BarChart>
+            </ResponsiveContainer>
+        ),
+    };
+
+    const recentOppsDrill: DrillDownConfig = {
+        title: "Recent Opportunities",
+        columns: [
+            { key: "name", label: "Opportunity", format: "text" },
+            { key: "client", label: "Client", format: "text" },
+            { key: "value", label: "Value", format: "currency" },
+            { key: "currentStage", label: "Stage", format: "text" },
+            { key: "healthScore", label: "Health %", format: "number" },
+            { key: "owner", label: "Owner", format: "text" },
+            { key: "salesRepName", label: "Sales Rep", format: "text" },
+            { key: "managerName", label: "Manager", format: "text" },
+            { key: "daysInStage", label: "Days in Stage", format: "number" },
+        ],
+        data: opportunities,
+    };
+
+    const managerKpiDrill: DrillDownConfig = {
+        title: "Manager Response KPI",
+        columns: [
+            { key: "name", label: "Manager", format: "text" },
+            { key: "totalAssigned", label: "Assigned", format: "number" },
+            { key: "responded", label: "Acted On", format: "number" },
+            { key: "avgResponseDays", label: "Avg Response Days", format: "number" },
+        ],
+        data: sales?.managerKpi || [],
+    };
+
+    const insightsDrill: DrillDownConfig = {
+        title: "Pipeline Insights & Deal Health",
+        columns: [
+            { key: "name", label: "Opportunity", format: "text" },
+            { key: "client", label: "Client", format: "text" },
+            { key: "value", label: "Value", format: "currency" },
+            { key: "status", label: "Health Status", format: "text" },
+            { key: "healthScore", label: "Health %", format: "number" },
+            { key: "daysInStage", label: "Days in Stage", format: "number" },
+            { key: "currentStage", label: "Stage", format: "text" },
+            { key: "isStalled", label: "Stalled", format: "text" },
+        ],
+        data: opportunities.map(o => ({ ...o, isStalled: o.isStalled ? "Yes" : "No" })),
+    };
+
+    // Build stat drill-downs
+    const statDrills: DrillDownConfig[] = [
+        { // Projected Revenue
+            title: "Projected Revenue – Active Opportunities",
+            columns: [
+                { key: "name", label: "Opportunity", format: "text" },
+                { key: "client", label: "Client", format: "text" },
+                { key: "value", label: "Value", format: "currency" },
+                { key: "currentStage", label: "Stage", format: "text" },
+                { key: "probability", label: "Probability", format: "percent" },
+                { key: "owner", label: "Owner", format: "text" },
+            ],
+            data: opportunities.filter(o => o.status !== "won" && o.status !== "lost"),
+        },
+        { // Closed Revenue
+            title: "Closed Revenue – Won Deals",
+            columns: [
+                { key: "name", label: "Opportunity", format: "text" },
+                { key: "client", label: "Client", format: "text" },
+                { key: "value", label: "Value", format: "currency" },
+                { key: "owner", label: "Owner", format: "text" },
+            ],
+            data: opportunities.filter(o => {
+                const s = STAGE_DISPLAY[o.currentStage] || o.currentStage;
+                return s === 'Project' || o.currentStage === 'Closed Won' || o.currentStage === 'Closed-Won';
+            }),
+        },
+        { // Opportunities
+            title: "All Opportunities",
+            columns: [
+                { key: "name", label: "Opportunity", format: "text" },
+                { key: "client", label: "Client", format: "text" },
+                { key: "value", label: "Value", format: "currency" },
+                { key: "currentStage", label: "Stage", format: "text" },
+                { key: "status", label: "Health", format: "text" },
+                { key: "owner", label: "Owner", format: "text" },
+            ],
+            data: opportunities,
+        },
+        { // Pipeline Value
+            title: "Pipeline Value – Active Deals",
+            columns: [
+                { key: "name", label: "Opportunity", format: "text" },
+                { key: "client", label: "Client", format: "text" },
+                { key: "value", label: "Value", format: "currency" },
+                { key: "currentStage", label: "Stage", format: "text" },
+                { key: "probability", label: "Probability", format: "percent" },
+            ],
+            data: opportunities.filter(o => {
+                const s = o.currentStage;
+                return s !== 'Closed Won' && s !== 'Closed-Won' && s !== 'Closed Lost' && s !== 'Proposal Lost';
+            }),
+        },
+        { // Win Rate
+            title: "Win/Loss Analysis",
+            columns: [
+                { key: "name", label: "Opportunity", format: "text" },
+                { key: "client", label: "Client", format: "text" },
+                { key: "value", label: "Value", format: "currency" },
+                { key: "currentStage", label: "Stage", format: "text" },
+                { key: "owner", label: "Owner", format: "text" },
+            ],
+            data: opportunities.filter(o => ['Closed Won', 'Closed-Won', 'Closed Lost', 'Proposal Lost'].includes(o.currentStage)),
+        },
+        { // Avg Close Time
+            title: "Deals – Cycle Time",
+            columns: [
+                { key: "name", label: "Opportunity", format: "text" },
+                { key: "client", label: "Client", format: "text" },
+                { key: "value", label: "Value", format: "currency" },
+                { key: "currentStage", label: "Stage", format: "text" },
+                { key: "daysInStage", label: "Days in Stage", format: "number" },
+            ],
+            data: opportunities,
+        },
+        { // Re-estimate Iterations
+            title: "Re-estimation Details",
+            columns: [
+                { key: "name", label: "Opportunity", format: "text" },
+                { key: "client", label: "Client", format: "text" },
+                { key: "value", label: "Value", format: "currency" },
+                { key: "currentStage", label: "Stage", format: "text" },
+                { key: "owner", label: "Owner", format: "text" },
+            ],
+            data: opportunities,
+        },
     ];
 
     return (
-        <div className="space-y-4 animate-in fade-in duration-500">
-            <div>
-                <h1 className="text-xl font-bold mb-0.5 text-slate-900">Dashboard</h1>
-                <p className="text-slate-500 text-sm">Welcome back{user?.name ? `, ${user.name.split(' ')[0]}` : ''}. Here&apos;s your pipeline overview.</p>
+        <div className="space-y-3 animate-in fade-in duration-500">
+            <div className="flex items-center justify-between">
+                <div>
+                    <h1 className="text-base font-semibold text-slate-900">Dashboard</h1>
+                    <p className="text-slate-400 text-xs">Welcome back{user?.name ? `, ${user.name.split(' ')[0]}` : ''}. Click any card to expand &amp; download.</p>
+                </div>
             </div>
 
-            {/* Stats Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-3">
+            {/* Stats Grid — tight 7-col, each expandable */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
                 {stats.map((stat, idx) => (
-                    <motion.div
-                        key={idx}
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: idx * 0.1 }}
-                        className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm hover:shadow-md transition-shadow"
-                    >
-                        <div className="flex justify-between items-start mb-2">
-                            <div className={`p-2 rounded-lg ${stat.iconBg}`}>
-                                <stat.icon className={`w-4 h-4 ${stat.iconColor}`} />
+                    <ExpandableCard key={idx} drillConfig={statDrills[idx]} className="bg-white rounded-lg px-3 py-2.5 border border-slate-100 hover:border-slate-200 transition-colors">
+                        <div className="flex items-center gap-1.5 mb-1">
+                            <div className={`p-1 rounded ${stat.iconBg}`}>
+                                <stat.icon className={`w-3 h-3 ${stat.iconColor}`} />
                             </div>
+                            <span className="text-[10px] text-slate-400 font-medium truncate">{stat.title}</span>
                         </div>
-                        <h3 className="text-slate-500 text-xs mb-0.5">{stat.title}</h3>
-                        <p className="text-lg font-bold text-slate-900">{stat.value}</p>
-                        <p className="text-[11px] text-slate-400 mt-0.5">{stat.subtitle}</p>
-                    </motion.div>
+                        <p className="text-sm font-bold text-slate-900 leading-tight">{stat.value}</p>
+                        <p className="text-[10px] text-slate-400 mt-0.5 truncate">{stat.subtitle}</p>
+                    </ExpandableCard>
                 ))}
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                {/* Revenue Projection Chart */}
-                <div className="lg:col-span-2 bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
-                    <div className="flex justify-between items-center mb-3">
-                        <h3 className="font-semibold text-sm text-slate-800">Revenue Projection</h3>
+            {/* Row 1: Revenue chart + Stage pie */}
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-2">
+                <ExpandableCard drillConfig={revenueDrill} className="lg:col-span-3 bg-white rounded-lg border border-slate-100">
+                    <div className="flex items-center justify-between px-3 py-2">
+                        <h3 className="font-medium text-xs text-slate-700">Revenue Projection</h3>
                     </div>
-                    <div className="h-[240px] w-full">
-                        {revenueData.length > 0 ? (
-                            <ResponsiveContainer width="100%" height="100%">
-                                <BarChart data={revenueData}>
-                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} />
-                                    <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} tickFormatter={(v) => `₹${(v / 100000).toFixed(0)}L`} />
-                                    <Tooltip
-                                        contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                                        formatter={(value: number) => [`₹${(value / 100000).toFixed(1)}L`, undefined]}
-                                    />
-                                    <Legend />
-                                    <Bar dataKey="proposed" name="Proposed" fill="#6366f1" radius={[4, 4, 0, 0]} />
-                                    <Bar dataKey="actual" name="Won" fill="#10b981" radius={[4, 4, 0, 0]} />
-                                    <Bar dataKey="lost" name="Lost" fill="#ef4444" radius={[4, 4, 0, 0]} />
-                                </BarChart>
-                            </ResponsiveContainer>
-                        ) : (
-                            <div className="flex items-center justify-center h-full text-slate-400 text-sm">No revenue data available</div>
-                        )}
+                    <div className="px-3 pb-3">
+                        <div className="h-[160px] w-full">
+                            {revenueData.length > 0 ? (
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <BarChart data={revenueData} barSize={12}>
+                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} />
+                                        <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} tickFormatter={(v) => fmtCurrency(v, { compact: true })} width={45} />
+                                        <Tooltip contentStyle={{ fontSize: '11px', borderRadius: '8px', border: '1px solid #e2e8f0', padding: '6px 10px' }} formatter={(value: number) => [fmtCurrency(value, { compact: true }), undefined]} />
+                                        <Bar dataKey="proposed" name="Proposed" fill="#6366f1" radius={[2, 2, 0, 0]} />
+                                        <Bar dataKey="actual" name="Won" fill="#10b981" radius={[2, 2, 0, 0]} />
+                                        <Bar dataKey="lost" name="Lost" fill="#ef4444" radius={[2, 2, 0, 0]} />
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            ) : <div className="flex items-center justify-center h-full text-slate-300 text-xs">No data</div>}
+                        </div>
                     </div>
-                </div>
+                </ExpandableCard>
 
-                {/* Pipeline by Stage - Pie */}
-                <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
-                    <div className="flex justify-between items-center mb-3">
-                        <h3 className="font-semibold text-sm text-slate-800">By Stage</h3>
-                    </div>
+                <ExpandableCard drillConfig={stageDrill} className="bg-white rounded-lg border border-slate-100 px-3 py-2">
+                    <h3 className="font-medium text-xs text-slate-700 mb-1">By Stage</h3>
                     {statusData.length > 0 ? (
                         <>
-                            <div className="h-[200px] w-full">
+                            <div className="h-[100px] w-full">
                                 <ResponsiveContainer width="100%" height="100%">
                                     <PieChart>
-                                        <Pie data={statusData} cx="50%" cy="50%" innerRadius={50} outerRadius={80} dataKey="value" paddingAngle={3}>
+                                        <Pie data={statusData} cx="50%" cy="50%" innerRadius={28} outerRadius={45} dataKey="value" paddingAngle={2} strokeWidth={0}>
                                             {statusData.map((entry, idx) => (
                                                 <Cell key={idx} fill={PIE_COLOR_MAP[entry.name] || PIE_COLORS[idx % PIE_COLORS.length]} />
                                             ))}
                                         </Pie>
-                                        <Tooltip
-                                            contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px' }}
-                                            formatter={(value: number, name: string) => [value, name]}
-                                        />
+                                        <Tooltip contentStyle={{ fontSize: '10px', borderRadius: '6px', border: '1px solid #e2e8f0', padding: '4px 8px' }} />
                                     </PieChart>
                                 </ResponsiveContainer>
                             </div>
-                            <div className="space-y-2 mt-2">
+                            <div className="space-y-0.5 mt-1">
                                 {statusData.map((s, idx) => (
-                                    <div key={s.name} className="flex items-center justify-between text-sm">
-                                        <div className="flex items-center gap-2">
-                                            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: PIE_COLOR_MAP[s.name] || PIE_COLORS[idx % PIE_COLORS.length] }} />
-                                            <span className="text-slate-600">{s.name}</span>
+                                    <div key={s.name} className="flex items-center justify-between text-[10px]">
+                                        <div className="flex items-center gap-1">
+                                            <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: PIE_COLOR_MAP[s.name] || PIE_COLORS[idx % PIE_COLORS.length] }} />
+                                            <span className="text-slate-500">{s.name}</span>
                                         </div>
-                                        <span className="font-medium text-slate-800">{s.value}</span>
+                                        <span className="font-medium text-slate-700">{s.value}</span>
                                     </div>
                                 ))}
                             </div>
                         </>
-                    ) : (
-                        <div className="flex items-center justify-center h-[200px] text-slate-400 text-sm">No data</div>
-                    )}
-                </div>
+                    ) : <div className="flex items-center justify-center h-[100px] text-slate-300 text-xs">No data</div>}
+                </ExpandableCard>
             </div>
 
-            {/* Opportunities by Salesperson */}
-            <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
-                <div className="flex justify-between items-center mb-3">
-                    <h3 className="font-semibold text-sm text-slate-800">Opportunities by Salesperson</h3>
-                </div>
-                {ownerData.length > 0 ? (
-                    <div className="h-[220px] w-full">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <BarChart data={ownerData} layout="vertical" margin={{ left: 20, right: 20 }}>
-                                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
-                                <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 11 }} allowDecimals={false} />
-                                <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 11 }} width={110} />
-                                <Tooltip
-                                    contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                                />
-                                <Legend />
-                                <Bar dataKey="active" name="Active" fill="#6366f1" radius={[0, 0, 0, 0]} stackId="a" />
-                                <Bar dataKey="won" name="Won" fill="#10b981" radius={[0, 4, 4, 0]} stackId="a" />
-                            </BarChart>
-                        </ResponsiveContainer>
-                    </div>
-                ) : (
-                    <div className="flex items-center justify-center h-[220px] text-slate-400 text-sm">No salesperson data available</div>
-                )}
-            </div>
+            {/* Row 2: Salesperson bar + Tech revenue + Client revenue */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-2">
+                <ExpandableCard drillConfig={salespersonDrill} className="bg-white rounded-lg border border-slate-100 px-3 py-2">
+                    <h3 className="font-medium text-xs text-slate-700 mb-1">Opps by Salesperson</h3>
+                    {ownerData.length > 0 ? (
+                        <div className="h-[130px] w-full">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={ownerData} layout="vertical" margin={{ left: 0, right: 5 }} barSize={10}>
+                                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
+                                    <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} allowDecimals={false} />
+                                    <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} width={80} />
+                                    <Tooltip contentStyle={{ fontSize: '10px', borderRadius: '6px', border: '1px solid #e2e8f0', padding: '4px 8px' }} />
+                                    <Bar dataKey="active" name="Active" fill="#6366f1" stackId="a" />
+                                    <Bar dataKey="won" name="Won" fill="#10b981" stackId="a" radius={[0, 2, 2, 0]} />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </div>
+                    ) : <div className="flex items-center justify-center h-[130px] text-slate-300 text-xs">No data</div>}
+                </ExpandableCard>
 
-            {/* Row: Revenue by Tech Stack + Revenue by Client + Count by Client */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                {/* Proposed Revenue by Tech Stack */}
-                <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
-                    <h3 className="font-semibold text-sm text-slate-800 mb-3">Proposed Revenue by Tech Stack</h3>
+                <ExpandableCard drillConfig={techRevDrill} className="bg-white rounded-lg border border-slate-100 px-3 py-2">
+                    <h3 className="font-medium text-xs text-slate-700 mb-1">Revenue by Tech Stack</h3>
                     {techRevenueData.length > 0 ? (
-                        <div className="h-[240px] w-full">
+                        <div className="h-[130px] w-full">
                             <ResponsiveContainer width="100%" height="100%">
-                                <BarChart data={techRevenueData} layout="vertical" margin={{ left: 10, right: 20 }}>
-                                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
-                                    <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 10 }} tickFormatter={(v) => `₹${(v/100000).toFixed(0)}L`} />
-                                    <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 10 }} width={80} />
-                                    <Tooltip formatter={(v: number) => [`₹${(v/100000).toFixed(1)}L`, 'Revenue']} contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0' }} />
-                                    <Bar dataKey="value" name="Revenue" fill="#6366f1" radius={[0, 4, 4, 0]} />
+                                <BarChart data={techRevenueData.slice(0,6)} layout="vertical" margin={{ left: 0, right: 5 }} barSize={10}>
+                                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
+                                    <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} tickFormatter={(v) => fmtCurrency(v, { compact: true })} />
+                                    <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} width={65} />
+                                    <Tooltip formatter={(v: number) => [fmtCurrency(v, { compact: true }), 'Revenue']} contentStyle={{ fontSize: '10px', borderRadius: '6px', border: '1px solid #e2e8f0', padding: '4px 8px' }} />
+                                    <Bar dataKey="value" fill="#8b5cf6" radius={[0, 2, 2, 0]} />
                                 </BarChart>
                             </ResponsiveContainer>
                         </div>
-                    ) : <div className="flex items-center justify-center h-[240px] text-slate-400 text-sm">No data</div>}
-                </div>
+                    ) : <div className="flex items-center justify-center h-[130px] text-slate-300 text-xs">No data</div>}
+                </ExpandableCard>
 
-                {/* Proposed Revenue by Client */}
-                <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
-                    <h3 className="font-semibold text-sm text-slate-800 mb-3">Proposed Revenue by Client</h3>
+                <ExpandableCard drillConfig={clientRevDrill} className="bg-white rounded-lg border border-slate-100 px-3 py-2">
+                    <h3 className="font-medium text-xs text-slate-700 mb-1">Revenue by Client</h3>
                     {clientRevenueData.length > 0 ? (
-                        <div className="h-[240px] w-full">
+                        <div className="h-[130px] w-full">
                             <ResponsiveContainer width="100%" height="100%">
-                                <BarChart data={clientRevenueData} layout="vertical" margin={{ left: 10, right: 20 }}>
-                                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
-                                    <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 10 }} tickFormatter={(v) => `₹${(v/100000).toFixed(0)}L`} />
-                                    <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 10 }} width={100} />
-                                    <Tooltip formatter={(v: number) => [`₹${(v/100000).toFixed(1)}L`, 'Revenue']} contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0' }} />
-                                    <Bar dataKey="value" name="Revenue" fill="#ec4899" radius={[0, 4, 4, 0]} />
+                                <BarChart data={clientRevenueData.slice(0,6)} layout="vertical" margin={{ left: 0, right: 5 }} barSize={10}>
+                                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
+                                    <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} tickFormatter={(v) => fmtCurrency(v, { compact: true })} />
+                                    <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} width={80} />
+                                    <Tooltip formatter={(v: number) => [fmtCurrency(v, { compact: true }), 'Revenue']} contentStyle={{ fontSize: '10px', borderRadius: '6px', border: '1px solid #e2e8f0', padding: '4px 8px' }} />
+                                    <Bar dataKey="value" fill="#ec4899" radius={[0, 2, 2, 0]} />
                                 </BarChart>
                             </ResponsiveContainer>
                         </div>
-                    ) : <div className="flex items-center justify-center h-[240px] text-slate-400 text-sm">No data</div>}
-                </div>
+                    ) : <div className="flex items-center justify-center h-[130px] text-slate-300 text-xs">No data</div>}
+                </ExpandableCard>
+            </div>
 
-                {/* Opportunity Count by Client */}
-                <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
-                    <h3 className="font-semibold text-sm text-slate-800 mb-3">Opportunity Count by Client</h3>
+            {/* Row 3: Rev by Sales Rep + Client count */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
+                <ExpandableCard drillConfig={salesRepRevDrill} className="bg-white rounded-lg border border-slate-100 px-3 py-2">
+                    <h3 className="font-medium text-xs text-slate-700 mb-1">Revenue by Sales Rep</h3>
+                    {ownerRevenueData.length > 0 ? (
+                        <div className="h-[120px] w-full">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={ownerRevenueData} layout="vertical" margin={{ left: 0, right: 5 }} barSize={10}>
+                                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
+                                    <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} tickFormatter={(v) => fmtCurrency(v, { compact: true })} />
+                                    <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} width={80} />
+                                    <Tooltip formatter={(v: number) => [fmtCurrency(v, { compact: true }), 'Revenue']} contentStyle={{ fontSize: '10px', borderRadius: '6px', border: '1px solid #e2e8f0', padding: '4px 8px' }} />
+                                    <Bar dataKey="revenue" fill="#0ea5e9" radius={[0, 2, 2, 0]} />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </div>
+                    ) : <div className="flex items-center justify-center h-[120px] text-slate-300 text-xs">No data</div>}
+                </ExpandableCard>
+
+                <ExpandableCard drillConfig={clientCountDrill} className="bg-white rounded-lg border border-slate-100 px-3 py-2">
+                    <h3 className="font-medium text-xs text-slate-700 mb-1">Opps by Client</h3>
                     {clientCountData.length > 0 ? (
-                        <div className="h-[240px] w-full">
+                        <div className="h-[120px] w-full">
                             <ResponsiveContainer width="100%" height="100%">
-                                <BarChart data={clientCountData.slice(0, 10)} layout="vertical" margin={{ left: 10, right: 20 }}>
-                                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
-                                    <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 10 }} allowDecimals={false} />
-                                    <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 10 }} width={100} />
-                                    <Tooltip contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0' }} />
-                                    <Bar dataKey="value" name="Count" fill="#8b5cf6" radius={[0, 4, 4, 0]} />
+                                <BarChart data={clientCountData.slice(0, 8)} layout="vertical" margin={{ left: 0, right: 5 }} barSize={10}>
+                                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
+                                    <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} allowDecimals={false} />
+                                    <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} width={80} />
+                                    <Tooltip contentStyle={{ fontSize: '10px', borderRadius: '6px', border: '1px solid #e2e8f0', padding: '4px 8px' }} />
+                                    <Bar dataKey="value" name="Count" fill="#f59e0b" radius={[0, 2, 2, 0]} />
                                 </BarChart>
                             </ResponsiveContainer>
                         </div>
-                    ) : <div className="flex items-center justify-center h-[240px] text-slate-400 text-sm">No data</div>}
-                </div>
+                    ) : <div className="flex items-center justify-center h-[120px] text-slate-300 text-xs">No data</div>}
+                </ExpandableCard>
             </div>
 
-            {/* Proposed Revenue by Sales Rep */}
-            <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
-                <h3 className="font-semibold text-sm text-slate-800 mb-3">Proposed Revenue by Sales Rep</h3>
-                {ownerRevenueData.length > 0 ? (
-                    <div className="h-[220px] w-full">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <BarChart data={ownerRevenueData} layout="vertical" margin={{ left: 20, right: 20 }}>
-                                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
-                                <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 11 }} tickFormatter={(v) => `₹${(v/100000).toFixed(0)}L`} />
-                                <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 11 }} width={110} />
-                                <Tooltip formatter={(v: number) => [`₹${(v/100000).toFixed(1)}L`, 'Revenue']} contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0' }} />
-                                <Bar dataKey="revenue" name="Revenue" fill="#0ea5e9" radius={[0, 4, 4, 0]} />
-                            </BarChart>
-                        </ResponsiveContainer>
-                    </div>
-                ) : <div className="flex items-center justify-center h-[220px] text-slate-400 text-sm">No data</div>}
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                {/* Recent Opportunities Table */}
-                <div className="lg:col-span-2 bg-white rounded-xl p-4 border border-slate-200 shadow-sm overflow-hidden">
-                    <div className="flex justify-between items-center mb-3">
-                        <h3 className="font-semibold text-sm text-slate-800">Recent Opportunities</h3>
-                        <button
-                            onClick={() => router.push('/dashboard/opportunities')}
-                            className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
-                        >
-                            View All
-                        </button>
+            {/* Row 4: Recent Opps table + Manager KPI + Insights */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-2">
+                {/* Recent Opportunities — compact table */}
+                <ExpandableCard drillConfig={recentOppsDrill} className="lg:col-span-6 bg-white rounded-lg border border-slate-100 px-3 py-2 overflow-hidden">
+                    <div className="flex justify-between items-center mb-1.5">
+                        <h3 className="font-medium text-xs text-slate-700">Recent Opportunities</h3>
+                        <button onClick={(e) => { e.stopPropagation(); router.push('/dashboard/opportunities'); }} className="text-[10px] text-indigo-500 hover:text-indigo-700 font-medium">View All</button>
                     </div>
                     {recentOpps.length > 0 ? (
                         <div className="overflow-x-auto">
                             <table className="w-full">
                                 <thead>
-                                    <tr className="border-b border-slate-100 text-left text-xs text-slate-500">
-                                        <th className="pb-2 pl-3 font-medium">Opportunity</th>
-                                        <th className="pb-2 font-medium">Value</th>
-                                        <th className="pb-2 font-medium">Stage</th>
-                                        <th className="pb-2 font-medium">Health</th>
-                                        <th className="pb-2 font-medium">Sales Rep</th>
-                                        <th className="pb-2 font-medium">Manager</th>
+                                    <tr className="border-b border-slate-50 text-left text-[10px] text-slate-400">
+                                        <th className="pb-1 pl-1 font-medium">Opportunity</th>
+                                        <th className="pb-1 font-medium">Value</th>
+                                        <th className="pb-1 font-medium">Stage</th>
+                                        <th className="pb-1 font-medium">Health</th>
                                     </tr>
                                 </thead>
-                                <tbody className="text-xs">
-                                    {recentOpps.map((opp) => (
-                                        <tr
-                                            key={opp.id}
-                                            onClick={() => router.push(`/dashboard/opportunities/${opp.id}`)}
-                                            className="border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-colors cursor-pointer"
-                                        >
-                                            <td className="py-2.5 pl-3">
-                                                <div className="font-medium text-slate-900">{opp.name}</div>
-                                                <div className="text-[11px] text-slate-400">{opp.client} • {opp.owner}</div>
+                                <tbody className="text-[10px]">
+                                    {recentOpps.slice(0, 6).map((opp) => (
+                                        <tr key={opp.id} className="border-b border-slate-50/50 last:border-0 hover:bg-slate-50 transition-colors">
+                                            <td className="py-1.5 pl-1">
+                                                <div className="font-medium text-slate-800 truncate max-w-[140px]">{opp.name}</div>
+                                                <div className="text-[9px] text-slate-400 truncate max-w-[140px]">{opp.client}</div>
                                             </td>
-                                            <td className="py-2.5 text-slate-600">{'\u20B9'}{(opp.value / 100000).toFixed(1)}L</td>
-                                            <td className="py-2.5">
-                                                <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium border ${STAGE_COLORS[STAGE_DISPLAY[opp.currentStage] || opp.currentStage] || "bg-slate-50 text-slate-700 border-slate-200"}`}>
+                                            <td className="py-1.5 text-slate-600">{fmtCurrency(opp.value, { compact: true })}</td>
+                                            <td className="py-1.5">
+                                                <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium border ${STAGE_COLORS[STAGE_DISPLAY[opp.currentStage] || opp.currentStage] || "bg-slate-50 text-slate-600 border-slate-200"}`}>
                                                     {STAGE_DISPLAY[opp.currentStage] || opp.currentStage}
                                                 </span>
                                             </td>
-                                            <td className="py-2.5">
-                                                <div className="flex items-center gap-1.5">
-                                                    <div className={`w-2 h-2 rounded-full ${opp.status === 'healthy' ? 'bg-emerald-500' : opp.status === 'at-risk' ? 'bg-amber-500' : 'bg-red-500'}`} />
-                                                    <span className="text-slate-600">{opp.healthScore}%</span>
+                                            <td className="py-1.5">
+                                                <div className="flex items-center gap-1">
+                                                    <div className={`w-1.5 h-1.5 rounded-full ${opp.status === 'healthy' ? 'bg-emerald-500' : opp.status === 'at-risk' ? 'bg-amber-500' : 'bg-red-500'}`} />
+                                                    <span className="text-slate-500">{opp.healthScore}%</span>
                                                 </div>
                                             </td>
-                                            <td className="py-2.5 text-slate-600">{opp.salesRepName || opp.owner}</td>
-                                            <td className="py-2.5 text-slate-600">{opp.managerName || <span className="text-slate-300">—</span>}</td>
                                         </tr>
                                     ))}
                                 </tbody>
                             </table>
                         </div>
-                    ) : (
-                        <div className="text-center py-4 text-slate-400 text-xs">No opportunities found</div>
-                    )}
-                </div>
+                    ) : <div className="text-center py-3 text-slate-300 text-[10px]">No opportunities</div>}
+                </ExpandableCard>
 
-                {/* AI Insights */}
-                <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
-                    <div className="flex justify-between items-center mb-3">
-                        <h3 className="font-semibold text-sm text-slate-800">AI Insights</h3>
-                    </div>
-                    <div className="space-y-2">
-                        {insights.map((insight, idx) => (
-                            <div key={idx} className="p-3 rounded-lg bg-slate-50 border border-slate-100 hover:border-indigo-200 hover:bg-indigo-50/30 transition-colors">
-                                <div className="flex gap-3">
-                                    <div className={`w-1.5 h-1.5 rounded-full mt-2 flex-shrink-0 ${insight.type === "warning" ? "bg-amber-500" :
-                                        insight.type === "success" ? "bg-green-500" : "bg-blue-500"
-                                        }`} />
-                                    <p className="text-sm text-slate-600 leading-relaxed">{insight.text}</p>
-                                </div>
+                {/* Manager KPI */}
+                <ExpandableCard drillConfig={managerKpiDrill} className="lg:col-span-3 bg-white rounded-lg border border-slate-100 px-3 py-2">
+                    <h3 className="font-medium text-xs text-slate-700 mb-1.5">Manager KPI</h3>
+                    {(sales?.managerKpi || []).length > 0 ? (
+                        <table className="w-full text-[10px]">
+                            <thead>
+                                <tr className="border-b border-slate-50 text-left text-slate-400">
+                                    <th className="pb-1 font-medium">Manager</th>
+                                    <th className="pb-1 font-medium text-center">Assigned</th>
+                                    <th className="pb-1 font-medium text-center">Acted</th>
+                                    <th className="pb-1 font-medium text-center">Avg Days</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {(sales?.managerKpi || []).map((mgr) => (
+                                    <tr key={mgr.name} className="border-b border-slate-50/50 last:border-0">
+                                        <td className="py-1.5 font-medium text-slate-700 truncate max-w-[90px]">{mgr.name}</td>
+                                        <td className="py-1.5 text-center text-slate-500">{mgr.totalAssigned}</td>
+                                        <td className="py-1.5 text-center text-slate-500">{mgr.responded}</td>
+                                        <td className="py-1.5 text-center text-slate-500">{mgr.avgResponseDays}d</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    ) : <div className="text-center py-3 text-slate-300 text-[10px]">No manager data</div>}
+                </ExpandableCard>
+
+                {/* AI Insights + Quick Stats */}
+                <ExpandableCard drillConfig={insightsDrill} className="lg:col-span-3 bg-white rounded-lg border border-slate-100 px-3 py-2">
+                    <h3 className="font-medium text-xs text-slate-700 mb-1.5">Insights</h3>
+                    <div className="space-y-1">
+                        {insights.slice(0, 4).map((insight, idx) => (
+                            <div key={idx} className="flex gap-1.5 py-1 border-b border-slate-50/50 last:border-0">
+                                <div className={`w-1 h-1 rounded-full mt-1.5 flex-shrink-0 ${insight.type === "warning" ? "bg-amber-400" : insight.type === "success" ? "bg-green-400" : "bg-blue-400"}`} />
+                                <p className="text-[10px] text-slate-500 leading-relaxed">{insight.text}</p>
                             </div>
                         ))}
                     </div>
-
-                    {/* Quick Stats */}
-                    <div className="mt-4 pt-4 border-t border-slate-100 space-y-2">
-                        <div className="flex items-center justify-between text-sm">
-                            <div className="flex items-center gap-2 text-slate-500">
-                                <AlertTriangle className="w-4 h-4 text-amber-500" />
-                                Stalled Deals
-                            </div>
-                            <span className="font-semibold text-slate-800">{stalledDeals.length}</span>
+                    <div className="mt-2 pt-2 border-t border-slate-100 space-y-1">
+                        <div className="flex items-center justify-between text-[10px]">
+                            <span className="text-slate-400 flex items-center gap-1"><AlertTriangle className="w-2.5 h-2.5 text-amber-400" />Stalled</span>
+                            <span className="font-semibold text-slate-700">{stalledDeals.length}</span>
                         </div>
-                        <div className="flex items-center justify-between text-sm">
-                            <div className="flex items-center gap-2 text-slate-500">
-                                <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                                Healthy Deals
-                            </div>
-                            <span className="font-semibold text-slate-800">{healthyDeals.length}</span>
+                        <div className="flex items-center justify-between text-[10px]">
+                            <span className="text-slate-400 flex items-center gap-1"><CheckCircle2 className="w-2.5 h-2.5 text-emerald-400" />Healthy</span>
+                            <span className="font-semibold text-slate-700">{healthyDeals.length}</span>
                         </div>
-                        <div className="flex items-center justify-between text-sm">
-                            <div className="flex items-center gap-2 text-slate-500">
-                                <Briefcase className="w-4 h-4 text-indigo-500" />
-                                In Presales
-                            </div>
-                            <span className="font-semibold text-slate-800">{presales?.totalPresalesOpps || 0}</span>
+                        <div className="flex items-center justify-between text-[10px]">
+                            <span className="text-slate-400 flex items-center gap-1"><Briefcase className="w-2.5 h-2.5 text-indigo-400" />Presales</span>
+                            <span className="font-semibold text-slate-700">{presales?.totalPresalesOpps || 0}</span>
                         </div>
                     </div>
-                </div>
+                </ExpandableCard>
             </div>
         </div>
     );

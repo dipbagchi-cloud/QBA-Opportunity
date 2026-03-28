@@ -8,9 +8,11 @@ const prisma = new PrismaClient()
 const BCRYPT_ROUNDS = 12;
 
 async function main() {
-    console.log('Seeding database...')
+    console.log('🌱 Seeding database — Full Master Data Migration...')
 
-    // 1. Create Stages
+    // ════════════════════════════════════════════════════════════════════════
+    // 1. STAGES
+    // ════════════════════════════════════════════════════════════════════════
     const stages = [
         { name: 'Discovery', order: 1, probability: 10, color: '#6366f1' },
         { name: 'Qualification', order: 2, probability: 30, color: '#8b5cf6' },
@@ -19,32 +21,41 @@ async function main() {
         { name: 'Closed Won', order: 5, probability: 100, color: '#10b981', isClosed: true, isWon: true },
         { name: 'Closed Lost', order: 6, probability: 0, color: '#ef4444', isClosed: true, isWon: false },
         { name: 'Proposal Lost', order: 7, probability: 0, color: '#e11d48', isClosed: true, isWon: false },
-    ]
+    ];
 
     for (const stage of stages) {
         await prisma.stage.upsert({
             where: { name: stage.name },
-            update: {},
+            update: { order: stage.order, probability: stage.probability, color: stage.color },
             create: {
                 ...stage,
                 requiredFields: "[]",
                 requiredDocs: "[]",
-                allowedNextStages: "[]"
+                allowedNextStages: "[]",
             },
-        })
+        });
     }
+    console.log(`  ✅ Seeded ${stages.length} stages`);
 
-    // 2. Create Opportunity Types
-    await prisma.opportunityType.upsert({
-        where: { name: 'New Business' },
-        update: {},
-        create: {
-            name: 'New Business',
-            description: 'Standard new deal logic'
-        },
-    })
+    // ════════════════════════════════════════════════════════════════════════
+    // 2. OPPORTUNITY TYPES
+    // ════════════════════════════════════════════════════════════════════════
+    const opportunityTypes = [
+        { name: 'New Business', description: 'Standard new deal logic' },
+    ];
 
-    // 3. Create Roles with Permission Sets
+    for (const ot of opportunityTypes) {
+        await prisma.opportunityType.upsert({
+            where: { name: ot.name },
+            update: {},
+            create: ot,
+        });
+    }
+    console.log(`  ✅ Seeded ${opportunityTypes.length} opportunity types`);
+
+    // ════════════════════════════════════════════════════════════════════════
+    // 3. ROLES WITH PERMISSION SETS
+    // ════════════════════════════════════════════════════════════════════════
     const roles = [
         {
             name: 'Admin',
@@ -151,8 +162,11 @@ async function main() {
         });
         createdRoles[role.name] = r.id;
     }
+    console.log(`  ✅ Seeded ${roles.length} roles`);
 
-    // 4. Create Team
+    // ════════════════════════════════════════════════════════════════════════
+    // 4. TEAM
+    // ════════════════════════════════════════════════════════════════════════
     const team = await prisma.team.upsert({
         where: { id: 'default-team' },
         update: {},
@@ -162,8 +176,11 @@ async function main() {
             description: 'Default sales team',
         },
     });
+    console.log(`  ✅ Seeded team: ${team.name}`);
 
-    // 5. Create Users (one per role) with hashed passwords
+    // ════════════════════════════════════════════════════════════════════════
+    // 5. DEMO USERS (one per role)
+    // ════════════════════════════════════════════════════════════════════════
     const defaultPassword = await bcrypt.hash('password123', BCRYPT_ROUNDS);
 
     const users = [
@@ -209,12 +226,11 @@ async function main() {
         },
     ];
 
-    let defaultUserId = '';
     for (const u of users) {
         const allRoleIds = [createdRoles[u.roleName], ...u.extraRoles.map(r => createdRoles[r])];
         const roleConnects = allRoleIds.map(id => ({ id }));
 
-        const user = await prisma.user.upsert({
+        await prisma.user.upsert({
             where: { email: u.email },
             update: {
                 passwordHash: defaultPassword,
@@ -231,129 +247,213 @@ async function main() {
                 teamId: u.teamId,
             },
         });
-        if (u.roleName === 'Admin') defaultUserId = user.id;
     }
+    console.log(`  ✅ Seeded ${users.length} demo users`);
 
-    // 6. Create Client
-    const client = await prisma.client.upsert({
-        where: { id: 'default-client' },
-        update: {},
-        create: {
-            id: 'default-client',
-            name: "Acme Corp",
-            domain: "acme.com",
-            industry: "Technology",
-            revenue: 50000000
-        }
-    });
-
-    // 7. Create Resources (Mock HRMS)
-    const resources = [
-        { name: "John Developer", grade: "L3", effortFactor: 1.2, attritionFactor: 1.1, standardRate: 60, skills: "React, Node.js" },
-        { name: "Jane Tester", grade: "L2", effortFactor: 1.0, attritionFactor: 1.05, standardRate: 40, skills: "Selenium, Cypress" },
-        { name: "Mike Manager", grade: "L5", effortFactor: 1.5, attritionFactor: 1.0, standardRate: 100, skills: "Agile, Scrum" }
+    // ════════════════════════════════════════════════════════════════════════
+    // 6. CLIENTS
+    // ════════════════════════════════════════════════════════════════════════
+    const clients = [
+        { name: 'Acme Corp', domain: 'acme.com', industry: 'Technology' },
+        { name: 'AM Corporate', domain: null, industry: null },
+        { name: 'AM Liberia', domain: null, industry: null },
+        { name: 'AM London', domain: null, industry: null },
+        { name: 'AMDS', domain: null, industry: null },
     ];
 
-    for (const res of resources) {
-        const existing = await prisma.resource.findFirst({ where: { name: res.name } });
+    for (const c of clients) {
+        const existing = await prisma.client.findFirst({ where: { name: c.name } });
         if (!existing) {
-            await prisma.resource.create({ data: res });
+            await prisma.client.create({
+                data: {
+                    name: c.name,
+                    domain: c.domain,
+                    industry: c.industry,
+                },
+            });
         }
     }
+    console.log(`  ✅ Seeded ${clients.length} clients`);
 
-    // 8. Seed Rate Cards from Excel-generated JSON (delete old records first)
-    await prisma.rateCard.deleteMany();
-    const rateCardsPath = path.join(__dirname, 'rate-cards-data.json');
-    const rateCardsData: Array<{ code: string; role: string; skill: string; experienceBand: string; masterCtc?: number; mercerCtc?: number; copilot?: number; existingCtc?: number; maxCtc?: number; ctc: number; category: string }> = JSON.parse(fs.readFileSync(rateCardsPath, 'utf-8'));
+    // ════════════════════════════════════════════════════════════════════════
+    // 7. REGIONS
+    // ════════════════════════════════════════════════════════════════════════
+    const regions = [
+        'North America', 'Europe', 'Asia Pacific', 'Middle East',
+        'India', 'Latin America', 'Africa', 'Australia',
+    ];
 
-    for (const rc of rateCardsData) {
-        await prisma.rateCard.upsert({
-            where: { code: rc.code },
-            update: {
-                role: rc.role,
-                skill: rc.skill,
-                experienceBand: rc.experienceBand,
-                masterCtc: rc.masterCtc || 0,
-                mercerCtc: rc.mercerCtc || 0,
-                copilot: rc.copilot || 0,
-                existingCtc: rc.existingCtc || 0,
-                maxCtc: rc.maxCtc || 0,
-                ctc: rc.ctc || 0,
-                category: rc.category,
-            },
-            create: {
-                code: rc.code,
-                role: rc.role,
-                skill: rc.skill,
-                experienceBand: rc.experienceBand,
-                masterCtc: rc.masterCtc || 0,
-                mercerCtc: rc.mercerCtc || 0,
-                copilot: rc.copilot || 0,
-                existingCtc: rc.existingCtc || 0,
-                maxCtc: rc.maxCtc || 0,
-                ctc: rc.ctc || 0,
-                category: rc.category,
-            },
-        });
-    }
-    console.log(`  Seeded ${rateCardsData.length} rate cards.`);
-
-    // 8b. Seed Regions
-    const regions = ['North America', 'Europe', 'Asia Pacific', 'Middle East', 'India', 'Latin America', 'Africa'];
     for (const name of regions) {
         await prisma.region.upsert({ where: { name }, update: {}, create: { name } });
     }
-    console.log(`  Seeded ${regions.length} regions.`);
+    console.log(`  ✅ Seeded ${regions.length} regions`);
 
-    // 8c. Seed Technologies
+    // ════════════════════════════════════════════════════════════════════════
+    // 8. TECHNOLOGIES
+    // ════════════════════════════════════════════════════════════════════════
     const technologies = [
-        '.NET', 'Java', 'Python', 'React', 'Angular', 'Node.js', 'SAP', 'Salesforce',
-        'AWS', 'Azure', 'GCP', 'AI/ML', 'Data Engineering', 'DevOps', 'Cybersecurity',
-        'Power Platform', 'ServiceNow', 'Blockchain', 'IoT', 'Mobile (iOS/Android)',
+        '.NET', 'Java', 'Python', 'React', 'Angular', 'Node.js',
+        'SAP', 'Salesforce', 'AWS', 'Azure', 'GCP', 'AI/ML',
+        'Data Engineering', 'DevOps', 'Cybersecurity', 'Power Platform',
+        'ServiceNow', 'Blockchain', 'IoT', 'Mobile (iOS/Android)',
     ];
+
     for (const name of technologies) {
         await prisma.technology.upsert({ where: { name }, update: {}, create: { name } });
     }
-    console.log(`  Seeded ${technologies.length} technologies.`);
+    console.log(`  ✅ Seeded ${technologies.length} technologies`);
 
-    // 8d. Seed Pricing Models
-    const pricingModels = ['Fixed Price', 'Time & Material', 'Hybrid', 'Managed Services', 'Outcome-Based', 'Staff Augmentation'];
+    // ════════════════════════════════════════════════════════════════════════
+    // 9. PRICING MODELS
+    // ════════════════════════════════════════════════════════════════════════
+    const pricingModels = [
+        'Fixed Price', 'Time & Material', 'Hybrid',
+        'Managed Services', 'Outcome-Based', 'Staff Augmentation',
+    ];
+
     for (const name of pricingModels) {
         await prisma.pricingModel.upsert({ where: { name }, update: {}, create: { name } });
     }
-    console.log(`  Seeded ${pricingModels.length} pricing models.`);
+    console.log(`  ✅ Seeded ${pricingModels.length} pricing models`);
 
-    // 9. Create Opportunity
-    const discoveryStage = await prisma.stage.findUnique({ where: { name: 'Discovery' } })
-    const newBizType = await prisma.opportunityType.findUnique({ where: { name: 'New Business' } })
+    // ════════════════════════════════════════════════════════════════════════
+    // 10. PROJECT TYPES
+    // ════════════════════════════════════════════════════════════════════════
+    const projectTypes = [
+        'New Development', 'Modernization', 'Maintenance', 'Consulting', 'Staffing',
+    ];
 
-    if (discoveryStage && newBizType && defaultUserId) {
-        const existingOpp = await prisma.opportunity.findFirst({ where: { title: 'Project Phoenix' } });
-        if (!existingOpp) {
-            await prisma.opportunity.create({
-                data: {
-                    title: "Project Phoenix",
-                    value: 150000,
-                    probability: 20,
-                    currency: "USD",
-                    clientId: client.id,
-                    ownerId: defaultUserId,
-                    typeId: newBizType.id,
-                    stageId: discoveryStage.id,
-                    priority: "High",
-                    tags: "strategic,ai-deal",
-                    currentStage: "Pipeline",
-                    detailedStatus: "in process",
-                    geolocation: "North America",
-                    salesRepName: "Dip Bagchi"
-                }
-            })
+    for (const name of projectTypes) {
+        await prisma.projectType.upsert({ where: { name }, update: {}, create: { name } });
+    }
+    console.log(`  ✅ Seeded ${projectTypes.length} project types`);
+
+    // ════════════════════════════════════════════════════════════════════════
+    // 11. RATE CARDS (from Excel-generated JSON)
+    // ════════════════════════════════════════════════════════════════════════
+    const rateCardsPath = path.join(__dirname, 'rate-cards-data.json');
+    if (fs.existsSync(rateCardsPath)) {
+        await prisma.rateCard.deleteMany();
+        const rateCardsData: Array<{
+            code: string; role: string; skill: string; experienceBand: string;
+            masterCtc?: number; mercerCtc?: number; copilot?: number;
+            existingCtc?: number; maxCtc?: number; ctc: number; category: string;
+        }> = JSON.parse(fs.readFileSync(rateCardsPath, 'utf-8'));
+
+        for (const rc of rateCardsData) {
+            await prisma.rateCard.upsert({
+                where: { code: rc.code },
+                update: {
+                    role: rc.role, skill: rc.skill, experienceBand: rc.experienceBand,
+                    masterCtc: rc.masterCtc || 0, mercerCtc: rc.mercerCtc || 0,
+                    copilot: rc.copilot || 0, existingCtc: rc.existingCtc || 0,
+                    maxCtc: rc.maxCtc || 0, ctc: rc.ctc || 0, category: rc.category,
+                },
+                create: {
+                    code: rc.code, role: rc.role, skill: rc.skill,
+                    experienceBand: rc.experienceBand,
+                    masterCtc: rc.masterCtc || 0, mercerCtc: rc.mercerCtc || 0,
+                    copilot: rc.copilot || 0, existingCtc: rc.existingCtc || 0,
+                    maxCtc: rc.maxCtc || 0, ctc: rc.ctc || 0, category: rc.category,
+                },
+            });
         }
+        console.log(`  ✅ Seeded ${rateCardsData.length} rate cards`);
+    } else {
+        console.log('  ⚠️  rate-cards-data.json not found — skipping rate cards');
     }
 
-    console.log('Seeding finished.')
+    // ════════════════════════════════════════════════════════════════════════
+    // 12. CURRENCY RATES (INR base)
+    // ════════════════════════════════════════════════════════════════════════
+    const currencyRates = [
+        // Africa
+        { code: 'EGP', name: 'Egyptian Pound', symbol: 'E£', region: 'Africa', rateToBase: 0.559492 },
+        { code: 'GHS', name: 'Ghanaian Cedi', symbol: '₵', region: 'Africa', rateToBase: 0.117011 },
+        { code: 'KES', name: 'Kenyan Shilling', symbol: 'KSh', region: 'Africa', rateToBase: 1.3801 },
+        { code: 'NGN', name: 'Nigerian Naira', symbol: '₦', region: 'Africa', rateToBase: 14.692348 },
+        { code: 'ZAR', name: 'South African Rand', symbol: 'R', region: 'Africa', rateToBase: 0.181326 },
+        // Asia Pacific
+        { code: 'AUD', name: 'Australian Dollar', symbol: 'A$', region: 'Asia Pacific', rateToBase: 0.015361 },
+        { code: 'CNY', name: 'Chinese Yuan', symbol: '¥', region: 'Asia Pacific', rateToBase: 0.073536 },
+        { code: 'HKD', name: 'Hong Kong Dollar', symbol: 'HK$', region: 'Asia Pacific', rateToBase: 0.083177 },
+        { code: 'JPY', name: 'Japanese Yen', symbol: '¥', region: 'Asia Pacific', rateToBase: 1.695588 },
+        { code: 'KRW', name: 'South Korean Won', symbol: '₩', region: 'Asia Pacific', rateToBase: 15.986026 },
+        { code: 'MYR', name: 'Malaysian Ringgit', symbol: 'RM', region: 'Asia Pacific', rateToBase: 0.042387 },
+        { code: 'NZD', name: 'New Zealand Dollar', symbol: 'NZ$', region: 'Asia Pacific', rateToBase: 0.018367 },
+        { code: 'PHP', name: 'Philippine Peso', symbol: '₱', region: 'Asia Pacific', rateToBase: 0.58547 },
+        { code: 'SGD', name: 'Singapore Dollar', symbol: 'S$', region: 'Asia Pacific', rateToBase: 0.013166 },
+        { code: 'THB', name: 'Thai Baht', symbol: '฿', region: 'Asia Pacific', rateToBase: 0.339756 },
+        { code: 'TWD', name: 'Taiwan Dollar', symbol: 'NT$', region: 'Asia Pacific', rateToBase: 0.327736 },
+        // Europe
+        { code: 'CHF', name: 'Swiss Franc', symbol: 'CHF', region: 'Europe', rateToBase: 0.008315 },
+        { code: 'DKK', name: 'Danish Krone', symbol: 'kr', region: 'Europe', rateToBase: 0.068135 },
+        { code: 'EUR', name: 'Euro', symbol: '€', region: 'Europe', rateToBase: 0.009129 },
+        { code: 'GBP', name: 'British Pound', symbol: '£', region: 'Europe', rateToBase: 0.007628 },
+        { code: 'NOK', name: 'Norwegian Krone', symbol: 'kr', region: 'Europe', rateToBase: 0.102832 },
+        { code: 'PLN', name: 'Polish Zloty', symbol: 'zł', region: 'Europe', rateToBase: 0.038432 },
+        { code: 'SEK', name: 'Swedish Krona', symbol: 'kr', region: 'Europe', rateToBase: 0.095841 },
+        // India
+        { code: 'INR', name: 'Indian Rupee', symbol: '₹', region: 'India', rateToBase: 1 },
+        // Latin America
+        { code: 'ARS', name: 'Argentine Peso', symbol: '$', region: 'Latin America', rateToBase: 10.960637 },
+        { code: 'BRL', name: 'Brazilian Real', symbol: 'R$', region: 'Latin America', rateToBase: 0.058118 },
+        { code: 'CLP', name: 'Chilean Peso', symbol: '$', region: 'Latin America', rateToBase: 9.506626 },
+        { code: 'COP', name: 'Colombian Peso', symbol: '$', region: 'Latin America', rateToBase: 41.675062 },
+        { code: 'MXN', name: 'Mexican Peso', symbol: '$', region: 'Latin America', rateToBase: 0.203668 },
+        // Middle East
+        { code: 'AED', name: 'UAE Dirham', symbol: 'د.إ', region: 'Middle East', rateToBase: 0.039268 },
+        { code: 'BHD', name: 'Bahraini Dinar', symbol: 'BD', region: 'Middle East', rateToBase: 0.004028 },
+        { code: 'ILS', name: 'Israeli Shekel', symbol: '₪', region: 'Middle East', rateToBase: 0.036005 },
+        { code: 'QAR', name: 'Qatari Riyal', symbol: 'QR', region: 'Middle East', rateToBase: 0.038931 },
+        { code: 'SAR', name: 'Saudi Riyal', symbol: 'SR', region: 'Middle East', rateToBase: 0.040095 },
+        { code: 'TRY', name: 'Turkish Lira', symbol: '₺', region: 'Middle East', rateToBase: 0.386493 },
+        // North America
+        { code: 'CAD', name: 'Canadian Dollar', symbol: 'C$', region: 'North America', rateToBase: 0.014194 },
+        { code: 'USD', name: 'US Dollar', symbol: '$', region: 'North America', rateToBase: 0.010694 },
+    ];
 
-    // ── Seed Email Templates ──
+    for (const cr of currencyRates) {
+        await prisma.currencyRate.upsert({
+            where: { code_baseCurrency: { code: cr.code, baseCurrency: 'INR' } },
+            update: { name: cr.name, symbol: cr.symbol, region: cr.region, rateToBase: cr.rateToBase },
+            create: { ...cr, baseCurrency: 'INR' },
+        });
+    }
+    console.log(`  ✅ Seeded ${currencyRates.length} currency rates`);
+
+    // ════════════════════════════════════════════════════════════════════════
+    // 13. BUDGET ASSUMPTIONS (SystemConfig)
+    // ════════════════════════════════════════════════════════════════════════
+    const budgetAssumptions = {
+        marginPercent: 35,
+        workingDaysPerYear: 240,
+        deliveryMgmtPercent: 5,
+        benchPercent: 10,
+        leaveEligibilityPercent: 0,
+        annualGrowthBufferPercent: 0,
+        averageIncrementPercent: 0,
+        bonusPercent: 0,
+        indirectCostPercent: 0,
+        welfarePerFte: 0,
+        trainingPerFte: 0,
+    };
+
+    await prisma.systemConfig.upsert({
+        where: { key: 'budget_assumptions' },
+        update: { value: budgetAssumptions },
+        create: {
+            key: 'budget_assumptions',
+            value: budgetAssumptions,
+            category: 'finance',
+            description: 'Global budget assumption parameters for GOM and cost calculations',
+        },
+    });
+    console.log(`  ✅ Seeded budget assumptions`);
+
+    // ════════════════════════════════════════════════════════════════════════
+    // 14. EMAIL TEMPLATES
+    // ════════════════════════════════════════════════════════════════════════
     const emailTemplates = [
         {
             eventKey: 'pipeline_saved',
@@ -405,22 +505,43 @@ async function main() {
             create: tmpl,
         });
     }
-    console.log(`Seeded ${emailTemplates.length} email templates.`);
+    console.log(`  ✅ Seeded ${emailTemplates.length} email templates`);
 
-    console.log('Test credentials (all passwords: password123):')
-    console.log('  Admin:     dip.bagchi@example.com')
-    console.log('  Manager:   manager@example.com')
-    console.log('  Sales:     sales@example.com')
-    console.log('  Presales:  presales@example.com')
-    console.log('  Read-Only: viewer@example.com')
+    // ════════════════════════════════════════════════════════════════════════
+    // 15. RESOURCES (Mock HRMS)
+    // ════════════════════════════════════════════════════════════════════════
+    const resources = [
+        { name: 'John Developer', grade: 'L3', effortFactor: 1.2, attritionFactor: 1.1, standardRate: 60, skills: 'React, Node.js' },
+        { name: 'Jane Tester', grade: 'L2', effortFactor: 1.0, attritionFactor: 1.05, standardRate: 40, skills: 'Selenium, Cypress' },
+        { name: 'Mike Manager', grade: 'L5', effortFactor: 1.5, attritionFactor: 1.0, standardRate: 100, skills: 'Agile, Scrum' },
+    ];
+
+    for (const res of resources) {
+        const existing = await prisma.resource.findFirst({ where: { name: res.name } });
+        if (!existing) {
+            await prisma.resource.create({ data: res });
+        }
+    }
+    console.log(`  ✅ Seeded ${resources.length} resources`);
+
+    // ════════════════════════════════════════════════════════════════════════
+    // DONE
+    // ════════════════════════════════════════════════════════════════════════
+    console.log('\n🎉 Seeding complete!');
+    console.log('\nTest credentials (all passwords: password123):');
+    console.log('  Admin:       dip.bagchi@example.com');
+    console.log('  Manager:     manager@example.com');
+    console.log('  Sales:       sales@example.com');
+    console.log('  Presales:    presales@example.com');
+    console.log('  Read-Only:   viewer@example.com');
 }
 
 main()
     .then(async () => {
-        await prisma.$disconnect()
+        await prisma.$disconnect();
     })
     .catch(async (e) => {
-        console.error(e)
-        await prisma.$disconnect()
-        process.exit(1)
-    })
+        console.error(e);
+        await prisma.$disconnect();
+        process.exit(1);
+    });

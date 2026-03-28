@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Sparkles,
@@ -17,8 +18,32 @@ import {
   Heart,
 } from "lucide-react";
 import Link from "next/link";
+import { API_URL } from "@/lib/api";
+
+interface LandingStats {
+  totalOpportunities: number;
+  uniqueClients: number;
+  winRate: number;
+  totalPipelineValue: number;
+  totalUsers: number;
+  closedWon: number;
+}
+
+function formatCurrency(val: number): string {
+  if (val >= 1_000_000) return `$${(val / 1_000_000).toFixed(1)}M`;
+  if (val >= 1_000) return `$${(val / 1_000).toFixed(0)}K`;
+  return `$${val}`;
+}
 
 export default function HomePage() {
+  const [stats, setStats] = useState<LandingStats | null>(null);
+
+  useEffect(() => {
+    fetch(`${API_URL}/api/public/stats`)
+      .then(res => res.ok ? res.json() : null)
+      .then(data => { if (data) setStats(data); })
+      .catch(() => {});
+  }, []);
   return (
     <div className="min-h-screen bg-gradient-to-br from-neutral-950 via-neutral-900 to-neutral-950 text-white overflow-hidden">
       {/* Animated background */}
@@ -70,20 +95,37 @@ export default function HomePage() {
 
             {/* Stats */}
             <div className="grid grid-cols-3 gap-6 pt-12 max-w-2xl mx-auto">
-              {[
-                { value: "40%", label: "Time Saved" },
-                { value: "10x", label: "Faster Insights" },
-                { value: "95%", label: "Accuracy" },
-              ].map((stat, idx) => (
-                <div key={idx} className="text-center">
-                  <div className="text-3xl font-bold text-gradient">
-                    {stat.value}
+              {stats ? (
+                [
+                  { value: String(stats.totalOpportunities), label: "Opportunities" },
+                  { value: String(stats.uniqueClients), label: "Clients" },
+                  { value: `${stats.winRate}%`, label: "Win Rate" },
+                ].map((stat, idx) => (
+                  <div key={idx} className="text-center">
+                    <div className="text-3xl font-bold text-gradient">
+                      {stat.value}
+                    </div>
+                    <div className="text-sm text-neutral-400 mt-1">
+                      {stat.label}
+                    </div>
                   </div>
-                  <div className="text-sm text-neutral-400 mt-1">
-                    {stat.label}
+                ))
+              ) : (
+                [
+                  { value: "—", label: "Opportunities" },
+                  { value: "—", label: "Clients" },
+                  { value: "—", label: "Win Rate" },
+                ].map((stat, idx) => (
+                  <div key={idx} className="text-center">
+                    <div className="text-3xl font-bold text-gradient">
+                      {stat.value}
+                    </div>
+                    <div className="text-sm text-neutral-400 mt-1">
+                      {stat.label}
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </div>
         </div>
@@ -168,7 +210,7 @@ export default function HomePage() {
             </p>
             <Link href="/login">
               <button className="btn-primary px-8 py-4 text-lg transition-transform hover:scale-105 active:scale-95">
-                Start Free Trial
+                Get Started
               </button>
             </Link>
           </div>

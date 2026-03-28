@@ -33,6 +33,8 @@ interface AuthState {
   mustChangePassword: boolean;
 
   login: (email: string, password: string) => Promise<boolean>;
+  ssoLogin: (email: string) => Promise<boolean>;
+  ssoCallback: (code: string) => Promise<boolean>;
   logout: () => void;
   checkAuth: () => Promise<boolean>;
   switchRole: (roleId: string) => Promise<boolean>;
@@ -73,6 +75,61 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         isLoading: false,
         error: null,
         mustChangePassword: !!data.mustChangePassword,
+      });
+      return true;
+    } catch (error) {
+      set({ isLoading: false, error: 'Network error. Please try again.' });
+      return false;
+    }
+  },
+
+  ssoLogin: async (email: string) => {
+    set({ isLoading: true, error: null });
+    try {
+      // Step 1: Get Microsoft OAuth URL from backend
+      const res = await fetch(`${API_URL}/api/auth/sso/url`);
+      if (!res.ok) {
+        const data = await res.json();
+        set({ isLoading: false, error: data.error || 'SSO not configured' });
+        return false;
+      }
+      const { url } = await res.json();
+      // Store email hint for after redirect
+      localStorage.setItem('sso_email_hint', email);
+      // Redirect to Microsoft login 
+      window.location.href = url;
+      return true; // won't actually reach here due to redirect
+    } catch (error) {
+      set({ isLoading: false, error: 'Network error. Please try again.' });
+      return false;
+    }
+  },
+
+  // Called after Microsoft redirects back with auth code
+  ssoCallback: async (code: string) => {
+    set({ isLoading: true, error: null });
+    try {
+      const res = await fetch(`${API_URL}/api/auth/sso/callback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        set({ isLoading: false, error: data.error || 'SSO authentication failed' });
+        return false;
+      }
+
+      const data = await res.json();
+      localStorage.setItem('auth_token', data.token);
+      set({
+        user: data.user,
+        token: data.token,
+        isAuthenticated: true,
+        isLoading: false,
+        error: null,
+        mustChangePassword: false,
       });
       return true;
     } catch (error) {

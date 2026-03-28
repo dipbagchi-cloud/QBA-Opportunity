@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { sendNotificationEmail } from '../lib/email';
+import path from 'path';
+import fs from 'fs';
 
 // GET /api/opportunities
 export async function listOpportunities(req: Request, res: Response) {
@@ -187,8 +189,10 @@ export async function createOpportunity(req: Request, res: Response) {
                 region: body.region,
                 practice: body.practice,
                 technology: body.technology,
+                projectType: body.projectType,
                 tentativeStartDate: body.tentativeStartDate ? new Date(body.tentativeStartDate) : undefined,
                 tentativeDuration: body.tentativeDuration,
+                tentativeDurationUnit: body.tentativeDurationUnit,
                 tentativeEndDate: body.tentativeEndDate ? new Date(body.tentativeEndDate) : undefined,
                 pricingModel: body.pricingModel,
                 expectedDayRate: body.expectedDayRate,
@@ -234,6 +238,10 @@ export async function getOpportunity(req: Request, res: Response) {
                 client: true,
                 stage: true,
                 owner: true,
+                attachments: {
+                    select: { id: true, fileName: true, fileType: true, fileSize: true, uploadedAt: true },
+                    orderBy: { uploadedAt: 'desc' },
+                },
             }
         });
 
@@ -283,10 +291,43 @@ export async function updateOpportunity(req: Request, res: Response) {
                     stageId: stage.id,
                     currentStage: newStageName
                 };
+                if (newStageName === 'Closed Won' || newStageName === 'Closed Lost') {
+                    stageUpdate.actualCloseDate = new Date();
+                }
                 if (newStageName === 'Closed Lost') {
                     stageUpdate.detailedStatus = 'Lost';
                 }
+                // Track re-estimation iterations (item 7)
+                // When Sales sends back to Qualification (re-estimate), increment counter
+                const prevStageName = previous?.stage?.name || previous?.currentStage || '';
+                if (newStageName === 'Qualification' && (prevStageName === 'Proposal' || prevStageName === 'Negotiation')) {
+                    stageUpdate.reEstimateCount = (previous as any)?.reEstimateCount ? (previous as any).reEstimateCount + 1 : 1;
+                    stageUpdate.detailedStatus = 'Sent for Re-estimate';
+                    stageUpdate.gomApproved = false; // Reset GOM approval on re-estimate
+                }
+                // When presales submits to sales: first time = 'Estimation Submitted', subsequent = 'Re-estimation Submitted'
+                if (newStageName === 'Proposal') {
+                    // Block move to Sales unless GOM is approved
+                    if (!previous?.gomApproved) {
+                        return res.status(400).json({ error: 'GOM must be approved before moving to Sales.' });
+                    }
+                    const reEstCount = (previous as any)?.reEstimateCount || 0;
+                    stageUpdate.detailedStatus = reEstCount > 0 ? 'Re-estimation Submitted' : 'Estimation Submitted';
+                }
             }
+        }
+
+        // If there's a reEstimate comment, create a Note for audit trail
+        if (body.reEstimateComment && newStageName === 'Qualification') {
+            await prisma.note.create({
+                data: {
+                    content: body.reEstimateComment,
+                    mentions: '',
+                    stage: 'Sales',
+                    opportunityId: id,
+                    authorId: req.user!.userId,
+                },
+            });
         }
 
         const updatedOpp = await prisma.opportunity.update({
@@ -300,13 +341,16 @@ export async function updateOpportunity(req: Request, res: Response) {
                 region: body.region,
                 practice: body.practice,
                 technology: body.technology,
+                projectType: body.projectType,
                 salesRepName: body.salesRepName || body.salesRep,
                 managerName: body.managerName,
                 tentativeStartDate: body.tentativeStartDate ? new Date(body.tentativeStartDate) : undefined,
                 tentativeEndDate: body.tentativeEndDate ? new Date(body.tentativeEndDate) : undefined,
                 tentativeDuration: body.tentativeDuration || body.duration,
+                tentativeDurationUnit: body.tentativeDurationUnit || body.durationUnit,
                 pricingModel: body.pricingModel,
                 expectedDayRate: body.expectedDayRate,
+                adjustedEstimatedValue: body.adjustedEstimatedValue,
 
                 // Complex Data
                 presalesData: body.presalesData,
@@ -318,30 +362,60 @@ export async function updateOpportunity(req: Request, res: Response) {
             }
         });
 
-        // Audit log — capture what changed
-        const changes: any = {};
-        if (body.projectName || body.title) changes.title = { from: previous?.title, to: body.projectName || body.title };
-        if (body.value !== undefined) changes.value = { from: previous?.value, to: body.value };
-        if (body.description !== undefined) changes.description = { from: previous?.description, to: body.description };
-        if (newStageName) changes.stage = { from: previous?.stage?.name || previous?.currentStage, to: newStageName };
-        if (body.clientName) changes.client = { from: previous?.client?.name, to: body.clientName };
-        if (body.region !== undefined) changes.region = { from: previous?.region, to: body.region };
-        if (body.practice !== undefined) changes.practice = { from: previous?.practice, to: body.practice };
-        if (body.technology !== undefined) changes.technology = { from: previous?.technology, to: body.technology };
-        if (body.pricingModel !== undefined) changes.pricingModel = { from: previous?.pricingModel, to: body.pricingModel };
-        if (body.presalesData !== undefined) changes.presalesData = 'updated';
-        if (body.salesData !== undefined) changes.salesData = 'updated';
+        // Audit log — capture what actually changed (human-readable)
+        const changes: string[] = [];
 
-        const action = newStageName ? 'STAGE_CHANGE' : 'UPDATE';
-        await prisma.auditLog.create({
-            data: {
-                entity: 'Opportunity',
-                entityId: id,
-                action,
-                userId: req.user!.userId,
-                changes,
-            },
-        });
+        const titleVal = body.projectName || body.title;
+        if (titleVal && titleVal !== previous?.title)
+            changes.push(`Title changed from '${previous?.title || ''}' to '${titleVal}'`);
+        if (body.value !== undefined && Number(body.value) !== Number(previous?.value))
+            changes.push(`Value changed from '${previous?.value ?? ''}' to '${body.value}'`);
+        if (body.description !== undefined && body.description !== (previous?.description || ''))
+            changes.push(`Description updated`);
+        if (newStageName && newStageName !== (previous?.stage?.name || previous?.currentStage))
+            changes.push(`Stage changed from '${previous?.stage?.name || previous?.currentStage || ''}' to '${newStageName}'`);
+        if (body.clientName && body.clientName !== previous?.client?.name)
+            changes.push(`Client changed from '${previous?.client?.name || ''}' to '${body.clientName}'`);
+        if (body.region !== undefined && body.region !== previous?.region)
+            changes.push(`Region changed from '${previous?.region || ''}' to '${body.region}'`);
+        if (body.practice !== undefined && body.practice !== previous?.practice)
+            changes.push(`Practice changed from '${previous?.practice || ''}' to '${body.practice}'`);
+        if (body.technology !== undefined && body.technology !== previous?.technology)
+            changes.push(`Technology changed from '${previous?.technology || ''}' to '${body.technology}'`);
+        if (body.pricingModel !== undefined && body.pricingModel !== previous?.pricingModel)
+            changes.push(`Pricing Model changed from '${previous?.pricingModel || ''}' to '${body.pricingModel}'`);
+        if (body.presalesData !== undefined) {
+            const prevPresales = JSON.stringify(previous?.presalesData || '');
+            const newPresales = JSON.stringify(body.presalesData);
+            if (prevPresales !== newPresales) {
+                const pd = body.presalesData;
+                const details: string[] = [];
+                if (pd.managerName) details.push(`Manager: ${pd.managerName}`);
+                if (pd.proposalDueDate) details.push(`Proposal Due Date: ${pd.proposalDueDate}`);
+                if (pd.comments) details.push(`Comments: ${pd.comments}`);
+                changes.push(details.length > 0
+                    ? `Moved to Presales — ${details.join(', ')}`
+                    : 'Presales data updated');
+            }
+        }
+        if (body.salesData !== undefined) {
+            const prevSales = JSON.stringify(previous?.salesData || '');
+            const newSales = JSON.stringify(body.salesData);
+            if (prevSales !== newSales) changes.push('Sales data updated');
+        }
+
+        if (changes.length > 0) {
+            const action = newStageName && newStageName !== (previous?.stage?.name || previous?.currentStage) ? 'STAGE_CHANGE' : 'UPDATE';
+            await prisma.auditLog.create({
+                data: {
+                    entity: 'Opportunity',
+                    entityId: id,
+                    action,
+                    userId: req.user!.userId,
+                    changes: changes.join('; '),
+                },
+            });
+        }
 
         // ── Email Notifications (fire-and-forget) ──
         const emailVars: Record<string, string> = {
@@ -394,6 +468,34 @@ export async function updateOpportunity(req: Request, res: Response) {
     } catch (error) {
         console.error("Update Error:", error);
         res.status(500).json({ error: 'Failed to update opportunity' });
+    }
+}
+
+// PATCH /api/opportunities/:id/approve-gom
+export async function approveGom(req: Request, res: Response) {
+    try {
+        const { id } = req.params;
+        const { approved } = req.body; // true or false
+
+        const updated = await prisma.opportunity.update({
+            where: { id },
+            data: { gomApproved: approved === true },
+        });
+
+        await prisma.auditLog.create({
+            data: {
+                entity: 'Opportunity',
+                entityId: id,
+                action: 'UPDATE',
+                userId: req.user!.userId,
+                changes: approved ? 'GOM Approved' : 'GOM Approval Revoked',
+            },
+        });
+
+        res.json({ gomApproved: updated.gomApproved });
+    } catch (error) {
+        console.error("Approve GOM Error:", error);
+        res.status(500).json({ error: 'Failed to update GOM approval' });
     }
 }
 
@@ -456,6 +558,7 @@ export async function convertOpportunity(req: Request, res: Response) {
             data: {
                 currentStage: 'Closed Won',
                 detailedStatus: 'SOW Approved',
+                actualCloseDate: new Date(),
                 ...(closedWonStage ? { stageId: closedWonStage.id } : {}),
             },
         });
@@ -480,5 +583,148 @@ export async function convertOpportunity(req: Request, res: Response) {
     } catch (error) {
         console.error('Conversion Error:', error);
         res.status(500).json({ error: 'Failed to convert opportunity' });
+    }
+}
+
+// GET /api/opportunities/:id/comments
+export async function listComments(req: Request, res: Response) {
+    try {
+        const { id } = req.params;
+        const comments = await prisma.note.findMany({
+            where: { opportunityId: id },
+            include: { author: { select: { id: true, name: true, email: true } } },
+            orderBy: { createdAt: 'desc' },
+        });
+        res.json(comments);
+    } catch (error) {
+        console.error('List Comments Error:', error);
+        res.status(500).json({ error: 'Failed to fetch comments' });
+    }
+}
+
+// POST /api/opportunities/:id/comments
+export async function addComment(req: Request, res: Response) {
+    try {
+        const { id } = req.params;
+        const { content, stage } = req.body;
+        if (!content || !content.trim()) {
+            return res.status(400).json({ error: 'Comment content is required' });
+        }
+        const comment = await prisma.note.create({
+            data: {
+                content: content.trim(),
+                mentions: '',
+                stage: stage || null,
+                opportunityId: id,
+                authorId: req.user!.userId,
+            } as any,
+            include: { author: { select: { id: true, name: true, email: true } } },
+        });
+
+        // Audit log
+        await prisma.auditLog.create({
+            data: {
+                entity: 'Opportunity',
+                entityId: id,
+                action: 'COMMENT_ADDED',
+                userId: req.user!.userId,
+                changes: { content: content.trim(), stage: stage || 'General' },
+            },
+        });
+
+        res.json(comment);
+    } catch (error) {
+        console.error('Add Comment Error:', error);
+        res.status(500).json({ error: 'Failed to add comment' });
+    }
+}
+
+// GET /api/opportunities/:id/audit-log
+export async function getOpportunityAuditLog(req: Request, res: Response) {
+    try {
+        const { id } = req.params;
+        const logs = await prisma.auditLog.findMany({
+            where: { entity: 'Opportunity', entityId: id },
+            include: { user: { select: { id: true, name: true, email: true } } },
+            orderBy: { timestamp: 'desc' },
+            take: 100,
+        });
+        res.json(logs);
+    } catch (error) {
+        console.error('Audit Log Error:', error);
+        res.status(500).json({ error: 'Failed to fetch audit log' });
+    }
+}
+
+// ── Attachment endpoints ──
+
+const UPLOAD_DIR = path.join(__dirname, '../../uploads');
+if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+// POST /api/opportunities/:id/attachments
+export async function uploadAttachment(req: Request, res: Response) {
+    try {
+        const { id } = req.params;
+        const file = (req as any).file;
+        if (!file) return res.status(400).json({ error: 'No file uploaded' });
+
+        const opp = await prisma.opportunity.findUnique({ where: { id } });
+        if (!opp) return res.status(404).json({ error: 'Opportunity not found' });
+
+        const attachment = await prisma.attachment.create({
+            data: {
+                fileName: file.originalname,
+                fileType: file.mimetype,
+                fileSize: file.size,
+                filePath: file.path,
+                opportunityId: id,
+            },
+            select: { id: true, fileName: true, fileType: true, fileSize: true, uploadedAt: true },
+        });
+
+        res.status(201).json(attachment);
+    } catch (error) {
+        console.error('Upload attachment error:', error);
+        res.status(500).json({ error: 'Failed to upload attachment' });
+    }
+}
+
+// GET /api/opportunities/:id/attachments/:attachmentId/download
+export async function downloadAttachment(req: Request, res: Response) {
+    try {
+        const { attachmentId } = req.params;
+        const attachment = await prisma.attachment.findUnique({ where: { id: attachmentId } });
+        if (!attachment) return res.status(404).json({ error: 'Attachment not found' });
+
+        if (!fs.existsSync(attachment.filePath)) {
+            return res.status(404).json({ error: 'File not found on server' });
+        }
+
+        res.setHeader('Content-Disposition', `attachment; filename="${attachment.fileName}"`);
+        res.setHeader('Content-Type', attachment.fileType);
+        fs.createReadStream(attachment.filePath).pipe(res);
+    } catch (error) {
+        console.error('Download attachment error:', error);
+        res.status(500).json({ error: 'Failed to download attachment' });
+    }
+}
+
+// DELETE /api/opportunities/:id/attachments/:attachmentId
+export async function deleteAttachment(req: Request, res: Response) {
+    try {
+        const { attachmentId } = req.params;
+        const attachment = await prisma.attachment.findUnique({ where: { id: attachmentId } });
+        if (!attachment) return res.status(404).json({ error: 'Attachment not found' });
+
+        // Remove file from disk
+        if (fs.existsSync(attachment.filePath)) {
+            fs.unlinkSync(attachment.filePath);
+        }
+
+        await prisma.attachment.delete({ where: { id: attachmentId } });
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Delete attachment error:', error);
+        res.status(500).json({ error: 'Failed to delete attachment' });
     }
 }

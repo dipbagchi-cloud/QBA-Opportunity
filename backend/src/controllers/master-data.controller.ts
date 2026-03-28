@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
+import { seedCurrenciesForRegion } from './currency.controller';
 
 // ── Clients ──
 export async function listClients(req: Request, res: Response) {
@@ -71,6 +72,10 @@ export async function createRegion(req: Request, res: Response) {
     const existing = await prisma.region.findUnique({ where: { name } });
     if (existing) { res.status(409).json({ error: `Region "${name}" already exists.` }); return; }
     const region = await prisma.region.create({ data: { name } });
+
+    // Auto-seed currencies for the new region
+    await seedCurrenciesForRegion(name).catch(() => { /* non-critical */ });
+
     res.status(201).json(region);
 }
 
@@ -166,6 +171,44 @@ export async function deletePricingModel(req: Request, res: Response) {
     const { id } = req.params;
     await prisma.pricingModel.delete({ where: { id } });
     res.json({ message: 'Pricing model deleted.' });
+}
+
+// ── Project Types ──
+export async function listProjectTypes(req: Request, res: Response) {
+    const types = await prisma.projectType.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } });
+    res.json(types);
+}
+
+export async function listAllProjectTypes(req: Request, res: Response) {
+    const types = await prisma.projectType.findMany({ orderBy: { name: 'asc' } });
+    res.json(types);
+}
+
+export async function createProjectType(req: Request, res: Response) {
+    const { name } = req.body;
+    if (!name) { res.status(400).json({ error: 'Project type name is required.' }); return; }
+    const existing = await prisma.projectType.findUnique({ where: { name } });
+    if (existing) { res.status(409).json({ error: `Project type "${name}" already exists.` }); return; }
+    const type = await prisma.projectType.create({ data: { name } });
+    res.status(201).json(type);
+}
+
+export async function updateProjectType(req: Request, res: Response) {
+    const { id } = req.params;
+    const { name, isActive } = req.body;
+    const existing = await prisma.projectType.findUnique({ where: { id } });
+    if (!existing) { res.status(404).json({ error: 'Project type not found.' }); return; }
+    const type = await prisma.projectType.update({
+        where: { id },
+        data: { ...(name !== undefined && { name }), ...(isActive !== undefined && { isActive }) },
+    });
+    res.json(type);
+}
+
+export async function deleteProjectType(req: Request, res: Response) {
+    const { id } = req.params;
+    await prisma.projectType.delete({ where: { id } });
+    res.json({ message: 'Project type deleted.' });
 }
 
 // ── Salespersons (users with Sales/Manager/Management role) ──

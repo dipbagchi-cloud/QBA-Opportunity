@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { useCurrency } from "@/components/providers/currency-provider";
 import {
     Calendar,
     Search,
@@ -19,20 +20,30 @@ import {
 import { useOpportunityStore } from "@/lib/store";
 import { API_URL, getAuthHeaders } from "@/lib/api";
 
-const PROJECT_TYPES = ["New Development", "Modernization", "Maintenance", "Consulting"];
-const DURATIONS = ["3 Months", "6 Months", "9 Months", "12 Months", "> 1 Year"];
+const DURATION_UNITS = ["days", "weeks", "months"];
 
-// Duration to months mapping for auto-calculation
-const DURATION_MONTHS: Record<string, number> = {
-    "3 Months": 3,
-    "6 Months": 6,
-    "9 Months": 9,
-    "12 Months": 12,
-    "> 1 Year": 18,
-};
+// Convert duration value + unit for calculations
+function durationToDays(value: number, unit: string): number {
+    switch (unit) {
+        case 'days': return value;
+        case 'weeks': return value * 7;
+        case 'months': return value * 30;
+        default: return value * 30;
+    }
+}
+
+function durationToMonths(value: number, unit: string): number {
+    switch (unit) {
+        case 'days': return value / 30;
+        case 'weeks': return value / 4.33;
+        case 'months': return value;
+        default: return value;
+    }
+}
 
 export default function NewOpportunityPage() {
     const router = useRouter();
+    const { symbol: cSym } = useCurrency();
     const { addOpportunity } = useOpportunityStore();
     const [isLoading, setIsLoading] = useState(false);
 
@@ -43,11 +54,16 @@ export default function NewOpportunityPage() {
     const [pricingModels, setPricingModels] = useState<string[]>([]);
     const [salespersons, setSalespersons] = useState<{ id: string; name: string }[]>([]);
     const [departments, setDepartments] = useState<string[]>([]);
+    const [projectTypes, setProjectTypes] = useState<string[]>([]);
 
     // Add Client modal
     const [showAddClient, setShowAddClient] = useState(false);
     const [newClientName, setNewClientName] = useState("");
     const [addingClient, setAddingClient] = useState(false);
+
+    // Tech dropdown state
+    const [techDropdownOpen, setTechDropdownOpen] = useState(false);
+    const techDropdownRef = useRef<HTMLDivElement>(null);
 
     // Form State
     const [formData, setFormData] = useState({
@@ -61,6 +77,7 @@ export default function NewOpportunityPage() {
         tentativeStartDate: "",
         tentativeEndDate: "",
         duration: "",
+        durationUnit: "months",
         pricingModel: "",
         expectedDayRate: "",
         description: "",
@@ -76,13 +93,14 @@ export default function NewOpportunityPage() {
         const fetchMasterData = async () => {
             const headers = getAuthHeaders();
             try {
-                const [clientsRes, regionsRes, techRes, pricingRes, salesRes, deptRes] = await Promise.all([
+                const [clientsRes, regionsRes, techRes, pricingRes, salesRes, deptRes, projTypesRes] = await Promise.all([
                     fetch(`${API_URL}/api/master/clients`, { headers }),
                     fetch(`${API_URL}/api/master/regions`, { headers }),
                     fetch(`${API_URL}/api/master/technologies`, { headers }),
                     fetch(`${API_URL}/api/master/pricing-models`, { headers }),
                     fetch(`${API_URL}/api/master/salespersons`, { headers }),
                     fetch(`${API_URL}/api/master/departments`, { headers }),
+                    fetch(`${API_URL}/api/master/project-types`, { headers }),
                 ]);
                 if (clientsRes.ok) setClients(await clientsRes.json());
                 if (regionsRes.ok) setRegions((await regionsRes.json()).map((r: any) => r.name));
@@ -90,6 +108,7 @@ export default function NewOpportunityPage() {
                 if (pricingRes.ok) setPricingModels((await pricingRes.json()).map((p: any) => p.name));
                 if (salesRes.ok) setSalespersons(await salesRes.json());
                 if (deptRes.ok) setDepartments(await deptRes.json());
+                if (projTypesRes.ok) setProjectTypes((await projTypesRes.json()).map((p: any) => p.name));
             } catch (err) {
                 console.error("Failed to load master data", err);
             }
@@ -99,23 +118,37 @@ export default function NewOpportunityPage() {
 
     // Auto-calculate tentative end date from start date + duration
     useEffect(() => {
-        if (formData.tentativeStartDate && formData.duration && DURATION_MONTHS[formData.duration]) {
+        const dur = Number(formData.duration);
+        if (formData.tentativeStartDate && dur > 0 && formData.durationUnit) {
             const start = new Date(formData.tentativeStartDate);
-            const months = DURATION_MONTHS[formData.duration];
+            const days = durationToDays(dur, formData.durationUnit);
             const end = new Date(start);
-            end.setMonth(end.getMonth() + months);
+            end.setDate(end.getDate() + days);
             setFormData(prev => ({ ...prev, tentativeEndDate: end.toISOString().split('T')[0] }));
         }
-    }, [formData.tentativeStartDate, formData.duration]);
+    }, [formData.tentativeStartDate, formData.duration, formData.durationUnit]);
 
-    // Auto-calculate estimated value = Expected Day Rate × 20 working days × Duration months
+    // Auto-calculate estimated value = Expected Day Rate × 20 working days × Duration months (only for Staffing)
     useEffect(() => {
+        if (formData.projectType !== 'Staffing') return;
         const rate = Number(formData.expectedDayRate) || 0;
-        const months = DURATION_MONTHS[formData.duration] || 0;
+        const dur = Number(formData.duration) || 0;
+        const months = durationToMonths(dur, formData.durationUnit);
         if (rate > 0 && months > 0) {
-            setFormData(prev => ({ ...prev, value: rate * 20 * months }));
+            setFormData(prev => ({ ...prev, value: Math.round(rate * 20 * months) }));
         }
-    }, [formData.expectedDayRate, formData.duration]);
+    }, [formData.expectedDayRate, formData.duration, formData.durationUnit, formData.projectType]);
+
+    // Click-outside handler for tech dropdown
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (techDropdownRef.current && !techDropdownRef.current.contains(e.target as Node)) {
+                setTechDropdownOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
         const { name, value } = e.target;
@@ -161,9 +194,11 @@ export default function NewOpportunityPage() {
                 region: formData.region,
                 practice: formData.practice,
                 technology: formData.technology,
+                projectType: formData.projectType,
                 tentativeStartDate: formData.tentativeStartDate ? new Date(formData.tentativeStartDate) : null,
                 tentativeEndDate: formData.tentativeEndDate ? new Date(formData.tentativeEndDate) : null,
                 tentativeDuration: formData.duration,
+                tentativeDurationUnit: formData.durationUnit,
                 salesRepName: formData.salesRep,
                 pricingModel: formData.pricingModel,
                 expectedDayRate: Number(formData.expectedDayRate),
@@ -270,7 +305,7 @@ export default function NewOpportunityPage() {
                             onChange={handleChange}
                         >
                             <option value="">Select Project Type</option>
-                            {PROJECT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                            {projectTypes.map((t: string) => <option key={t} value={t}>{t}</option>)}
                         </select>
                     </div>
 
@@ -317,15 +352,12 @@ export default function NewOpportunityPage() {
 
                     <div className="space-y-1.5">
                         <label className="block text-sm font-bold text-slate-700">Technology *</label>
-                        <div className="relative">
+                        <div className="relative" ref={techDropdownRef}>
                             <div
                                 className="w-full min-h-[42px] px-3 py-2 bg-white border border-slate-300 rounded-md text-sm shadow-sm flex flex-wrap gap-1 cursor-pointer"
-                                onClick={() => {
-                                    const el = document.getElementById('tech-dropdown-new');
-                                    if (el) el.classList.toggle('hidden');
-                                }}
+                                onClick={() => setTechDropdownOpen(!techDropdownOpen)}
                             >
-                                {formData.technology ? formData.technology.split(',').map(t => (
+                                {formData.technology ? formData.technology.split(',').filter(Boolean).map(t => (
                                     <span key={t} className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 text-xs px-2 py-0.5 rounded-full border border-indigo-200">
                                         {t}
                                         <button type="button" onClick={(e) => {
@@ -338,7 +370,8 @@ export default function NewOpportunityPage() {
                                     </span>
                                 )) : <span className="text-slate-400">Select Technologies</span>}
                             </div>
-                            <div id="tech-dropdown-new" className="hidden absolute z-20 top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                            {techDropdownOpen && (
+                            <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
                                 {technologies.map(t => {
                                     const selected = formData.technology.split(',').filter(Boolean).includes(t);
                                     return (
@@ -360,6 +393,7 @@ export default function NewOpportunityPage() {
                                     );
                                 })}
                             </div>
+                            )}
                         </div>
                     </div>
 
@@ -377,14 +411,25 @@ export default function NewOpportunityPage() {
 
                     <div className="space-y-1.5">
                         <label className="block text-sm font-bold text-slate-700">Duration/Tentative End Date</label>
-                        <select
-                            name="duration"
-                            className="w-full pl-3 pr-10 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
-                            onChange={handleChange}
-                        >
-                            <option value="">Select Duration</option>
-                            {DURATIONS.map(d => <option key={d} value={d}>{d}</option>)}
-                        </select>
+                        <div className="flex gap-2">
+                            <input
+                                type="number"
+                                name="duration"
+                                min="1"
+                                value={formData.duration}
+                                placeholder="Enter duration"
+                                className="flex-1 px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
+                                onChange={handleChange}
+                            />
+                            <select
+                                name="durationUnit"
+                                value={formData.durationUnit}
+                                className="w-28 px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
+                                onChange={handleChange}
+                            >
+                                {DURATION_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                            </select>
+                        </div>
                     </div>
 
                     <div className="space-y-1.5">
@@ -413,8 +458,9 @@ export default function NewOpportunityPage() {
                         </select>
                     </div>
 
+                    {formData.projectType === 'Staffing' && (
                     <div className="space-y-1.5">
-                        <label className="block text-sm font-bold text-slate-700">Expected Day Rate (₹) *</label>
+                        <label className="block text-sm font-bold text-slate-700">Expected Day Rate ({cSym}) *</label>
                         <input
                             type="number"
                             name="expectedDayRate"
@@ -424,18 +470,33 @@ export default function NewOpportunityPage() {
                             onChange={handleChange}
                         />
                     </div>
+                    )}
 
                     <div className="space-y-1.5">
-                        <label className="block text-sm font-bold text-slate-700">Estimated Value ($)</label>
+                        <label className="block text-sm font-bold text-slate-700">Estimated Value ({cSym}){formData.projectType !== 'Staffing' ? ' *' : ''}</label>
+                        {formData.projectType === 'Staffing' ? (
+                        <>
+                            <input
+                                type="number"
+                                name="value"
+                                readOnly
+                                value={formData.value}
+                                placeholder="0.00"
+                                className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-md text-sm shadow-sm text-slate-500 cursor-not-allowed"
+                            />
+                            <p className="text-[10px] text-slate-400">= Day Rate ({formData.expectedDayRate || 0}) × 20 days × {Math.round(durationToMonths(Number(formData.duration) || 0, formData.durationUnit) * 100) / 100} months</p>
+                        </>
+                        ) : (
                         <input
                             type="number"
                             name="value"
-                            readOnly
-                            value={formData.value}
+                            required
+                            value={formData.value || ''}
                             placeholder="0.00"
-                            className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-md text-sm shadow-sm text-slate-500 cursor-not-allowed"
+                            className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
+                            onChange={(e) => setFormData(prev => ({ ...prev, value: Number(e.target.value) || 0 }))}
                         />
-                        <p className="text-[10px] text-slate-400">= Day Rate ({formData.expectedDayRate || 0}) × 20 days × {DURATION_MONTHS[formData.duration] || 0} months</p>
+                        )}
                     </div>
 
                     {/* Row 6: Description & Attachments */}
@@ -478,7 +539,7 @@ export default function NewOpportunityPage() {
                         disabled={isLoading}
                         className="px-4 py-1.5 bg-indigo-600 border border-transparent rounded-md text-sm text-white font-bold hover:bg-indigo-700 transition-all disabled:opacity-70 disabled:cursor-not-allowed"
                     >
-                        {isLoading ? 'Submitting...' : 'Submit Details'}
+                        {isLoading ? 'Submitting...' : 'Save'}
                     </button>
                 </div>
             </form>

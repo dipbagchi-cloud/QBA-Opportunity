@@ -198,6 +198,24 @@ model Region {
   @@map("regions")
 }
 
+model CurrencyRate {
+  id           String   @id @default(cuid())
+  code         String   // e.g. "USD", "EUR"
+  name         String   // e.g. "US Dollar"
+  symbol       String   // e.g. "$"
+  region       String   // region name reference
+  rateToBase   Float    // rate relative to base currency (INR)
+  baseCurrency String   @default("INR")
+  isActive     Boolean  @default(true)
+  lastSynced   DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([code, baseCurrency])
+  @@index([region])
+  @@map("currency_rates")
+}
+
 model Technology {
   id        String   @id @default(cuid())
   name      String   @unique
@@ -216,6 +234,16 @@ model PricingModel {
   updatedAt DateTime @updatedAt
 
   @@map("pricing_models")
+}
+
+model ProjectType {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("project_types")
 }
 
 // ============================================================================
@@ -267,15 +295,20 @@ model Opportunity {
   region            String?
   practice          String?
   technology        String?
+  projectType       String?
   tentativeStartDate DateTime?
-  tentativeDuration String?
+  tentativeDuration String?     // e.g. "6"
+  tentativeDurationUnit String? // "days", "weeks", or "months"
   tentativeEndDate  DateTime?
   pricingModel      String?
   expectedDayRate   Decimal?
+  adjustedEstimatedValue Decimal?
   
   // Pipeline, Presales, Sales
   currentStage      String   @default("Pipeline") 
   detailedStatus    String?
+  reEstimateCount   Int      @default(0)    // Number of times sent back for re-estimation
+  gomApproved       Boolean  @default(false) // GOM must be approved before moving to Sales
   
   // Presales Data
   presalesData      Json?
@@ -298,7 +331,7 @@ model Opportunity {
   // Child relations
   activities        Activity[]
   tasks             Task[]
-  notes             Note[]
+  notes             Note[]       // Also used as opportunity comments
   attachments       Attachment[]
   stageHistory      StageHistory[]
   approvalRequests  ApprovalRequest[]
@@ -432,6 +465,7 @@ model Note {
   content     String
   mentions    String   
   isPinned    Boolean  @default(false)
+  stage       String?  // Which stage/page the comment was added on (Pipeline, Presales, Sales, Project)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

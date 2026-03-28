@@ -12,6 +12,8 @@ import rateCardsRoutes from './routes/rate-cards.routes';
 import masterDataRoutes from './routes/master-data.routes';
 import authRoutes from './routes/auth.routes';
 import adminRoutes from './routes/admin.routes';
+import contactsRoutes from './routes/contacts.routes';
+import { getPublicStats } from './controllers/public.controller';
 import { errorHandler } from './middleware/errorHandler';
 
 dotenv.config();
@@ -29,6 +31,9 @@ app.use(express.json());
 // Auth routes (public + protected)
 app.use('/api/auth', authRoutes);
 
+// Public stats for landing page (no auth)
+app.get('/api/public/stats', getPublicStats);
+
 // Admin routes (protected, Admin-only)
 app.use('/api/admin', adminRoutes);
 
@@ -41,6 +46,7 @@ app.use('/api', agentsRoutes);  // mounts /api/agents/task and /api/agent/run
 app.use('/api/resources', resourcesRoutes);
 app.use('/api/rate-cards', rateCardsRoutes);
 app.use('/api/master', masterDataRoutes);
+app.use('/api/contacts', contactsRoutes);
 
 // Health check (public)
 app.get('/api/health', (req, res) => {

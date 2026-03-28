@@ -5,6 +5,7 @@ import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea
 import { useOpportunityStore, Opportunity } from '@/lib/store';
 import { MoreHorizontal, DollarSign, User, AlertCircle, Clock } from 'lucide-react';
 import Link from 'next/link';
+import { useCurrency } from '@/components/providers/currency-provider';
 
 const STAGES = [
     { id: 'Discovery', title: 'Discovery', color: 'bg-indigo-500' },
@@ -18,6 +19,7 @@ const STAGES = [
 
 export default function KanbanBoard() {
     const { opportunities, updateOpportunity } = useOpportunityStore();
+    const { format: fmtCurrency } = useCurrency();
 
     // Group opportunities by stage
     const columns = useMemo(() => {
@@ -90,6 +92,7 @@ export default function KanbanBoard() {
                                                             } ${opp.isStalled ? 'border-amber-300 bg-amber-50/30' : 'border-slate-200'}
                                                             `}
                                                         style={provided.draggableProps.style}
+                                                        title={`${opp.name}\nClient: ${opp.client}\nOwner: ${opp.owner || 'N/A'}\nStage: ${stage.title}\nValue: ${(opp.value || 0).toLocaleString()}\nProbability: ${opp.probability}%\nDays in Stage: ${opp.daysInStage || 0}\nHealth: ${opp.healthScore ?? 'N/A'}/100\nStatus: ${opp.status}\nSales Rep: ${opp.salesRepName || 'N/A'}\nManager: ${opp.managerName || 'N/A'}`}
                                                     >
                                                         {/* Header: Name + Icons */}
                                                         <div className="flex justify-between items-start mb-1.5 gap-2">
@@ -119,7 +122,7 @@ export default function KanbanBoard() {
                                                         <div className="grid grid-cols-2 gap-1.5 mb-2">
                                                             <div className="bg-slate-50 p-1.5 rounded border border-slate-100">
                                                                 <p className="text-[10px] text-slate-400 uppercase font-semibold">Value</p>
-                                                                <p className="text-xs font-semibold text-slate-700">${(opp.value / 1000).toFixed(0)}k</p>
+                                                                <p className="text-xs font-semibold text-slate-700">{fmtCurrency(opp.value, { compact: true })}</p>
                                                             </div>
                                                             <div className="bg-slate-50 p-1.5 rounded border border-slate-100">
                                                                 <p className="text-[10px] text-slate-400 uppercase font-semibold">Days</p>

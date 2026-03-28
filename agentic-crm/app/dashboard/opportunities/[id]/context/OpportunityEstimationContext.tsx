@@ -78,7 +78,7 @@ interface OpportunityEstimationContextType {
 
 const OpportunityEstimationContext = createContext<OpportunityEstimationContextType | undefined>(undefined);
 
-export function OpportunityEstimationProvider({ children, opportunityId, readOnly = false, startDate = '', endDate = '' }: { children: ReactNode; opportunityId?: string; readOnly?: boolean; startDate?: string; endDate?: string }) {
+export function OpportunityEstimationProvider({ children, opportunityId, readOnly = false, startDate = '', endDate = '', adjustedEstimatedValue = 0 }: { children: ReactNode; opportunityId?: string; readOnly?: boolean; startDate?: string; endDate?: string; adjustedEstimatedValue?: number }) {
     // State
     const [assumptions, setAssumptions] = useState<BudgetAssumptions>(DEFAULT_ASSUMPTIONS);
     const [resources, setResources] = useState<ResourceRow[]>([]);
@@ -94,10 +94,19 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
         marketingCom: 0,
         hotelCost: 0,
     });
-    const [markupPercent, setMarkupPercent] = useState<number>(0);
+    const [markupPercent, setMarkupPercentRaw] = useState<number>(0);
     const [currency, setCurrency] = useState<string>("INR");
     const [isSaving, setIsSaving] = useState(false);
     const [isLoaded, setIsLoaded] = useState(false);
+
+    // Wrap setMarkupPercent to also recalculate all resources' dailyRate
+    const setMarkupPercent = useCallback((newMarkup: number) => {
+        setMarkupPercentRaw(newMarkup);
+        setResources(prev => prev.map(r => ({
+            ...r,
+            dailyRate: r.dailyCost * (1 + newMarkup / 100),
+        })));
+    }, []);
 
     // Fetch budget assumptions from admin settings
     useEffect(() => {
@@ -239,13 +248,21 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
 
         // Create other costs for travel (distribute across months if needed)
         const otherCosts: OtherCost[] = [];
-        if (totalTravelCost > 0 && months.length > 0) {
-            // Add travel cost to first month
+        if (totalTravelCost > 0) {
+            // Determine month for travel cost: first resource month, or derive from start date
+            let travelMonth = months.length > 0 ? months[0] : null;
+            if (!travelMonth && startDate) {
+                const d = new Date(startDate);
+                travelMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+            }
+            if (!travelMonth) {
+                travelMonth = `${selectedYear}-01`;
+            }
             otherCosts.push({
                 id: "travel-1",
                 description: "Travel & Hospitality",
                 amount: totalTravelCost,
-                month: months[0],
+                month: travelMonth,
                 category: "Travel + Stay",
             });
         }
@@ -260,7 +277,10 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
             const finalCost = resCost + totalTravelCost;
             setTotalCost(finalCost);
 
-            const calculatedRevenue = finalCost * (1 + markupPercent / 100);
+            // Use adjustedEstimatedValue as revenue if provided, otherwise use markup calculation
+            const calculatedRevenue = adjustedEstimatedValue > 0
+                ? adjustedEstimatedValue
+                : finalCost * (1 + markupPercent / 100);
             setRevenue(calculatedRevenue);
 
             const gom = calculatedRevenue > 0 ? ((calculatedRevenue - finalCost) / calculatedRevenue) * 100 : 0;
@@ -270,14 +290,16 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
             const finalCost = totalTravelCost;
             setTotalCost(finalCost);
 
-            const calculatedRevenue = finalCost * (1 + markupPercent / 100);
+            const calculatedRevenue = adjustedEstimatedValue > 0
+                ? adjustedEstimatedValue
+                : finalCost * (1 + markupPercent / 100);
             setRevenue(calculatedRevenue);
 
             const gom = calculatedRevenue > 0 ? ((calculatedRevenue - finalCost) / calculatedRevenue) * 100 : 0;
             setGomPercent(gom);
             setGomSummary(null);
         }
-    }, [resources, totalTravelCost, markupPercent, assumptions, selectedYear, months]);
+    }, [resources, totalTravelCost, markupPercent, assumptions, selectedYear, months, adjustedEstimatedValue, startDate]);
 
     // Determine GOM status
     const getGomStatus = () => {

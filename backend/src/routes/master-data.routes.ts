@@ -5,6 +5,7 @@ import {
     listRegions,
     listTechnologies,
     listPricingModels,
+    listProjectTypes,
     listSalespersons,
     listDepartments,
     listManagersByDepartment,
@@ -19,6 +20,7 @@ router.get('/clients', listClients);
 router.get('/regions', listRegions);
 router.get('/technologies', listTechnologies);
 router.get('/pricing-models', listPricingModels);
+router.get('/project-types', listProjectTypes);
 router.get('/salespersons', listSalespersons);
 router.get('/departments', listDepartments);
 router.get('/managers', listManagersByDepartment);

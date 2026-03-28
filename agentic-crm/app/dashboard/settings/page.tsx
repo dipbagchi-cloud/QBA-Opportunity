@@ -1,9 +1,10 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { User, Lock, Users, Shield, Plus, X, Check, AlertCircle, RotateCcw, Pencil, ToggleLeft, ToggleRight, DollarSign, Trash2, Globe, Cpu, Tag, Building2, Download, Settings2, ChevronDown, ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, Search, Eye, EyeOff, FileText, Mail, Send } from "lucide-react";
+import { User, Lock, Users, Shield, Plus, X, Check, AlertCircle, RotateCcw, Pencil, ToggleLeft, ToggleRight, DollarSign, Trash2, Globe, Cpu, Tag, Building2, Download, Settings2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, Search, Eye, EyeOff, FileText, Mail, Send, Briefcase, ShieldCheck, RefreshCw, Coins, UserPlus, UserMinus, Calculator, Percent, Info, Clock } from "lucide-react";
 import { useAuthStore } from "@/lib/auth-store";
 import { apiClient } from "@/lib/api";
+import { useCurrency } from "@/components/providers/currency-provider";
 
 // ── Permission categories for the checkbox grid ──
 const PERMISSION_CATEGORIES = [
@@ -112,6 +113,7 @@ interface AdminRole {
     permissions: string[];
     isSystem: boolean;
     userCount: number;
+    users?: { id: string; name: string; email: string }[];
 }
 
 interface TeamOption {
@@ -119,7 +121,7 @@ interface TeamOption {
     name: string;
 }
 
-type Tab = "profile" | "security" | "users" | "roles" | "ratecards" | "budgetassumptions" | "clients" | "regions" | "technologies" | "pricingmodels" | "auditlog" | "emailtemplates";
+type Tab = "profile" | "security" | "users" | "roles" | "ratecards" | "budgetassumptions" | "currencyrates" | "gomcalculator" | "clients" | "regions" | "technologies" | "pricingmodels" | "projecttypes" | "auditlog" | "emailtemplates";
 
 export default function SettingsPage() {
     const { user, hasPermission } = useAuthStore();
@@ -151,6 +153,8 @@ export default function SettingsPage() {
             tabs: [
                 { key: "ratecards", label: "Rate Cards", icon: DollarSign, adminOnly: true },
                 { key: "budgetassumptions", label: "Budget Assumptions", icon: Settings2, adminOnly: true },
+                { key: "currencyrates", label: "Currency Rates", icon: Coins, adminOnly: true },
+                { key: "gomcalculator", label: "GOM Calculator", icon: DollarSign, adminOnly: true },
             ],
         },
         {
@@ -161,6 +165,7 @@ export default function SettingsPage() {
                 { key: "regions", label: "Regions", icon: Globe, adminOnly: true },
                 { key: "technologies", label: "Technologies", icon: Cpu, adminOnly: true },
                 { key: "pricingmodels", label: "Pricing Models", icon: Tag, adminOnly: true },
+                { key: "projecttypes", label: "Project Types", icon: Briefcase, adminOnly: true },
             ],
         },
         {
@@ -261,10 +266,13 @@ export default function SettingsPage() {
                     {activeTab === "roles" && canManageRoles && <RolesTab />}
                     {activeTab === "ratecards" && canManageCostCards && <RateCardsTab />}
                     {activeTab === "budgetassumptions" && isAdmin && <BudgetAssumptionsTab />}
+                    {activeTab === "currencyrates" && isAdmin && <CurrencyRatesTab />}
+                    {activeTab === "gomcalculator" && isAdmin && <GomCalculatorTab />}
                     {activeTab === "clients" && canManageMetadata && <MasterDataTab entity="clients" label="Client" />}
                     {activeTab === "regions" && canManageMetadata && <MasterDataTab entity="regions" label="Region" />}
                     {activeTab === "technologies" && canManageMetadata && <MasterDataTab entity="technologies" label="Technology" />}
                     {activeTab === "pricingmodels" && canManageMetadata && <MasterDataTab entity="pricing-models" label="Pricing Model" />}
+                    {activeTab === "projecttypes" && canManageMetadata && <MasterDataTab entity="project-types" label="Project Type" />}
                     {activeTab === "auditlog" && canViewAuditLogs && <AuditLogTab />}
                     {activeTab === "emailtemplates" && isAdmin && <EmailTemplatesTab />}
                 </div>
@@ -302,6 +310,8 @@ function ProfileTab() {
 
 /* ─────────────── Security Tab ─────────────── */
 function SecurityTab() {
+    const { user } = useAuthStore();
+    const isSSOUser = user?.email?.toLowerCase().endsWith("@qbadvisory.com");
     const [currentPassword, setCurrentPassword] = useState("");
     const [newPassword, setNewPassword] = useState("");
     const [confirmPassword, setConfirmPassword] = useState("");
@@ -342,6 +352,13 @@ function SecurityTab() {
                 <p className="text-xs text-slate-500">Update your account password.</p>
             </div>
 
+            {isSSOUser ? (
+                <div className="flex items-center gap-2 p-3 rounded-lg text-sm bg-blue-50 text-blue-700">
+                    <ShieldCheck className="w-4 h-4" />
+                    Your account uses SSO (Single Sign-On) via @qbadvisory.com. Password management is handled by your organization.
+                </div>
+            ) : (
+            <>
             {status && (
                 <div className={`flex items-center gap-2 p-3 rounded-lg text-sm ${status.type === "success" ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>
                     {status.type === "success" ? <Check className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
@@ -369,6 +386,8 @@ function SecurityTab() {
                     {saving ? "Saving..." : "Change Password"}
                 </button>
             </div>
+            </>
+            )}
         </div>
     );
 }
@@ -627,8 +646,8 @@ function UsersTab() {
             )}
 
             {/* Users table */}
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-                <div className="overflow-x-auto">
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm">
+                <div className="overflow-x-auto overflow-y-visible">
                     <table className="w-full text-xs">
                         <thead className="bg-slate-50 border-b border-slate-200">
                             <tr>
@@ -672,9 +691,15 @@ function UsersTab() {
                                         </button>
                                     </td>
                                     <td className="px-3 py-2 text-right">
+                                        {u.email.toLowerCase().endsWith("@qbadvisory.com") ? (
+                                            <span className="inline-flex items-center gap-1 text-xs text-blue-500" title="SSO User — password managed via SSO">
+                                                SSO
+                                            </span>
+                                        ) : (
                                         <button onClick={() => { setResetUserId(u.id); setResetPassword(""); setShowResetPw(false); }} className="inline-flex items-center gap-1 text-xs text-amber-600 hover:text-amber-800 transition-colors" title="Reset Password">
                                             <RotateCcw className="w-3 h-3" /> Reset
                                         </button>
+                                        )}
                                     </td>
                                 </tr>
                             ))}
@@ -729,6 +754,14 @@ function RolesTab() {
     const [formPermissions, setFormPermissions] = useState<string[]>([]);
     const [saving, setSaving] = useState(false);
 
+    // Expand/Collapse state for role user list
+    const [expandedRoleId, setExpandedRoleId] = useState<string | null>(null);
+
+    // All users list (for "add user" dropdown)
+    const [allUsers, setAllUsers] = useState<{ id: string; name: string; email: string }[]>([]);
+    const [addUserSearch, setAddUserSearch] = useState("");
+    const [showAddUserDropdown, setShowAddUserDropdown] = useState(false);
+
     const fetchRoles = useCallback(async () => {
         setLoading(true);
         try {
@@ -742,6 +775,16 @@ function RolesTab() {
     }, []);
 
     useEffect(() => { fetchRoles(); }, [fetchRoles]);
+
+    // Fetch all users once for the add-user dropdown
+    useEffect(() => {
+        (async () => {
+            try {
+                const users = await apiClient<{ id: string; name: string; email: string }[]>("/api/admin/users");
+                setAllUsers(users.map((u: any) => ({ id: u.id, name: u.name, email: u.email })));
+            } catch { /* ignore */ }
+        })();
+    }, []);
 
     const openEdit = (role: AdminRole) => {
         setEditingRole(role);
@@ -808,6 +851,31 @@ function RolesTab() {
             setStatus({ type: "success", message: "Role deleted." });
         } catch (err: any) {
             setStatus({ type: "error", message: err.message || "Failed to delete role." });
+        }
+    };
+
+    const handleAddUser = async (roleId: string, userId: string) => {
+        try {
+            await apiClient(`/api/admin/roles/${roleId}/users`, {
+                method: "POST",
+                body: JSON.stringify({ userId }),
+            });
+            setShowAddUserDropdown(false);
+            setAddUserSearch("");
+            fetchRoles();
+            setStatus({ type: "success", message: "User added to role." });
+        } catch (err: any) {
+            setStatus({ type: "error", message: err.message || "Failed to add user." });
+        }
+    };
+
+    const handleRemoveUser = async (roleId: string, userId: string) => {
+        try {
+            await apiClient(`/api/admin/roles/${roleId}/users/${userId}`, { method: "DELETE" });
+            fetchRoles();
+            setStatus({ type: "success", message: "User removed from role." });
+        } catch (err: any) {
+            setStatus({ type: "error", message: err.message || "Failed to remove user." });
         }
     };
 
@@ -908,36 +976,119 @@ function RolesTab() {
 
             {/* Roles list */}
             <div className="grid grid-cols-1 gap-3">
-                {roles.map((role) => (
-                    <div key={role.id} className="bg-white rounded-lg border border-slate-200 p-3 flex items-center justify-between hover:shadow-sm transition-shadow">
-                        <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
-                                <span className="font-semibold text-slate-800">{role.name}</span>
-                                {role.isSystem && <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-medium">SYSTEM</span>}
-                                <span className="text-xs text-slate-400">{role.userCount} user{role.userCount !== 1 ? "s" : ""}</span>
+                {roles.map((role) => {
+                    const isExpanded = expandedRoleId === role.id;
+                    const roleUsers = role.users || [];
+                    const assignedUserIds = new Set(roleUsers.map(u => u.id));
+                    const availableUsers = allUsers.filter(u => !assignedUserIds.has(u.id) && (
+                        !addUserSearch || u.name.toLowerCase().includes(addUserSearch.toLowerCase()) || u.email.toLowerCase().includes(addUserSearch.toLowerCase())
+                    ));
+
+                    return (
+                    <div key={role.id} className="bg-white rounded-lg border border-slate-200 hover:shadow-sm transition-shadow">
+                        <div className="p-3 flex items-center justify-between">
+                            <div className="flex-1 min-w-0 cursor-pointer" onClick={() => { setExpandedRoleId(isExpanded ? null : role.id); setShowAddUserDropdown(false); setAddUserSearch(""); }}>
+                                <div className="flex items-center gap-2">
+                                    {isExpanded ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+                                    <span className="font-semibold text-slate-800">{role.name}</span>
+                                    {role.isSystem && <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-medium">SYSTEM</span>}
+                                    <span className="text-xs text-slate-400">{role.userCount} user{role.userCount !== 1 ? "s" : ""}</span>
+                                </div>
+                                {role.description && <p className="text-xs text-slate-500 mt-0.5 ml-6">{role.description}</p>}
+                                <div className="flex flex-wrap gap-1 mt-2 ml-6">
+                                    {(role.permissions as string[]).includes("*") ? (
+                                        <span className="text-[10px] bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full font-medium">ALL PERMISSIONS</span>
+                                    ) : (
+                                        (role.permissions as string[]).slice(0, 6).map((p) => (
+                                            <span key={p} className="text-[10px] bg-slate-50 text-slate-500 px-2 py-0.5 rounded-full font-mono">{p}</span>
+                                        ))
+                                    )}
+                                    {!((role.permissions as string[]).includes("*")) && (role.permissions as string[]).length > 6 && (
+                                        <span className="text-[10px] text-slate-400">+{(role.permissions as string[]).length - 6} more</span>
+                                    )}
+                                </div>
                             </div>
-                            {role.description && <p className="text-xs text-slate-500 mt-0.5">{role.description}</p>}
-                            <div className="flex flex-wrap gap-1 mt-2">
-                                {(role.permissions as string[]).includes("*") ? (
-                                    <span className="text-[10px] bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full font-medium">ALL PERMISSIONS</span>
+                            <div className="flex items-center gap-2 ml-4">
+                                <button onClick={() => openEdit(role)} className="p-2 text-slate-400 hover:text-indigo-600 transition-colors" title="Edit"><Pencil className="w-4 h-4" /></button>
+                                {!role.isSystem && (
+                                    <button onClick={() => handleDelete(role)} className="p-2 text-slate-400 hover:text-red-600 transition-colors" title="Delete"><X className="w-4 h-4" /></button>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Expanded user list */}
+                        {isExpanded && (
+                            <div className="border-t border-slate-100 px-4 py-3 bg-slate-50/50">
+                                <div className="flex items-center justify-between mb-2">
+                                    <h5 className="text-xs font-semibold text-slate-600 uppercase tracking-wider flex items-center gap-1.5">
+                                        <Users className="w-3.5 h-3.5" /> Assigned Users ({roleUsers.length})
+                                    </h5>
+                                    <div className="relative">
+                                        <button onClick={() => setShowAddUserDropdown(!showAddUserDropdown)} className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50 rounded transition-colors">
+                                            <UserPlus className="w-3.5 h-3.5" /> Add User
+                                        </button>
+                                        {showAddUserDropdown && (
+                                            <div className="absolute right-0 top-8 z-20 bg-white border border-slate-200 rounded-lg shadow-lg w-72 max-h-60 overflow-hidden">
+                                                <div className="p-2 border-b border-slate-100">
+                                                    <div className="relative">
+                                                        <Search className="absolute left-2.5 top-2 w-3.5 h-3.5 text-slate-400" />
+                                                        <input
+                                                            type="text"
+                                                            placeholder="Search users..."
+                                                            value={addUserSearch}
+                                                            onChange={(e) => setAddUserSearch(e.target.value)}
+                                                            className="w-full pl-8 pr-3 py-1.5 text-xs border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                                            autoFocus
+                                                        />
+                                                    </div>
+                                                </div>
+                                                <div className="max-h-44 overflow-y-auto">
+                                                    {availableUsers.length === 0 ? (
+                                                        <p className="text-xs text-slate-400 text-center py-3">No users available</p>
+                                                    ) : availableUsers.slice(0, 20).map(u => (
+                                                        <button
+                                                            key={u.id}
+                                                            onClick={() => handleAddUser(role.id, u.id)}
+                                                            className="w-full text-left px-3 py-2 text-xs hover:bg-indigo-50 flex items-center justify-between"
+                                                        >
+                                                            <div>
+                                                                <span className="font-medium text-slate-700">{u.name}</span>
+                                                                <span className="text-slate-400 ml-2">{u.email}</span>
+                                                            </div>
+                                                            <Plus className="w-3.5 h-3.5 text-indigo-500" />
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {roleUsers.length === 0 ? (
+                                    <p className="text-xs text-slate-400 italic py-2">No users assigned to this role.</p>
                                 ) : (
-                                    (role.permissions as string[]).slice(0, 6).map((p) => (
-                                        <span key={p} className="text-[10px] bg-slate-50 text-slate-500 px-2 py-0.5 rounded-full font-mono">{p}</span>
-                                    ))
-                                )}
-                                {!((role.permissions as string[]).includes("*")) && (role.permissions as string[]).length > 6 && (
-                                    <span className="text-[10px] text-slate-400">+{(role.permissions as string[]).length - 6} more</span>
+                                    <div className="space-y-1">
+                                        {roleUsers.map(u => (
+                                            <div key={u.id} className="flex items-center justify-between bg-white border border-slate-100 rounded-md px-3 py-1.5 text-xs">
+                                                <div className="flex items-center gap-2">
+                                                    <div className="w-6 h-6 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center text-[10px] font-bold">
+                                                        {u.name.charAt(0).toUpperCase()}
+                                                    </div>
+                                                    <span className="font-medium text-slate-700">{u.name}</span>
+                                                    <span className="text-slate-400">{u.email}</span>
+                                                </div>
+                                                <button onClick={() => handleRemoveUser(role.id, u.id)} className="text-slate-400 hover:text-red-600 transition-colors" title="Remove user">
+                                                    <UserMinus className="w-3.5 h-3.5" />
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
                                 )}
                             </div>
-                        </div>
-                        <div className="flex items-center gap-2 ml-4">
-                            <button onClick={() => openEdit(role)} className="p-2 text-slate-400 hover:text-indigo-600 transition-colors" title="Edit"><Pencil className="w-4 h-4" /></button>
-                            {!role.isSystem && (
-                                <button onClick={() => handleDelete(role)} className="p-2 text-slate-400 hover:text-red-600 transition-colors" title="Delete"><X className="w-4 h-4" /></button>
-                            )}
-                        </div>
+                        )}
                     </div>
-                ))}
+                    );
+                })}
             </div>
         </div>
     );
@@ -1135,23 +1286,23 @@ function RateCardsTab() {
                             <input className="w-full px-3 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm" placeholder="e.g. 00-02" value={formData.experienceBand} onChange={(e) => setFormData({ ...formData, experienceBand: e.target.value })} />
                         </div>
                         <div>
-                            <label className="block text-xs font-medium text-slate-700 mb-1">Master CTC (₹)</label>
+                            <label className="block text-xs font-medium text-slate-700 mb-1">Master CTC (Base Curr.)</label>
                             <input type="number" className="w-full px-3 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm" placeholder="0" value={formData.masterCtc} onChange={(e) => setFormData({ ...formData, masterCtc: e.target.value })} />
                         </div>
                         <div>
-                            <label className="block text-xs font-medium text-slate-700 mb-1">Mercer CTC (₹)</label>
+                            <label className="block text-xs font-medium text-slate-700 mb-1">Mercer CTC (Base Curr.)</label>
                             <input type="number" className="w-full px-3 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm" placeholder="0" value={formData.mercerCtc} onChange={(e) => setFormData({ ...formData, mercerCtc: e.target.value })} />
                         </div>
                         <div>
-                            <label className="block text-xs font-medium text-slate-700 mb-1">Copilot (₹)</label>
+                            <label className="block text-xs font-medium text-slate-700 mb-1">Copilot (Base Curr.)</label>
                             <input type="number" className="w-full px-3 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm" placeholder="0" value={formData.copilot} onChange={(e) => setFormData({ ...formData, copilot: e.target.value })} />
                         </div>
                         <div>
-                            <label className="block text-xs font-medium text-slate-700 mb-1">Existing CTC (₹)</label>
+                            <label className="block text-xs font-medium text-slate-700 mb-1">Existing CTC (Base Curr.)</label>
                             <input type="number" className="w-full px-3 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm" placeholder="0" value={formData.existingCtc} onChange={(e) => setFormData({ ...formData, existingCtc: e.target.value })} />
                         </div>
                         <div>
-                            <label className="block text-xs font-medium text-slate-700 mb-1">Max CTC (₹)</label>
+                            <label className="block text-xs font-medium text-slate-700 mb-1">Max CTC (Base Curr.)</label>
                             <input type="number" className="w-full px-3 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm" placeholder="0" value={formData.maxCtc} onChange={(e) => setFormData({ ...formData, maxCtc: e.target.value })} />
                         </div>
                         <div>
@@ -1276,6 +1427,10 @@ interface BudgetAssumptionsData {
     indirectCostPercent: number;
     welfarePerFte: number;
     trainingPerFte: number;
+    autoSaveIntervalMinutes: number;
+    minGomPercent: number;
+    defaultCurrency: string;
+    supportedCurrencies: string;
 }
 
 const DEFAULT_ASSUMPTIONS: BudgetAssumptionsData = {
@@ -1290,6 +1445,10 @@ const DEFAULT_ASSUMPTIONS: BudgetAssumptionsData = {
     indirectCostPercent: 0,
     welfarePerFte: 0,
     trainingPerFte: 0,
+    autoSaveIntervalMinutes: 2,
+    minGomPercent: 20,
+    defaultCurrency: "INR",
+    supportedCurrencies: "INR,USD,EUR,GBP,AED,SGD",
 };
 
 function BudgetAssumptionsTab() {
@@ -1312,7 +1471,12 @@ function BudgetAssumptionsTab() {
     }, []);
 
     const handleChange = (name: keyof BudgetAssumptionsData, value: string) => {
-        setData(prev => ({ ...prev, [name]: parseFloat(value) || 0 }));
+        const numericFields = ['marginPercent', 'workingDaysPerYear', 'deliveryMgmtPercent', 'benchPercent', 'leaveEligibilityPercent', 'annualGrowthBufferPercent', 'averageIncrementPercent', 'bonusPercent', 'indirectCostPercent', 'welfarePerFte', 'trainingPerFte', 'autoSaveIntervalMinutes', 'minGomPercent'];
+        if (numericFields.includes(name)) {
+            setData(prev => ({ ...prev, [name]: parseFloat(value) || 0 }));
+        } else {
+            setData(prev => ({ ...prev, [name]: value }));
+        }
     };
 
     const handleSave = async () => {
@@ -1389,6 +1553,43 @@ function BudgetAssumptionsTab() {
                         <InputField label="Indirect Cost % (of Base)" name="indirectCostPercent" desc="Overheads and SG&A." />
                         <InputField label="Welfare / FTE (Yearly)" name="welfarePerFte" desc="Team building amount per head/year." />
                         <InputField label="Training / FTE (Yearly)" name="trainingPerFte" desc="Learning budget per head/year." />
+                    </div>
+                </div>
+
+                <div className="mt-6 border-t border-slate-200 pt-4">
+                    <h3 className="font-semibold text-sm text-slate-800 mb-3">Application Settings</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-lg">
+                        <InputField label="Auto-Save Interval (minutes)" name="autoSaveIntervalMinutes" desc="How often opportunity forms auto-save (0 = disabled)." />
+                        <InputField label="Min GOM % for Sales Submission" name="minGomPercent" desc="Presales cannot submit to Sales unless GOM meets this % (0 = no check)." />
+                    </div>
+                </div>
+
+                <div className="mt-6 border-t border-slate-200 pt-4">
+                    <h3 className="font-semibold text-sm text-slate-800 mb-3">Currency Configuration</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-lg">
+                        <div className="grid gap-1">
+                            <label className="text-xs font-medium text-slate-700">Default Currency</label>
+                            <select
+                                value={data.defaultCurrency || 'INR'}
+                                onChange={(e) => handleChange('defaultCurrency', e.target.value)}
+                                className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            >
+                                {(data.supportedCurrencies || 'INR,USD,EUR,GBP,AED,SGD').split(',').map(c => (
+                                    <option key={c.trim()} value={c.trim()}>{c.trim()}</option>
+                                ))}
+                            </select>
+                            <p className="text-xs text-slate-500">Default currency used across the application.</p>
+                        </div>
+                        <div className="grid gap-1">
+                            <label className="text-xs font-medium text-slate-700">Supported Currencies</label>
+                            <input
+                                type="text"
+                                value={data.supportedCurrencies || 'INR,USD,EUR,GBP,AED,SGD'}
+                                onChange={(e) => handleChange('supportedCurrencies', e.target.value)}
+                                className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            />
+                            <p className="text-xs text-slate-500">Comma-separated list of supported currency codes.</p>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1737,6 +1938,198 @@ function MasterDataTab({ entity, label }: { entity: string; label: string }) {
     );
 }
 
+/* ─────────────── GOM Calculator Tab ─────────────── */
+function GomCalculatorTab() {
+    const { currency, setCurrency, symbol: cSym, currencies, getRate } = useCurrency();
+    const exchangeRate = getRate(currency) || 1;
+
+    const [annualCTC, setAnnualCTC] = useState<number>(1200000);
+    const [deliveryMgmt, setDeliveryMgmt] = useState<number>(5);
+    const [benchCost, setBenchCost] = useState<number>(10);
+    const [onsiteAllowance, setOnsiteAllowance] = useState<number>(2802);
+    const [markupPercent, setMarkupPercent] = useState<number>(0);
+    const [targetRevenue, setTargetRevenue] = useState<number>(0);
+    const [calcMode, setCalcMode] = useState<'markup' | 'revenue'>('markup');
+    const [adjustedCost, setAdjustedCost] = useState<number>(0);
+    const [offshoreDayRate, setOffshoreDayRate] = useState<number>(0);
+    const [onsiteDayRate, setOnsiteDayRate] = useState<number>(0);
+    const [durationMonths, setDurationMonths] = useState<number>(3);
+    const [workingDays, setWorkingDays] = useState<number>(55);
+
+    const perDiemUSD = 50;
+    const perDiemRate = 85;
+
+    useEffect(() => {
+        const loadingFactor = (deliveryMgmt + benchCost) / 100;
+        const adjCost = annualCTC * (1 + loadingFactor);
+        setAdjustedCost(adjCost);
+        const ctcInQuot = adjCost / exchangeRate;
+        const offDay = Math.ceil(ctcInQuot / 220);
+        setOffshoreDayRate(offDay);
+        const perDiemTotal = perDiemUSD * perDiemRate;
+        setOnsiteDayRate(offDay + perDiemTotal + onsiteAllowance);
+    }, [annualCTC, deliveryMgmt, benchCost, exchangeRate, onsiteAllowance]);
+
+    const calculateMargin = (cost: number) => {
+        let rev = 0, gom = 0, profit = 0;
+        if (calcMode === 'markup') { rev = cost * (1 + markupPercent / 100); } else { rev = targetRevenue; }
+        if (rev > 0) { gom = ((rev - cost) / rev) * 100; profit = (markupPercent / (1 + markupPercent / 100)) * 100; }
+        return { revenue: rev, gom, profit };
+    };
+
+    const offshoreFinancials = calculateMargin(offshoreDayRate);
+    const onsiteFinancials = calculateMargin(onsiteDayRate);
+
+    return (
+        <div className="space-y-4">
+            <div className="flex items-center justify-between">
+                <div>
+                    <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2"><Calculator className="w-5 h-5 text-indigo-600" /> GOM Calculator</h2>
+                    <p className="text-slate-500 text-sm mt-0.5">Resource effort estimation and cost calculation.</p>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                {/* Inputs Column */}
+                <div className="lg:col-span-1 space-y-4">
+                    <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                        <h3 className="font-bold text-slate-800 text-sm mb-3 flex items-center gap-2">
+                            <Briefcase className="w-4 h-4 text-indigo-600" /> Cost Inputs
+                        </h3>
+                        <div className="space-y-3">
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-500 mb-1">Annual CTC ({cSym})</label>
+                                <div className="relative">
+                                    <span className="absolute left-3 top-2.5 text-slate-400 font-bold text-xs">{cSym}</span>
+                                    <input type="number" value={annualCTC} onChange={(e) => setAnnualCTC(Number(e.target.value))} className="w-full pl-10 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none" />
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-500 mb-1">Delivery Mgmt (%)</label>
+                                    <input type="number" value={deliveryMgmt} onChange={(e) => setDeliveryMgmt(Number(e.target.value))} className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-500" />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-500 mb-1">Addl. Bench (%)</label>
+                                    <input type="number" value={benchCost} onChange={(e) => setBenchCost(Number(e.target.value))} className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-500" />
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-500 mb-1">Currency & Exchange Rate</label>
+                                <div className="flex gap-2">
+                                    <select value={currency} onChange={(e) => setCurrency(e.target.value)} className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none">
+                                        {currencies.map((c: any) => (<option key={c.code} value={c.code}>{c.symbol} {c.code}</option>))}
+                                    </select>
+                                    <input type="number" value={exchangeRate} readOnly className="flex-1 px-3 py-1.5 bg-slate-100 border border-slate-200 rounded-lg text-sm outline-none cursor-not-allowed" />
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-500 mb-1">Onsite Allowance / Loading</label>
+                                <div className="relative">
+                                    <span className="absolute left-3 top-2.5 text-slate-400 font-bold text-xs">+</span>
+                                    <input type="number" value={onsiteAllowance} onChange={(e) => setOnsiteAllowance(Number(e.target.value))} className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-500" />
+                                </div>
+                                <p className="text-[10px] text-slate-400 mt-1">Adjust to match Base+PerDiem difference</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                        <h3 className="font-bold text-slate-800 text-sm mb-3 flex items-center gap-2">
+                            <RefreshCw className="w-4 h-4 text-emerald-600" /> Margin & Markup
+                        </h3>
+                        <div className="space-y-3">
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-500 mb-1">Markup Percentage (%)</label>
+                                <div className="relative">
+                                    <Percent className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+                                    <input type="number" value={markupPercent} onChange={(e) => { setMarkupPercent(Number(e.target.value)); setCalcMode('markup'); }} className="w-full pl-10 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:border-emerald-500" />
+                                </div>
+                                <p className="text-xs text-slate-400 mt-1">Example: 900%</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                        <h3 className="font-bold text-slate-800 text-sm mb-3 flex items-center gap-2">
+                            <Clock className="w-4 h-4 text-amber-600" /> Period Estimation
+                        </h3>
+                        <div className="grid grid-cols-2 gap-3">
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-500 mb-1">Duration (Months)</label>
+                                <input type="number" value={durationMonths} onChange={(e) => setDurationMonths(Number(e.target.value))} className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm" />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-500 mb-1">Working Days</label>
+                                <input type="number" value={workingDays} onChange={(e) => setWorkingDays(Number(e.target.value))} className={`w-full px-3 py-1.5 bg-slate-50 border rounded-lg text-sm ${workingDays / durationMonths > 22 ? 'border-amber-500 text-amber-700' : 'border-slate-200'}`} />
+                            </div>
+                        </div>
+                        {workingDays / durationMonths > 22 && (
+                            <div className="flex items-center gap-2 text-amber-600 text-xs mt-2 bg-amber-50 p-2 rounded">
+                                <Info className="w-3 h-3" /><span>Warning: {Math.round(workingDays / durationMonths)} days/month exceeds typical 22 days.</span>
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {/* Results Column */}
+                <div className="lg:col-span-2 space-y-4">
+                    <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                        <h3 className="font-bold text-slate-800 text-sm mb-4 border-b border-slate-100 pb-2">Calculation Results</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                            <div className="space-y-3">
+                                <h4 className="font-semibold text-sm text-indigo-600 flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-indigo-500" /> Offshore</h4>
+                                <div className="p-3 bg-slate-50 rounded-lg border border-slate-100">
+                                    <p className="text-xs text-slate-500 mb-0.5">Cost Per Day</p>
+                                    <p className="text-lg font-bold text-slate-800">{offshoreDayRate.toLocaleString()} <span className="text-xs font-normal text-slate-400">{currency}</span></p>
+                                </div>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div className="p-3 bg-slate-50 rounded-lg"><p className="text-xs text-slate-500">Revenue/Day</p><p className="font-semibold text-slate-700">{Math.round(offshoreFinancials.revenue).toLocaleString()}</p></div>
+                                    <div className="p-3 bg-slate-50 rounded-lg"><p className="text-xs text-slate-500">GOM %</p><p className="font-semibold text-emerald-600">{offshoreFinancials.gom.toFixed(1)}%</p></div>
+                                </div>
+                                <div className="p-2.5 bg-amber-50 rounded-lg border border-amber-100">
+                                    <p className="text-xs text-amber-700 font-medium">Est. Cost ({workingDays} days)</p>
+                                    <p className="text-base font-bold text-amber-800">{(offshoreDayRate * workingDays).toLocaleString()} {currency}</p>
+                                </div>
+                            </div>
+                            <div className="space-y-3">
+                                <h4 className="font-semibold text-sm text-purple-600 flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-purple-500" /> Onsite</h4>
+                                <div className="p-3 bg-slate-50 rounded-lg border border-slate-100">
+                                    <p className="text-xs text-slate-500 mb-0.5">Cost Per Day</p>
+                                    <p className="text-lg font-bold text-slate-800">{onsiteDayRate.toLocaleString()} <span className="text-xs font-normal text-slate-400">{currency}</span></p>
+                                    <p className="text-[10px] text-slate-400 mt-1">Includes Per Diem + Allowance</p>
+                                </div>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div className="p-3 bg-slate-50 rounded-lg"><p className="text-xs text-slate-500">Revenue/Day</p><p className="font-semibold text-slate-700">{Math.round(onsiteFinancials.revenue).toLocaleString()}</p></div>
+                                    <div className="p-3 bg-slate-50 rounded-lg"><p className="text-xs text-slate-500">GOM %</p><p className="font-semibold text-emerald-600">{onsiteFinancials.gom.toFixed(1)}%</p></div>
+                                </div>
+                                <div className="p-2.5 bg-amber-50 rounded-lg border border-amber-100">
+                                    <p className="text-xs text-amber-700 font-medium">Est. Cost ({workingDays} days)</p>
+                                    <p className="text-base font-bold text-amber-800">{(onsiteDayRate * workingDays).toLocaleString()} {currency}</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Detailed Stats Table */}
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-xs text-left">
+                                <thead className="bg-slate-50 text-slate-500 font-medium border-y border-slate-200">
+                                    <tr><th className="py-2 px-3">Metric</th><th className="py-2 px-3">Value</th><th className="py-2 px-3">Formula / Notes</th></tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                    <tr><td className="py-2 px-3 text-slate-800">Adjusted Cost</td><td className="py-2 px-3 font-mono">{adjustedCost.toLocaleString()}</td><td className="py-2 px-3 text-slate-400 text-xs">CTC * (1 + (Mgmt+Bench)/100)</td></tr>
+                                    <tr><td className="py-2 px-3 text-slate-800">Annual Working Days</td><td className="py-2 px-3 font-mono">220</td><td className="py-2 px-3 text-slate-400 text-xs">Fixed Standard</td></tr>
+                                    <tr><td className="py-2 px-3 text-slate-800">Actual Profit Margin</td><td className="py-2 px-3 font-mono font-bold text-indigo-600">{offshoreFinancials.profit.toLocaleString()}%</td><td className="py-2 px-3 text-slate-400 text-xs">(Markup / (1 + Markup%)) * 100</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 /* ─────────────── Email Templates Tab ─────────────── */
 interface EmailTemplateData {
     id: string;
@@ -1928,6 +2321,250 @@ function EmailTemplatesTab() {
                     </tbody>
                 </table>
                 {templates.length === 0 && <div className="text-center py-8 text-slate-400">No email templates configured. Run the seed script to create default templates.</div>}
+            </div>
+        </div>
+    );
+}
+
+/* ─────────────── Currency Rates Tab ─────────────── */
+interface CurrencyRateRow {
+    id: string;
+    code: string;
+    name: string;
+    symbol: string;
+    region: string;
+    rateToBase: number;
+    baseCurrency: string;
+    isActive: boolean;
+    lastSynced: string | null;
+}
+
+function CurrencyRatesTab() {
+    const [rates, setRates] = useState<CurrencyRateRow[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [syncing, setSyncing] = useState(false);
+    const [seeding, setSeeding] = useState(false);
+    const [status, setStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
+    const [editId, setEditId] = useState<string | null>(null);
+    const [editRate, setEditRate] = useState("");
+    const [addOpen, setAddOpen] = useState(false);
+    const [addForm, setAddForm] = useState({ code: "", name: "", symbol: "", region: "", rateToBase: "1" });
+    const [filterRegion, setFilterRegion] = useState("all");
+
+    const fetchRates = useCallback(async () => {
+        setLoading(true);
+        try {
+            const data = await apiClient<CurrencyRateRow[]>("/api/admin/currency-rates");
+            setRates(data);
+        } catch { setStatus({ type: "error", message: "Failed to load currency rates." }); }
+        finally { setLoading(false); }
+    }, []);
+
+    useEffect(() => { fetchRates(); }, [fetchRates]);
+
+    const handleSync = async () => {
+        setSyncing(true);
+        setStatus(null);
+        try {
+            const result = await apiClient<{ synced: number; lastSynced: string }>("/api/admin/currency-rates/sync", { method: "POST" });
+            setStatus({ type: "success", message: `Synced ${result.synced} rates from open.er-api.com.` });
+            fetchRates();
+        } catch (err: any) {
+            setStatus({ type: "error", message: err.message || "Sync failed." });
+        } finally { setSyncing(false); }
+    };
+
+    const handleSeed = async () => {
+        setSeeding(true);
+        setStatus(null);
+        try {
+            const result = await apiClient<{ message: string }>("/api/admin/currency-rates/seed", { method: "POST" });
+            setStatus({ type: "success", message: result.message });
+            fetchRates();
+        } catch (err: any) {
+            setStatus({ type: "error", message: err.message || "Seed failed." });
+        } finally { setSeeding(false); }
+    };
+
+    const handleToggle = async (id: string) => {
+        try {
+            await apiClient(`/api/admin/currency-rates/${id}/toggle`, { method: "PATCH" });
+            fetchRates();
+        } catch { setStatus({ type: "error", message: "Toggle failed." }); }
+    };
+
+    const handleSaveRate = async (id: string) => {
+        const val = parseFloat(editRate);
+        if (isNaN(val) || val <= 0) { setStatus({ type: "error", message: "Rate must be a positive number." }); return; }
+        try {
+            await apiClient(`/api/admin/currency-rates/${id}`, {
+                method: "PATCH",
+                body: JSON.stringify({ rateToBase: val }),
+            });
+            setEditId(null);
+            fetchRates();
+        } catch { setStatus({ type: "error", message: "Update failed." }); }
+    };
+
+    const handleDelete = async (id: string) => {
+        if (!confirm("Delete this currency?")) return;
+        try {
+            await apiClient(`/api/admin/currency-rates/${id}`, { method: "DELETE" });
+            fetchRates();
+        } catch { setStatus({ type: "error", message: "Delete failed." }); }
+    };
+
+    const handleAdd = async () => {
+        if (!addForm.code || !addForm.name || !addForm.symbol || !addForm.region) {
+            setStatus({ type: "error", message: "All fields are required." }); return;
+        }
+        try {
+            await apiClient("/api/admin/currency-rates", {
+                method: "POST",
+                body: JSON.stringify({
+                    ...addForm,
+                    code: addForm.code.toUpperCase(),
+                    rateToBase: parseFloat(addForm.rateToBase) || 1,
+                }),
+            });
+            setAddOpen(false);
+            setAddForm({ code: "", name: "", symbol: "", region: "", rateToBase: "1" });
+            fetchRates();
+        } catch (err: any) {
+            setStatus({ type: "error", message: err.message || "Add failed." });
+        }
+    };
+
+    const regions = [...new Set(rates.map(r => r.region))].sort();
+    const filtered = filterRegion === "all" ? rates : rates.filter(r => r.region === filterRegion);
+
+    if (loading) return <div className="flex justify-center py-12"><RefreshCw className="w-5 h-5 animate-spin text-indigo-500" /></div>;
+
+    return (
+        <div className="space-y-4">
+            <div className="flex items-center justify-between">
+                <div>
+                    <h2 className="text-lg font-bold text-slate-800">Currency Conversion Master</h2>
+                    <p className="text-xs text-slate-500 mt-0.5">Manage exchange rates relative to base currency (INR). Sync live rates from open.er-api.com.</p>
+                </div>
+                <div className="flex gap-2">
+                    <button onClick={handleSeed} disabled={seeding} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50">
+                        {seeding ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                        Seed Missing
+                    </button>
+                    <button onClick={handleSync} disabled={syncing} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50">
+                        {syncing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                        Sync Live Rates
+                    </button>
+                    <button onClick={() => setAddOpen(!addOpen)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">
+                        <Plus className="w-3.5 h-3.5" /> Add Currency
+                    </button>
+                </div>
+            </div>
+
+            {status && (
+                <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${status.type === "success" ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-red-50 text-red-700 border border-red-200"}`}>
+                    {status.type === "success" ? <Check className="w-3.5 h-3.5" /> : <AlertCircle className="w-3.5 h-3.5" />}
+                    {status.message}
+                    <button onClick={() => setStatus(null)} className="ml-auto text-slate-400 hover:text-slate-600"><X className="w-3 h-3" /></button>
+                </div>
+            )}
+
+            {/* Add currency form */}
+            {addOpen && (
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 space-y-3">
+                    <h3 className="text-sm font-semibold text-slate-700">Add New Currency</h3>
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                        <div>
+                            <label className="text-xs text-slate-500">Code</label>
+                            <input value={addForm.code} onChange={e => setAddForm(p => ({ ...p, code: e.target.value }))} placeholder="USD" maxLength={3} className="w-full mt-1 px-2.5 py-1.5 text-xs rounded-md border border-slate-200 focus:ring-1 focus:ring-indigo-400 uppercase" />
+                        </div>
+                        <div>
+                            <label className="text-xs text-slate-500">Name</label>
+                            <input value={addForm.name} onChange={e => setAddForm(p => ({ ...p, name: e.target.value }))} placeholder="US Dollar" className="w-full mt-1 px-2.5 py-1.5 text-xs rounded-md border border-slate-200 focus:ring-1 focus:ring-indigo-400" />
+                        </div>
+                        <div>
+                            <label className="text-xs text-slate-500">Symbol</label>
+                            <input value={addForm.symbol} onChange={e => setAddForm(p => ({ ...p, symbol: e.target.value }))} placeholder="$" className="w-full mt-1 px-2.5 py-1.5 text-xs rounded-md border border-slate-200 focus:ring-1 focus:ring-indigo-400" />
+                        </div>
+                        <div>
+                            <label className="text-xs text-slate-500">Region</label>
+                            <input value={addForm.region} onChange={e => setAddForm(p => ({ ...p, region: e.target.value }))} placeholder="North America" className="w-full mt-1 px-2.5 py-1.5 text-xs rounded-md border border-slate-200 focus:ring-1 focus:ring-indigo-400" />
+                        </div>
+                        <div className="flex items-end gap-2">
+                            <div className="flex-1">
+                                <label className="text-xs text-slate-500">Rate to INR</label>
+                                <input value={addForm.rateToBase} onChange={e => setAddForm(p => ({ ...p, rateToBase: e.target.value }))} type="number" step="0.0001" className="w-full mt-1 px-2.5 py-1.5 text-xs rounded-md border border-slate-200 focus:ring-1 focus:ring-indigo-400" />
+                            </div>
+                            <button onClick={handleAdd} className="px-3 py-1.5 text-xs font-medium rounded-md bg-indigo-600 text-white hover:bg-indigo-700">Save</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Filter by region */}
+            <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-500">Filter:</span>
+                <select value={filterRegion} onChange={e => setFilterRegion(e.target.value)} className="text-xs border border-slate-200 rounded-md px-2 py-1 focus:ring-1 focus:ring-indigo-400">
+                    <option value="all">All Regions</option>
+                    {regions.map(r => <option key={r} value={r}>{r}</option>)}
+                </select>
+                <span className="text-xs text-slate-400 ml-auto">{filtered.length} currencies</span>
+            </div>
+
+            {/* Rates table */}
+            <div className="border border-slate-200 rounded-lg overflow-hidden">
+                <table className="w-full text-xs">
+                    <thead className="bg-slate-50 border-b border-slate-200">
+                        <tr>
+                            <th className="text-left px-3 py-2 font-medium text-slate-600">Code</th>
+                            <th className="text-left px-3 py-2 font-medium text-slate-600">Currency</th>
+                            <th className="text-left px-3 py-2 font-medium text-slate-600">Symbol</th>
+                            <th className="text-left px-3 py-2 font-medium text-slate-600">Region</th>
+                            <th className="text-right px-3 py-2 font-medium text-slate-600">Rate (1 INR =)</th>
+                            <th className="text-center px-3 py-2 font-medium text-slate-600">Active</th>
+                            <th className="text-left px-3 py-2 font-medium text-slate-600">Last Synced</th>
+                            <th className="text-right px-3 py-2 font-medium text-slate-600">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                        {filtered.map(rate => (
+                            <tr key={rate.id} className="hover:bg-slate-50/50">
+                                <td className="px-3 py-2 font-mono font-bold text-indigo-600">{rate.code}</td>
+                                <td className="px-3 py-2 text-slate-700">{rate.name}</td>
+                                <td className="px-3 py-2 text-slate-500">{rate.symbol}</td>
+                                <td className="px-3 py-2 text-slate-500">{rate.region}</td>
+                                <td className="px-3 py-2 text-right font-mono text-slate-700">
+                                    {editId === rate.id ? (
+                                        <div className="flex items-center justify-end gap-1">
+                                            <input value={editRate} onChange={e => setEditRate(e.target.value)} type="number" step="0.0001" className="w-24 px-1.5 py-0.5 text-xs rounded border border-indigo-300 text-right" autoFocus />
+                                            <button onClick={() => handleSaveRate(rate.id)} className="p-0.5 text-emerald-600 hover:text-emerald-800"><Check className="w-3.5 h-3.5" /></button>
+                                            <button onClick={() => setEditId(null)} className="p-0.5 text-slate-400 hover:text-slate-600"><X className="w-3.5 h-3.5" /></button>
+                                        </div>
+                                    ) : (
+                                        <span className="cursor-pointer hover:text-indigo-600" onClick={() => { setEditId(rate.id); setEditRate(String(rate.rateToBase)); }}>{rate.rateToBase.toFixed(4)}</span>
+                                    )}
+                                </td>
+                                <td className="px-3 py-2 text-center">
+                                    <button onClick={() => handleToggle(rate.id)} className="text-slate-400 hover:text-indigo-600">
+                                        {rate.isActive ? <ToggleRight className="w-5 h-5 text-indigo-600 inline" /> : <ToggleLeft className="w-5 h-5 inline" />}
+                                    </button>
+                                </td>
+                                <td className="px-3 py-2 text-slate-400">
+                                    {rate.lastSynced ? new Date(rate.lastSynced).toLocaleString("en-IN", { dateStyle: "short", timeStyle: "short" }) : "Never"}
+                                </td>
+                                <td className="px-3 py-2 text-right">
+                                    <button onClick={() => handleDelete(rate.id)} className="p-1 text-slate-400 hover:text-red-500" title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+                {filtered.length === 0 && (
+                    <div className="text-center py-8 text-slate-400">
+                        No currency rates found. Click &quot;Seed Missing&quot; to auto-populate from regions, then &quot;Sync Live Rates&quot; to fetch current exchange rates.
+                    </div>
+                )}
             </div>
         </div>
     );

@@ -2,14 +2,15 @@
 
 import { useState, useEffect } from "react";
 import { Calculator, DollarSign, RefreshCw, Briefcase, ArrowRight, Percent, Info } from "lucide-react";
+import { useCurrency } from "@/components/providers/currency-provider";
 
 export default function GomCalculatorPage() {
     // Inputs
     const [annualCTC, setAnnualCTC] = useState<number>(1200000);
     const [deliveryMgmt, setDeliveryMgmt] = useState<number>(5);
     const [benchCost, setBenchCost] = useState<number>(10);
-    const [exchangeRate, setExchangeRate] = useState<number>(1); // 1 for INR
-    const [currency, setCurrency] = useState<string>("INR");
+    const { currency, setCurrency, symbol: cSym, currencies, getRate, format: fmtCurrency } = useCurrency();
+    const exchangeRate = getRate(currency) || 1;
     const [onsiteAllowance, setOnsiteAllowance] = useState<number>(2802); // Default to gap value for demo
 
     // Constants from Prompt
@@ -96,9 +97,9 @@ export default function GomCalculatorPage() {
 
                         <div className="space-y-3">
                             <div>
-                                <label className="block text-xs font-semibold text-slate-500 mb-1">Annual CTC</label>
+                                <label className="block text-xs font-semibold text-slate-500 mb-1">Annual CTC ({cSym})</label>
                                 <div className="relative">
-                                    <span className="absolute left-3 top-2.5 text-slate-400 font-bold text-xs">{currency}</span>
+                                    <span className="absolute left-3 top-2.5 text-slate-400 font-bold text-xs">{cSym}</span>
                                     <input
                                         type="number"
                                         value={annualCTC}
@@ -137,16 +138,15 @@ export default function GomCalculatorPage() {
                                         onChange={(e) => setCurrency(e.target.value)}
                                         className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none"
                                     >
-                                        <option value="INR">INR</option>
-                                        <option value="USD">USD</option>
-                                        <option value="EUR">EUR</option>
+                                        {currencies.map((c: any) => (
+                                            <option key={c.code} value={c.code}>{c.symbol} {c.code}</option>
+                                        ))}
                                     </select>
                                     <input
                                         type="number"
                                         value={exchangeRate}
-                                        onChange={(e) => setExchangeRate(Number(e.target.value))}
-                                        placeholder="Rate"
-                                        className="flex-1 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-500"
+                                        readOnly
+                                        className="flex-1 px-3 py-1.5 bg-slate-100 border border-slate-200 rounded-lg text-sm outline-none cursor-not-allowed"
                                     />
                                 </div>
                             </div>

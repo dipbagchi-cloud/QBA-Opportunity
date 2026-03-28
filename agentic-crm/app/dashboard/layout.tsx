@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { API_URL, getAuthHeaders } from "@/lib/api";
 import {
     LayoutDashboard,
     Users,
@@ -20,6 +21,7 @@ import {
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { AuthProvider } from "@/components/providers/auth-provider";
+import { CurrencyProvider, useCurrency } from "@/components/providers/currency-provider";
 import { useAuthStore } from "@/lib/auth-store";
 
 interface NavItem {
@@ -35,7 +37,6 @@ const allSidebarItems: NavItem[] = [
     { icon: Users, label: "Contacts", href: "/dashboard/contacts", permission: "contacts:view" },
     { icon: BarChart3, label: "Analytics", href: "/dashboard/analytics", permission: "analytics:view" },
     { icon: Bot, label: "Agentic AI", href: "/dashboard/agents", permission: "agents:execute" },
-    { icon: BarChart3, label: "GOM Calculator", href: "/dashboard/gom", permission: "gom:view" },
     { icon: Settings, label: "Settings", href: "/dashboard/settings", permission: "settings:view" },
 ];
 
@@ -46,7 +47,9 @@ export default function DashboardLayout({
 }) {
     return (
         <AuthProvider>
-            <DashboardContent>{children}</DashboardContent>
+            <CurrencyProvider>
+                <DashboardContent>{children}</DashboardContent>
+            </CurrencyProvider>
         </AuthProvider>
     );
 }
@@ -58,6 +61,7 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
     const router = useRouter();
     const { user, logout, hasPermission, switchRole } = useAuthStore();
+    const { currency: globalCurrency, setCurrency: setGlobalCurrency, currencies, symbol: currencySymbol } = useCurrency();
 
     const sidebarItems = allSidebarItems.filter((item) => {
         if (!item.permission) return true;
@@ -262,6 +266,18 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
                                 className="w-64 bg-slate-100/50 border border-slate-200 rounded-lg py-2 pl-10 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-slate-800 placeholder:text-slate-400"
                             />
                         </div>
+
+                        {/* Global Currency Selector */}
+                        <select
+                            value={globalCurrency}
+                            onChange={(e) => setGlobalCurrency(e.target.value)}
+                            title="Global Currency"
+                            className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer"
+                        >
+                            {currencies.map(c => (
+                                <option key={c.code} value={c.code}>{c.symbol} {c.code}</option>
+                            ))}
+                        </select>
 
                         {/* Notifications */}
                         <button className="relative p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors">

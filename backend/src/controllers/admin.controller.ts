@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { hashPassword } from '../services/auth.service';
+import { isSSOUser } from './auth.controller';
 
 // GET /api/admin/users
 export async function listUsers(req: Request, res: Response) {
@@ -62,8 +63,14 @@ export async function createUser(req: Request, res: Response) {
     const { email, name, password, roleId, roleIds, teamId, title, department } = req.body;
     const resolvedRoleIds: string[] = roleIds && Array.isArray(roleIds) ? roleIds : roleId ? [roleId] : [];
 
-    if (!email || !name || !password || resolvedRoleIds.length === 0) {
-      return res.status(400).json({ error: 'email, name, password, and at least one role are required' });
+    const ssoUser = isSSOUser(email);
+
+    if (!email || !name || resolvedRoleIds.length === 0) {
+      return res.status(400).json({ error: 'email, name, and at least one role are required' });
+    }
+
+    if (!ssoUser && !password) {
+      return res.status(400).json({ error: 'password is required for non-SSO users' });
     }
 
     // Check unique email
@@ -78,13 +85,13 @@ export async function createUser(req: Request, res: Response) {
       return res.status(400).json({ error: 'One or more invalid roleIds' });
     }
 
-    const passwordHash = await hashPassword(password);
+    const passwordHash = ssoUser ? null : await hashPassword(password);
 
     const user = await prisma.user.create({
       data: {
         email,
         name,
-        passwordHash,
+        ...(passwordHash ? { passwordHash } : {}),
         roles: { connect: resolvedRoleIds.map(id => ({ id })) },
         activeRoleId: resolvedRoleIds[0],
         teamId: teamId || undefined,
@@ -205,6 +212,11 @@ export async function resetUserPassword(req: Request, res: Response) {
       return res.status(404).json({ error: 'User not found' });
     }
 
+    // Block password reset for SSO users
+    if (isSSOUser(user.email)) {
+      return res.status(403).json({ error: 'Cannot reset password for SSO users (@qbadvisory.com). They authenticate via SSO.' });
+    }
+
     const passwordHash = await hashPassword(newPassword);
     await (prisma.user as any).update({ where: { id }, data: { passwordHash, mustChangePassword: true } });
 
@@ -228,7 +240,10 @@ export async function resetUserPassword(req: Request, res: Response) {
 export async function listRoles(req: Request, res: Response) {
   try {
     const roles = await prisma.role.findMany({
-      include: { _count: { select: { users: true } } },
+      include: {
+        _count: { select: { users: true } },
+        users: { select: { id: true, name: true, email: true }, orderBy: { name: 'asc' } },
+      },
       orderBy: { name: 'asc' },
     });
 
@@ -240,6 +255,7 @@ export async function listRoles(req: Request, res: Response) {
         permissions: r.permissions,
         isSystem: r.isSystem,
         userCount: r._count.users,
+        users: r.users,
         createdAt: r.createdAt,
         updatedAt: r.updatedAt,
       }))
@@ -369,6 +385,71 @@ export async function deleteRole(req: Request, res: Response) {
   } catch (error) {
     console.error('Delete role error:', error);
     res.status(500).json({ error: 'Failed to delete role' });
+  }
+}
+
+// POST /api/admin/roles/:id/users — Assign a user to a role
+export async function addUserToRole(req: Request, res: Response) {
+  try {
+    const { id } = req.params;
+    const { userId } = req.body;
+    if (!userId) return res.status(400).json({ error: 'userId is required' });
+
+    const role = await prisma.role.findUnique({ where: { id } });
+    if (!role) return res.status(404).json({ error: 'Role not found' });
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    await prisma.role.update({
+      where: { id },
+      data: { users: { connect: { id: userId } } },
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        entity: 'Role',
+        entityId: id,
+        action: 'ASSIGN_USER_TO_ROLE',
+        userId: req.user!.userId,
+        changes: { roleName: role.name, userName: user.name, userEmail: user.email },
+      },
+    });
+
+    res.json({ message: `User ${user.name} added to role ${role.name}` });
+  } catch (error) {
+    console.error('Add user to role error:', error);
+    res.status(500).json({ error: 'Failed to add user to role' });
+  }
+}
+
+// DELETE /api/admin/roles/:id/users/:userId — Remove a user from a role
+export async function removeUserFromRole(req: Request, res: Response) {
+  try {
+    const { id, userId } = req.params;
+
+    const role = await prisma.role.findUnique({ where: { id } });
+    if (!role) return res.status(404).json({ error: 'Role not found' });
+
+    await prisma.role.update({
+      where: { id },
+      data: { users: { disconnect: { id: userId } } },
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        entity: 'Role',
+        entityId: id,
+        action: 'REMOVE_USER_FROM_ROLE',
+        userId: req.user!.userId,
+        changes: { roleName: role.name, removedUserId: userId },
+      },
+    });
+
+    res.json({ message: 'User removed from role' });
+  } catch (error) {
+    console.error('Remove user from role error:', error);
+    res.status(500).json({ error: 'Failed to remove user from role' });
   }
 }
 

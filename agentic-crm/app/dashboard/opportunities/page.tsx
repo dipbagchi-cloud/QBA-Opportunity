@@ -19,6 +19,7 @@ import Link from "next/link";
 import { useOpportunityStore } from "@/lib/store";
 import { useState, useEffect, useCallback } from "react";
 import KanbanBoard from "@/components/opportunities/KanbanBoard";
+import { useCurrency } from "@/components/providers/currency-provider";
 
 export default function OpportunitiesPage() {
     const { opportunities, deleteOpportunity, fetchOpportunities, total, page, totalPages, isLoading } = useOpportunityStore();
@@ -28,6 +29,7 @@ export default function OpportunitiesPage() {
     const limit = 10;
 
     const [viewMode, setViewMode] = useState<'list' | 'kanban'>('list');
+    const { format: fmtCurrency } = useCurrency();
 
     const loadPage = useCallback((pg: number, search?: string) => {
         setCurrentPage(pg);
@@ -133,7 +135,9 @@ export default function OpportunitiesPage() {
                                     </tr>
                                 ) : (
                                     opportunities.map((opp) => (
-                                        <tr key={opp.id} className="hover:bg-slate-50/80 transition-colors group">
+                                        <tr key={opp.id} className="hover:bg-slate-50/80 transition-colors group"
+                                            title={`${opp.name}\nClient: ${opp.client}\nOwner: ${opp.owner}\nStage: ${opp.stage}\nValue: ${(typeof opp.value === 'number' ? opp.value : Number(opp.value) || 0).toLocaleString()}\nProbability: ${opp.probability}%\nSales Rep: ${opp.salesRepName || 'N/A'}\nManager: ${opp.managerName || 'N/A'}\nHealth: ${opp.healthScore ?? 'N/A'}/100\nStatus: ${opp.status}\nLast Activity: ${opp.lastActivity}`}
+                                        >
                                             <td className="py-2.5 px-4">
                                                 <div className="flex items-center gap-2">
                                                     <div
@@ -164,7 +168,7 @@ export default function OpportunitiesPage() {
                                             </td>
                                             <td className="py-2.5 px-4">
                                                 <span className="font-medium text-sm text-slate-700">
-                                                    ${typeof opp.value === 'number' ? opp.value.toLocaleString() : opp.value}
+                                                    {fmtCurrency(typeof opp.value === 'number' ? opp.value : Number(opp.value) || 0)}
                                                 </span>
                                             </td>
                                             <td className="py-2.5 px-4">

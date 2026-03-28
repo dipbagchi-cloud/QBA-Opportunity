@@ -5,6 +5,7 @@ import { Plus, Trash2, Search } from "lucide-react";
 import { fetchRateCards } from "@/lib/rate-cards";
 import { useOpportunityEstimation, ResourceRow } from "../context/OpportunityEstimationContext";
 import { calculateRateCard } from "@/lib/gom-calculator";
+import { useCurrency } from "@/components/providers/currency-provider";
 
 const ALL_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -21,6 +22,16 @@ export function ResourceAssignmentTab() {
         endDate,
     } = useOpportunityEstimation();
 
+    const { format: fmtCurrency } = useCurrency();
+
+    // Rate card CTC values are always in INR — format without currency conversion
+    const fmtINR = (val: number, opts?: { compact?: boolean }) => {
+        if (opts?.compact && Math.abs(val) >= 100000) {
+            return `₹${(val / 100000).toFixed(1)}L`;
+        }
+        return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(val);
+    };
+
     const currentYear = new Date().getFullYear();
     const [isAdding, setIsAdding] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
@@ -31,7 +42,7 @@ export function ResourceAssignmentTab() {
         fetchRateCards().then(setRateCards).catch(() => setRateCards([]));
     }, []);
 
-    // Compute visible months based on start/end dates
+    // Compute visible months based on start/end dates — only scheduled months are shown/editable
     const visibleMonths = useMemo(() => {
         if (!startDate) return ALL_MONTHS;
         const start = new Date(startDate);
@@ -41,12 +52,16 @@ export function ResourceAssignmentTab() {
         const startYear = start.getFullYear();
 
         if (!end) {
-            // Show from start month to Dec of same year
-            return ALL_MONTHS.slice(startMonth);
+            if (selectedYear < startYear) return [];
+            if (selectedYear === startYear) return ALL_MONTHS.slice(startMonth);
+            return ALL_MONTHS; // future years after start
         }
 
         const endMonth = end.getMonth();
         const endYear = end.getFullYear();
+
+        // Year entirely outside the scheduled range — no editable months
+        if (selectedYear < startYear || selectedYear > endYear) return [];
 
         if (startYear === endYear && startYear === selectedYear) {
             return ALL_MONTHS.slice(startMonth, endMonth + 1);
@@ -54,10 +69,8 @@ export function ResourceAssignmentTab() {
             return ALL_MONTHS.slice(startMonth);
         } else if (selectedYear === endYear) {
             return ALL_MONTHS.slice(0, endMonth + 1);
-        } else if (selectedYear > startYear && selectedYear < endYear) {
-            return ALL_MONTHS; // full year in between
         }
-        return ALL_MONTHS;
+        return ALL_MONTHS; // full year in between
     }, [startDate, endDate, selectedYear]);
 
     const filteredRoles = useMemo(() => {
@@ -224,7 +237,7 @@ export function ResourceAssignmentTab() {
                                         <td className="p-2 pl-3 font-medium text-slate-800">{r.skill || r.role}</td>
                                         <td className="p-2 text-slate-600">{r.experienceBand || '-'}</td>
                                         <td className="p-2 text-slate-500 text-xs">{r.category}</td>
-                                        <td className="p-2 pr-3 text-right font-mono text-slate-500 group-hover:text-slate-700">₹{(r.annualCtc / 100000).toFixed(1)}L</td>
+                                        <td className="p-2 pr-3 text-right font-mono text-slate-500 group-hover:text-slate-700">{fmtINR(r.annualCtc, { compact: true })}</td>
                                     </tr>
                                 ))}
                             </tbody>
@@ -260,7 +273,7 @@ export function ResourceAssignmentTab() {
                                     <td className="p-2 px-3 font-medium text-slate-900 border-r sticky left-0 bg-white z-10">
                                         <div className="flex flex-col">
                                             <span className="text-sm">{row.role}</span>
-                                            <span className="text-xs text-slate-500">₹{(row.annualCTC / 100000).toFixed(1)}L CTC</span>
+                                            <span className="text-xs text-slate-500">{fmtINR(row.annualCTC, { compact: true })} CTC</span>
                                         </div>
                                     </td>
                                     <td className="p-2 border-r">

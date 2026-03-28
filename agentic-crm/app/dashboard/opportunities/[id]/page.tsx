@@ -21,22 +21,48 @@ import {
     ChevronDown,
     XCircle,
     AlertTriangle,
-    Search
+    Search,
+    Upload,
+    Download,
+    Trash2,
+    FileText
 } from "lucide-react";
 import { useOpportunityStore } from "@/lib/store";
 import { EstimationTab } from "./components/EstimationTab";
 import { ResourceAssignmentTab } from "./components/ResourceAssignmentTab";
 import { GomCalculatorTab } from "./components/GomCalculatorTab";
 import { OpportunityEstimationProvider, useOpportunityEstimation } from "./context/OpportunityEstimationContext";
+import { useCurrency } from "@/components/providers/currency-provider";
+import { CommentsPanel } from "./components/CommentsPanel";
+import { AuditLogPane } from "./components/AuditLogPane";
 
 // Static dropdowns (not master-data driven)
-const PROJECT_TYPES = ["New Development", "Modernization", "Maintenance", "Consulting"];
-const DURATIONS = ["3 Months", "6 Months", "9 Months", "12 Months", "> 1 Year"];
+const DURATION_UNITS = ["days", "weeks", "months"];
 const ARCHITECTS = ["David Chen", "Sarah Jones", "Rahul Gupta", "Emily White"];
 
-const DURATION_MONTHS: Record<string, number> = {
-    "3 Months": 3, "6 Months": 6, "9 Months": 9, "12 Months": 12, "> 1 Year": 18,
-};
+// Convert duration value + unit to total months (for end date / value calcs)
+function durationToDays(value: number, unit: string): number {
+    switch (unit) {
+        case 'days': return value;
+        case 'weeks': return value * 7;
+        case 'months': return value * 30;
+        default: return value * 30;
+    }
+}
+
+function durationToMonths(value: number, unit: string): number {
+    switch (unit) {
+        case 'days': return value / 30;
+        case 'weeks': return value / 4.33;
+        case 'months': return value;
+        default: return value;
+    }
+}
+
+function formatDuration(value: string, unit: string): string {
+    if (!value) return '';
+    return `${value} ${unit}`;
+}
 
 // Save button that uses the estimation context (must be inside the provider)
 function PresalesSaveButton() {
@@ -69,8 +95,16 @@ function PresalesSaveButton() {
     );
 }
 
+// Bridge component to sync GOM percent from context to parent
+function GomPercentSync({ onGomPercentChange }: { onGomPercentChange: (pct: number) => void }) {
+    const { gomPercent } = useOpportunityEstimation();
+    useEffect(() => { onGomPercentChange(gomPercent); }, [gomPercent, onGomPercentChange]);
+    return null;
+}
+
 export default function OpportunityDetailsPage({ params }: { params: Promise<{ id: string }> }) {
     const router = useRouter();
+    const { format: fmtCurrency, symbol: cSym } = useCurrency();
     const { id } = use(params);
     const { updateOpportunity } = useOpportunityStore();
     const { toast } = useToast();
@@ -88,6 +122,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const [managers, setManagers] = useState<{ id: string; name: string; department: string }[]>([]);
     const [isLoadingManagers, setIsLoadingManagers] = useState(false);
     const [opportunityManagerName, setOpportunityManagerName] = useState("");
+    const [projectTypes, setProjectTypes] = useState<string[]>([]);
+    const [autoSaveIntervalMinutes, setAutoSaveIntervalMinutes] = useState(2);
 
     // Form State
     const [formData, setFormData] = useState({
@@ -101,11 +137,17 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         tentativeStartDate: "",
         tentativeEndDate: "",
         duration: "",
+        durationUnit: "months",
         pricingModel: "",
         expectedDayRate: "",
         description: "",
         value: 0
     });
+
+    // Attachments state
+    const [attachments, setAttachments] = useState<{ id: string; fileName: string; fileType: string; fileSize: number; uploadedAt: string }[]>([]);
+    const [isUploading, setIsUploading] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Presales Modal State (Modal for transition)
     const [presalesForm, setPresalesForm] = useState({
@@ -151,6 +193,17 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const [techDropdownOpen, setTechDropdownOpen] = useState(false);
     const [techSearch, setTechSearch] = useState("");
     const techDropdownRef = useRef<HTMLDivElement>(null);
+
+    // Re-estimate modal state
+    const [showReestimateModal, setShowReestimateModal] = useState(false);
+    const [adjustedEstimatedValue, setAdjustedEstimatedValue] = useState<string>("");
+    const [reEstimateComment, setReEstimateComment] = useState("");
+    const [detailedStatus, setDetailedStatus] = useState<string>("");
+
+    // GOM percent from estimation context (for threshold check)
+    const [contextGomPercent, setContextGomPercent] = useState(0);
+    const [minGomPercent, setMinGomPercent] = useState(0);
+    const [gomApproved, setGomApproved] = useState(false);
 
     // Load managers by department when presales modal opens
     useEffect(() => {
@@ -272,13 +325,15 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         const fetchMasterData = async () => {
             const headers = getAuthHeaders();
             try {
-                const [clientsRes, regionsRes, techRes, pricingRes, salesRes, deptRes] = await Promise.all([
+                const [clientsRes, regionsRes, techRes, pricingRes, salesRes, deptRes, projTypesRes, budgetRes] = await Promise.all([
                     fetch(`${API_URL}/api/master/clients`, { headers }),
                     fetch(`${API_URL}/api/master/regions`, { headers }),
                     fetch(`${API_URL}/api/master/technologies`, { headers }),
                     fetch(`${API_URL}/api/master/pricing-models`, { headers }),
                     fetch(`${API_URL}/api/master/salespersons`, { headers }),
                     fetch(`${API_URL}/api/master/departments`, { headers }),
+                    fetch(`${API_URL}/api/master/project-types`, { headers }),
+                    fetch(`${API_URL}/api/admin/budget-assumptions`, { headers }),
                 ]);
                 if (clientsRes.ok) setClients(await clientsRes.json());
                 if (regionsRes.ok) setRegions((await regionsRes.json()).map((r: any) => r.name));
@@ -286,6 +341,16 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 if (pricingRes.ok) setPricingModels((await pricingRes.json()).map((p: any) => p.name));
                 if (salesRes.ok) setSalespersons(await salesRes.json());
                 if (deptRes.ok) setDepartments(await deptRes.json());
+                if (projTypesRes.ok) setProjectTypes((await projTypesRes.json()).map((p: any) => p.name));
+                if (budgetRes.ok) {
+                    const budgetData = await budgetRes.json();
+                    if (budgetData.autoSaveIntervalMinutes !== undefined) {
+                        setAutoSaveIntervalMinutes(budgetData.autoSaveIntervalMinutes);
+                    }
+                    if (budgetData.minGomPercent !== undefined) {
+                        setMinGomPercent(budgetData.minGomPercent);
+                    }
+                }
             } catch (err) {
                 console.error("Failed to load master data", err);
             }
@@ -295,23 +360,26 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
     // Auto-calculate tentative end date
     useEffect(() => {
-        if (formData.tentativeStartDate && formData.duration && DURATION_MONTHS[formData.duration]) {
+        const dur = Number(formData.duration);
+        if (formData.tentativeStartDate && dur > 0 && formData.durationUnit) {
             const start = new Date(formData.tentativeStartDate);
-            const months = DURATION_MONTHS[formData.duration];
+            const days = durationToDays(dur, formData.durationUnit);
             const end = new Date(start);
-            end.setMonth(end.getMonth() + months);
+            end.setDate(end.getDate() + days);
             setFormData(prev => ({ ...prev, tentativeEndDate: end.toISOString().split('T')[0] }));
         }
-    }, [formData.tentativeStartDate, formData.duration]);
+    }, [formData.tentativeStartDate, formData.duration, formData.durationUnit]);
 
-    // Auto-calculate estimated value = Expected Day Rate × 20 working days × Duration months
+    // Auto-calculate estimated value = Expected Day Rate × 20 working days × Duration months (only for Staffing)
     useEffect(() => {
+        if (formData.projectType !== 'Staffing') return;
         const rate = Number(formData.expectedDayRate) || 0;
-        const months = DURATION_MONTHS[formData.duration] || 0;
+        const dur = Number(formData.duration) || 0;
+        const months = durationToMonths(dur, formData.durationUnit);
         if (rate > 0 && months > 0) {
-            setFormData(prev => ({ ...prev, value: rate * 20 * months }));
+            setFormData(prev => ({ ...prev, value: Math.round(rate * 20 * months) }));
         }
-    }, [formData.expectedDayRate, formData.duration]);
+    }, [formData.expectedDayRate, formData.duration, formData.durationUnit, formData.projectType]);
 
     // Fetch Data on Load
     useEffect(() => {
@@ -326,7 +394,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 setFormData({
                     clientName: data.client?.name || "",
                     region: data.region || "",
-                    projectType: "New Development", // Default if missing
+                    projectType: data.projectType || "New Development",
                     projectName: data.title || "",
                     practice: data.practice || "",
                     salesRep: data.salesRepName || "",
@@ -334,13 +402,24 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     tentativeStartDate: data.tentativeStartDate ? new Date(data.tentativeStartDate).toISOString().split('T')[0] : "",
                     tentativeEndDate: data.tentativeEndDate ? new Date(data.tentativeEndDate).toISOString().split('T')[0] : "",
                     duration: data.tentativeDuration || "",
+                    durationUnit: data.tentativeDurationUnit || "months",
                     pricingModel: data.pricingModel || "",
                     expectedDayRate: data.expectedDayRate || "",
                     description: data.description || "",
                     value: data.value || 0
                 });
 
+                // Load attachments
+                if (data.attachments && Array.isArray(data.attachments)) {
+                    setAttachments(data.attachments);
+                }
+
                 setOpportunityManagerName(data.managerName || "");
+                if (data.adjustedEstimatedValue) {
+                    setAdjustedEstimatedValue(String(data.adjustedEstimatedValue));
+                }
+                setDetailedStatus(data.detailedStatus || "");
+                setGomApproved(data.gomApproved === true);
 
                 // Update active step based on stage
                 const stageName = data.stage?.name || data.currentStage || '';
@@ -393,8 +472,72 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         setFormData(prev => ({ ...prev, [name]: value }));
     };
 
+    // Attachment upload handler
+    const handleFileUpload = async (files: FileList | null) => {
+        if (!files || files.length === 0) return;
+        setIsUploading(true);
+        try {
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                const fd = new FormData();
+                fd.append("file", file);
+                const res = await fetch(`${API_URL}/api/opportunities/${id}/attachments`, {
+                    method: "POST",
+                    headers: { Authorization: getAuthHeaders().Authorization },
+                    body: fd,
+                });
+                if (!res.ok) throw new Error("Upload failed");
+                const attachment = await res.json();
+                setAttachments(prev => [...prev, attachment]);
+            }
+            toast({ title: "Uploaded", description: "File(s) uploaded successfully." });
+        } catch {
+            toast({ title: "Error", description: "Failed to upload file." });
+        } finally {
+            setIsUploading(false);
+            if (fileInputRef.current) fileInputRef.current.value = "";
+        }
+    };
+
+    // Attachment download handler (uses auth headers)
+    const handleDownloadAttachment = async (attachmentId: string, fileName: string) => {
+        try {
+            const res = await fetch(`${API_URL}/api/opportunities/${id}/attachments/${attachmentId}/download`, {
+                headers: getAuthHeaders(),
+            });
+            if (!res.ok) throw new Error("Download failed");
+            const blob = await res.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            window.URL.revokeObjectURL(url);
+        } catch {
+            toast({ title: "Error", description: "Failed to download file." });
+        }
+    };
+
+    // Attachment delete handler
+    const handleDeleteAttachment = async (attachmentId: string) => {
+        try {
+            const res = await fetch(`${API_URL}/api/opportunities/${id}/attachments/${attachmentId}`, {
+                method: "DELETE",
+                headers: getAuthHeaders(),
+            });
+            if (!res.ok) throw new Error("Delete failed");
+            setAttachments(prev => prev.filter(a => a.id !== attachmentId));
+            toast({ title: "Deleted", description: "Attachment removed." });
+        } catch {
+            toast({ title: "Error", description: "Failed to delete attachment." });
+        }
+    };
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        toast({ title: "Saving", description: "Saving opportunity..." });
         setIsSaving(true);
         try {
             const res = await fetch(`${API_URL}/api/opportunities/${id}`, {
@@ -410,7 +553,6 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     value: Number(formData.value)
                 });
                 toast({ title: "Success", description: "Opportunity updated successfully!" });
-                router.push("/dashboard/opportunities");
             } else {
                 toast({ title: "Error", description: "Failed to save changes. Please check all fields." });
             }
@@ -422,8 +564,41 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         }
     };
 
+    // Auto-save timer
+    const autoSaveRef = useRef<NodeJS.Timeout | null>(null);
+    const formDataRef = useRef(formData);
+    formDataRef.current = formData;
+
+    useEffect(() => {
+        if (autoSaveIntervalMinutes <= 0 || opportunityStage !== 0 || isLost) return;
+
+        autoSaveRef.current = setInterval(async () => {
+            try {
+                const res = await fetch(`${API_URL}/api/opportunities/${id}`, {
+                    method: 'PATCH',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify(formDataRef.current)
+                });
+                if (res.ok) {
+                    toast({ title: "Auto-saved", description: "Changes saved automatically." });
+                }
+            } catch (err) {
+                console.error("Auto-save failed", err);
+            }
+        }, autoSaveIntervalMinutes * 60 * 1000);
+
+        return () => {
+            if (autoSaveRef.current) clearInterval(autoSaveRef.current);
+        };
+    }, [autoSaveIntervalMinutes, opportunityStage, isLost, id]);
+
     const handlePresalesSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        // Validate proposal due date against start date
+        if (presalesForm.proposalDueDate && formData.tentativeStartDate && presalesForm.proposalDueDate > formData.tentativeStartDate) {
+            toast({ title: "Validation Error", description: "Proposal due date cannot be beyond the estimated start date." });
+            return;
+        }
         setIsSaving(true);
         try {
             // Update stage to Qualification (Presales) and save presales data
@@ -455,7 +630,36 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         }
     };
 
+    const handleApproveGom = async (approved: boolean) => {
+        try {
+            const res = await fetch(`${API_URL}/api/opportunities/${id}/approve-gom`, {
+                method: 'PATCH',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({ approved })
+            });
+            if (res.ok) {
+                setGomApproved(approved);
+                toast({ title: approved ? "GOM Approved" : "GOM Approval Revoked", description: approved ? "GOM has been approved. You can now move to Sales." : "GOM approval has been revoked." });
+            } else {
+                toast({ title: "Error", description: "Failed to update GOM approval." });
+            }
+        } catch (e) {
+            console.error(e);
+        }
+    };
+
     const handleMoveToSales = async () => {
+        // Check GOM approval
+        if (!gomApproved) {
+            toast({ title: "GOM Not Approved", description: "GOM must be approved before moving to Sales. Please approve the GOM in the GOM Calculator tab." });
+            return;
+        }
+        // Check GOM threshold if configured
+        if (minGomPercent > 0 && contextGomPercent < minGomPercent) {
+            toast({ title: "GOM Below Threshold", description: `GOM is ${contextGomPercent.toFixed(1)}%, which is below the minimum required ${minGomPercent}%. Cannot submit to Sales.` });
+            return;
+        }
+        toast({ title: "Processing", description: "Moving to Sales..." });
         setIsSaving(true);
         try {
             const res = await fetch(`${API_URL}/api/opportunities/${id}`, {
@@ -470,7 +674,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 setOpportunityStage(2);
                 toast({ title: "Success", description: "Moved to Sales stage." });
             } else {
-                toast({ title: "Error", description: "Failed to move to Sales." });
+                const err = await res.json().catch(() => ({}));
+                toast({ title: "Error", description: err.error || "Failed to move to Sales." });
             }
         } catch (e) {
             console.error(e);
@@ -480,6 +685,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     };
 
     const handleProposalSent = async () => {
+        toast({ title: "Processing", description: "Sending proposal..." });
         setIsSaving(true);
         try {
             const res = await fetch(`${API_URL}/api/opportunities/${id}`, {
@@ -502,19 +708,36 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     };
 
     const handleSendBackForReestimate = async () => {
+        setShowReestimateModal(true);
+    };
+
+    const handleConfirmReestimate = async () => {
+        if (!reEstimateComment.trim()) {
+            toast({ title: "Required", description: "Please enter a comment explaining why re-estimation is needed." });
+            return;
+        }
         setIsSaving(true);
         try {
+            const payload: any = { stageName: 'Qualification', reEstimateComment: reEstimateComment.trim() };
+            if (adjustedEstimatedValue && Number(adjustedEstimatedValue) > 0) {
+                payload.adjustedEstimatedValue = Number(adjustedEstimatedValue);
+            }
             const res = await fetch(`${API_URL}/api/opportunities/${id}`, {
                 method: 'PATCH',
                 headers: getAuthHeaders(),
-                body: JSON.stringify({ stageName: 'Qualification' })
+                body: JSON.stringify(payload)
             });
             if (res.ok) {
-                await updateOpportunity(id, { stage: 'Qualification' });
+                // Update UI state immediately
                 setCurrentStageName('Qualification');
                 setActiveStep(1);
                 setOpportunityStage(1);
+                setGomApproved(false);
+                setShowReestimateModal(false);
+                setReEstimateComment("");
                 toast({ title: "Success", description: "Sent back for re-estimation." });
+                // Sync Zustand store in background (non-blocking)
+                updateOpportunity(id, { stage: 'Qualification' }).catch(() => {});
             } else {
                 toast({ title: "Error", description: "Failed to send back for re-estimation." });
             }
@@ -557,6 +780,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     };
 
     const handleMoveToProject = async () => {
+        toast({ title: "Processing", description: "Converting to project..." });
         setIsSaving(true);
         try {
             const res = await fetch(`${API_URL}/api/opportunities/${id}/convert`, {
@@ -588,7 +812,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     if (isLoading) return <div className="p-6">Loading Opportunity...</div>;
 
     return (
-        <div className="max-w-7xl mx-auto space-y-4 relative">
+        <div className="max-w-[1400px] mx-auto space-y-4 relative">
             {/* Header with Actions */}
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -624,7 +848,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             <button
                                 onClick={handleMoveToSales}
                                 disabled={isSaving}
-                                className="px-4 py-2 bg-blue-600 text-white rounded-md font-medium hover:bg-blue-700 disabled:opacity-50"
+                                className={`px-4 py-2 rounded-md font-medium disabled:opacity-50 ${gomApproved ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-slate-300 text-slate-600 cursor-not-allowed'}`}
+                                title={!gomApproved ? 'GOM must be approved first (see GOM Calculator tab)' : ''}
                             >
                                 {isSaving ? 'Moving...' : 'Move to Sales'}
                             </button>
@@ -819,8 +1044,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 onChange={handleChange}
                             >
                                 <option value="">Select Project Type</option>
-                                {PROJECT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-                                <option value="Development">Development</option>
+                                {projectTypes.map((t: string) => <option key={t} value={t}>{t}</option>)}
                             </select>
                         </div>
 
@@ -876,8 +1100,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     className={`w-full min-h-[42px] px-3 py-2 border border-slate-300 rounded-md text-sm shadow-sm flex flex-wrap gap-1 ${isPipelineEditable ? 'bg-white cursor-pointer' : 'bg-slate-50 cursor-not-allowed opacity-70'}`}
                                     onClick={() => { if (isPipelineEditable) setTechDropdownOpen(!techDropdownOpen); }}
                                 >
-                                    {formData.technology ? formData.technology.split(',').filter(Boolean).map(t => (
-                                        <span key={t} className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 text-xs px-2 py-0.5 rounded-full border border-indigo-200">
+                                    {formData.technology ? formData.technology.split(',').filter(Boolean).map((t, i) => (
+                                        <span key={`${t}-${i}`} className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 text-xs px-2 py-0.5 rounded-full border border-indigo-200">
                                             {t}
                                             <button type="button" onClick={(e) => {
                                                 e.stopPropagation();
@@ -934,18 +1158,50 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             </div>
                         </div>
 
-                        {/* Value */}
+                        {/* Day Rate (only for Staffing) */}
+                        {formData.projectType === 'Staffing' && (
                         <div className="space-y-1.5">
-                            <label className="block text-sm font-bold text-slate-700">Estimated Value ($)</label>
+                            <label className="block text-sm font-bold text-slate-700">Expected Day Rate ({cSym}) *</label>
                             <input
                                 type="number"
-                                name="value"
-                                readOnly
-                                value={formData.value}
-                                placeholder="0.00"
-                                className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-md text-sm shadow-sm text-slate-500 cursor-not-allowed"
+                                name="expectedDayRate"
+                                required
+                                value={formData.expectedDayRate}
+                                placeholder="0"
+                                disabled={!isPipelineEditable}
+                                className={`w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm shadow-sm ${disabledClass}`}
+                                onChange={handleChange}
                             />
-                            <p className="text-[10px] text-slate-400">= Day Rate ({formData.expectedDayRate || 0}) × 20 days × {DURATION_MONTHS[formData.duration] || 0} months</p>
+                        </div>
+                        )}
+
+                        {/* Value */}
+                        <div className="space-y-1.5">
+                            <label className="block text-sm font-bold text-slate-700">Estimated Value ({cSym}){formData.projectType !== 'Staffing' ? ' *' : ''}</label>
+                            {formData.projectType === 'Staffing' ? (
+                            <>
+                                <input
+                                    type="number"
+                                    name="value"
+                                    readOnly
+                                    value={formData.value}
+                                    placeholder="0.00"
+                                    className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-md text-sm shadow-sm text-slate-500 cursor-not-allowed"
+                                />
+                                <p className="text-[10px] text-slate-400">= Day Rate ({formData.expectedDayRate || 0}) × 20 days × {Math.round(durationToMonths(Number(formData.duration) || 0, formData.durationUnit) * 100) / 100} months</p>
+                            </>
+                            ) : (
+                                <input
+                                    type="number"
+                                    name="value"
+                                    required
+                                    value={formData.value || ''}
+                                    placeholder="0.00"
+                                    disabled={!isPipelineEditable}
+                                    className={`w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm shadow-sm ${isPipelineEditable ? 'bg-white' : 'bg-slate-50 cursor-not-allowed opacity-70'}`}
+                                    onChange={(e) => setFormData(prev => ({ ...prev, value: Number(e.target.value) || 0 }))}
+                                />
+                            )}
                         </div>
 
                         {/* Row 4: Dates & Duration */}
@@ -965,16 +1221,27 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
                         <div className="space-y-1.5">
                             <label className="block text-sm font-bold text-slate-700">Duration/Tentative End Date</label>
-                            <select
-                                name="duration"
-                                value={formData.duration}
-                                disabled={!isPipelineEditable}
-                                className={`w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm shadow-sm ${disabledClass}`}
-                                onChange={handleChange}
-                            >
-                                <option value="">Select Duration</option>
-                                {DURATIONS.map(d => <option key={d} value={d}>{d}</option>)}
-                            </select>
+                            <div className="flex gap-2">
+                                <input
+                                    type="number"
+                                    name="duration"
+                                    min="1"
+                                    value={formData.duration}
+                                    disabled={!isPipelineEditable}
+                                    placeholder="Enter duration"
+                                    className={`flex-1 px-3 py-2.5 border border-slate-300 rounded-md text-sm shadow-sm ${disabledClass}`}
+                                    onChange={handleChange}
+                                />
+                                <select
+                                    name="durationUnit"
+                                    value={formData.durationUnit}
+                                    disabled={!isPipelineEditable}
+                                    className={`w-28 px-3 py-2.5 border border-slate-300 rounded-md text-sm shadow-sm ${disabledClass}`}
+                                    onChange={handleChange}
+                                >
+                                    {DURATION_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                                </select>
+                            </div>
                         </div>
 
                         <div className="space-y-1.5">
@@ -989,6 +1256,67 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             <p className="text-[10px] text-slate-400">Auto-calculated from Start Date + Duration</p>
                         </div>
 
+                        {/* Row 5: Description & Attachments */}
+                        <div className="col-span-1 md:col-span-2 space-y-1.5">
+                            <label className="block text-sm font-bold text-slate-700">Description</label>
+                            <textarea
+                                name="description"
+                                placeholder="Project Description..."
+                                rows={4}
+                                value={formData.description}
+                                disabled={!isPipelineEditable}
+                                className={`w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm shadow-sm resize-none ${isPipelineEditable ? 'bg-white' : 'bg-slate-50 cursor-not-allowed opacity-70'}`}
+                                onChange={handleChange}
+                            />
+                        </div>
+
+                        <div className="space-y-1.5">
+                            <label className="block text-sm font-bold text-slate-700">Attachments</label>
+                            <input
+                                ref={fileInputRef}
+                                type="file"
+                                multiple
+                                className="hidden"
+                                onChange={(e) => handleFileUpload(e.target.files)}
+                            />
+                            {attachments.length === 0 ? (
+                                <div className="mt-1 border border-slate-300 rounded-md p-4 bg-white flex flex-col items-center justify-center text-slate-400 gap-2 border-dashed h-[120px]">
+                                    <span className="text-xs">No files attached.</span>
+                                    {isPipelineEditable && (
+                                        <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="flex items-center gap-1 text-slate-600 font-semibold text-xs hover:text-indigo-600">
+                                            <Upload className="w-3 h-3" />
+                                            {isUploading ? "Uploading..." : "Attach file"}
+                                        </button>
+                                    )}
+                                </div>
+                            ) : (
+                                <div className="space-y-2">
+                                    <div className="max-h-[120px] overflow-y-auto space-y-1.5">
+                                        {attachments.map(att => (
+                                            <div key={att.id} className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-md px-3 py-1.5 text-xs">
+                                                <div className="flex items-center gap-2 min-w-0">
+                                                    <FileText className="w-3.5 h-3.5 text-indigo-500 flex-shrink-0" />
+                                                    <button type="button" onClick={() => handleDownloadAttachment(att.id, att.fileName)} className="text-indigo-600 hover:underline truncate text-left">{att.fileName}</button>
+                                                    <span className="text-slate-400">{(att.fileSize / 1024).toFixed(0)} KB</span>
+                                                </div>
+                                                {isPipelineEditable && (
+                                                    <button type="button" onClick={() => handleDeleteAttachment(att.id)} className="text-slate-400 hover:text-red-600 flex-shrink-0">
+                                                        <Trash2 className="w-3.5 h-3.5" />
+                                                    </button>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                    {isPipelineEditable && (
+                                        <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="flex items-center gap-1 text-slate-600 font-semibold text-xs hover:text-indigo-600">
+                                            <Upload className="w-3 h-3" />
+                                            {isUploading ? "Uploading..." : "Attach more"}
+                                        </button>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+
                     </div>
 
                     {/* Footer Actions */}
@@ -999,7 +1327,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             disabled={isSaving}
                             className="px-6 py-2 bg-blue-600 border border-transparent rounded-md text-white font-bold hover:bg-blue-700 transition-all disabled:opacity-70"
                         >
-                            {isSaving ? 'Saving...' : 'Submit Details'}
+                            {isSaving ? 'Saving...' : 'Save'}
                         </button>
                     </div>
                     )}
@@ -1009,7 +1337,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
             {/* PRESALES VIEW (Step 1) */}
             {activeStep === 1 && (
-                <OpportunityEstimationProvider opportunityId={id} readOnly={opportunityStage >= 2} startDate={formData.tentativeStartDate} endDate={formData.tentativeEndDate}>
+                <OpportunityEstimationProvider opportunityId={id} readOnly={opportunityStage >= 2} startDate={formData.tentativeStartDate} endDate={formData.tentativeEndDate} adjustedEstimatedValue={Number(adjustedEstimatedValue) || 0}>
+                    <GomPercentSync onGomPercentChange={setContextGomPercent} />
                     {opportunityStage < 2 && <PresalesSaveButton />}
                     <div className="bg-white rounded-lg shadow-sm border border-slate-200">
                         {isLost && (
@@ -1024,7 +1353,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                         )}
                         {/* Inner Tabs */}
                         <div className="flex items-center gap-4 px-4 border-b border-slate-200 text-sm font-medium">
-                            {["Project Details", "Schedule", "Resource Assignment", "Estimation", "GOM Calculator"].map(tab => (
+                            {["Project Details", "Schedule", "Resource Assignment", "GOM Calculator", "Estimation"].map(tab => (
                                 <button
                                     key={tab}
                                     onClick={() => setActiveTab(tab)}
@@ -1098,6 +1427,12 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                         <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Expected Day Rate</label>
                                         <div className="font-semibold text-slate-800">{formData.expectedDayRate}</div>
                                     </div>
+                                    {Number(adjustedEstimatedValue) > 0 && (
+                                    <div>
+                                        <label className="block text-xs font-semibold text-amber-600 uppercase mb-1">Adjusted Estimated Value</label>
+                                        <div className="font-bold text-amber-700">{fmtCurrency(Number(adjustedEstimatedValue))}</div>
+                                    </div>
+                                    )}
                                     <div className="col-span-2">
                                         <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Description</label>
                                         <div className="font-semibold text-slate-800 truncate">{formData.description}</div>
@@ -1119,10 +1454,10 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                             <label className="text-sm font-medium text-slate-600">GOM Approve/Reject</label>
                                             <div className="text-sm font-bold text-amber-600">: Approval Needed</div>
 
-                                            <label className="text-sm font-medium text-slate-600">Revenue (₹)</label>
+                                            <label className="text-sm font-medium text-slate-600">Revenue ({cSym})</label>
                                             <div className="text-sm font-bold text-slate-800">: 0.0</div>
 
-                                            <label className="text-sm font-medium text-slate-600">Final Cost (₹)</label>
+                                            <label className="text-sm font-medium text-slate-600">Final Cost ({cSym})</label>
                                             <div className="text-sm font-bold text-slate-800">: 0.0</div>
                                         </div>
                                     </div>
@@ -1130,7 +1465,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     {/* Right: Inputs */}
                                     <div className="space-y-4 pt-10">
                                         <div className="grid grid-cols-3 gap-4 items-center">
-                                            <label className="text-sm font-medium text-slate-600">Resource Cost (₹)</label>
+                                            <label className="text-sm font-medium text-slate-600">Resource Cost ({cSym})</label>
                                             <input disabled type="text" className="col-span-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-sm" />
                                         </div>
                                         <div className="grid grid-cols-3 gap-4 items-center">
@@ -1179,7 +1514,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                         </div>
 
                                         <div className="grid grid-cols-3 gap-4 items-center">
-                                            <label className="text-sm font-medium text-slate-600">Round Trip Cost (₹)</label>
+                                            <label className="text-sm font-medium text-slate-600">Round Trip Cost ({cSym})</label>
                                             <input
                                                 type="number"
                                                 name="roundTripCost"
@@ -1190,7 +1525,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                             />
                                         </div>
                                         <div className="grid grid-cols-3 gap-4 items-center">
-                                            <label className="text-sm font-medium text-slate-600">Medical Insurance Cost (₹)</label>
+                                            <label className="text-sm font-medium text-slate-600">Medical Insurance Cost ({cSym})</label>
                                             <input
                                                 type="number"
                                                 name="medicalInsuranceCost"
@@ -1202,7 +1537,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                         </div>
 
                                         <div className="grid grid-cols-3 gap-4 items-center">
-                                            <label className="text-sm font-medium text-slate-600">Visa Cost (₹)</label>
+                                            <label className="text-sm font-medium text-slate-600">Visa Cost ({cSym})</label>
                                             <input
                                                 type="number"
                                                 name="visaCost"
@@ -1213,7 +1548,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                             />
                                         </div>
                                         <div className="grid grid-cols-3 gap-4 items-center">
-                                            <label className="text-sm font-medium text-slate-600">Vaccine Cost (₹)</label>
+                                            <label className="text-sm font-medium text-slate-600">Vaccine Cost ({cSym})</label>
                                             <input
                                                 type="number"
                                                 name="vaccineCost"
@@ -1225,7 +1560,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                         </div>
 
                                         <div className="grid grid-cols-3 gap-4 items-center">
-                                            <label className="text-sm font-medium text-slate-600">Hotel Cost (₹)</label>
+                                            <label className="text-sm font-medium text-slate-600">Hotel Cost ({cSym})</label>
                                             <input
                                                 type="number"
                                                 name="hotelCost"
@@ -1251,9 +1586,14 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 <div className="space-y-4">
                                     <div className="flex items-center justify-between border-b border-slate-200 pb-2 mb-4">
                                         <h3 className="font-bold text-slate-900">Attachments</h3>
-                                        <button className="px-3 py-1.5 bg-slate-100 text-slate-700 font-medium rounded text-xs hover:bg-slate-200 flex items-center gap-2">
-                                            <Paperclip className="w-3 h-3" /> Attach
-                                        </button>
+                                        {opportunityStage < 2 && (
+                                            <>
+                                                <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(e) => handleFileUpload(e.target.files)} />
+                                                <button onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="px-3 py-1.5 bg-slate-100 text-slate-700 font-medium rounded text-xs hover:bg-slate-200 flex items-center gap-2">
+                                                    <Paperclip className="w-3 h-3" /> {isUploading ? "Uploading..." : "Attach"}
+                                                </button>
+                                            </>
+                                        )}
                                     </div>
 
                                     <div className="bg-slate-50 border border-slate-200 rounded-md overflow-hidden">
@@ -1267,9 +1607,25 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                <tr>
-                                                    <td className="px-3 py-6 text-center text-slate-400 italic" colSpan={4}>No attachments found</td>
-                                                </tr>
+                                                {attachments.length === 0 ? (
+                                                    <tr>
+                                                        <td className="px-3 py-6 text-center text-slate-400 italic" colSpan={4}>No attachments found</td>
+                                                    </tr>
+                                                ) : attachments.map(att => (
+                                                    <tr key={att.id} className="border-b border-slate-100 hover:bg-slate-100">
+                                                        <td className="px-3 py-2">
+                                                            <button type="button" onClick={() => handleDownloadAttachment(att.id, att.fileName)} className="text-indigo-600 hover:underline text-left">{att.fileName}</button>
+                                                        </td>
+                                                        <td className="px-3 py-2">{att.fileType}</td>
+                                                        <td className="px-3 py-2">{new Date(att.uploadedAt).toLocaleDateString()}</td>
+                                                        <td className="px-3 py-2 flex items-center gap-2">
+                                                            <button type="button" onClick={() => handleDownloadAttachment(att.id, att.fileName)} className="text-slate-400 hover:text-indigo-600"><Download className="w-3.5 h-3.5" /></button>
+                                                            {opportunityStage < 2 && (
+                                                                <button onClick={() => handleDeleteAttachment(att.id)} className="text-slate-400 hover:text-red-600"><Trash2 className="w-3.5 h-3.5" /></button>
+                                                            )}
+                                                        </td>
+                                                    </tr>
+                                                ))}
                                             </tbody>
                                         </table>
                                     </div>
@@ -1326,16 +1682,27 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
                                     <div className="space-y-1.5">
                                         <label className="block text-sm font-bold text-slate-700">Duration/Tentative End Date *</label>
-                                        <select
-                                            name="duration"
-                                            value={formData.duration}
-                                            onChange={handleChange}
-                                            disabled={opportunityStage >= 2}
-                                            className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm disabled:bg-slate-100 disabled:cursor-not-allowed"
-                                        >
-                                            <option value="">Select Duration</option>
-                                            {DURATIONS.map(d => <option key={d} value={d}>{d}</option>)}
-                                        </select>
+                                        <div className="flex gap-2">
+                                            <input
+                                                type="number"
+                                                name="duration"
+                                                min="1"
+                                                value={formData.duration}
+                                                onChange={handleChange}
+                                                disabled={opportunityStage >= 2}
+                                                placeholder="Enter duration"
+                                                className="flex-1 px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm disabled:bg-slate-100 disabled:cursor-not-allowed"
+                                            />
+                                            <select
+                                                name="durationUnit"
+                                                value={formData.durationUnit}
+                                                onChange={handleChange}
+                                                disabled={opportunityStage >= 2}
+                                                className="w-28 px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm disabled:bg-slate-100 disabled:cursor-not-allowed"
+                                            >
+                                                {DURATION_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                                            </select>
+                                        </div>
                                     </div>
 
                                     <div className="space-y-1.5">
@@ -1610,7 +1977,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                         {/* TAB CONTENT: GOM Calculator */}
                         {activeTab === "GOM Calculator" && (
                             <div className="p-5">
-                                <GomCalculatorTab />
+                                <GomCalculatorTab gomApproved={gomApproved} onApproveGom={handleApproveGom} canApprove={opportunityStage === 1 && !isLost} />
                             </div>
                         )}
                     </div>
@@ -1672,8 +2039,14 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             </div>
                             <div className="bg-indigo-50 rounded-lg p-3 border border-indigo-200">
                                 <p className="text-xs text-indigo-600 mb-1">Estimated Value</p>
-                                <p className="font-semibold text-indigo-700">₹{Number(formData.value).toLocaleString()}</p>
+                                <p className="font-semibold text-indigo-700">{fmtCurrency(Number(formData.value))}</p>
                             </div>
+                            {Number(adjustedEstimatedValue) > 0 && (
+                            <div className="bg-amber-50 rounded-lg p-3 border border-amber-200">
+                                <p className="text-xs text-amber-600 mb-1">Adjusted Value</p>
+                                <p className="font-bold text-amber-700">{fmtCurrency(Number(adjustedEstimatedValue))}</p>
+                            </div>
+                            )}
                         </div>
                     </div>
 
@@ -1722,8 +2095,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                         <span className="text-xs text-slate-500 uppercase tracking-wide">Technology</span>
                                         <div className="flex flex-wrap gap-1 mt-1">
                                             {formData.technology
-                                                ? formData.technology.split(',').filter(Boolean).map(t => (
-                                                    <span key={t} className="inline-block bg-indigo-50 text-indigo-700 text-xs px-2 py-0.5 rounded-full border border-indigo-200">{t}</span>
+                                                ? formData.technology.split(',').filter(Boolean).map((t, i) => (
+                                                    <span key={`${t}-${i}`} className="inline-block bg-indigo-50 text-indigo-700 text-xs px-2 py-0.5 rounded-full border border-indigo-200">{t}</span>
                                                 ))
                                                 : <p className="font-medium text-slate-800">N/A</p>
                                             }
@@ -1789,23 +2162,23 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     </div>
                                     <div>
                                         <span className="text-xs text-slate-500 uppercase tracking-wide">Round Trip Cost</span>
-                                        <p className="font-medium text-slate-800 mt-1">₹{Number(presalesData.roundTripCost).toLocaleString()}</p>
+                                        <p className="font-medium text-slate-800 mt-1">{fmtCurrency(Number(presalesData.roundTripCost))}</p>
                                     </div>
                                     <div>
                                         <span className="text-xs text-slate-500 uppercase tracking-wide">Medical Insurance</span>
-                                        <p className="font-medium text-slate-800 mt-1">₹{Number(presalesData.medicalInsuranceCost).toLocaleString()}</p>
+                                        <p className="font-medium text-slate-800 mt-1">{fmtCurrency(Number(presalesData.medicalInsuranceCost))}</p>
                                     </div>
                                     <div>
                                         <span className="text-xs text-slate-500 uppercase tracking-wide">Visa Cost</span>
-                                        <p className="font-medium text-slate-800 mt-1">₹{Number(presalesData.visaCost).toLocaleString()}</p>
+                                        <p className="font-medium text-slate-800 mt-1">{fmtCurrency(Number(presalesData.visaCost))}</p>
                                     </div>
                                     <div>
                                         <span className="text-xs text-slate-500 uppercase tracking-wide">Vaccine Cost</span>
-                                        <p className="font-medium text-slate-800 mt-1">₹{Number(presalesData.vaccineCost).toLocaleString()}</p>
+                                        <p className="font-medium text-slate-800 mt-1">{fmtCurrency(Number(presalesData.vaccineCost))}</p>
                                     </div>
                                     <div>
                                         <span className="text-xs text-slate-500 uppercase tracking-wide">Hotel Cost</span>
-                                        <p className="font-medium text-slate-800 mt-1">₹{Number(presalesData.hotelCost).toLocaleString()}</p>
+                                        <p className="font-medium text-slate-800 mt-1">{fmtCurrency(Number(presalesData.hotelCost))}</p>
                                     </div>
                                 </div>
 
@@ -1814,7 +2187,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                                     <div className="bg-blue-50 rounded-lg p-3 border border-blue-200">
                                         <p className="text-xs text-blue-600 mb-1">Revenue</p>
-                                        <p className="text-sm font-bold text-blue-700">₹{Math.round(gomResults.offshoreRevenue * (gomInputs.workingDays || 1)).toLocaleString()}</p>
+                                        <p className="text-sm font-bold text-blue-700">{fmtCurrency(Math.round(gomResults.offshoreRevenue * (gomInputs.workingDays || 1)))}</p>
                                     </div>
                                     <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
                                         <p className="text-xs text-slate-500 mb-1">Offshore Day Rate</p>
@@ -1826,7 +2199,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     </div>
                                     <div className="bg-purple-50 rounded-lg p-3 border border-purple-200">
                                         <p className="text-xs text-purple-600 mb-1">Adjusted Cost</p>
-                                        <p className="text-sm font-bold text-purple-700">₹{Math.round(gomResults.adjustedCost).toLocaleString()}</p>
+                                        <p className="text-sm font-bold text-purple-700">{fmtCurrency(Math.round(gomResults.adjustedCost))}</p>
                                     </div>
                                 </div>
                             </div>
@@ -1856,7 +2229,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             </div>
                             <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
                                 <p className="text-xs text-slate-500 mb-1">Value</p>
-                                <p className="font-semibold text-sm text-slate-800">₹{Number(formData.value).toLocaleString()}</p>
+                                <p className="font-semibold text-sm text-slate-800">{fmtCurrency(Number(formData.value))}</p>
                             </div>
                             <div className="bg-emerald-50 rounded-lg p-3 border border-emerald-200">
                                 <p className="text-xs text-emerald-600 mb-1">Status</p>
@@ -1873,6 +2246,12 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     </div>
                 </div>
             )}
+
+            {/* Comments & Audit Log — visible on all stages */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <CommentsPanel opportunityId={id} currentStage={steps[activeStep]} />
+                <AuditLogPane opportunityId={id} />
+            </div>
 
             {/* Presales Modal */}
             {showPresalesModal && (
@@ -2012,6 +2391,74 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     className="w-full px-4 py-2 text-sm font-bold text-white bg-red-600 hover:bg-red-700 rounded-md shadow-sm disabled:opacity-70 transition-colors"
                                 >
                                     {isSaving ? 'Saving...' : 'Confirm Lost'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Re-estimate Modal */}
+            {showReestimateModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden">
+                        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-white">
+                            <div className="flex items-center gap-2">
+                                <RefreshCw className="w-5 h-5 text-amber-500" />
+                                <h3 className="font-bold text-lg text-slate-800">Send Back for Re-estimation</h3>
+                            </div>
+                            <button
+                                onClick={() => setShowReestimateModal(false)}
+                                className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100"
+                            >
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+
+                        <div className="p-5 space-y-4">
+                            <p className="text-sm text-slate-600">
+                                Provide a comment explaining why re-estimation is needed. Optionally provide an adjusted estimated value.
+                            </p>
+
+                            <div className="space-y-1.5">
+                                <label className="block text-sm font-bold text-slate-700">Comment *</label>
+                                <textarea
+                                    rows={3}
+                                    required
+                                    placeholder="Explain why re-estimation is needed..."
+                                    value={reEstimateComment}
+                                    onChange={(e) => setReEstimateComment(e.target.value)}
+                                    className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm resize-none focus:outline-none focus:ring-2 focus:ring-amber-500/30 focus:border-amber-400"
+                                />
+                            </div>
+
+                            <div className="space-y-1.5">
+                                <label className="block text-sm font-bold text-slate-700">Adjusted Estimated Value ({cSym})</label>
+                                <input
+                                    type="number"
+                                    placeholder="0.00"
+                                    value={adjustedEstimatedValue}
+                                    onChange={(e) => setAdjustedEstimatedValue(e.target.value)}
+                                    className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-amber-500/30 focus:border-amber-400"
+                                />
+                                <p className="text-[10px] text-slate-400">Leave empty to keep the current estimated value</p>
+                            </div>
+
+                            <div className="pt-4 flex justify-between gap-3 border-t border-slate-50">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowReestimateModal(false)}
+                                    className="w-full px-4 py-2 text-sm font-bold text-slate-700 bg-white border border-slate-300 rounded-md hover:bg-slate-50 transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleConfirmReestimate}
+                                    disabled={isSaving || !reEstimateComment.trim()}
+                                    className="w-full px-4 py-2 text-sm font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-md shadow-sm disabled:opacity-70 transition-colors"
+                                >
+                                    {isSaving ? 'Sending...' : 'Send for Re-estimation'}
                                 </button>
                             </div>
                         </div>

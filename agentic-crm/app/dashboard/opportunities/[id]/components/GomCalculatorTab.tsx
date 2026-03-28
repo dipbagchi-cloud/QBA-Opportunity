@@ -1,20 +1,16 @@
 "use client";
 
-import { useState } from "react";
-import { TrendingUp, AlertCircle, CheckCircle, XCircle, DollarSign } from "lucide-react";
+import { TrendingUp, AlertCircle, CheckCircle, XCircle, DollarSign, ShieldCheck, ShieldOff } from "lucide-react";
 import { useOpportunityEstimation } from "../context/OpportunityEstimationContext";
+import { useCurrency } from "@/components/providers/currency-provider";
 
-// Exchange rates (INR as base)
-const EXCHANGE_RATES: Record<string, { rate: number; symbol: string; name: string }> = {
-    INR: { rate: 1, symbol: "₹", name: "Indian Rupee" },
-    USD: { rate: 0.012, symbol: "$", name: "US Dollar" },
-    EUR: { rate: 0.011, symbol: "€", name: "Euro" },
-    GBP: { rate: 0.0094, symbol: "£", name: "British Pound" },
-    AED: { rate: 0.044, symbol: "د.إ", name: "UAE Dirham" },
-    SGD: { rate: 0.016, symbol: "S$", name: "Singapore Dollar" },
-};
+interface GomCalculatorTabProps {
+    gomApproved?: boolean;
+    onApproveGom?: (approved: boolean) => void;
+    canApprove?: boolean;
+}
 
-export function GomCalculatorTab() {
+export function GomCalculatorTab({ gomApproved = false, onApproveGom, canApprove = false }: GomCalculatorTabProps) {
     const {
         assumptions,
         setAssumptions,
@@ -32,8 +28,7 @@ export function GomCalculatorTab() {
         readOnly,
     } = useOpportunityEstimation();
 
-    // Currency converter state
-    const [selectedCurrency, setSelectedCurrency] = useState<string>("INR");
+    const { format: fmtCurrency, symbol: cSym, convert: convertCurrency, currency: selectedCurrency, setCurrency: setSelectedCurrency, currencies, getRate } = useCurrency();
 
     // Get status icon
     const getStatusIcon = () => {
@@ -42,17 +37,7 @@ export function GomCalculatorTab() {
         return <XCircle className="w-5 h-5" />;
     };
 
-    // Convert amount to selected currency
-    const convertCurrency = (amountInINR: number) => {
-        const rate = EXCHANGE_RATES[selectedCurrency].rate;
-        return amountInINR * rate;
-    };
-
-    // Format currency
-    const formatCurrency = (amount: number) => {
-        const symbol = EXCHANGE_RATES[selectedCurrency].symbol;
-        return `${symbol}${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-    };
+    const formatCurrency = (amount: number) => fmtCurrency(amount);
 
     return (
         <div className="space-y-4">
@@ -63,7 +48,7 @@ export function GomCalculatorTab() {
                         <span className="text-xs font-medium opacity-90">Total Revenue</span>
                         <TrendingUp className="w-4 h-4 opacity-75" />
                     </div>
-                    <div className="text-xl font-bold">₹{revenue.toLocaleString()}</div>
+                    <div className="text-xl font-bold">{fmtCurrency(revenue)}</div>
                     <div className="text-[10px] opacity-75 mt-0.5">Quote Price</div>
                 </div>
 
@@ -74,7 +59,7 @@ export function GomCalculatorTab() {
                             {resources.length} Resources
                         </span>
                     </div>
-                    <div className="text-xl font-bold">₹{totalCost.toLocaleString()}</div>
+                    <div className="text-xl font-bold">{fmtCurrency(totalCost)}</div>
                     <div className="text-[10px] opacity-75 mt-0.5">Resource + Travel</div>
                 </div>
 
@@ -91,12 +76,42 @@ export function GomCalculatorTab() {
                     <div className="flex items-center justify-between mb-1">
                         <span className="text-xs font-medium opacity-90">Profit</span>
                         <span className="text-[10px] font-semibold px-1.5 py-0.5 bg-white/20 rounded">
-                            INR
+                            {selectedCurrency}
                         </span>
                     </div>
-                    <div className="text-xl font-bold">₹{(revenue - totalCost).toLocaleString()}</div>
+                    <div className="text-xl font-bold">{fmtCurrency(revenue - totalCost)}</div>
                     <div className="text-[10px] opacity-75 mt-0.5">Net Margin</div>
                 </div>
+            </div>
+
+            {/* GOM Approval */}
+            <div className={`rounded-lg border-2 p-4 flex items-center justify-between ${gomApproved ? 'bg-green-50 border-green-300' : 'bg-amber-50 border-amber-300'}`}>
+                <div className="flex items-center gap-3">
+                    {gomApproved
+                        ? <ShieldCheck className="w-6 h-6 text-green-600" />
+                        : <ShieldOff className="w-6 h-6 text-amber-600" />
+                    }
+                    <div>
+                        <div className={`text-sm font-bold ${gomApproved ? 'text-green-800' : 'text-amber-800'}`}>
+                            {gomApproved ? 'GOM Approved' : 'GOM Not Approved'}
+                        </div>
+                        <div className="text-xs text-slate-600">
+                            {gomApproved
+                                ? 'This opportunity can be moved to Sales.'
+                                : 'GOM must be approved before this opportunity can move to Sales.'}
+                        </div>
+                    </div>
+                </div>
+                {canApprove && onApproveGom && (
+                    <button
+                        onClick={() => onApproveGom(!gomApproved)}
+                        className={`px-4 py-2 rounded-md text-sm font-bold transition-colors ${gomApproved
+                            ? 'bg-white border border-red-300 text-red-600 hover:bg-red-50'
+                            : 'bg-green-600 text-white hover:bg-green-700 shadow-sm'}`}
+                    >
+                        {gomApproved ? 'Revoke Approval' : 'Approve GOM'}
+                    </button>
+                )}
             </div>
 
             {/* Budget Assumptions (Read-Only from Admin Settings) */}
@@ -113,8 +128,8 @@ export function GomCalculatorTab() {
                         <div><span className="text-slate-500">Increments:</span> <span className="font-semibold">{assumptions.averageIncrementPercent}%</span></div>
                         <div><span className="text-slate-500">Bonus:</span> <span className="font-semibold">{assumptions.bonusPercent}%</span></div>
                         <div><span className="text-slate-500">Indirect Cost:</span> <span className="font-semibold">{assumptions.indirectCostPercent}%</span></div>
-                        <div><span className="text-slate-500">Welfare/FTE:</span> <span className="font-semibold">₹{assumptions.welfarePerFte.toLocaleString()}</span></div>
-                        <div><span className="text-slate-500">Training/FTE:</span> <span className="font-semibold">₹{assumptions.trainingPerFte.toLocaleString()}</span></div>
+                        <div><span className="text-slate-500">Welfare/FTE:</span> <span className="font-semibold">{fmtCurrency(assumptions.welfarePerFte)}</span></div>
+                        <div><span className="text-slate-500">Training/FTE:</span> <span className="font-semibold">{fmtCurrency(assumptions.trainingPerFte)}</span></div>
                     </div>
                 </div>
             </div>
@@ -152,18 +167,18 @@ export function GomCalculatorTab() {
 
                             <div className="flex justify-between items-center text-sm">
                                 <span className="text-slate-600">Resource Cost:</span>
-                                <span className="font-semibold text-slate-900">₹{totalResourceCost.toLocaleString()}</span>
+                                <span className="font-semibold text-slate-900">{fmtCurrency(totalResourceCost)}</span>
                             </div>
 
                             <div className="flex justify-between items-center text-sm">
                                 <span className="text-slate-600">Travel Cost:</span>
-                                <span className="font-semibold text-slate-900">₹{totalTravelCost.toLocaleString()}</span>
+                                <span className="font-semibold text-slate-900">{fmtCurrency(totalTravelCost)}</span>
                             </div>
 
                             <div className="border-t border-slate-300 pt-2 mt-2">
                                 <div className="flex justify-between items-center text-sm font-bold">
                                     <span className="text-slate-700">Total Cost:</span>
-                                    <span className="text-slate-900">₹{totalCost.toLocaleString()}</span>
+                                    <span className="text-slate-900">{fmtCurrency(totalCost)}</span>
                                 </div>
                             </div>
                         </div>
@@ -172,7 +187,7 @@ export function GomCalculatorTab() {
                         <div className="bg-blue-50 rounded-lg p-3 border border-blue-200">
                             <div className="flex justify-between items-center mb-1">
                                 <span className="text-xs font-medium text-blue-900">Calculated Revenue:</span>
-                                <span className="text-base font-bold text-blue-700">₹{revenue.toLocaleString()}</span>
+                                <span className="text-base font-bold text-blue-700">{fmtCurrency(revenue)}</span>
                             </div>
                             <p className="text-xs text-blue-600">
                                 Formula: Total Cost × (1 + {markupPercent}%)
@@ -234,7 +249,7 @@ export function GomCalculatorTab() {
                         {/* Cost Fields */}
                         <div className="grid grid-cols-2 gap-4">
                             <div>
-                                <label className="block text-xs font-medium text-slate-700 mb-1">Round Trip Cost (₹)</label>
+                                <label className="block text-xs font-medium text-slate-700 mb-1">Round Trip Cost ({cSym})</label>
                                 <input
                                     type="number"
                                     value={travelCosts.roundTripCost}
@@ -245,7 +260,7 @@ export function GomCalculatorTab() {
                                 />
                             </div>
                             <div>
-                                <label className="block text-xs font-medium text-slate-700 mb-1">Medical Insurance (₹)</label>
+                                <label className="block text-xs font-medium text-slate-700 mb-1">Medical Insurance ({cSym})</label>
                                 <input
                                     type="number"
                                     value={travelCosts.medicalInsurance}
@@ -259,7 +274,7 @@ export function GomCalculatorTab() {
 
                         <div className="grid grid-cols-2 gap-4">
                             <div>
-                                <label className="block text-xs font-medium text-slate-700 mb-1">Visa Cost (₹)</label>
+                                <label className="block text-xs font-medium text-slate-700 mb-1">Visa Cost ({cSym})</label>
                                 <input
                                     type="number"
                                     value={travelCosts.visaCost}
@@ -270,7 +285,7 @@ export function GomCalculatorTab() {
                                 />
                             </div>
                             <div>
-                                <label className="block text-xs font-medium text-slate-700 mb-1">Vaccine Cost (₹)</label>
+                                <label className="block text-xs font-medium text-slate-700 mb-1">Vaccine Cost ({cSym})</label>
                                 <input
                                     type="number"
                                     value={travelCosts.vaccineCost}
@@ -284,7 +299,7 @@ export function GomCalculatorTab() {
 
                         <div className="grid grid-cols-2 gap-4">
                             <div>
-                                <label className="block text-xs font-medium text-slate-700 mb-1">Local Conveyance (₹)</label>
+                                <label className="block text-xs font-medium text-slate-700 mb-1">Local Conveyance ({cSym})</label>
                                 <input
                                     type="number"
                                     value={travelCosts.localConveyance}
@@ -295,7 +310,7 @@ export function GomCalculatorTab() {
                                 />
                             </div>
                             <div>
-                                <label className="block text-xs font-medium text-slate-700 mb-1">Marketing/Communication (₹)</label>
+                                <label className="block text-xs font-medium text-slate-700 mb-1">Marketing/Communication ({cSym})</label>
                                 <input
                                     type="number"
                                     value={travelCosts.marketingCom}
@@ -308,7 +323,7 @@ export function GomCalculatorTab() {
                         </div>
 
                         <div>
-                            <label className="block text-xs font-medium text-slate-700 mb-1">Hotel Cost (₹)</label>
+                            <label className="block text-xs font-medium text-slate-700 mb-1">Hotel Cost ({cSym})</label>
                             <input
                                 type="number"
                                 value={travelCosts.hotelCost}
@@ -324,7 +339,7 @@ export function GomCalculatorTab() {
                             <div className="flex justify-between items-center">
                                 <span className="text-xs font-medium text-blue-900">Total Travel Cost:</span>
                                 <span className="text-base font-bold text-blue-700">
-                                    ₹{totalTravelCost.toLocaleString()}
+                                    {fmtCurrency(totalTravelCost)}
                                 </span>
                             </div>
                         </div>
@@ -369,9 +384,9 @@ export function GomCalculatorTab() {
                         onChange={(e) => setSelectedCurrency(e.target.value)}
                         className="px-3 py-1.5 bg-white border-2 border-indigo-300 rounded-lg text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent shadow-sm"
                     >
-                        {Object.entries(EXCHANGE_RATES).map(([code, { name, symbol }]) => (
-                            <option key={code} value={code}>
-                                {symbol} {code} - {name}
+                        {currencies.map((c: any) => (
+                            <option key={c.code} value={c.code}>
+                                {c.symbol} {c.code}
                             </option>
                         ))}
                     </select>
@@ -386,7 +401,7 @@ export function GomCalculatorTab() {
                             {formatCurrency(convertCurrency(revenue))}
                         </div>
                         <div className="text-xs text-slate-500">
-                            ₹{revenue.toLocaleString()} INR
+                            {fmtCurrency(revenue)}
                         </div>
                     </div>
 
@@ -397,7 +412,7 @@ export function GomCalculatorTab() {
                             {formatCurrency(convertCurrency(totalCost))}
                         </div>
                         <div className="text-xs text-slate-500">
-                            ₹{totalCost.toLocaleString()} INR
+                            {fmtCurrency(totalCost)}
                         </div>
                     </div>
 
@@ -408,7 +423,7 @@ export function GomCalculatorTab() {
                             {formatCurrency(convertCurrency(revenue - totalCost))}
                         </div>
                         <div className="text-xs text-slate-500">
-                            ₹{(revenue - totalCost).toLocaleString()} INR
+                            {fmtCurrency(revenue - totalCost)}
                         </div>
                     </div>
 
@@ -432,14 +447,14 @@ export function GomCalculatorTab() {
                             <span className="text-slate-600">Resource Cost:</span>
                             <div className="text-right">
                                 <div className="font-semibold text-slate-900">{formatCurrency(convertCurrency(totalResourceCost))}</div>
-                                <div className="text-xs text-slate-500">₹{totalResourceCost.toLocaleString()}</div>
+                                <div className="text-xs text-slate-500">{fmtCurrency(totalResourceCost)}</div>
                             </div>
                         </div>
                         <div className="flex justify-between items-center py-2 border-b border-slate-100">
                             <span className="text-slate-600">Travel Cost:</span>
                             <div className="text-right">
                                 <div className="font-semibold text-slate-900">{formatCurrency(convertCurrency(totalTravelCost))}</div>
-                                <div className="text-xs text-slate-500">₹{totalTravelCost.toLocaleString()}</div>
+                                <div className="text-xs text-slate-500">{fmtCurrency(totalTravelCost)}</div>
                             </div>
                         </div>
                     </div>
@@ -449,7 +464,7 @@ export function GomCalculatorTab() {
                 <div className="mt-4 flex items-center justify-center gap-2 text-xs text-slate-600">
                     <span className="font-medium">Exchange Rate:</span>
                     <span className="px-2 py-1 bg-white rounded border border-indigo-200">
-                        1 INR = {EXCHANGE_RATES[selectedCurrency].rate.toFixed(4)} {selectedCurrency}
+                        1 INR = {(getRate(selectedCurrency) || 1).toFixed(4)} {selectedCurrency}
                     </span>
                     <span className="text-slate-400">• Live conversion</span>
                 </div>

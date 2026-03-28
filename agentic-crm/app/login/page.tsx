@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { Eye, EyeOff, Loader2, Lock, Mail, ArrowRight, ShieldCheck, AlertCircle, KeyRound, Check } from "lucide-react";
@@ -10,9 +10,29 @@ import { API_URL, getAuthHeaders } from "@/lib/api";
 
 export default function LoginPage() {
     const router = useRouter();
-    const { login, isLoading, error, clearError, mustChangePassword } = useAuthStore();
+    const searchParams = useSearchParams();
+    const { login, ssoLogin, ssoCallback, isLoading, error, clearError, mustChangePassword } = useAuthStore();
     const [showPassword, setShowPassword] = useState(false);
     const [formData, setFormData] = useState({ email: "", password: "" });
+    const [ssoProcessing, setSsoProcessing] = useState(false);
+
+    const isSSO = formData.email.toLowerCase().endsWith("@qbadvisory.com");
+
+    // Handle Microsoft OAuth redirect callback
+    useEffect(() => {
+        const code = searchParams.get('code');
+        if (code && !ssoProcessing) {
+            setSsoProcessing(true);
+            // Clean URL immediately
+            window.history.replaceState({}, '', '/login');
+            ssoCallback(code).then((success) => {
+                if (success) {
+                    router.push("/dashboard");
+                }
+                setSsoProcessing(false);
+            });
+        }
+    }, [searchParams, ssoCallback, router, ssoProcessing]);
 
     // Set-password modal state
     const [newPassword, setNewPassword] = useState("");
@@ -26,11 +46,17 @@ export default function LoginPage() {
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         clearError();
-        const success = await login(formData.email, formData.password);
+
+        let success: boolean;
+        if (isSSO) {
+            success = await ssoLogin(formData.email);
+        } else {
+            success = await login(formData.email, formData.password);
+        }
+
         if (success && !useAuthStore.getState().mustChangePassword) {
             router.push("/dashboard");
         }
-        // If mustChangePassword is true, the modal will show — don't redirect
     };
 
     const handleSetPassword = async (e: React.FormEvent) => {
@@ -66,6 +92,22 @@ export default function LoginPage() {
             setSetSaving(false);
         }
     };
+
+    // Show processing screen while handling SSO callback
+    if (ssoProcessing) {
+        return (
+            <div className="min-h-screen bg-gradient-to-br from-neutral-950 via-neutral-900 to-neutral-950 text-white flex flex-col items-center justify-center p-4">
+                <Loader2 className="w-10 h-10 animate-spin text-blue-400 mb-4" />
+                <p className="text-neutral-300 text-sm">Verifying Microsoft SSO authentication...</p>
+                {error && (
+                    <div className="mt-4 flex items-center gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm max-w-md">
+                        <AlertCircle className="w-4 h-4 shrink-0" />
+                        {error}
+                    </div>
+                )}
+            </div>
+        );
+    }
 
     // Show set-password screen after first login
     if (mustChangePassword) {
@@ -198,6 +240,8 @@ export default function LoginPage() {
                             </div>
                         </div>
 
+                        {/* Password field — hidden for SSO users */}
+                        {!isSSO && (
                         <div className="space-y-2">
                             <div className="flex justify-between items-center ml-1">
                                 <label className="text-sm font-medium text-neutral-300">Password</label>
@@ -222,6 +266,15 @@ export default function LoginPage() {
                                 </button>
                             </div>
                         </div>
+                        )}
+
+                        {/* SSO info banner */}
+                        {isSSO && (
+                            <div className="flex items-center gap-2 p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl text-blue-400 text-sm">
+                                <ShieldCheck className="w-4 h-4 shrink-0" />
+                                You will be redirected to Microsoft to sign in
+                            </div>
+                        )}
 
                         <button
                             type="submit"
@@ -232,11 +285,11 @@ export default function LoginPage() {
                                 {isLoading ? (
                                     <>
                                         <Loader2 className="w-5 h-5 animate-spin" />
-                                        Signing in...
+                                        {isSSO ? "Authenticating via SSO..." : "Signing in..."}
                                     </>
                                 ) : (
                                     <>
-                                        Sign In
+                                        {isSSO ? "Sign In with SSO" : "Sign In"}
                                         <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
                                     </>
                                 )}
@@ -244,15 +297,7 @@ export default function LoginPage() {
                         </button>
                     </form>
 
-                    {/* Footer */}
-                    <div className="mt-6 text-center">
-                        <p className="text-neutral-400 text-sm">
-                            Don't have an account?{" "}
-                            <Link href="/register" className="text-primary-400 font-medium hover:text-primary-300 transition-colors">
-                                Start a free trial
-                            </Link>
-                        </p>
-                    </div>
+
                 </div>
 
                 {/* Footer Links */}

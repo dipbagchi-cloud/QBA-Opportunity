@@ -13,6 +13,8 @@ import {
   createRole,
   updateRole,
   deleteRole,
+  addUserToRole,
+  removeUserFromRole,
   listTeams,
 } from '../controllers/admin.controller';
 import {
@@ -38,6 +40,10 @@ import {
   createPricingModel,
   updatePricingModel,
   deletePricingModel,
+  listAllProjectTypes,
+  createProjectType,
+  updateProjectType,
+  deleteProjectType,
 } from '../controllers/master-data.controller';
 import {
   listAuditLogs,
@@ -50,6 +56,15 @@ import {
   updateEmailTemplate,
   sendTestEmail,
 } from '../controllers/email-templates.controller';
+import {
+  listCurrencyRates,
+  syncCurrencyRates,
+  seedAllDefaultCurrencies,
+  toggleCurrencyRate,
+  updateCurrencyRate,
+  addCurrencyRate,
+  deleteCurrencyRate,
+} from '../controllers/currency.controller';
 
 const router = Router();
 
@@ -68,6 +83,8 @@ router.get('/roles', authorize(PERMISSIONS.ROLES_MANAGE), listRoles);
 router.post('/roles', authorize(PERMISSIONS.ROLES_MANAGE), createRole);
 router.patch('/roles/:id', authorize(PERMISSIONS.ROLES_MANAGE), updateRole);
 router.delete('/roles/:id', authorize(PERMISSIONS.ROLES_MANAGE), deleteRole);
+router.post('/roles/:id/users', authorize(PERMISSIONS.ROLES_MANAGE), addUserToRole);
+router.delete('/roles/:id/users/:userId', authorize(PERMISSIONS.ROLES_MANAGE), removeUserFromRole);
 
 // Team listing (requires users:manage)
 router.get('/teams', authorize(PERMISSIONS.USERS_MANAGE), listTeams);
@@ -102,6 +119,12 @@ router.post('/pricing-models', authorize(PERMISSIONS.METADATA_MANAGE), createPri
 router.patch('/pricing-models/:id', authorize(PERMISSIONS.METADATA_MANAGE), updatePricingModel);
 router.delete('/pricing-models/:id', authorize(PERMISSIONS.METADATA_MANAGE), deletePricingModel);
 
+// Project type management (requires metadata:manage)
+router.get('/project-types', authorize(PERMISSIONS.METADATA_MANAGE), listAllProjectTypes);
+router.post('/project-types', authorize(PERMISSIONS.METADATA_MANAGE), createProjectType);
+router.patch('/project-types/:id', authorize(PERMISSIONS.METADATA_MANAGE), updateProjectType);
+router.delete('/project-types/:id', authorize(PERMISSIONS.METADATA_MANAGE), deleteProjectType);
+
 // Budget assumptions (GET: any authenticated user, PUT: requires settings:manage)
 router.get('/budget-assumptions', getBudgetAssumptions);
 router.put('/budget-assumptions', authorize(PERMISSIONS.SETTINGS_MANAGE), updateBudgetAssumptions);
@@ -116,5 +139,14 @@ router.get('/email-templates', authorize(PERMISSIONS.SETTINGS_MANAGE), listEmail
 router.get('/email-templates/:id', authorize(PERMISSIONS.SETTINGS_MANAGE), getEmailTemplate);
 router.patch('/email-templates/:id', authorize(PERMISSIONS.SETTINGS_MANAGE), updateEmailTemplate);
 router.post('/email-templates/test', authorize(PERMISSIONS.SETTINGS_MANAGE), sendTestEmail);
+
+// Currency rates (requires settings:manage for mutations, any auth for list)
+router.get('/currency-rates', listCurrencyRates);
+router.post('/currency-rates', authorize(PERMISSIONS.SETTINGS_MANAGE), addCurrencyRate);
+router.post('/currency-rates/sync', authorize(PERMISSIONS.SETTINGS_MANAGE), syncCurrencyRates);
+router.post('/currency-rates/seed', authorize(PERMISSIONS.SETTINGS_MANAGE), seedAllDefaultCurrencies);
+router.patch('/currency-rates/:id', authorize(PERMISSIONS.SETTINGS_MANAGE), updateCurrencyRate);
+router.patch('/currency-rates/:id/toggle', authorize(PERMISSIONS.SETTINGS_MANAGE), toggleCurrencyRate);
+router.delete('/currency-rates/:id', authorize(PERMISSIONS.SETTINGS_MANAGE), deleteCurrencyRate);
 
 export default router;
