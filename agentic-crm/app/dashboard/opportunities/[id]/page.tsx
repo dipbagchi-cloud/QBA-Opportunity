@@ -205,6 +205,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const [minGomPercent, setMinGomPercent] = useState(0);
     const [gomAutoApprovePercent, setGomAutoApprovePercent] = useState(0);
     const [gomApproved, setGomApproved] = useState(false);
+    const [gomPendingApproval, setGomPendingApproval] = useState<{ id: string; requester: string; reviewer: string | null; reason: string } | null>(null);
 
     // Load managers by department when presales modal opens
     useEffect(() => {
@@ -432,6 +433,14 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 setDetailedStatus(data.detailedStatus || "");
                 setGomApproved(data.gomApproved === true);
 
+                // Fetch pending GOM approval status
+                if (!data.gomApproved) {
+                    fetch(`${API_URL}/api/opportunities/${id}/gom-approval-status`, { headers: getAuthHeaders() })
+                        .then(r => r.ok ? r.json() : null)
+                        .then(d => { if (d?.pending) setGomPendingApproval(d.pending); })
+                        .catch(() => {});
+                }
+
                 // Update active step based on stage
                 const stageName = data.stage?.name || data.currentStage || '';
                 setCurrentStageName(stageName);
@@ -646,13 +655,38 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             const res = await fetch(`${API_URL}/api/opportunities/${id}/approve-gom`, {
                 method: 'PATCH',
                 headers: getAuthHeaders(),
-                body: JSON.stringify({ approved })
+                body: JSON.stringify({ approved, gomPercent: contextGomPercent })
             });
             if (res.ok) {
-                setGomApproved(approved);
-                toast({ title: approved ? "GOM Approved" : "GOM Approval Revoked", description: approved ? "GOM has been approved. You can now move to Sales." : "GOM approval has been revoked." });
+                const data = await res.json();
+                if (data.pendingApproval) {
+                    setGomPendingApproval({ id: data.approvalId, requester: '', reviewer: data.reviewer, reason: '' });
+                    toast({ title: "GOM Approval Requested", description: `Approval request sent to ${data.reviewer || 'your reporting manager'}.` });
+                } else {
+                    setGomApproved(data.gomApproved);
+                    setGomPendingApproval(null);
+                    toast({ title: data.gomApproved ? "GOM Approved" : "GOM Approval Revoked", description: data.gomApproved ? "GOM has been approved. You can now move to Sales." : "GOM approval has been revoked." });
+                }
             } else {
                 toast({ title: "Error", description: "Failed to update GOM approval." });
+            }
+        } catch (e) {
+            console.error(e);
+        }
+    };
+
+    const handleReviewGomApproval = async (approved: boolean, comments?: string) => {
+        try {
+            const res = await fetch(`${API_URL}/api/opportunities/${id}/review-gom-approval`, {
+                method: 'PATCH',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({ approved, comments })
+            });
+            if (res.ok) {
+                const data = await res.json();
+                setGomApproved(data.gomApproved);
+                setGomPendingApproval(null);
+                toast({ title: approved ? "GOM Approved" : "GOM Rejected", description: approved ? "GOM has been approved by manager." : "GOM approval has been rejected." });
             }
         } catch (e) {
             console.error(e);
@@ -1618,9 +1652,25 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                                         GOM Approved
                                                     </span>
                                                 )}
-                                                {opportunityStage < 2 && !gomApproved && (
+                                                {opportunityStage < 2 && !gomApproved && gomPendingApproval && (
+                                                    <span className="flex items-center gap-1.5 text-sm text-amber-600 font-semibold">
+                                                        <svg className="w-4 h-4 animate-pulse" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.828a1 1 0 101.415-1.414L11 9.586V6z" clipRule="evenodd" /></svg>
+                                                        Pending Approval{gomPendingApproval.reviewer ? ` from ${gomPendingApproval.reviewer}` : ''}
+                                                    </span>
+                                                )}
+                                                {opportunityStage < 2 && !gomApproved && gomPendingApproval && (
+                                                    <div className="flex gap-1">
+                                                        <button onClick={() => handleReviewGomApproval(true)} className="px-3 py-1.5 bg-green-600 text-white font-bold rounded-md hover:bg-green-700 text-xs">
+                                                            Approve
+                                                        </button>
+                                                        <button onClick={() => handleReviewGomApproval(false, 'Rejected')} className="px-3 py-1.5 bg-red-500 text-white font-bold rounded-md hover:bg-red-600 text-xs">
+                                                            Reject
+                                                        </button>
+                                                    </div>
+                                                )}
+                                                {opportunityStage < 2 && !gomApproved && !gomPendingApproval && (
                                                     <button onClick={() => handleApproveGom(true)} className="px-4 py-2 bg-blue-600 text-white font-bold rounded-md hover:bg-blue-700 text-sm">
-                                                        Approve GOM
+                                                        {gomAutoApprovePercent > 0 && contextGomPercent < gomAutoApprovePercent ? 'Request GOM Approval' : 'Approve GOM'}
                                                     </button>
                                                 )}
                                             </div>

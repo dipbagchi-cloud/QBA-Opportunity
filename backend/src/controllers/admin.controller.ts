@@ -714,6 +714,7 @@ export async function listQPeopleMappings(req: Request, res: Response) {
     const result = mappings.map((m: any) => ({
       id: m.id,
       qpeopleDesignation: m.qpeopleDesignation,
+      department: m.department,
       jobBand: m.jobBand,
       crmRoleIds: m.crmRoleIds || [],
       crmRoles: (m.crmRoleIds || []).map((rid: string) => ({ id: rid, name: roleMap.get(rid) || 'Unknown' })),

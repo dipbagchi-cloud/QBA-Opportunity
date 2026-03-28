@@ -312,27 +312,25 @@ export async function listDepartments(req: Request, res: Response) {
     }
 }
 
-// ── Managers by Department from QPeople ──
+// ── Managers by Department (CRM users with Manager role) ──
 export async function listManagersByDepartment(req: Request, res: Response) {
     const { department } = req.query;
     try {
-        const response = await fetch(
-            'https://hr.qbadvisory.com/api/method/hrms.api.employee.get_all_managers_with_departments',
-            { headers: { 'Authorization': 'token 762913b0eb9f140:1205f410c1b7b31' } }
-        );
-        const json: any = await response.json();
-        const all: any[] = json.message?.data || [];
-        const filtered = department
-            ? all.filter((e: any) => (e.department || e.department_name) === department)
-            : all;
-        const managers = filtered.map((e: any) => ({
-            id: e.name || e.employee,
-            name: e.employee_name || e.full_name || e.name,
-            department: e.department || e.department_name,
-        })).filter((m: any) => m.name);
-        res.json(managers);
+        const where: any = {
+            isActive: true,
+            roles: { some: { name: 'Manager' } },
+        };
+        if (department && typeof department === 'string') {
+            where.department = department;
+        }
+        const users = await prisma.user.findMany({
+            where,
+            orderBy: { name: 'asc' },
+            select: { id: true, name: true, email: true, department: true },
+        });
+        res.json(users);
     } catch (error) {
-        console.error('QPeople managers API error:', error);
-        res.status(502).json({ error: 'Failed to fetch managers from HRMS.' });
+        console.error('List managers error:', error);
+        res.status(500).json({ error: 'Failed to fetch managers.' });
     }
 }

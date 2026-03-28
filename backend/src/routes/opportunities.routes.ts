@@ -8,6 +8,8 @@ import {
     updateOpportunity,
     convertOpportunity,
     approveGom,
+    getGomApprovalStatus,
+    reviewGomApproval,
     listComments,
     addComment,
     getOpportunityAuditLog,
@@ -39,6 +41,8 @@ router.get('/:id', authorize(PERMISSIONS.PIPELINE_VIEW), getOpportunity);
 router.patch('/:id', authorize(PERMISSIONS.PIPELINE_WRITE), updateOpportunity);
 router.post('/:id/convert', authorize(PERMISSIONS.SALES_WRITE), convertOpportunity);
 router.patch('/:id/approve-gom', authorize(PERMISSIONS.PRESALES_WRITE), approveGom);
+router.get('/:id/gom-approval-status', authorize(PERMISSIONS.PIPELINE_VIEW), getGomApprovalStatus);
+router.patch('/:id/review-gom-approval', authorize(PERMISSIONS.PRESALES_WRITE), reviewGomApproval);
 router.get('/:id/comments', authorize(PERMISSIONS.PIPELINE_VIEW), listComments);
 router.post('/:id/comments', authorize(PERMISSIONS.PIPELINE_VIEW), addComment);
 router.get('/:id/audit-log', authorize(PERMISSIONS.PIPELINE_VIEW), getOpportunityAuditLog);

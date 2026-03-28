@@ -532,27 +532,102 @@ export async function updateOpportunity(req: Request, res: Response) {
 export async function approveGom(req: Request, res: Response) {
     try {
         const { id } = req.params;
-        const { approved } = req.body; // true or false
+        const { approved, gomPercent } = req.body;
 
-        const updated = await prisma.opportunity.update({
-            where: { id },
-            data: { gomApproved: approved === true },
+        // If revoking, just revoke
+        if (approved === false) {
+            const updated = await prisma.opportunity.update({ where: { id }, data: { gomApproved: false } });
+            await prisma.auditLog.create({ data: { entity: 'Opportunity', entityId: id, action: 'GOM_REVOKED', userId: req.user!.userId, changes: 'GOM Approval Revoked' } });
+            return res.json({ gomApproved: false });
+        }
+
+        // Get auto-approve threshold from budget assumptions
+        const config = await prisma.systemConfig.findUnique({ where: { key: 'budget_assumptions' } });
+        const assumptions = (config?.value as any) || {};
+        const autoApproveThreshold = assumptions.gomAutoApprovePercent || 0;
+
+        // If GOM% >= threshold (or threshold not set), auto-approve directly
+        if (autoApproveThreshold <= 0 || (gomPercent !== undefined && gomPercent >= autoApproveThreshold)) {
+            const updated = await prisma.opportunity.update({ where: { id }, data: { gomApproved: true } });
+            await prisma.auditLog.create({ data: { entity: 'Opportunity', entityId: id, action: 'GOM_APPROVED', userId: req.user!.userId, changes: `GOM Auto-Approved at ${gomPercent?.toFixed(1) || '?'}%` } });
+            return res.json({ gomApproved: true });
+        }
+
+        // GOM% below threshold — create approval request to reporting manager
+        const requester = await prisma.user.findUnique({ where: { id: req.user!.userId }, select: { id: true, name: true, reportingManagerName: true } });
+        let reviewerId: string | null = null;
+        if (requester?.reportingManagerName) {
+            const manager = await prisma.user.findFirst({ where: { name: requester.reportingManagerName, isActive: true } });
+            reviewerId = manager?.id || null;
+        }
+
+        // Cancel any existing pending GOM approval for this opportunity
+        await prisma.approvalRequest.updateMany({
+            where: { opportunityId: id, type: 'GOM_APPROVAL', status: 'Pending' },
+            data: { status: 'Cancelled' },
         });
 
-        await prisma.auditLog.create({
+        const approval = await prisma.approvalRequest.create({
             data: {
-                entity: 'Opportunity',
-                entityId: id,
-                action: approved ? 'GOM_APPROVED' : 'GOM_REVOKED',
-                userId: req.user!.userId,
-                changes: approved ? 'GOM Approved' : 'GOM Approval Revoked',
+                type: 'GOM_APPROVAL',
+                reason: `GOM is ${gomPercent?.toFixed(1) || '?'}% (below auto-approve threshold of ${autoApproveThreshold}%)`,
+                status: 'Pending',
+                opportunityId: id,
+                requesterId: req.user!.userId,
+                reviewerId,
             },
         });
 
-        res.json({ gomApproved: updated.gomApproved });
+        await prisma.auditLog.create({ data: { entity: 'Opportunity', entityId: id, action: 'GOM_APPROVAL_REQUESTED', userId: req.user!.userId, changes: `GOM Approval requested at ${gomPercent?.toFixed(1) || '?'}%. Sent to ${requester?.reportingManagerName || 'unassigned manager'}` } });
+
+        res.json({ gomApproved: false, pendingApproval: true, approvalId: approval.id, reviewer: requester?.reportingManagerName || null });
     } catch (error) {
         console.error("Approve GOM Error:", error);
         res.status(500).json({ error: 'Failed to update GOM approval' });
+    }
+}
+
+// GET /api/opportunities/:id/gom-approval-status
+export async function getGomApprovalStatus(req: Request, res: Response) {
+    try {
+        const { id } = req.params;
+        const pending = await prisma.approvalRequest.findFirst({
+            where: { opportunityId: id, type: 'GOM_APPROVAL', status: 'Pending' },
+            include: { requester: { select: { name: true } }, reviewer: { select: { name: true } } },
+            orderBy: { requestedAt: 'desc' },
+        });
+        res.json({ pending: pending ? { id: pending.id, requester: pending.requester.name, reviewer: pending.reviewer?.name || null, requestedAt: pending.requestedAt, reason: pending.reason } : null });
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to fetch approval status' });
+    }
+}
+
+// PATCH /api/opportunities/:id/review-gom-approval
+export async function reviewGomApproval(req: Request, res: Response) {
+    try {
+        const { id } = req.params;
+        const { approved, comments } = req.body;
+
+        const pending = await prisma.approvalRequest.findFirst({
+            where: { opportunityId: id, type: 'GOM_APPROVAL', status: 'Pending' },
+        });
+        if (!pending) return res.status(404).json({ error: 'No pending GOM approval request found' });
+
+        await prisma.approvalRequest.update({
+            where: { id: pending.id },
+            data: { status: approved ? 'Approved' : 'Rejected', comments, reviewedAt: new Date(), reviewerId: req.user!.userId },
+        });
+
+        if (approved) {
+            await prisma.opportunity.update({ where: { id }, data: { gomApproved: true } });
+        }
+
+        await prisma.auditLog.create({ data: { entity: 'Opportunity', entityId: id, action: approved ? 'GOM_APPROVED' : 'GOM_REJECTED', userId: req.user!.userId, changes: `GOM ${approved ? 'Approved' : 'Rejected'} by manager${comments ? `: ${comments}` : ''}` } });
+
+        res.json({ gomApproved: approved === true, status: approved ? 'Approved' : 'Rejected' });
+    } catch (error) {
+        console.error("Review GOM Approval Error:", error);
+        res.status(500).json({ error: 'Failed to review GOM approval' });
     }
 }
 
