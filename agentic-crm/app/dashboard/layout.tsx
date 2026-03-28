@@ -23,6 +23,7 @@ import { motion } from "framer-motion";
 import { AuthProvider } from "@/components/providers/auth-provider";
 import { CurrencyProvider, useCurrency } from "@/components/providers/currency-provider";
 import { useAuthStore } from "@/lib/auth-store";
+import ChatBot from "@/components/chatbot/ChatBot";
 
 interface NavItem {
     icon: any;
@@ -292,6 +293,9 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
                     {children}
                 </main>
             </div>
+
+            {/* AI Chatbot */}
+            <ChatBot />
         </div>
     );
 }

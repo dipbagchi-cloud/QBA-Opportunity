@@ -13,6 +13,7 @@ import masterDataRoutes from './routes/master-data.routes';
 import authRoutes from './routes/auth.routes';
 import adminRoutes from './routes/admin.routes';
 import contactsRoutes from './routes/contacts.routes';
+import chatbotRoutes from './routes/chatbot.routes';
 import { getPublicStats } from './controllers/public.controller';
 import { errorHandler } from './middleware/errorHandler';
 
@@ -49,6 +50,7 @@ app.use('/api/resources', resourcesRoutes);
 app.use('/api/rate-cards', rateCardsRoutes);
 app.use('/api/master', masterDataRoutes);
 app.use('/api/contacts', contactsRoutes);
+app.use('/api/chatbot', chatbotRoutes);
 
 // Health check (public)
 app.get('/api/health', (req, res) => {

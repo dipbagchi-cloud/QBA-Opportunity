@@ -16,6 +16,12 @@ export async function listUsers(req: Request, res: Response) {
     const filterRole = (req.query.role as string || '').trim();
     const filterStatus = (req.query.status as string || '').trim();
     const filterManager = (req.query.reportingManager as string || '').trim();
+    const sortBy = (req.query.sortBy as string || 'name').trim();
+    const sortDir = (req.query.sortDir as string || 'asc').trim() === 'desc' ? 'desc' : 'asc';
+
+    // Validate sortBy to prevent Prisma injection
+    const allowedSortFields = ['name', 'email', 'department', 'designation', 'reportingManagerName', 'isActive', 'createdAt', 'lastLoginAt'];
+    const safeSortBy = allowedSortFields.includes(sortBy) ? sortBy : 'name';
 
     const where: any = {};
     const andConditions: any[] = [];
@@ -42,7 +48,7 @@ export async function listUsers(req: Request, res: Response) {
       prisma.user.findMany({
         where,
         include: { roles: true, team: true },
-        orderBy: { name: 'asc' },
+        orderBy: { [safeSortBy]: sortDir } as any,
         skip: (page - 1) * limit,
         take: limit,
       }),

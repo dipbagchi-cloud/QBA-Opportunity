@@ -477,6 +477,11 @@ function UsersTab() {
     const [filterManager, setFilterManager] = useState("");
     const [filterOptions, setFilterOptions] = useState<{ departments: string[]; designations: string[]; managers: string[]; roles: string[]; statuses: string[] }>({ departments: [], designations: [], managers: [], roles: [], statuses: ['active', 'inactive'] });
 
+    // Sort
+    const [userSortKey, setUserSortKey] = useState("name");
+    const [userSortDir, setUserSortDir] = useState<SortDir>("asc");
+    const handleUserSort = (key: string, dir: SortDir) => { setUserSortKey(dir ? key : "name"); setUserSortDir(dir); setUserPage(1); };
+
     // Reset password
     const [resetUserId, setResetUserId] = useState<string | null>(null);
     const [resetPassword, setResetPassword] = useState("");
@@ -493,6 +498,7 @@ function UsersTab() {
             if (filterRole) qp.set("role", filterRole);
             if (filterStatus) qp.set("status", filterStatus);
             if (filterManager) qp.set("reportingManager", filterManager);
+            if (userSortKey && userSortDir) { qp.set("sortBy", userSortKey); qp.set("sortDir", userSortDir); }
             const res = await apiClient<any>(`/api/admin/users?${qp.toString()}`);
             // Support paginated { data, total } or legacy array
             if (res.data && Array.isArray(res.data)) {
@@ -510,7 +516,7 @@ function UsersTab() {
         } catch {
             setStatus({ type: "error", message: "Failed to load users." });
         }
-    }, [userLimit, filterDept, filterDesig, filterRole, filterStatus, filterManager]);
+    }, [userLimit, filterDept, filterDesig, filterRole, filterStatus, filterManager, userSortKey, userSortDir]);
 
     const fetchData = useCallback(async () => {
         setLoading(true);
@@ -679,8 +685,8 @@ function UsersTab() {
                     <table className="w-full text-xs">
                         <thead className="bg-slate-50 border-b border-slate-200">
                             <tr>
-                                <th className="text-left px-3 py-2 font-medium text-slate-600">Name</th>
-                                <th className="text-left px-3 py-2 font-medium text-slate-600">Email</th>
+                                <SortableHeader label="Name" sortKey="name" currentSort={userSortKey} currentDir={userSortDir} onSort={handleUserSort} className="text-left px-3 text-slate-600" />
+                                <SortableHeader label="Email" sortKey="email" currentSort={userSortKey} currentDir={userSortDir} onSort={handleUserSort} className="text-left px-3 text-slate-600" />
                                 <th className="text-left px-3 py-2 font-medium text-slate-600">
                                     <ColumnFilter label="Department" value={filterDept} options={filterOptions.departments} onChange={setFilterDept} />
                                 </th>
@@ -760,6 +766,38 @@ function UsersTab() {
             />
         </div>
     );
+}
+
+/* ─────────────── Sortable Column Header ─────────────── */
+type SortDir = "asc" | "desc" | null;
+function SortableHeader({ label, sortKey, currentSort, currentDir, onSort, className }: {
+    label: string; sortKey: string; currentSort: string; currentDir: SortDir;
+    onSort: (key: string, dir: SortDir) => void; className?: string;
+}) {
+    const active = currentSort === sortKey;
+    const next = (): SortDir => !active ? "asc" : currentDir === "asc" ? "desc" : null;
+    return (
+        <th className={`py-2 px-3 font-semibold select-none cursor-pointer hover:bg-slate-100/60 transition-colors ${className || "text-left text-slate-600"}`}
+            onClick={() => onSort(sortKey, next())}>
+            <span className="inline-flex items-center gap-1">
+                {label}
+                {active && currentDir === "asc" && <ChevronUp className="w-3 h-3 text-indigo-600" />}
+                {active && currentDir === "desc" && <ChevronDown className="w-3 h-3 text-indigo-600" />}
+                {!active && <ChevronDown className="w-3 h-3 text-slate-300" />}
+            </span>
+        </th>
+    );
+}
+
+/* ─────────────── Generic client-side sort helper ─────────────── */
+function sortData<T>(data: T[], key: string, dir: SortDir): T[] {
+    if (!dir || !key) return data;
+    return [...data].sort((a: any, b: any) => {
+        const av = a[key] ?? "";
+        const bv = b[key] ?? "";
+        if (typeof av === "number" && typeof bv === "number") return dir === "asc" ? av - bv : bv - av;
+        return dir === "asc" ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
+    });
 }
 
 /* ─────────────── Column Filter Dropdown ─────────────── */
@@ -1238,6 +1276,12 @@ function RateCardsTab() {
     const [saving, setSaving] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
 
+    // Sort
+    const [rcSortKey, setRcSortKey] = useState("");
+    const [rcSortDir, setRcSortDir] = useState<SortDir>(null);
+    const handleRcSort = (key: string, dir: SortDir) => { setRcSortKey(dir ? key : ""); setRcSortDir(dir); };
+    const sortedRateCards = sortData(rateCards, rcSortKey, rcSortDir);
+
     // Pagination
     const [rcPage, setRcPage] = useState(1);
     const [rcTotal, setRcTotal] = useState(0);
@@ -1456,18 +1500,18 @@ function RateCardsTab() {
                         <thead className="bg-slate-50 border-b border-slate-200">
                             <tr>
                                 <th className="text-left px-3 py-2 font-medium text-slate-600">#</th>
-                                <th className="text-left px-3 py-2 font-medium text-slate-600">Skill</th>
-                                <th className="text-left px-3 py-2 font-medium text-slate-600">Experience Band</th>
-                                <th className="text-right px-3 py-2 font-medium text-slate-600">Master CTC</th>
-                                <th className="text-right px-3 py-2 font-medium text-slate-600">Mercer CTC</th>
-                                <th className="text-right px-3 py-2 font-medium text-slate-600">Copilot</th>
-                                <th className="text-right px-3 py-2 font-medium text-slate-600">Existing CTC</th>
-                                <th className="text-right px-3 py-2 font-medium text-slate-600">Max</th>
+                                <SortableHeader label="Skill" sortKey="skill" currentSort={rcSortKey} currentDir={rcSortDir} onSort={handleRcSort} className="text-left px-3 text-slate-600" />
+                                <SortableHeader label="Experience Band" sortKey="experienceBand" currentSort={rcSortKey} currentDir={rcSortDir} onSort={handleRcSort} className="text-left px-3 text-slate-600" />
+                                <SortableHeader label="Master CTC" sortKey="masterCtc" currentSort={rcSortKey} currentDir={rcSortDir} onSort={handleRcSort} className="text-right px-3 text-slate-600" />
+                                <SortableHeader label="Mercer CTC" sortKey="mercerCtc" currentSort={rcSortKey} currentDir={rcSortDir} onSort={handleRcSort} className="text-right px-3 text-slate-600" />
+                                <SortableHeader label="Copilot" sortKey="copilot" currentSort={rcSortKey} currentDir={rcSortDir} onSort={handleRcSort} className="text-right px-3 text-slate-600" />
+                                <SortableHeader label="Existing CTC" sortKey="existingCtc" currentSort={rcSortKey} currentDir={rcSortDir} onSort={handleRcSort} className="text-right px-3 text-slate-600" />
+                                <SortableHeader label="Max" sortKey="maxCtc" currentSort={rcSortKey} currentDir={rcSortDir} onSort={handleRcSort} className="text-right px-3 text-slate-600" />
                                 <th className="text-right px-3 py-2 font-medium text-slate-600">Actions</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                            {rateCards.map((rc, idx) => (
+                            {sortedRateCards.map((rc, idx) => (
                                 <tr key={rc.id} className="hover:bg-slate-50/50">
                                     <td className="px-3 py-2 text-slate-400 text-xs">{(rcPage - 1) * rcLimit + idx + 1}</td>
                                     <td className="px-3 py-2 font-medium text-slate-800">{rc.skill || rc.role}</td>
@@ -1741,6 +1785,9 @@ function AuditLogTab() {
     const [entities, setEntities] = useState<string[]>([]);
     const [actions, setActions] = useState<string[]>([]);
     const [expandedRow, setExpandedRow] = useState<string | null>(null);
+    const [alSortKey, setAlSortKey] = useState(""); const [alSortDir, setAlSortDir] = useState<SortDir>(null);
+    const handleAlSort = (key: string, dir: SortDir) => { setAlSortKey(dir ? key : ""); setAlSortDir(dir); };
+    const sortedLogs = sortData(logs, alSortKey, alSortDir);
 
     const fetchLogs = useCallback(async () => {
         setLoading(true);
@@ -1858,15 +1905,15 @@ function AuditLogTab() {
                     <table className="w-full text-xs">
                         <thead>
                             <tr className="bg-slate-50 border-b border-slate-200">
-                                <th className="text-left px-3 py-2 font-semibold text-slate-600">Timestamp</th>
+                                <SortableHeader label="Timestamp" sortKey="timestamp" currentSort={alSortKey} currentDir={alSortDir} onSort={handleAlSort} className="text-left px-3 text-slate-600" />
                                 <th className="text-left px-3 py-2 font-semibold text-slate-600">User</th>
-                                <th className="text-left px-3 py-2 font-semibold text-slate-600">Entity</th>
-                                <th className="text-left px-3 py-2 font-semibold text-slate-600">Action</th>
+                                <SortableHeader label="Entity" sortKey="entity" currentSort={alSortKey} currentDir={alSortDir} onSort={handleAlSort} className="text-left px-3 text-slate-600" />
+                                <SortableHeader label="Action" sortKey="action" currentSort={alSortKey} currentDir={alSortDir} onSort={handleAlSort} className="text-left px-3 text-slate-600" />
                                 <th className="text-left px-3 py-2 font-semibold text-slate-600">Details</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {logs.map(log => (
+                            {sortedLogs.map(log => (
                                 <React.Fragment key={log.id}>
                                     <tr
                                         onClick={() => setExpandedRow(expandedRow === log.id ? null : log.id)}
@@ -2287,6 +2334,9 @@ function EmailTemplatesTab() {
     const [status, setStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
     const [testEmail, setTestEmail] = useState("");
     const [sendingTest, setSendingTest] = useState(false);
+    const [etSortKey, setEtSortKey] = useState(""); const [etSortDir, setEtSortDir] = useState<SortDir>(null);
+    const handleEtSort = (key: string, dir: SortDir) => { setEtSortKey(dir ? key : ""); setEtSortDir(dir); };
+    const sortedTemplates = sortData(templates, etSortKey, etSortDir);
 
     const fetchTemplates = useCallback(async () => {
         setLoading(true);
@@ -2433,15 +2483,15 @@ function EmailTemplatesTab() {
                 <table className="w-full text-xs">
                     <thead className="bg-slate-50 border-b border-slate-200">
                         <tr>
-                            <th className="text-left px-3 py-2 font-medium text-slate-600">Event</th>
-                            <th className="text-left px-3 py-2 font-medium text-slate-600">Name</th>
-                            <th className="text-left px-3 py-2 font-medium text-slate-600">Subject</th>
+                            <SortableHeader label="Event" sortKey="eventKey" currentSort={etSortKey} currentDir={etSortDir} onSort={handleEtSort} className="text-left px-3 text-slate-600" />
+                            <SortableHeader label="Name" sortKey="name" currentSort={etSortKey} currentDir={etSortDir} onSort={handleEtSort} className="text-left px-3 text-slate-600" />
+                            <SortableHeader label="Subject" sortKey="subject" currentSort={etSortKey} currentDir={etSortDir} onSort={handleEtSort} className="text-left px-3 text-slate-600" />
                             <th className="text-center px-3 py-2 font-medium text-slate-600">Active</th>
                             <th className="text-right px-3 py-2 font-medium text-slate-600">Actions</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                        {templates.map(t => (
+                        {sortedTemplates.map(t => (
                             <tr key={t.id} className="hover:bg-slate-50/50">
                                 <td className="px-3 py-2 font-mono text-indigo-600">{t.eventKey}</td>
                                 <td className="px-3 py-2 text-slate-800 font-medium">{t.name}</td>
@@ -2574,7 +2624,10 @@ function CurrencyRatesTab() {
     };
 
     const regions = [...new Set(rates.map(r => r.region))].sort();
-    const filtered = filterRegion === "all" ? rates : rates.filter(r => r.region === filterRegion);
+    const [crSortKey, setCrSortKey] = useState(""); const [crSortDir, setCrSortDir] = useState<SortDir>(null);
+    const handleCrSort = (key: string, dir: SortDir) => { setCrSortKey(dir ? key : ""); setCrSortDir(dir); };
+    const filteredBase = filterRegion === "all" ? rates : rates.filter(r => r.region === filterRegion);
+    const filtered = sortData(filteredBase, crSortKey, crSortDir);
 
     if (loading) return <div className="flex justify-center py-12"><RefreshCw className="w-5 h-5 animate-spin text-indigo-500" /></div>;
 
@@ -2655,13 +2708,13 @@ function CurrencyRatesTab() {
                 <table className="w-full text-xs">
                     <thead className="bg-slate-50 border-b border-slate-200">
                         <tr>
-                            <th className="text-left px-3 py-2 font-medium text-slate-600">Code</th>
-                            <th className="text-left px-3 py-2 font-medium text-slate-600">Currency</th>
+                            <SortableHeader label="Code" sortKey="code" currentSort={crSortKey} currentDir={crSortDir} onSort={handleCrSort} className="text-left px-3 text-slate-600" />
+                            <SortableHeader label="Currency" sortKey="name" currentSort={crSortKey} currentDir={crSortDir} onSort={handleCrSort} className="text-left px-3 text-slate-600" />
                             <th className="text-left px-3 py-2 font-medium text-slate-600">Symbol</th>
-                            <th className="text-left px-3 py-2 font-medium text-slate-600">Region</th>
-                            <th className="text-right px-3 py-2 font-medium text-slate-600">Rate (1 INR =)</th>
+                            <SortableHeader label="Region" sortKey="region" currentSort={crSortKey} currentDir={crSortDir} onSort={handleCrSort} className="text-left px-3 text-slate-600" />
+                            <SortableHeader label="Rate (1 INR =)" sortKey="rateToBase" currentSort={crSortKey} currentDir={crSortDir} onSort={handleCrSort} className="text-right px-3 text-slate-600" />
                             <th className="text-center px-3 py-2 font-medium text-slate-600">Active</th>
-                            <th className="text-left px-3 py-2 font-medium text-slate-600">Last Synced</th>
+                            <SortableHeader label="Last Synced" sortKey="lastSynced" currentSort={crSortKey} currentDir={crSortDir} onSort={handleCrSort} className="text-left px-3 text-slate-600" />
                             <th className="text-right px-3 py-2 font-medium text-slate-600">Actions</th>
                         </tr>
                     </thead>
@@ -2718,6 +2771,9 @@ function QPeopleMappingTab() {
     const [applying, setApplying] = useState(false);
     const [search, setSearch] = useState("");
     const [editRow, setEditRow] = useState<{ designation: string; crmRoleIds: string[]; jobBand: string; department: string } | null>(null);
+    const [qpSortKey, setQpSortKey] = useState(""); 
+    const [qpSortDir, setQpSortDir] = useState<SortDir>(null);
+    const handleQpSort = (key: string) => { if (qpSortKey === key) { setQpSortDir(qpSortDir === "asc" ? "desc" : qpSortDir === "desc" ? null : "asc"); if (qpSortDir === "desc") setQpSortKey(""); } else { setQpSortKey(key); setQpSortDir("asc"); } };
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -2739,12 +2795,18 @@ function QPeopleMappingTab() {
 
     const mappingMap = new Map(mappings.map((m: any) => [m.qpeopleDesignation, m]));
     const unmappedDesignations = designations.filter(d => !mappingMap.has(d.designation));
-    const filtered = search
-        ? mappings.filter((m: any) => m.qpeopleDesignation.toLowerCase().includes(search.toLowerCase()) || m.crmRoles?.some((r: any) => r.name?.toLowerCase().includes(search.toLowerCase())))
-        : mappings;
-    const filteredUnmapped = search
-        ? unmappedDesignations.filter(d => d.designation.toLowerCase().includes(search.toLowerCase()))
-        : unmappedDesignations;
+    const filtered = sortData(
+        search
+            ? mappings.filter((m: any) => m.qpeopleDesignation.toLowerCase().includes(search.toLowerCase()) || m.crmRoles?.some((r: any) => r.name?.toLowerCase().includes(search.toLowerCase())))
+            : mappings,
+        qpSortKey, qpSortDir
+    );
+    const filteredUnmapped = sortData(
+        search
+            ? unmappedDesignations.filter(d => d.designation.toLowerCase().includes(search.toLowerCase()))
+            : unmappedDesignations,
+        qpSortKey === "qpeopleDesignation" ? "designation" : qpSortKey, qpSortDir
+    );
 
     async function handleSave(designation: string, crmRoleIds: string[], jobBand: string, department: string) {
         if (crmRoleIds.length === 0) return;
@@ -2829,11 +2891,11 @@ function QPeopleMappingTab() {
                     <table className="w-full text-xs">
                         <thead className="bg-slate-50 border-b border-slate-200">
                             <tr>
-                                <th className="text-left py-2 px-3 font-semibold text-slate-600">QPeople Designation</th>
-                                <th className="text-left py-2 px-3 font-semibold text-slate-600">Department</th>
-                                <th className="text-left py-2 px-3 font-semibold text-slate-600">Job Band</th>
+                                <SortableHeader label="QPeople Designation" sortKey="qpeopleDesignation" currentSort={qpSortKey} currentDir={qpSortDir} onSort={handleQpSort} className="text-left px-3 text-slate-600" />
+                                <SortableHeader label="Department" sortKey="department" currentSort={qpSortKey} currentDir={qpSortDir} onSort={handleQpSort} className="text-left px-3 text-slate-600" />
+                                <SortableHeader label="Job Band" sortKey="jobBand" currentSort={qpSortKey} currentDir={qpSortDir} onSort={handleQpSort} className="text-left px-3 text-slate-600" />
                                 <th className="text-left py-2 px-3 font-semibold text-slate-600">CRM Roles</th>
-                                <th className="text-center py-2 px-3 font-semibold text-slate-600">Users</th>
+                                <SortableHeader label="Users" sortKey="userCount" currentSort={qpSortKey} currentDir={qpSortDir} onSort={handleQpSort} className="text-center px-3 text-slate-600" />
                                 <th className="text-right py-2 px-3 font-semibold text-slate-600">Actions</th>
                             </tr>
                         </thead>
@@ -2906,11 +2968,11 @@ function QPeopleMappingTab() {
                         <table className="w-full text-xs">
                             <thead className="bg-amber-50 border-b border-amber-200">
                             <tr>
-                                    <th className="text-left py-2 px-3 font-semibold text-amber-700">QPeople Designation</th>
-                                    <th className="text-left py-2 px-3 font-semibold text-amber-700">Department</th>
+                                    <SortableHeader label="QPeople Designation" sortKey="qpeopleDesignation" currentSort={qpSortKey} currentDir={qpSortDir} onSort={handleQpSort} className="text-left px-3 text-amber-700" />
+                                    <SortableHeader label="Department" sortKey="department" currentSort={qpSortKey} currentDir={qpSortDir} onSort={handleQpSort} className="text-left px-3 text-amber-700" />
                                     <th className="text-left py-2 px-3 font-semibold text-amber-700">Job Band</th>
                                     <th className="text-left py-2 px-3 font-semibold text-amber-700">Assign CRM Roles</th>
-                                    <th className="text-center py-2 px-3 font-semibold text-amber-700">Users</th>
+                                    <SortableHeader label="Users" sortKey="userCount" currentSort={qpSortKey} currentDir={qpSortDir} onSort={handleQpSort} className="text-center px-3 text-amber-700" />
                                     <th className="text-right py-2 px-3 font-semibold text-amber-700"></th>
                                 </tr>
                             </thead>
