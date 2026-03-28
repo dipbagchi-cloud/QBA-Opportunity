@@ -122,7 +122,7 @@ interface TeamOption {
     name: string;
 }
 
-type Tab = "profile" | "security" | "users" | "roles" | "qpeoplemapping" | "ratecards" | "budgetassumptions" | "currencyrates" | "gomcalculator" | "clients" | "regions" | "technologies" | "pricingmodels" | "projecttypes" | "auditlog" | "emailtemplates";
+type Tab = "profile" | "security" | "users" | "roles" | "qpeoplemapping" | "authconfig" | "ratecards" | "budgetassumptions" | "currencyrates" | "gomcalculator" | "clients" | "regions" | "technologies" | "pricingmodels" | "projecttypes" | "auditlog" | "emailtemplates";
 
 export default function SettingsPage() {
     const { user, hasPermission } = useAuthStore();
@@ -147,6 +147,7 @@ export default function SettingsPage() {
                 { key: "users", label: "Users", icon: Users, adminOnly: true },
                 { key: "roles", label: "Roles", icon: Shield, adminOnly: true },
                 { key: "qpeoplemapping", label: "QPeople Role Mapping", icon: RefreshCw, adminOnly: true },
+                { key: "authconfig", label: "Authentication", icon: ShieldCheck, adminOnly: true },
             ],
         },
         {
@@ -267,6 +268,7 @@ export default function SettingsPage() {
                     {activeTab === "users" && isAdmin && <UsersTab />}
                     {activeTab === "roles" && canManageRoles && <RolesTab />}
                     {activeTab === "qpeoplemapping" && isAdmin && <QPeopleMappingTab />}
+                    {activeTab === "authconfig" && isAdmin && <AuthConfigTab />}
                     {activeTab === "ratecards" && canManageCostCards && <RateCardsTab />}
                     {activeTab === "budgetassumptions" && isAdmin && <BudgetAssumptionsTab />}
                     {activeTab === "currencyrates" && isAdmin && <CurrencyRatesTab />}
@@ -2757,6 +2759,141 @@ function CurrencyRatesTab() {
                     </div>
                 )}
             </div>
+        </div>
+    );
+}
+
+/* ─────────────── Auth Configuration Tab ─────────────── */
+function AuthConfigTab() {
+    const [config, setConfig] = useState<{ mode: string; ssoDomain: string } | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
+    const [mode, setMode] = useState("sso");
+    const [ssoDomain, setSsoDomain] = useState("@qbadvisory.com");
+    const [msg, setMsg] = useState("");
+
+    const load = useCallback(async () => {
+        setLoading(true);
+        try {
+            const data = await apiClient<any>("/api/admin/auth-config");
+            setConfig(data);
+            setMode(data.mode || "sso");
+            setSsoDomain(data.ssoDomain || "@qbadvisory.com");
+        } catch { }
+        setLoading(false);
+    }, []);
+
+    useEffect(() => { load(); }, [load]);
+
+    const save = async () => {
+        setSaving(true);
+        setMsg("");
+        try {
+            const res = await apiClient<any>("/api/admin/auth-config", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ mode, ssoDomain }),
+            });
+            setMsg(res.message || "Saved!");
+            load();
+        } catch (e: any) {
+            setMsg(e?.message || "Failed to save");
+        }
+        setSaving(false);
+    };
+
+    if (loading) return <div className="p-8 text-center text-slate-400">Loading...</div>;
+
+    return (
+        <div className="space-y-6">
+            <div>
+                <h2 className="text-lg font-semibold">Authentication Configuration</h2>
+                <p className="text-sm text-slate-500 mt-1">Choose how users authenticate to Q-CRM.</p>
+            </div>
+
+            <div className="bg-white border rounded-xl p-6 space-y-5">
+                <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">Authentication Mode</label>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        {[
+                            { value: "sso", label: "SSO Only", desc: "All domain users authenticate via Microsoft SSO. External users are not allowed." },
+                            { value: "local", label: "Local (Password)", desc: "All users use email + password. A default password is auto-assigned; users must change on first login." },
+                            { value: "hybrid", label: "Hybrid", desc: "Domain users use SSO. External users (different domain) use local password auth. Admin can add external users." },
+                        ].map(opt => (
+                            <button
+                                key={opt.value}
+                                type="button"
+                                onClick={() => setMode(opt.value)}
+                                className={`text-left p-4 rounded-lg border-2 transition-all ${mode === opt.value ? "border-indigo-500 bg-indigo-50" : "border-slate-200 hover:border-slate-300"}`}
+                            >
+                                <div className="font-medium text-sm">{opt.label}</div>
+                                <div className="text-xs text-slate-500 mt-1">{opt.desc}</div>
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
+                {(mode === "sso" || mode === "hybrid") && (
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">SSO Domain</label>
+                        <input
+                            type="text"
+                            value={ssoDomain}
+                            onChange={e => setSsoDomain(e.target.value)}
+                            placeholder="@qbadvisory.com"
+                            className="w-64 px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        />
+                        <p className="text-xs text-slate-400 mt-1">Users with this email domain will authenticate via Microsoft Entra ID (Azure AD).</p>
+                    </div>
+                )}
+
+                {mode === "local" && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                        <div className="flex items-start gap-2">
+                            <AlertCircle className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" />
+                            <div className="text-sm text-amber-800">
+                                <strong>Local Mode:</strong> When switching to local mode, all SSO-only users (without a password) will be assigned a
+                                default password <code className="bg-amber-100 px-1 rounded">Welcome@CRM1</code> and will be required to change it on first login.
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {mode === "hybrid" && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                        <div className="flex items-start gap-2">
+                            <Info className="w-4 h-4 text-blue-500 mt-0.5 shrink-0" />
+                            <div className="text-sm text-blue-800">
+                                <strong>Hybrid Mode:</strong> Users with <strong>{ssoDomain}</strong> emails use SSO. External users (any other domain)
+                                use password-based login. When adding external users, a default password is auto-assigned and they must change it on first login.
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                <div className="flex items-center gap-3 pt-2">
+                    <button
+                        onClick={save}
+                        disabled={saving}
+                        className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                    >
+                        {saving ? "Saving..." : "Save Configuration"}
+                    </button>
+                    {msg && <span className="text-sm text-green-600">{msg}</span>}
+                </div>
+            </div>
+
+            {config && (
+                <div className="bg-slate-50 border rounded-xl p-4">
+                    <h3 className="text-sm font-medium text-slate-600 mb-2">Current Configuration</h3>
+                    <div className="grid grid-cols-2 gap-2 text-sm">
+                        <span className="text-slate-500">Mode:</span>
+                        <span className="font-medium capitalize">{config.mode}</span>
+                        <span className="text-slate-500">SSO Domain:</span>
+                        <span className="font-medium">{config.ssoDomain}</span>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

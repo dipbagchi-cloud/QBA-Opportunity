@@ -23,8 +23,16 @@ function LoginContent() {
     const [showPassword, setShowPassword] = useState(false);
     const [formData, setFormData] = useState({ email: "", password: "" });
     const [ssoProcessing, setSsoProcessing] = useState(false);
+    const [authInfo, setAuthInfo] = useState<{ mode: string; ssoDomain: string; ssoConfigured: boolean } | null>(null);
 
-    const isSSO = formData.email.toLowerCase().endsWith("@qbadvisory.com");
+    // Fetch auth mode info on mount
+    useEffect(() => {
+        fetch(`${API_URL}/api/auth/info`).then(r => r.json()).then(setAuthInfo).catch(() => {});
+    }, []);
+
+    const isSSO = authInfo?.mode === 'local'
+        ? false
+        : formData.email.toLowerCase().endsWith(authInfo?.ssoDomain || "@qbadvisory.com");
 
     // Handle Microsoft OAuth redirect callback
     useEffect(() => {

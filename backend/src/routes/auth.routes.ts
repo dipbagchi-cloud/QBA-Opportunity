@@ -1,11 +1,12 @@
 import { Router } from 'express';
-import { login, getMe, changePassword, switchRole, setPassword, getSSOUrl, ssoCallback } from '../controllers/auth.controller';
+import { login, getMe, changePassword, switchRole, setPassword, getSSOUrl, ssoCallback, getAuthInfo } from '../controllers/auth.controller';
 import { authenticate } from '../middleware/auth';
 
 const router = Router();
 
 // Public
 router.post('/login', login);
+router.get('/info', getAuthInfo);
 router.get('/sso/url', getSSOUrl);
 router.post('/sso/callback', ssoCallback);
 

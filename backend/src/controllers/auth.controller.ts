@@ -10,8 +10,38 @@ const AZURE_CLIENT_ID = process.env.AZURE_AD_CLIENT_ID || '';
 const AZURE_CLIENT_SECRET = process.env.AZURE_AD_CLIENT_SECRET || '';
 const AZURE_REDIRECT_URI = process.env.AZURE_AD_REDIRECT_URI || 'http://localhost:3000/login';
 
+// ─── AUTH MODE RESOLUTION ───────────────────────────────────────────────────
+
+interface AuthConfig {
+  mode: 'sso' | 'local' | 'hybrid';
+  ssoDomain: string;
+  localPasswordPolicy: { minLength: number; requireChangeOnFirstLogin: boolean };
+}
+
+let _authConfigCache: AuthConfig | null = null;
+let _authConfigLastLoaded = 0;
+const AUTH_CONFIG_TTL = 60 * 1000; // 1 min cache
+
+export async function getAuthMode(): Promise<AuthConfig> {
+  if (_authConfigCache && Date.now() - _authConfigLastLoaded < AUTH_CONFIG_TTL) return _authConfigCache;
+  const config = await prisma.systemConfig.findUnique({ where: { key: 'auth_mode' } });
+  _authConfigCache = config
+    ? (config.value as any)
+    : { mode: 'sso', ssoDomain: SSO_DOMAIN, localPasswordPolicy: { minLength: 6, requireChangeOnFirstLogin: true } };
+  _authConfigLastLoaded = Date.now();
+  return _authConfigCache!;
+}
+
 export function isSSOUser(email: string): boolean {
-  return email.toLowerCase().endsWith(SSO_DOMAIN);
+  // Sync check using cached config (for non-async contexts)
+  const domain = _authConfigCache?.ssoDomain || SSO_DOMAIN;
+  return email.toLowerCase().endsWith(domain.toLowerCase());
+}
+
+export async function isSSOUserAsync(email: string): Promise<boolean> {
+  const config = await getAuthMode();
+  if (config.mode === 'local') return false; // All users are local in local mode
+  return email.toLowerCase().endsWith(config.ssoDomain.toLowerCase());
 }
 
 // POST /api/auth/login
@@ -226,8 +256,9 @@ export async function changePassword(req: Request, res: Response) {
     const userId = req.user?.userId;
     const { currentPassword, newPassword } = req.body;
 
-    // Block password change for SSO users
-    if (req.user?.email && isSSOUser(req.user.email)) {
+    // Block password change for SSO users (only in sso/hybrid mode)
+    const authConfig = await getAuthMode();
+    if (authConfig.mode !== 'local' && req.user?.email && isSSOUser(req.user.email)) {
       return res.status(403).json({ error: 'SSO users cannot change password. Use your organization SSO to manage credentials.' });
     }
 
@@ -277,8 +308,9 @@ export async function setPassword(req: Request, res: Response) {
     const userId = req.user?.userId;
     const { newPassword } = req.body;
 
-    // Block for SSO users
-    if (req.user?.email && isSSOUser(req.user.email)) {
+    // Block for SSO users (only in sso/hybrid mode)
+    const authCfg = await getAuthMode();
+    if (authCfg.mode !== 'local' && req.user?.email && isSSOUser(req.user.email)) {
       return res.status(403).json({ error: 'SSO users cannot set password.' });
     }
 
@@ -318,6 +350,12 @@ export async function setPassword(req: Request, res: Response) {
 // GET /api/auth/sso/url — Returns Microsoft OAuth2 authorization URL
 export async function getSSOUrl(req: Request, res: Response) {
   try {
+    // Block SSO in local mode
+    const authConfig = await getAuthMode();
+    if (authConfig.mode === 'local') {
+      return res.status(403).json({ error: 'SSO is disabled. The system uses local authentication.' });
+    }
+
     if (!AZURE_TENANT_ID || !AZURE_CLIENT_ID) {
       return res.status(503).json({ error: 'SSO is not configured. Set AZURE_AD_TENANT_ID and AZURE_AD_CLIENT_ID in environment.' });
     }
@@ -395,7 +433,14 @@ export async function ssoCallback(req: Request, res: Response) {
     }
 
     if (!isSSOUser(msEmail)) {
-      return res.status(403).json({ error: 'SSO login is only available for @qbadvisory.com users.' });
+      const authConfig = await getAuthMode();
+      return res.status(403).json({ error: `SSO login is only available for ${authConfig.ssoDomain} users.` });
+    }
+
+    // Block SSO in local mode
+    const authConfig = await getAuthMode();
+    if (authConfig.mode === 'local') {
+      return res.status(403).json({ error: 'SSO is disabled. The system uses local authentication.' });
     }
 
     // Find user in our database
@@ -466,5 +511,20 @@ export async function ssoCallback(req: Request, res: Response) {
   } catch (error) {
     console.error('SSO callback error:', error);
     res.status(500).json({ error: 'SSO authentication failed.' });
+  }
+}
+
+// GET /api/auth/info — Public endpoint returning auth mode for the login page
+export async function getAuthInfo(req: Request, res: Response) {
+  try {
+    const config = await getAuthMode();
+    res.json({
+      mode: config.mode,           // 'sso' | 'local' | 'hybrid'
+      ssoDomain: config.ssoDomain, // e.g. '@qbadvisory.com'
+      ssoConfigured: !!(AZURE_TENANT_ID && AZURE_CLIENT_ID),
+    });
+  } catch (error) {
+    console.error('Auth info error:', error);
+    res.json({ mode: 'sso', ssoDomain: SSO_DOMAIN, ssoConfigured: false });
   }
 }

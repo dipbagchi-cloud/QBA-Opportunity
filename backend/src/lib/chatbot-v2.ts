@@ -30,7 +30,7 @@ export interface UserContext {
 }
 
 export interface ConversationState {
-    mode: 'idle' | 'creating' | 'updating' | 'confirming' | 'creating_lead' | 'creating_contact';
+    mode: 'idle' | 'creating' | 'updating' | 'confirming' | 'confirming_extract' | 'creating_lead' | 'creating_contact';
     entityType?: 'opportunity' | 'lead' | 'contact';
     targetOpportunityId?: string;
     targetContactId?: string;
@@ -353,6 +353,12 @@ Value parsing: "500K" = 500000, "2M" = 2000000, "1.5 crore" = 15000000
 Date formats: accept any format
 If the user says "skip" or "none" for a field, set fieldValue to "__SKIP__"
 
+IMPORTANT for create_opportunity: Users may mention client names and technologies in plain language without explicit labels.
+Example: "create AMDS PowerBI" → intent: create_opportunity, params: { client: "AMDS", technology: "PowerBI" }
+Example: "new deal for TechCorp using React" → intent: create_opportunity, params: { client: "TechCorp", technology: "React" }
+Example: "add opportunity AMDS Power BI 500K" → intent: create_opportunity, params: { client: "AMDS", technology: "Power BI", value: 500000 }
+Extract as many fields as possible from the natural language. The first unrecognized proper noun is likely the client name.
+
 IMPORTANT: Return ONLY the JSON object, no markdown or extra text.`;
 
 async function callLLM(userMessage: string, conversationContext: string): Promise<LLMParsedIntent | null> {
@@ -438,7 +444,7 @@ function extractEntityName(msg: string): string {
 function nlpParseIntent(message: string, conv: ConversationState): LLMParsedIntent {
     const lower = message.toLowerCase().trim();
 
-    if (conv.mode === 'confirming') {
+    if (conv.mode === 'confirming' || conv.mode === 'confirming_extract') {
         if (/\b(yes|yeah|yep|confirm|sure|go ahead|do it|ok|okay|proceed|correct)\b/i.test(lower))
             return { intent: 'confirm_yes', params: {}, confidence: 0.95 };
         if (/\b(no|nope|cancel|abort|stop|wrong|nah|don't)\b/i.test(lower))
@@ -629,6 +635,12 @@ function nlpParseIntent(message: string, conv: ConversationState): LLMParsedInte
         return { intent: 'about_bot', params: {}, confidence: 0.85 };
     }
 
+    // Fallback: "create/add/new" without explicit entity keyword — treat as create opportunity
+    // Smart extraction in processChat will match against master data
+    if (/^\s*(create|add|new)\b/i.test(lower) && !/\b(lead|contact|user|comment|tag)\b/i.test(lower)) {
+        return { intent: 'create_opportunity', params: extractOpportunityParams(lower), confidence: 0.6 };
+    }
+
     return { intent: 'general_chat', params: {}, confidence: 0.3 };
 }
 
@@ -686,6 +698,60 @@ function extractListParams(lower: string): Record<string, any> {
     const valMatch = lower.match(/(?:above|over|more than|greater than|>)\s+\$?([\d,.]+)\s*(k|m)?/i);
     if (valMatch) params.minValue = parseMoneyValue(valMatch[0].replace(/^(above|over|more than|greater than|>)\s+/i, ''));
     return params;
+}
+
+// ─── SMART ENTITY EXTRACTION FROM PLAIN LANGUAGE ────────────────────────────
+
+/**
+ * Extracts opportunity fields by fuzzy-matching tokens/phrases against master data.
+ * E.g., "AMDS PowerBI" → { client: 'AMDS', technology: 'Power BI' }
+ * Tries multi-word phrases first (longest match), then single tokens.
+ */
+function smartExtractFromMasterData(text: string, master: MasterDataCache): Record<string, any> {
+    const extracted: Record<string, any> = {};
+    // Strip common command words so they don't interfere with matching
+    const cleaned = text.replace(/\b(create|add|new|register|opportunity|deal|opp|project|for|with|using|please|the|an?)\b/gi, ' ').trim();
+    const words = cleaned.split(/\s+/).filter(w => w.length > 1);
+    if (words.length === 0) return extracted;
+
+    // Build phrases: try 3-word, 2-word, then 1-word combos
+    const phrases: string[] = [];
+    for (let len = Math.min(3, words.length); len >= 1; len--) {
+        for (let i = 0; i <= words.length - len; i++) {
+            phrases.push(words.slice(i, i + len).join(' '));
+        }
+    }
+
+    const matchedPhrases = new Set<string>();
+
+    // Master categories to match against, in priority order
+    const categories: { key: string; items: { id: string; name: string }[]; idKey?: string }[] = [
+        { key: 'client', items: master.clients, idKey: '_clientId' },
+        { key: 'technology', items: master.technologies },
+        { key: 'region', items: master.regions },
+        { key: 'pricingModel', items: master.pricingModels },
+        { key: 'projectType', items: master.projectTypes },
+    ];
+
+    for (const phrase of phrases) {
+        // Skip if any word in this phrase was already matched
+        const phraseWords = phrase.toLowerCase().split(/\s+/);
+        if (phraseWords.some(w => matchedPhrases.has(w))) continue;
+
+        for (const cat of categories) {
+            if (extracted[cat.key]) continue; // already found for this category
+            const result = fuzzyMatch(phrase, cat.items, 0.6); // higher threshold for plain language
+            if (result.exact && result.match) {
+                extracted[cat.key] = result.match.name;
+                if (cat.idKey) extracted[cat.idKey] = result.match.id;
+                // Only mark the matched entity's name words as consumed (not entire phrase)
+                result.match.name.toLowerCase().split(/\s+/).forEach(w => matchedPhrases.add(w));
+                break;
+            }
+        }
+    }
+
+    return extracted;
 }
 
 // ─── PERMISSION CHECKS ─────────────────────────────────────────────────────
@@ -1684,6 +1750,36 @@ export async function processChat(message: string, ctx: UserContext): Promise<Ch
         }
     }
 
+    // Human-in-the-loop: confirm extracted entities before field collection
+    if (conv.mode === 'confirming_extract') {
+        if (intent.intent === 'confirm_yes') {
+            // User confirmed the extracted entities — proceed to field collection
+            conv.mode = 'creating';
+            let response = `Great! Let's continue with the remaining details.\n`;
+            const nextPrompt = await getNextFieldPrompt(conv);
+            if (nextPrompt) response += `\n${nextPrompt}`;
+            else {
+                conv.mode = 'confirming';
+                response += `\n${buildConfirmationSummary(conv)}`;
+            }
+            return reply(response, undefined, conv.missingRequired.concat(conv.optionalRemaining));
+        }
+        if (intent.intent === 'confirm_no') {
+            // User rejected — reset and start fresh
+            resetConversation(ctx.userId);
+            const freshConv = getConversation(ctx.userId);
+            freshConv.mode = 'creating';
+            freshConv.collectedFields = { _isCreate: true };
+            freshConv.missingRequired = OPPORTUNITY_FIELDS.filter(f => f.required).map(f => f.key);
+            freshConv.optionalRemaining = OPPORTUNITY_FIELDS.filter(f => !f.required).map(f => f.key);
+            let response = `No problem! Let's start fresh.\n`;
+            const nextPrompt = await getNextFieldPrompt(freshConv);
+            if (nextPrompt) response += `\n${nextPrompt}`;
+            return reply(response, undefined, freshConv.missingRequired.concat(freshConv.optionalRemaining));
+        }
+        return reply('Please type **"yes"** to proceed with the details I understood, or **"no"** to start fresh.');
+    }
+
     // Confirmation
     if (conv.mode === 'confirming') {
         if (intent.intent === 'confirm_yes') {
@@ -1727,22 +1823,45 @@ export async function processChat(message: string, ctx: UserContext): Promise<Ch
     if (intent.intent === 'create_opportunity') {
         if (!canExecute('create_opportunity', ctx.permissions))
             return reply(`You don't have permission to create opportunities. Your role: **${ctx.roleName}**.`);
+
+        // Smart extract: merge LLM params + plain-language master data matching
+        const smartParams = smartExtractFromMasterData(message, master);
+        const mergedParams: Record<string, any> = { ...smartParams };
+        // LLM/NLP params take priority over smart extraction
+        for (const [k, v] of Object.entries(intent.params)) {
+            if (v !== null && v !== undefined && v !== '') mergedParams[k] = v;
+        }
+
+        // Copy internal IDs from smartParams if not overridden
+        if (smartParams._clientId && !intent.params.client) mergedParams._clientId = smartParams._clientId;
+
+        // Pre-validate extracted fields against master data
         conv.mode = 'creating';
         conv.collectedFields = { _isCreate: true };
-        for (const [k, v] of Object.entries(intent.params)) {
-            if (v !== null && v !== undefined && v !== '') {
-                const fieldDef = OPPORTUNITY_FIELDS.find(f => f.key === k);
-                if (fieldDef) processFieldValue(k, String(v), conv, master);
-            }
+        for (const [k, v] of Object.entries(mergedParams)) {
+            if (k.startsWith('_')) { conv.collectedFields[k] = v; continue; }
+            const fieldDef = OPPORTUNITY_FIELDS.find(f => f.key === k);
+            if (fieldDef) processFieldValue(k, String(v), conv, master);
         }
-        conv.missingRequired = OPPORTUNITY_FIELDS.filter(f => f.required && !(f.key in conv.collectedFields)).map(f => f.key);
-        conv.optionalRemaining = OPPORTUNITY_FIELDS.filter(f => !f.required && !(f.key in conv.collectedFields)).map(f => f.key);
+
         const prefilled = Object.entries(conv.collectedFields).filter(([k]) => !k.startsWith('_')).map(([k, v]) => {
             const def = OPPORTUNITY_FIELDS.find(f => f.key === k);
             return `- **${def?.label || k}:** ${k === 'value' ? `$${Number(v).toLocaleString()}` : v}`;
         });
+
+        // Human-in-the-loop: if we extracted entities from plain language, confirm first
+        if (prefilled.length > 0) {
+            conv.missingRequired = OPPORTUNITY_FIELDS.filter(f => f.required && !(f.key in conv.collectedFields)).map(f => f.key);
+            conv.optionalRemaining = OPPORTUNITY_FIELDS.filter(f => !f.required && !(f.key in conv.collectedFields)).map(f => f.key);
+            let response = `I understood the following from your message:\n${prefilled.join('\n')}\n\nIs this correct? Type **"yes"** to proceed with these details, or **"no"** to start fresh.`;
+            conv.mode = 'confirming_extract';
+            return reply(response);
+        }
+
+        // No entities extracted — go straight to field collection
+        conv.missingRequired = OPPORTUNITY_FIELDS.filter(f => f.required && !(f.key in conv.collectedFields)).map(f => f.key);
+        conv.optionalRemaining = OPPORTUNITY_FIELDS.filter(f => !f.required && !(f.key in conv.collectedFields)).map(f => f.key);
         let response = `Let's create a new opportunity! I'll walk you through the required information.\n`;
-        if (prefilled.length > 0) response += `\nI captured these details from your message:\n${prefilled.join('\n')}\n`;
         const nextPrompt = await getNextFieldPrompt(conv);
         if (nextPrompt) response += `\n${nextPrompt}`;
         else {

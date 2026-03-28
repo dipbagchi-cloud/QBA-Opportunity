@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { hashPassword } from '../services/auth.service';
-import { isSSOUser } from './auth.controller';
+import { isSSOUser, getAuthMode } from './auth.controller';
 
 // GET /api/admin/users
 export async function listUsers(req: Request, res: Response) {
@@ -105,13 +105,19 @@ export async function createUser(req: Request, res: Response) {
     const { email, name, password, roleId, roleIds, teamId, title, department } = req.body;
     const resolvedRoleIds: string[] = roleIds && Array.isArray(roleIds) ? roleIds : roleId ? [roleId] : [];
 
-    const ssoUser = isSSOUser(email);
+    const authConfig = await getAuthMode();
+    const ssoUser = authConfig.mode !== 'local' && isSSOUser(email);
 
     if (!email || !name || resolvedRoleIds.length === 0) {
       return res.status(400).json({ error: 'email, name, and at least one role are required' });
     }
 
-    if (!ssoUser && !password) {
+    // In local mode, password is auto-assigned if not provided
+    // In SSO/hybrid mode, SSO users don't need password, external users do
+    const needsPassword = !ssoUser;
+    const autoAssignPassword = authConfig.mode === 'local' && !password;
+
+    if (needsPassword && !password && !autoAssignPassword) {
       return res.status(400).json({ error: 'password is required for non-SSO users' });
     }
 
@@ -127,13 +133,15 @@ export async function createUser(req: Request, res: Response) {
       return res.status(400).json({ error: 'One or more invalid roleIds' });
     }
 
-    const passwordHash = ssoUser ? null : await hashPassword(password);
+    const passwordHash = ssoUser ? null : await hashPassword(password || DEFAULT_LOCAL_PASSWORD);
+    const mustChangePassword = autoAssignPassword;
 
     const user = await prisma.user.create({
       data: {
         email,
         name,
         ...(passwordHash ? { passwordHash } : {}),
+        ...(mustChangePassword ? { mustChangePassword: true } : {}),
         roles: { connect: resolvedRoleIds.map(id => ({ id })) },
         activeRoleId: resolvedRoleIds[0],
         teamId: teamId || undefined,
@@ -254,9 +262,10 @@ export async function resetUserPassword(req: Request, res: Response) {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // Block password reset for SSO users
-    if (isSSOUser(user.email)) {
-      return res.status(403).json({ error: 'Cannot reset password for SSO users (@qbadvisory.com). They authenticate via SSO.' });
+    // Block password reset for SSO users (only in SSO/hybrid mode)
+    const authConfig = await getAuthMode();
+    if (authConfig.mode !== 'local' && isSSOUser(user.email)) {
+      return res.status(403).json({ error: `Cannot reset password for SSO users (${authConfig.ssoDomain}). They authenticate via SSO.` });
     }
 
     const passwordHash = await hashPassword(newPassword);
@@ -942,5 +951,117 @@ export async function applyQPeopleMappings(req: Request, res: Response) {
   } catch (error) {
     console.error('Apply QPeople mappings error:', error);
     res.status(500).json({ error: 'Failed to apply mappings' });
+  }
+}
+
+// ─── AUTH CONFIGURATION ─────────────────────────────────────────────────────
+
+const DEFAULT_LOCAL_PASSWORD = 'Welcome@CRM1';
+
+// GET /api/admin/auth-config
+export async function getAuthConfig(req: Request, res: Response) {
+  try {
+    const config = await prisma.systemConfig.findUnique({ where: { key: 'auth_mode' } });
+    const defaultConfig = {
+      mode: 'sso',          // 'sso' | 'local' | 'hybrid'
+      ssoDomain: '@qbadvisory.com',
+      localPasswordPolicy: {
+        minLength: 6,
+        requireChangeOnFirstLogin: true,
+      },
+    };
+    res.json(config ? { ...defaultConfig, ...(config.value as any) } : defaultConfig);
+  } catch (error) {
+    console.error('Get auth config error:', error);
+    res.status(500).json({ error: 'Failed to fetch auth configuration' });
+  }
+}
+
+// PUT /api/admin/auth-config
+export async function updateAuthConfig(req: Request, res: Response) {
+  try {
+    const { mode, ssoDomain } = req.body;
+
+    if (!mode || !['sso', 'local', 'hybrid'].includes(mode)) {
+      return res.status(400).json({ error: 'mode must be one of: sso, local, hybrid' });
+    }
+
+    if ((mode === 'sso' || mode === 'hybrid') && !ssoDomain) {
+      return res.status(400).json({ error: 'ssoDomain is required for SSO and Hybrid modes' });
+    }
+
+    const configValue = {
+      mode,
+      ssoDomain: ssoDomain || '@qbadvisory.com',
+      localPasswordPolicy: { minLength: 6, requireChangeOnFirstLogin: true },
+    };
+
+    await prisma.systemConfig.upsert({
+      where: { key: 'auth_mode' },
+      update: { value: configValue, updatedAt: new Date() },
+      create: { key: 'auth_mode', value: configValue, category: 'auth', description: 'Authentication mode configuration' },
+    });
+
+    // If switching to local mode, ensure all users without passwords get one assigned
+    if (mode === 'local') {
+      const usersWithoutPassword = await prisma.user.findMany({
+        where: { passwordHash: null, isActive: true },
+        select: { id: true, email: true },
+      });
+
+      if (usersWithoutPassword.length > 0) {
+        const hash = await hashPassword(DEFAULT_LOCAL_PASSWORD);
+        await prisma.user.updateMany({
+          where: { id: { in: usersWithoutPassword.map(u => u.id) } },
+          data: { passwordHash: hash, mustChangePassword: true } as any,
+        });
+      }
+    }
+
+    await prisma.auditLog.create({
+      data: {
+        entity: 'SystemConfig',
+        entityId: 'auth_mode',
+        action: 'UPDATE_AUTH_CONFIG',
+        userId: req.user!.userId,
+        changes: configValue,
+      },
+    });
+
+    res.json({ message: 'Auth configuration updated', config: configValue });
+  } catch (error) {
+    console.error('Update auth config error:', error);
+    res.status(500).json({ error: 'Failed to update auth configuration' });
+  }
+}
+
+// POST /api/admin/users/:id/assign-local-password
+export async function assignLocalPassword(req: Request, res: Response) {
+  try {
+    const { id } = req.params;
+    
+    const user = await prisma.user.findUnique({ where: { id } });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const hash = await hashPassword(DEFAULT_LOCAL_PASSWORD);
+    await (prisma.user as any).update({
+      where: { id },
+      data: { passwordHash: hash, mustChangePassword: true },
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        entity: 'User',
+        entityId: id,
+        action: 'ASSIGN_LOCAL_PASSWORD',
+        userId: req.user!.userId,
+        changes: { targetEmail: user.email, mustChangePassword: true },
+      },
+    });
+
+    res.json({ message: `Local password assigned to ${user.email}. User must change on first login.` });
+  } catch (error) {
+    console.error('Assign local password error:', error);
+    res.status(500).json({ error: 'Failed to assign password' });
   }
 }

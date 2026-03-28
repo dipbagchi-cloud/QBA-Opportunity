@@ -21,6 +21,9 @@ import {
   upsertQPeopleMapping,
   deleteQPeopleMapping,
   applyQPeopleMappings,
+  getAuthConfig,
+  updateAuthConfig,
+  assignLocalPassword,
 } from '../controllers/admin.controller';
 import {
   listAllRateCards,
@@ -82,6 +85,11 @@ router.post('/users', authorize(PERMISSIONS.USERS_MANAGE), createUser);
 router.post('/users/sync-qpeople', authorize(PERMISSIONS.USERS_MANAGE), syncQPeopleUsers);
 router.patch('/users/:id', authorize(PERMISSIONS.USERS_MANAGE), updateUser);
 router.patch('/users/:id/reset-password', authorize(PERMISSIONS.USERS_MANAGE), resetUserPassword);
+router.post('/users/:id/assign-local-password', authorize(PERMISSIONS.USERS_MANAGE), assignLocalPassword);
+
+// Auth configuration (requires settings:manage)
+router.get('/auth-config', authorize(PERMISSIONS.SETTINGS_MANAGE), getAuthConfig);
+router.put('/auth-config', authorize(PERMISSIONS.SETTINGS_MANAGE), updateAuthConfig);
 
 // Role management (requires roles:manage)
 router.get('/roles', authorize(PERMISSIONS.ROLES_MANAGE), listRoles);
