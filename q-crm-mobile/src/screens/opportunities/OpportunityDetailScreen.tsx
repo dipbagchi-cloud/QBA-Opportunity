@@ -7,7 +7,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { api, API_URL } from '../../lib/api';
+import * as DocumentPicker from 'expo-document-picker';
+import { api, API_URL, getAuthToken } from '../../lib/api';
 import { useCurrency } from '../../contexts/CurrencyContext';
 
 const STEPS = ['Pipeline', 'Presales', 'Sales', 'Project'];
@@ -191,6 +192,8 @@ export default function OpportunityDetailScreen() {
   const isLost = currentStageName === 'Closed Lost' || currentStageName === 'Proposal Lost';
   const hasProject = !!opp?.project;
   const canEditPresales = oppStageStep === 1 && !isLost;
+  const canEditPipeline = oppStageStep === 0 && !isLost;
+  const canUploadAttachments = (oppStageStep <= 1) && !isLost;  // Allow uploads in Pipeline and Presales
 
   useEffect(() => {
     if (opp) {
@@ -361,6 +364,46 @@ export default function OpportunityDetailScreen() {
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: () => deleteAttachmentMut.mutate(att.id) },
     ]);
+  };
+
+  const [uploading, setUploading] = useState(false);
+  const handleUploadAttachment = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: '*/*',
+        copyToCacheDirectory: true,
+      });
+      
+      if (result.canceled || !result.assets || result.assets.length === 0) return;
+      
+      const file = result.assets[0];
+      setUploading(true);
+      
+      const formData = new FormData();
+      formData.append('file', {
+        uri: file.uri,
+        name: file.name,
+        type: file.mimeType || 'application/octet-stream',
+      } as any);
+      
+      const token = await getAuthToken();
+      const res = await fetch(`${API_URL}/api/opportunities/${oppId}/attachments`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+        body: formData,
+      });
+      
+      if (!res.ok) throw new Error('Upload failed');
+      
+      await refetch();
+      Alert.alert('Success', `File "${file.name}" uploaded`);
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Failed to upload file');
+    } finally {
+      setUploading(false);
+    }
   };
 
   const handleAddResource = (rc: any) => {
@@ -551,6 +594,27 @@ export default function OpportunityDetailScreen() {
               </>
             )}
 
+            {/* Attachments in Pipeline */}
+            <View style={st.divider} />
+            <View style={st.sectionHeader}>
+              <Text style={st.sectionTitle}>Attachments ({attachments.length})</Text>
+              {canUploadAttachments && (
+                <TouchableOpacity onPress={handleUploadAttachment} disabled={uploading} style={st.uploadBtn}>
+                  <Text style={st.uploadBtnText}>{uploading ? '⏳' : '📎'} {uploading ? 'Uploading...' : 'Add File'}</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+            {attachments.length === 0 ? <Text style={st.emptyText}>No attachments</Text> : attachments.map((att: any) => (
+              <View key={att.id} style={st.attachRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={st.attachName}>{att.fileName}</Text>
+                  <Text style={st.attachMeta}>{att.fileType} • {(att.fileSize / 1024).toFixed(0)}KB • {fmtDate(att.uploadedAt)}</Text>
+                </View>
+                <TouchableOpacity onPress={() => handleDownloadAttachment(att)} style={st.attachBtn}><Text style={st.attachBtnText}>⬇</Text></TouchableOpacity>
+                {canUploadAttachments && <TouchableOpacity onPress={() => handleDeleteAttachment(att)} style={[st.attachBtn, { backgroundColor: '#fef2f2' }]}><Text style={[st.attachBtnText, { color: '#ef4444' }]}>🗑</Text></TouchableOpacity>}
+              </View>
+            ))}
+
             {oppStageStep === 0 && !isLost && (
               <View style={st.actionRow}>
                 {editMode && <ActionBtn label="Save" color="#6366f1" onPress={handleSave} loading={updateMut.isPending} />}
@@ -628,7 +692,14 @@ export default function OpportunityDetailScreen() {
                 <FieldRow label="Total T&H" value={fmt(travelTotal)} highlight />
 
                 <View style={st.divider} />
-                <Text style={st.sectionTitle}>Attachments ({attachments.length})</Text>
+                <View style={st.sectionHeader}>
+                  <Text style={st.sectionTitle}>Attachments ({attachments.length})</Text>
+                  {canUploadAttachments && (
+                    <TouchableOpacity onPress={handleUploadAttachment} disabled={uploading} style={st.uploadBtn}>
+                      <Text style={st.uploadBtnText}>{uploading ? '⏳' : '📎'} {uploading ? 'Uploading...' : 'Add File'}</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
                 {attachments.length === 0 ? <Text style={st.emptyText}>No attachments</Text> : attachments.map((att: any) => (
                   <View key={att.id} style={st.attachRow}>
                     <View style={{ flex: 1 }}>
@@ -636,7 +707,7 @@ export default function OpportunityDetailScreen() {
                       <Text style={st.attachMeta}>{att.fileType} • {(att.fileSize / 1024).toFixed(0)}KB • {fmtDate(att.uploadedAt)}</Text>
                     </View>
                     <TouchableOpacity onPress={() => handleDownloadAttachment(att)} style={st.attachBtn}><Text style={st.attachBtnText}>⬇</Text></TouchableOpacity>
-                    {canEditPresales && <TouchableOpacity onPress={() => handleDeleteAttachment(att)} style={[st.attachBtn, { backgroundColor: '#fef2f2' }]}><Text style={[st.attachBtnText, { color: '#ef4444' }]}>🗑</Text></TouchableOpacity>}
+                    {canUploadAttachments && <TouchableOpacity onPress={() => handleDeleteAttachment(att)} style={[st.attachBtn, { backgroundColor: '#fef2f2' }]}><Text style={[st.attachBtnText, { color: '#ef4444' }]}>🗑</Text></TouchableOpacity>}
                   </View>
                 ))}
 
@@ -1229,6 +1300,8 @@ const st = StyleSheet.create({
   attachMeta: { fontSize: 11, color: '#94a3b8', marginTop: 1 },
   attachBtn: { width: 32, height: 32, borderRadius: 8, backgroundColor: '#f1f5f9', justifyContent: 'center', alignItems: 'center', marginLeft: 6 },
   attachBtnText: { fontSize: 14 },
+  uploadBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#6366f1', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
+  uploadBtnText: { color: '#fff', fontSize: 12, fontWeight: '600' },
   commentInput: { flexDirection: 'row', alignItems: 'flex-end', marginBottom: 12, gap: 8 },
   commentField: { flex: 1, backgroundColor: '#f8fafc', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, fontSize: 13, color: '#0f172a', maxHeight: 80, borderWidth: 1, borderColor: '#e2e8f0' },
   commentSendBtn: { backgroundColor: '#6366f1', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10 },

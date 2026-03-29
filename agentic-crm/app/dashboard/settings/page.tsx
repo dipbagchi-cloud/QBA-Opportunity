@@ -490,6 +490,14 @@ function UsersTab() {
     const [resetting, setResetting] = useState(false);
     const [showResetPw, setShowResetPw] = useState(false);
 
+    // Create user form
+    const [showCreateUser, setShowCreateUser] = useState(false);
+    const [newUserName, setNewUserName] = useState("");
+    const [newUserEmail, setNewUserEmail] = useState("");
+    const [newUserRole, setNewUserRole] = useState("");
+    const [newUserDept, setNewUserDept] = useState("");
+    const [creatingUser, setCreatingUser] = useState(false);
+
     const fetchUsers = useCallback(async (pg = 1, search = "", lim?: number) => {
         try {
             const effectiveLimit = lim ?? userLimit;
@@ -600,6 +608,36 @@ function UsersTab() {
         }
     };
 
+    const handleCreateUser = async () => {
+        if (!newUserName.trim() || !newUserEmail.trim() || !newUserRole) {
+            setStatus({ type: "error", message: "Name, email, and role are required." });
+            return;
+        }
+        setCreatingUser(true);
+        try {
+            await apiClient("/api/admin/users", {
+                method: "POST",
+                body: JSON.stringify({
+                    name: newUserName,
+                    email: newUserEmail,
+                    roleIds: [newUserRole],
+                    department: newUserDept || undefined,
+                }),
+            });
+            setStatus({ type: "success", message: "User created. Default password assigned - user must change on first login." });
+            setShowCreateUser(false);
+            setNewUserName("");
+            setNewUserEmail("");
+            setNewUserRole("");
+            setNewUserDept("");
+            fetchUsers(1, userSearch);
+        } catch (err: any) {
+            setStatus({ type: "error", message: err.message || "Failed to create user." });
+        } finally {
+            setCreatingUser(false);
+        }
+    };
+
     // Debounced user search
     useEffect(() => {
         const timer = setTimeout(() => {
@@ -618,14 +656,23 @@ function UsersTab() {
             {/* Header */}
             <div className="flex items-center justify-between">
                 <h3 className="text-base font-bold text-slate-900">User Management</h3>
-                <button
-                    onClick={handleSyncQPeople}
-                    disabled={syncing}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-                >
-                    <Download className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
-                    {syncing ? "Syncing..." : "Sync from QPeople"}
-                </button>
+                <div className="flex items-center gap-2">
+                    <button
+                        onClick={() => setShowCreateUser(true)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-600 text-white text-xs font-medium hover:bg-green-700 transition-colors"
+                    >
+                        <UserPlus className="w-4 h-4" />
+                        Create User
+                    </button>
+                    <button
+                        onClick={handleSyncQPeople}
+                        disabled={syncing}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                    >
+                        <Download className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
+                        {syncing ? "Syncing..." : "Sync from QPeople"}
+                    </button>
+                </div>
             </div>
 
             <p className="text-xs text-slate-500">Users are synced from QPeople HRMS. You can assign app-specific roles and reset passwords here.</p>
@@ -664,6 +711,72 @@ function UsersTab() {
                             {resetting ? "Resetting..." : "Reset Password"}
                         </button>
                         <button onClick={() => { setResetUserId(null); setResetPassword(""); setShowResetPw(false); }} className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-600 hover:bg-slate-50 transition-colors">Cancel</button>
+                    </div>
+                </div>
+            )}
+
+            {/* Create user modal */}
+            {showCreateUser && (
+                <div className="bg-white p-4 rounded-xl border border-green-200 shadow-sm space-y-4">
+                    <h4 className="font-semibold text-sm text-slate-800">Create New User</h4>
+                    <p className="text-xs text-slate-500">User will be assigned a default password and must change it on first login.</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label className="block text-xs font-medium text-slate-700 mb-1">Name *</label>
+                            <input
+                                placeholder="Full name"
+                                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-green-500/20 text-sm"
+                                value={newUserName}
+                                onChange={(e) => setNewUserName(e.target.value)}
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-medium text-slate-700 mb-1">Email *</label>
+                            <input
+                                type="email"
+                                placeholder="email@example.com"
+                                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-green-500/20 text-sm"
+                                value={newUserEmail}
+                                onChange={(e) => setNewUserEmail(e.target.value)}
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-medium text-slate-700 mb-1">Role *</label>
+                            <select
+                                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-green-500/20 text-sm"
+                                value={newUserRole}
+                                onChange={(e) => setNewUserRole(e.target.value)}
+                            >
+                                <option value="">Select role...</option>
+                                {roles.map((r) => (
+                                    <option key={r.id} value={r.id}>{r.name}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-xs font-medium text-slate-700 mb-1">Department</label>
+                            <input
+                                placeholder="Optional"
+                                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-green-500/20 text-sm"
+                                value={newUserDept}
+                                onChange={(e) => setNewUserDept(e.target.value)}
+                            />
+                        </div>
+                    </div>
+                    <div className="flex gap-2 pt-2">
+                        <button
+                            disabled={creatingUser}
+                            onClick={handleCreateUser}
+                            className="px-4 py-1.5 rounded-lg bg-green-600 text-white text-xs font-medium hover:bg-green-700 disabled:opacity-50 transition-colors"
+                        >
+                            {creatingUser ? "Creating..." : "Create User"}
+                        </button>
+                        <button
+                            onClick={() => { setShowCreateUser(false); setNewUserName(""); setNewUserEmail(""); setNewUserRole(""); setNewUserDept(""); }}
+                            className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-600 hover:bg-slate-50 transition-colors"
+                        >
+                            Cancel
+                        </button>
                     </div>
                 </div>
             )}

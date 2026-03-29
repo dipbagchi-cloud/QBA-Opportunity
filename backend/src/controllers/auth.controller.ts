@@ -3,6 +3,7 @@ import { prisma } from '../lib/prisma';
 import { hashPassword, comparePassword, generateToken } from '../services/auth.service';
 
 const SSO_DOMAIN = '@qbadvisory.com';
+const DEFAULT_LOCAL_PASSWORD = 'Welcome@CRM1';
 
 // Microsoft Entra ID (Azure AD) configuration
 const AZURE_TENANT_ID = process.env.AZURE_AD_TENANT_ID || '';
@@ -62,8 +63,21 @@ export async function login(req: Request, res: Response) {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
+    // Check auth mode - in local mode, auto-assign password if missing
+    const authConfig = await getAuthMode();
     if (!user.passwordHash) {
-      return res.status(401).json({ error: 'Account not set up. Contact admin.' });
+      if (authConfig.mode === 'local') {
+        // Auto-assign default password for first login
+        const defaultHash = await hashPassword(DEFAULT_LOCAL_PASSWORD);
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { passwordHash: defaultHash, mustChangePassword: true } as any,
+        });
+        user.passwordHash = defaultHash;
+        (user as any).mustChangePassword = true;
+      } else {
+        return res.status(401).json({ error: 'Account not set up. Contact admin.' });
+      }
     }
 
     const isValid = await comparePassword(password, user.passwordHash);

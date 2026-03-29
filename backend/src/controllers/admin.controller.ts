@@ -113,9 +113,9 @@ export async function createUser(req: Request, res: Response) {
     }
 
     // In local mode, password is auto-assigned if not provided
-    // In SSO/hybrid mode, SSO users don't need password, external users do
+    // In SSO/hybrid mode, SSO users don't need password, external users get auto-assigned password
     const needsPassword = !ssoUser;
-    const autoAssignPassword = authConfig.mode === 'local' && !password;
+    const autoAssignPassword = !password && (authConfig.mode === 'local' || (authConfig.mode === 'hybrid' && !ssoUser));
 
     if (needsPassword && !password && !autoAssignPassword) {
       return res.status(400).json({ error: 'password is required for non-SSO users' });

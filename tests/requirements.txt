@@ -1,0 +1,22 @@
+# Q-CRM Test Suite Requirements
+# Install with: pip install -r requirements.txt
+
+# Core Testing
+pytest>=7.4.0
+pytest-html>=4.0.0
+
+# API Testing
+requests>=2.31.0
+
+# Selenium Testing
+selenium>=4.15.0
+webdriver-manager>=4.0.0
+
+# Utilities
+python-dotenv>=1.0.0
+
+# Optional: For parallel test execution
+pytest-xdist>=3.3.0
+
+# Optional: For coverage reporting
+pytest-cov>=4.1.0
