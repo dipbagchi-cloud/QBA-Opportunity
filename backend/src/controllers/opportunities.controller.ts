@@ -183,6 +183,22 @@ export async function createOpportunity(req: Request, res: Response) {
             }
         }
 
+        // Duplicate detection: Check if same title + client was created in last 30 seconds
+        const thirtySecondsAgo = new Date(Date.now() - 30000);
+        const recentDuplicate = await prisma.opportunity.findFirst({
+            where: {
+                title: body.title || body.name,
+                clientId: clientId,
+                ownerId: ownerId,
+                createdAt: { gte: thirtySecondsAgo }
+            }
+        });
+
+        if (recentDuplicate) {
+            console.log(`Duplicate detected: ${recentDuplicate.id} - returning existing record`);
+            return res.json(recentDuplicate);
+        }
+
         const newOpp = await prisma.opportunity.create({
             data: {
                 title: body.title || body.name,
