@@ -4,7 +4,7 @@ import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { Eye, EyeOff, Loader2, Lock, Mail, ArrowRight, ShieldCheck, AlertCircle, KeyRound, Check } from "lucide-react";
+import { Eye, EyeOff, Loader2, Lock, Mail, ArrowRight, ShieldCheck, AlertCircle, KeyRound, Check, Smartphone, Download } from "lucide-react";
 import { useAuthStore } from "@/lib/auth-store";
 import { API_URL, getAuthHeaders } from "@/lib/api";
 
@@ -314,6 +314,29 @@ function LoginContent() {
                     </form>
 
 
+                </div>
+
+                {/* Mobile App Download */}
+                <div className="mt-6 p-4 glass-card-dark border border-white/10 rounded-xl">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            <div className="p-2 bg-emerald-500/20 rounded-lg">
+                                <Smartphone className="w-5 h-5 text-emerald-400" />
+                            </div>
+                            <div>
+                                <p className="text-sm font-medium text-white">Q-CRM Mobile App</p>
+                                <p className="text-xs text-neutral-400">Android APK v10</p>
+                            </div>
+                        </div>
+                        <a
+                            href="/Q-CRM.apk"
+                            download
+                            className="flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-black text-sm font-semibold rounded-lg transition-colors"
+                        >
+                            <Download className="w-4 h-4" />
+                            Download
+                        </a>
+                    </div>
                 </div>
 
                 {/* Footer Links */}
