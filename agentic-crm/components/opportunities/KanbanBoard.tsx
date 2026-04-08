@@ -3,7 +3,7 @@
 import React, { useMemo } from 'react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { useOpportunityStore, Opportunity } from '@/lib/store';
-import { MoreHorizontal, DollarSign, User, AlertCircle, Clock, Calendar, CalendarCheck, CalendarClock } from 'lucide-react';
+import { MoreHorizontal, User, AlertCircle, Clock, Calendar, CalendarCheck, CalendarClock } from 'lucide-react';
 import Link from 'next/link';
 import { useCurrency } from '@/components/providers/currency-provider';
 

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { User, Lock, Users, Shield, Plus, X, Check, AlertCircle, RotateCcw, Pencil, ToggleLeft, ToggleRight, DollarSign, Trash2, Globe, Cpu, Tag, Building2, Download, Settings2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, Search, Eye, EyeOff, FileText, Mail, Send, Briefcase, ShieldCheck, RefreshCw, Coins, UserPlus, UserMinus, Calculator, Percent, Info, Clock } from "lucide-react";
+import { User, Lock, Users, Shield, Plus, X, Check, AlertCircle, RotateCcw, Pencil, ToggleLeft, ToggleRight, DollarSign, Trash2, Globe, Cpu, Tag, Building2, Download, Settings2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, Search, Eye, EyeOff, FileText, Mail, Send, Briefcase, ShieldCheck, RefreshCw, Coins, UserPlus, UserMinus, Calculator, Percent, Info, Clock, Bell, Filter, Zap, ArrowRight } from "lucide-react";
 import { useAuthStore } from "@/lib/auth-store";
 import { apiClient } from "@/lib/api";
 import { useCurrency } from "@/components/providers/currency-provider";
@@ -122,7 +122,7 @@ interface TeamOption {
     name: string;
 }
 
-type Tab = "profile" | "security" | "users" | "roles" | "qpeoplemapping" | "authconfig" | "ratecards" | "budgetassumptions" | "currencyrates" | "gomcalculator" | "clients" | "regions" | "technologies" | "pricingmodels" | "projecttypes" | "auditlog" | "emailtemplates";
+type Tab = "profile" | "security" | "users" | "roles" | "qpeoplemapping" | "authconfig" | "ratecards" | "budgetassumptions" | "currencyrates" | "gomcalculator" | "clients" | "regions" | "technologies" | "pricingmodels" | "projecttypes" | "auditlog" | "emailtemplates" | "notificationrules";
 
 export default function SettingsPage() {
     const { user, hasPermission } = useAuthStore();
@@ -183,6 +183,7 @@ export default function SettingsPage() {
             adminOnly: true,
             tabs: [
                 { key: "emailtemplates", label: "Email Templates", icon: Mail, adminOnly: true },
+                { key: "notificationrules", label: "Notification Rules", icon: Bell, adminOnly: true },
             ],
         },
     ];
@@ -280,6 +281,7 @@ export default function SettingsPage() {
                     {activeTab === "projecttypes" && canManageMetadata && <MasterDataTab entity="project-types" label="Project Type" />}
                     {activeTab === "auditlog" && canViewAuditLogs && <AuditLogTab />}
                     {activeTab === "emailtemplates" && isAdmin && <EmailTemplatesTab />}
+                    {activeTab === "notificationrules" && isAdmin && <NotificationRulesTab />}
                 </div>
             </div>
         </div>
@@ -3313,6 +3315,502 @@ function QPeopleMappingTab() {
                                 ))}
                             </tbody>
                         </table>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
+/* ─────────────── Notification Rules Tab ─────────────── */
+
+const TRIGGER_TYPES = [
+    { value: "stage_change", label: "Stage Change", description: "When an opportunity moves between stages" },
+    { value: "data_condition", label: "Data Condition", description: "When opportunity data matches a condition" },
+    { value: "approval", label: "Approval Required", description: "When an approval action is needed" },
+    { value: "stalled_deal", label: "Stalled Deal", description: "When a deal stays too long in a stage" },
+    { value: "health_drop", label: "Health Score Drop", description: "When deal health score drops" },
+];
+
+const STAGES = ["Discovery", "Qualification", "Proposal", "Negotiation", "Closed Won", "Closed Lost", "Proposal Lost"];
+
+const CONDITION_FIELDS = [
+    { value: "value", label: "Deal Value", type: "number" },
+    { value: "probability", label: "Probability (%)", type: "number" },
+    { value: "healthScore", label: "Health Score", type: "number" },
+    { value: "daysInStage", label: "Days in Stage", type: "number" },
+    { value: "stage", label: "Stage", type: "select", options: STAGES },
+    { value: "technology", label: "Technology", type: "text" },
+    { value: "region", label: "Region", type: "text" },
+    { value: "client", label: "Client", type: "text" },
+    { value: "ownerName", label: "Owner", type: "text" },
+    { value: "salesRepName", label: "Sales Rep", type: "text" },
+    { value: "managerName", label: "Manager", type: "text" },
+];
+
+const OPERATORS = [
+    { value: "eq", label: "equals" },
+    { value: "neq", label: "not equals" },
+    { value: "gt", label: "greater than" },
+    { value: "gte", label: "greater than or equal" },
+    { value: "lt", label: "less than" },
+    { value: "lte", label: "less than or equal" },
+    { value: "contains", label: "contains" },
+];
+
+interface NotifRule {
+    id: string;
+    name: string;
+    description: string | null;
+    isActive: boolean;
+    triggerType: string;
+    fromStage: string | null;
+    toStage: string | null;
+    conditions: any[] | null;
+    recipientRoles: string[];
+    channels: string[];
+    emailTemplateKey: string | null;
+    messageTemplate: string | null;
+    createdAt: string;
+    updatedAt: string;
+}
+
+interface ConditionRow {
+    field: string;
+    operator: string;
+    value: string;
+}
+
+function NotificationRulesTab() {
+    const [rules, setRules] = useState<NotifRule[]>([]);
+    const [roles, setRoles] = useState<{ id: string; name: string }[]>([]);
+    const [emailTemplates, setEmailTemplates] = useState<{ id: string; eventKey: string; name: string }[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
+    const [showModal, setShowModal] = useState(false);
+    const [editingRule, setEditingRule] = useState<NotifRule | null>(null);
+
+    // Form state
+    const [formName, setFormName] = useState("");
+    const [formDescription, setFormDescription] = useState("");
+    const [formTriggerType, setFormTriggerType] = useState("stage_change");
+    const [formFromStage, setFormFromStage] = useState("");
+    const [formToStage, setFormToStage] = useState("");
+    const [formConditions, setFormConditions] = useState<ConditionRow[]>([]);
+    const [formRecipientRoles, setFormRecipientRoles] = useState<string[]>([]);
+    const [formChannels, setFormChannels] = useState<string[]>(["in_app"]);
+    const [formEmailTemplateKey, setFormEmailTemplateKey] = useState("");
+    const [formMessageTemplate, setFormMessageTemplate] = useState("");
+
+    const load = useCallback(async () => {
+        setLoading(true);
+        try {
+            const [rulesData, rolesData, templatesData] = await Promise.all([
+                apiClient<any>("/api/admin/notification-rules"),
+                apiClient<any>("/api/admin/roles"),
+                apiClient<any>("/api/admin/email-templates"),
+            ]);
+            setRules(Array.isArray(rulesData) ? rulesData : []);
+            const roleList = (rolesData.roles || rolesData || []).map((r: any) => ({ id: r.id, name: r.name }));
+            setRoles(roleList);
+            setEmailTemplates(Array.isArray(templatesData) ? templatesData : []);
+        } catch (e) {
+            console.error("Failed to load notification rules:", e);
+        }
+        setLoading(false);
+    }, []);
+
+    useEffect(() => { load(); }, [load]);
+
+    function resetForm() {
+        setFormName("");
+        setFormDescription("");
+        setFormTriggerType("stage_change");
+        setFormFromStage("");
+        setFormToStage("");
+        setFormConditions([]);
+        setFormRecipientRoles([]);
+        setFormChannels(["in_app"]);
+        setFormEmailTemplateKey("");
+        setFormMessageTemplate("");
+        setEditingRule(null);
+    }
+
+    function openCreate() {
+        resetForm();
+        setShowModal(true);
+    }
+
+    function openEdit(rule: NotifRule) {
+        setEditingRule(rule);
+        setFormName(rule.name);
+        setFormDescription(rule.description || "");
+        setFormTriggerType(rule.triggerType);
+        setFormFromStage(rule.fromStage || "");
+        setFormToStage(rule.toStage || "");
+        setFormConditions(Array.isArray(rule.conditions) ? rule.conditions : []);
+        setFormRecipientRoles(Array.isArray(rule.recipientRoles) ? rule.recipientRoles : []);
+        setFormChannels(Array.isArray(rule.channels) ? rule.channels : ["in_app"]);
+        setFormEmailTemplateKey(rule.emailTemplateKey || "");
+        setFormMessageTemplate(rule.messageTemplate || "");
+        setShowModal(true);
+    }
+
+    async function handleSave() {
+        if (!formName.trim() || formRecipientRoles.length === 0 || formChannels.length === 0) return;
+        setSaving(true);
+        try {
+            const payload: any = {
+                name: formName.trim(),
+                description: formDescription.trim() || null,
+                triggerType: formTriggerType,
+                fromStage: formFromStage || null,
+                toStage: formToStage || null,
+                conditions: formConditions.length > 0 ? formConditions : null,
+                recipientRoles: formRecipientRoles,
+                channels: formChannels,
+                emailTemplateKey: formEmailTemplateKey || null,
+                messageTemplate: formMessageTemplate.trim() || null,
+            };
+
+            if (editingRule) {
+                await apiClient(`/api/admin/notification-rules/${editingRule.id}`, {
+                    method: "PATCH",
+                    body: JSON.stringify(payload),
+                });
+            } else {
+                await apiClient("/api/admin/notification-rules", {
+                    method: "POST",
+                    body: JSON.stringify(payload),
+                });
+            }
+            setShowModal(false);
+            resetForm();
+            await load();
+        } catch (e) {
+            console.error("Save notification rule error:", e);
+        }
+        setSaving(false);
+    }
+
+    async function handleToggle(rule: NotifRule) {
+        try {
+            await apiClient(`/api/admin/notification-rules/${rule.id}`, {
+                method: "PATCH",
+                body: JSON.stringify({ isActive: !rule.isActive }),
+            });
+            await load();
+        } catch (e) {
+            console.error("Toggle notification rule error:", e);
+        }
+    }
+
+    async function handleDelete(rule: NotifRule) {
+        if (!confirm(`Delete rule "${rule.name}"?`)) return;
+        try {
+            await apiClient(`/api/admin/notification-rules/${rule.id}`, { method: "DELETE" });
+            await load();
+        } catch (e) {
+            console.error("Delete notification rule error:", e);
+        }
+    }
+
+    function toggleRole(roleName: string) {
+        setFormRecipientRoles(prev =>
+            prev.includes(roleName) ? prev.filter(r => r !== roleName) : [...prev, roleName]
+        );
+    }
+
+    function toggleChannel(ch: string) {
+        setFormChannels(prev =>
+            prev.includes(ch) ? prev.filter(c => c !== ch) : [...prev, ch]
+        );
+    }
+
+    function addCondition() {
+        setFormConditions(prev => [...prev, { field: "value", operator: "gt", value: "" }]);
+    }
+
+    function updateCondition(idx: number, key: keyof ConditionRow, val: string) {
+        setFormConditions(prev => prev.map((c, i) => i === idx ? { ...c, [key]: val } : c));
+    }
+
+    function removeCondition(idx: number) {
+        setFormConditions(prev => prev.filter((_, i) => i !== idx));
+    }
+
+    const triggerLabel = (t: string) => TRIGGER_TYPES.find(x => x.value === t)?.label || t;
+
+    if (loading) {
+        return (
+            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+                <div className="animate-pulse space-y-3">
+                    <div className="h-5 w-48 bg-slate-200 rounded" />
+                    <div className="h-4 w-72 bg-slate-100 rounded" />
+                    <div className="h-32 bg-slate-50 rounded" />
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-4">
+            <div className="flex items-center justify-between">
+                <div>
+                    <h3 className="text-base font-bold text-slate-900 mb-0.5">Notification Rules</h3>
+                    <p className="text-xs text-slate-500">Configure automated notifications based on workflow stages, data conditions, and roles.</p>
+                </div>
+                <button
+                    onClick={openCreate}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-xs font-medium rounded-lg hover:bg-indigo-700 transition-colors"
+                >
+                    <Plus className="w-3.5 h-3.5" /> Add Rule
+                </button>
+            </div>
+
+            {rules.length === 0 ? (
+                <div className="text-center py-12 text-slate-400">
+                    <Bell className="w-10 h-10 mx-auto mb-2 opacity-40" />
+                    <p className="text-sm font-medium">No notification rules configured</p>
+                    <p className="text-xs mt-1">Create rules to automate notifications based on workflow events.</p>
+                </div>
+            ) : (
+                <div className="space-y-2">
+                    {rules.map(rule => (
+                        <div key={rule.id} className={`border rounded-lg p-3 transition-colors ${rule.isActive ? 'border-slate-200 bg-white' : 'border-slate-100 bg-slate-50 opacity-60'}`}>
+                            <div className="flex items-start justify-between gap-3">
+                                <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <span className="font-semibold text-sm text-slate-900">{rule.name}</span>
+                                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                                            rule.triggerType === 'stage_change' ? 'bg-blue-50 text-blue-700' :
+                                            rule.triggerType === 'data_condition' ? 'bg-amber-50 text-amber-700' :
+                                            rule.triggerType === 'approval' ? 'bg-purple-50 text-purple-700' :
+                                            rule.triggerType === 'stalled_deal' ? 'bg-red-50 text-red-700' :
+                                            'bg-orange-50 text-orange-700'
+                                        }`}>
+                                            {triggerLabel(rule.triggerType)}
+                                        </span>
+                                    </div>
+                                    {rule.description && <p className="text-xs text-slate-500 mb-1.5">{rule.description}</p>}
+                                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500">
+                                        {rule.triggerType === 'stage_change' && (
+                                            <span className="flex items-center gap-1">
+                                                <ArrowRight className="w-3 h-3" />
+                                                {rule.fromStage || 'Any'} → {rule.toStage || 'Any'}
+                                            </span>
+                                        )}
+                                        {rule.triggerType === 'data_condition' && Array.isArray(rule.conditions) && rule.conditions.length > 0 && (
+                                            <span className="flex items-center gap-1">
+                                                <Filter className="w-3 h-3" />
+                                                {rule.conditions.length} condition{rule.conditions.length > 1 ? 's' : ''}
+                                            </span>
+                                        )}
+                                        <span className="flex items-center gap-1">
+                                            <Users className="w-3 h-3" />
+                                            {Array.isArray(rule.recipientRoles) ? rule.recipientRoles.join(', ') : '—'}
+                                        </span>
+                                        <span className="flex items-center gap-1">
+                                            <Zap className="w-3 h-3" />
+                                            {Array.isArray(rule.channels) ? rule.channels.map(c => c === 'in_app' ? 'In-App' : 'Email').join(', ') : '—'}
+                                        </span>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                    <button onClick={() => handleToggle(rule)} className="p-1 rounded hover:bg-slate-100 transition-colors" title={rule.isActive ? 'Disable' : 'Enable'}>
+                                        {rule.isActive ? <ToggleRight className="w-5 h-5 text-green-600" /> : <ToggleLeft className="w-5 h-5 text-slate-400" />}
+                                    </button>
+                                    <button onClick={() => openEdit(rule)} className="p-1 rounded hover:bg-slate-100 transition-colors" title="Edit">
+                                        <Pencil className="w-3.5 h-3.5 text-slate-500" />
+                                    </button>
+                                    <button onClick={() => handleDelete(rule)} className="p-1 rounded hover:bg-red-50 transition-colors" title="Delete">
+                                        <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {/* Create / Edit Modal */}
+            {showModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => { setShowModal(false); resetForm(); }}>
+                    <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[85vh] overflow-y-auto m-4" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
+                            <h4 className="text-sm font-bold text-slate-900">{editingRule ? 'Edit' : 'Create'} Notification Rule</h4>
+                            <button onClick={() => { setShowModal(false); resetForm(); }} className="p-1 hover:bg-slate-100 rounded"><X className="w-4 h-4" /></button>
+                        </div>
+                        <div className="p-5 space-y-4">
+                            {/* Name & Description */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block text-xs font-medium text-slate-700 mb-1">Rule Name *</label>
+                                    <input value={formName} onChange={e => setFormName(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none" placeholder="e.g. Notify Manager on Closed Won" />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-medium text-slate-700 mb-1">Description</label>
+                                    <input value={formDescription} onChange={e => setFormDescription(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none" placeholder="Optional description" />
+                                </div>
+                            </div>
+
+                            {/* Trigger Type */}
+                            <div>
+                                <label className="block text-xs font-medium text-slate-700 mb-1.5">Trigger Type *</label>
+                                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                                    {TRIGGER_TYPES.map(t => (
+                                        <button
+                                            key={t.value}
+                                            type="button"
+                                            onClick={() => setFormTriggerType(t.value)}
+                                            className={`text-left p-2.5 rounded-lg border text-xs transition-colors ${
+                                                formTriggerType === t.value
+                                                    ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
+                                                    : 'border-slate-200 hover:border-slate-300 text-slate-600'
+                                            }`}
+                                        >
+                                            <div className="font-medium">{t.label}</div>
+                                            <div className="text-[10px] mt-0.5 opacity-70">{t.description}</div>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Stage Change fields */}
+                            {formTriggerType === 'stage_change' && (
+                                <div className="grid grid-cols-2 gap-3 p-3 bg-blue-50/50 rounded-lg border border-blue-100">
+                                    <div>
+                                        <label className="block text-xs font-medium text-slate-700 mb-1">From Stage</label>
+                                        <select value={formFromStage} onChange={e => setFormFromStage(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:ring-2 focus:ring-indigo-500 outline-none">
+                                            <option value="">Any Stage</option>
+                                            {STAGES.map(s => <option key={s} value={s}>{s}</option>)}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-medium text-slate-700 mb-1">To Stage</label>
+                                        <select value={formToStage} onChange={e => setFormToStage(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:ring-2 focus:ring-indigo-500 outline-none">
+                                            <option value="">Any Stage</option>
+                                            {STAGES.map(s => <option key={s} value={s}>{s}</option>)}
+                                        </select>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Data Condition fields */}
+                            {formTriggerType === 'data_condition' && (
+                                <div className="p-3 bg-amber-50/50 rounded-lg border border-amber-100 space-y-2">
+                                    <div className="flex items-center justify-between">
+                                        <label className="text-xs font-medium text-slate-700">Conditions</label>
+                                        <button type="button" onClick={addCondition} className="text-[10px] font-medium text-indigo-600 hover:text-indigo-800 flex items-center gap-0.5">
+                                            <Plus className="w-3 h-3" /> Add Condition
+                                        </button>
+                                    </div>
+                                    {formConditions.length === 0 && (
+                                        <p className="text-[11px] text-slate-400 py-2 text-center">No conditions added. Click &quot;Add Condition&quot; to define data-based triggers.</p>
+                                    )}
+                                    {formConditions.map((cond, idx) => (
+                                        <div key={idx} className="flex items-center gap-2">
+                                            <select value={cond.field} onChange={e => updateCondition(idx, 'field', e.target.value)} className="border border-slate-200 rounded px-2 py-1 text-xs bg-white flex-1">
+                                                {CONDITION_FIELDS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+                                            </select>
+                                            <select value={cond.operator} onChange={e => updateCondition(idx, 'operator', e.target.value)} className="border border-slate-200 rounded px-2 py-1 text-xs bg-white w-32">
+                                                {OPERATORS.map(op => <option key={op.value} value={op.value}>{op.label}</option>)}
+                                            </select>
+                                            {CONDITION_FIELDS.find(f => f.value === cond.field)?.type === 'select' ? (
+                                                <select value={cond.value} onChange={e => updateCondition(idx, 'value', e.target.value)} className="border border-slate-200 rounded px-2 py-1 text-xs bg-white flex-1">
+                                                    <option value="">Select...</option>
+                                                    {(CONDITION_FIELDS.find(f => f.value === cond.field)?.options || []).map(o => <option key={o} value={o}>{o}</option>)}
+                                                </select>
+                                            ) : (
+                                                <input value={cond.value} onChange={e => updateCondition(idx, 'value', e.target.value)}
+                                                    type={CONDITION_FIELDS.find(f => f.value === cond.field)?.type === 'number' ? 'number' : 'text'}
+                                                    className="border border-slate-200 rounded px-2 py-1 text-xs flex-1" placeholder="Value..." />
+                                            )}
+                                            <button type="button" onClick={() => removeCondition(idx)} className="p-1 hover:bg-red-50 rounded">
+                                                <X className="w-3 h-3 text-red-400" />
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            {/* Recipient Roles */}
+                            <div>
+                                <label className="block text-xs font-medium text-slate-700 mb-1.5">Recipient Roles *</label>
+                                <div className="flex flex-wrap gap-2">
+                                    {roles.map(role => (
+                                        <button
+                                            key={role.id}
+                                            type="button"
+                                            onClick={() => toggleRole(role.name)}
+                                            className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                                                formRecipientRoles.includes(role.name)
+                                                    ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
+                                                    : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
+                                            }`}
+                                        >
+                                            {formRecipientRoles.includes(role.name) && <Check className="w-3 h-3 inline mr-1" />}
+                                            {role.name}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Channels */}
+                            <div>
+                                <label className="block text-xs font-medium text-slate-700 mb-1.5">Notification Channels *</label>
+                                <div className="flex gap-3">
+                                    {[{ value: 'in_app', label: 'In-App', icon: Bell }, { value: 'email', label: 'Email', icon: Mail }].map(ch => (
+                                        <button
+                                            key={ch.value}
+                                            type="button"
+                                            onClick={() => toggleChannel(ch.value)}
+                                            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium border transition-colors ${
+                                                formChannels.includes(ch.value)
+                                                    ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
+                                                    : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
+                                            }`}
+                                        >
+                                            <ch.icon className="w-3.5 h-3.5" />
+                                            {ch.label}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Email Template (when email channel selected) */}
+                            {formChannels.includes('email') && (
+                                <div>
+                                    <label className="block text-xs font-medium text-slate-700 mb-1">Email Template</label>
+                                    <select value={formEmailTemplateKey} onChange={e => setFormEmailTemplateKey(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:ring-2 focus:ring-indigo-500 outline-none">
+                                        <option value="">None (use message template below)</option>
+                                        {emailTemplates.map(t => <option key={t.id} value={t.eventKey}>{t.name || t.eventKey}</option>)}
+                                    </select>
+                                </div>
+                            )}
+
+                            {/* Message Template */}
+                            <div>
+                                <label className="block text-xs font-medium text-slate-700 mb-1">Message Template</label>
+                                <textarea value={formMessageTemplate} onChange={e => setFormMessageTemplate(e.target.value)} rows={2}
+                                    className="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none resize-none"
+                                    placeholder="e.g. Deal {{dealName}} moved to {{stage}} by {{userName}}. Use {{variable}} for placeholders." />
+                                <p className="text-[10px] text-slate-400 mt-0.5">Available: {"{{dealName}}, {{stage}}, {{value}}, {{userName}}, {{client}}, {{technology}}, {{probability}}"}</p>
+                            </div>
+                        </div>
+
+                        {/* Footer */}
+                        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-slate-100">
+                            <button onClick={() => { setShowModal(false); resetForm(); }} className="px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">Cancel</button>
+                            <button
+                                onClick={handleSave}
+                                disabled={saving || !formName.trim() || formRecipientRoles.length === 0 || formChannels.length === 0}
+                                className="px-4 py-1.5 bg-indigo-600 text-white text-xs font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors flex items-center gap-1.5"
+                            >
+                                {saving ? <RotateCcw className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                                {editingRule ? 'Update Rule' : 'Create Rule'}
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

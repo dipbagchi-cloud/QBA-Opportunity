@@ -38,6 +38,35 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              // Auto-reload on ChunkLoadError after new deployments
+              window.addEventListener('error', function(e) {
+                if (
+                  e.message && (
+                    e.message.includes('Loading chunk') ||
+                    e.message.includes('ChunkLoadError') ||
+                    e.message.includes('Failed to fetch dynamically imported module')
+                  )
+                ) {
+                  if (!sessionStorage.getItem('chunk_reload')) {
+                    sessionStorage.setItem('chunk_reload', '1');
+                    window.location.reload();
+                  } else {
+                    sessionStorage.removeItem('chunk_reload');
+                  }
+                }
+              });
+              // Clear reload flag on successful load
+              window.addEventListener('load', function() {
+                sessionStorage.removeItem('chunk_reload');
+              });
+            `,
+          }}
+        />
+      </head>
       <body className={`${jakarta.variable} antialiased font-sans`}>
         <ThemeProvider
           attribute="class"

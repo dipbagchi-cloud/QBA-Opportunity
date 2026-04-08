@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
-    DollarSign,
+    IndianRupee,
     Target,
     Activity,
     Clock,
@@ -96,7 +96,7 @@ interface Analytics {
         avgTimeToClose: number;
         wonCount: number;
         lostCount: number;
-        managerKpi?: { name: string; totalAssigned: number; responded: number; avgResponseDays: number }[];
+        managerKpi?: { name: string; totalAssigned: number; responded: number; avgResponseDays: number; wonCount: number; lostCount: number; totalRevenue: number }[];
     };
 }
 
@@ -217,12 +217,97 @@ export default function DashboardPage() {
     const projectedRevenue = analytics?.dashboard.projectedRevenue || 0;
     const closedRevenue = analytics?.dashboard.closedRevenue || 0;
 
+    // Build tech → project names mapping for tooltip
+    const STAGE_GROUP: Record<string, string> = {
+        'Discovery': 'Pipeline', 'Pipeline': 'Pipeline', 'Qualification': 'Qualification',
+        'Presales': 'Qualification', 'Proposal': 'Proposal', 'Sales': 'Proposal',
+        'Negotiation': 'Negotiation', 'Closed Won': 'Closed Won', 'Closed Lost': 'Closed Lost',
+        'Proposal Lost': 'Proposal Lost',
+    };
+    const techProjectsMap: Record<string, string[]> = {};
+    const ownerProjectsMap: Record<string, string[]> = {};
+    const clientProjectsMap: Record<string, string[]> = {};
+    const salesRepProjectsMap: Record<string, string[]> = {};
+    const stageProjectsMap: Record<string, string[]> = {};
+    opportunities.forEach(opp => {
+        // Tech map
+        if (opp.technology) {
+            opp.technology.split(',').map(t => t.trim()).filter(Boolean).forEach(tech => {
+                if (!techProjectsMap[tech]) techProjectsMap[tech] = [];
+                if (!techProjectsMap[tech].includes(opp.name)) techProjectsMap[tech].push(opp.name);
+            });
+        }
+        // Owner / Salesperson map
+        const ownerKey = opp.owner || 'Unassigned';
+        if (!ownerProjectsMap[ownerKey]) ownerProjectsMap[ownerKey] = [];
+        if (!ownerProjectsMap[ownerKey].includes(opp.name)) ownerProjectsMap[ownerKey].push(opp.name);
+        // Sales rep map
+        const repKey = opp.salesRepName || opp.owner || 'Unknown';
+        if (!salesRepProjectsMap[repKey]) salesRepProjectsMap[repKey] = [];
+        if (!salesRepProjectsMap[repKey].includes(opp.name)) salesRepProjectsMap[repKey].push(opp.name);
+        // Client map
+        const cKey = opp.client || 'Unknown';
+        if (!clientProjectsMap[cKey]) clientProjectsMap[cKey] = [];
+        if (!clientProjectsMap[cKey].includes(opp.name)) clientProjectsMap[cKey].push(opp.name);
+        // Stage map (grouped)
+        const rawStage = opp.currentStage || 'Unknown';
+        const groupedStage = STAGE_GROUP[rawStage] || rawStage;
+        if (!stageProjectsMap[groupedStage]) stageProjectsMap[groupedStage] = [];
+        if (!stageProjectsMap[groupedStage].includes(opp.name)) stageProjectsMap[groupedStage].push(opp.name);
+    });
+
+    const CategoryTooltip = ({ active, payload, label, projectsMap, valueLabel }: any) => {
+        if (!active || !payload?.length) return null;
+        const category = label || payload[0]?.payload?.name;
+        const projects: string[] = (projectsMap || {})[category] || [];
+        const isCurrency = valueLabel === 'Revenue';
+        return (
+            <div className="bg-white border border-slate-200 rounded-lg shadow-lg p-2.5 max-w-[260px]">
+                <p className="text-xs font-bold text-slate-800 mb-1">{category}</p>
+                {payload.map((entry: any, i: number) => (
+                    <p key={i} className="text-xs text-purple-600 font-semibold">
+                        {entry.name || entry.dataKey}: {isCurrency ? fmtCurrency(entry.value, { compact: true }) : entry.value}
+                    </p>
+                ))}
+                {projects.length > 0 && (
+                    <div className="border-t border-slate-100 pt-1.5 mt-1.5">
+                        <p className="text-[10px] text-slate-400 font-semibold uppercase mb-0.5">Projects</p>
+                        {projects.slice(0, 8).map((p: string, i: number) => (
+                            <p key={i} className="text-[11px] text-slate-600 truncate">{p}</p>
+                        ))}
+                        {projects.length > 8 && <p className="text-[10px] text-slate-400">+{projects.length - 8} more</p>}
+                    </div>
+                )}
+            </div>
+        );
+    };
+
+    // Shorthand tooltip creators
+    const TechRevTooltip = (props: any) => <CategoryTooltip {...props} projectsMap={techProjectsMap} valueLabel="Revenue" />;
+    const OwnerTooltip = (props: any) => <CategoryTooltip {...props} projectsMap={ownerProjectsMap} valueLabel="Count" />;
+    const ClientRevTooltip = (props: any) => <CategoryTooltip {...props} projectsMap={clientProjectsMap} valueLabel="Revenue" />;
+    const ClientCountTooltip = (props: any) => <CategoryTooltip {...props} projectsMap={clientProjectsMap} valueLabel="Count" />;
+    const SalesRepRevTooltip = (props: any) => <CategoryTooltip {...props} projectsMap={salesRepProjectsMap} valueLabel="Revenue" />;
+    const StageTooltip = (props: any) => <CategoryTooltip {...props} projectsMap={stageProjectsMap} valueLabel="Count" />;
+
+    // Custom YAxis tick that truncates long names to a single line
+    const TruncatedTick = ({ x, y, payload }: any) => {
+        const maxLen = 16;
+        const name = payload?.value || '';
+        const display = name.length > maxLen ? name.slice(0, maxLen) + '…' : name;
+        return (
+            <text x={x} y={y} textAnchor="end" fill="#94a3b8" fontSize={8} dominantBaseline="central">
+                {display}
+            </text>
+        );
+    };
+
     const stats = [
         {
             title: "Projected Revenue",
             value: fmtCurrency(projectedRevenue, { compact: true }),
             subtitle: `${pipeline?.totalOpps || 0} opportunities`,
-            icon: DollarSign,
+            icon: IndianRupee,
             iconBg: "bg-indigo-100",
             iconColor: "text-indigo-600",
         },
@@ -330,7 +415,7 @@ export default function DashboardPage() {
                             <Cell key={idx} fill={PIE_COLOR_MAP[entry.name] || PIE_COLORS[idx % PIE_COLORS.length]} />
                         ))}
                     </Pie>
-                    <Tooltip />
+                    <Tooltip content={<StageTooltip />} />
                     <Legend />
                 </PieChart>
             </ResponsiveContainer>
@@ -355,7 +440,7 @@ export default function DashboardPage() {
                     <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
                     <XAxis type="number" tick={{ fill: '#64748b', fontSize: 11 }} allowDecimals={false} />
                     <YAxis type="category" dataKey="name" tick={{ fill: '#64748b', fontSize: 11 }} width={120} />
-                    <Tooltip />
+                    <Tooltip content={<OwnerTooltip />} />
                     <Legend />
                     <Bar dataKey="active" name="Active" fill="#6366f1" stackId="a" />
                     <Bar dataKey="won" name="Won" fill="#10b981" stackId="a" radius={[0, 3, 3, 0]} />
@@ -381,7 +466,7 @@ export default function DashboardPage() {
                     <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
                     <XAxis type="number" tickFormatter={(v) => fmtCurrency(v, { compact: true })} tick={{ fill: '#64748b', fontSize: 11 }} />
                     <YAxis type="category" dataKey="name" tick={{ fill: '#64748b', fontSize: 11 }} width={100} />
-                    <Tooltip formatter={(v: number) => [fmtCurrency(v, { compact: true }), 'Revenue']} />
+                    <Tooltip content={<TechRevTooltip />} />
                     <Bar dataKey="value" fill="#8b5cf6" radius={[0, 3, 3, 0]} />
                 </BarChart>
             </ResponsiveContainer>
@@ -405,8 +490,8 @@ export default function DashboardPage() {
                     <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
                     <XAxis type="number" tickFormatter={(v) => fmtCurrency(v, { compact: true })} tick={{ fill: '#64748b', fontSize: 11 }} />
                     <YAxis type="category" dataKey="name" tick={{ fill: '#64748b', fontSize: 11 }} width={120} />
-                    <Tooltip formatter={(v: number) => [fmtCurrency(v, { compact: true }), 'Revenue']} />
-                    <Bar dataKey="value" fill="#ec4899" radius={[0, 3, 3, 0]} />
+                    <Tooltip content={<ClientRevTooltip />} />
+                    <Bar dataKey="value" name="Revenue" fill="#ec4899" radius={[0, 3, 3, 0]} />
                 </BarChart>
             </ResponsiveContainer>
         ),
@@ -429,8 +514,8 @@ export default function DashboardPage() {
                     <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
                     <XAxis type="number" tickFormatter={(v) => fmtCurrency(v, { compact: true })} tick={{ fill: '#64748b', fontSize: 11 }} />
                     <YAxis type="category" dataKey="name" tick={{ fill: '#64748b', fontSize: 11 }} width={120} />
-                    <Tooltip formatter={(v: number) => [fmtCurrency(v, { compact: true }), 'Revenue']} />
-                    <Bar dataKey="revenue" fill="#0ea5e9" radius={[0, 3, 3, 0]} />
+                    <Tooltip content={<SalesRepRevTooltip />} />
+                    <Bar dataKey="revenue" name="Revenue" fill="#0ea5e9" radius={[0, 3, 3, 0]} />
                 </BarChart>
             </ResponsiveContainer>
         ),
@@ -453,7 +538,7 @@ export default function DashboardPage() {
                     <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
                     <XAxis type="number" tick={{ fill: '#64748b', fontSize: 11 }} allowDecimals={false} />
                     <YAxis type="category" dataKey="name" tick={{ fill: '#64748b', fontSize: 11 }} width={120} />
-                    <Tooltip />
+                    <Tooltip content={<ClientCountTooltip />} />
                     <Bar dataKey="value" name="Count" fill="#f59e0b" radius={[0, 3, 3, 0]} />
                 </BarChart>
             </ResponsiveContainer>
@@ -477,12 +562,14 @@ export default function DashboardPage() {
     };
 
     const managerKpiDrill: DrillDownConfig = {
-        title: "Manager Response KPI",
+        title: "Manager KPI",
         columns: [
             { key: "name", label: "Manager", format: "text" },
-            { key: "totalAssigned", label: "Assigned", format: "number" },
-            { key: "responded", label: "Acted On", format: "number" },
-            { key: "avgResponseDays", label: "Avg Response Days", format: "number" },
+            { key: "totalAssigned", label: "Total Opps", format: "number" },
+            { key: "wonCount", label: "Won", format: "number" },
+            { key: "lostCount", label: "Lost", format: "number" },
+            { key: "totalRevenue", label: "Won Revenue", format: "currency" },
+            { key: "avgResponseDays", label: "Avg Days to Close", format: "number" },
         ],
         data: sales?.managerKpi || [],
     };
@@ -666,7 +753,7 @@ export default function DashboardPage() {
                                                 <Cell key={idx} fill={PIE_COLOR_MAP[entry.name] || PIE_COLORS[idx % PIE_COLORS.length]} />
                                             ))}
                                         </Pie>
-                                        <Tooltip contentStyle={{ fontSize: '10px', borderRadius: '6px', border: '1px solid #e2e8f0', padding: '4px 8px' }} />
+                                        <Tooltip content={<StageTooltip />} />
                                     </PieChart>
                                 </ResponsiveContainer>
                             </div>
@@ -696,8 +783,9 @@ export default function DashboardPage() {
                                 <BarChart data={ownerData} layout="vertical" margin={{ left: 0, right: 5 }} barSize={10}>
                                     <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
                                     <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} allowDecimals={false} />
-                                    <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} width={80} />
-                                    <Tooltip contentStyle={{ fontSize: '10px', borderRadius: '6px', border: '1px solid #e2e8f0', padding: '4px 8px' }} />
+                                    <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} tick={<TruncatedTick />} width={110} interval={0} />
+                                    <Tooltip content={<OwnerTooltip />} />
+                                    <Legend wrapperStyle={{ fontSize: '9px', paddingTop: '2px' }} iconSize={8} />
                                     <Bar dataKey="active" name="Active" fill="#6366f1" stackId="a" />
                                     <Bar dataKey="won" name="Won" fill="#10b981" stackId="a" radius={[0, 2, 2, 0]} />
                                 </BarChart>
@@ -715,8 +803,9 @@ export default function DashboardPage() {
                                     <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
                                     <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} tickFormatter={(v) => fmtCurrency(v, { compact: true })} />
                                     <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} width={65} />
-                                    <Tooltip formatter={(v: number) => [fmtCurrency(v, { compact: true }), 'Revenue']} contentStyle={{ fontSize: '10px', borderRadius: '6px', border: '1px solid #e2e8f0', padding: '4px 8px' }} />
-                                    <Bar dataKey="value" fill="#8b5cf6" radius={[0, 2, 2, 0]} />
+                                    <Tooltip content={<TechRevTooltip />} />
+                                    <Legend wrapperStyle={{ fontSize: '9px', paddingTop: '2px' }} iconSize={8} />
+                                    <Bar dataKey="value" name="Revenue" fill="#8b5cf6" radius={[0, 2, 2, 0]} />
                                 </BarChart>
                             </ResponsiveContainer>
                         </div>
@@ -732,8 +821,9 @@ export default function DashboardPage() {
                                     <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
                                     <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} tickFormatter={(v) => fmtCurrency(v, { compact: true })} />
                                     <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} width={80} />
-                                    <Tooltip formatter={(v: number) => [fmtCurrency(v, { compact: true }), 'Revenue']} contentStyle={{ fontSize: '10px', borderRadius: '6px', border: '1px solid #e2e8f0', padding: '4px 8px' }} />
-                                    <Bar dataKey="value" fill="#ec4899" radius={[0, 2, 2, 0]} />
+                                    <Tooltip content={<ClientRevTooltip />} />
+                                    <Legend wrapperStyle={{ fontSize: '9px', paddingTop: '2px' }} iconSize={8} />
+                                    <Bar dataKey="value" name="Revenue" fill="#ec4899" radius={[0, 2, 2, 0]} />
                                 </BarChart>
                             </ResponsiveContainer>
                         </div>
@@ -751,9 +841,10 @@ export default function DashboardPage() {
                                 <BarChart data={ownerRevenueData} layout="vertical" margin={{ left: 0, right: 5 }} barSize={10}>
                                     <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
                                     <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} tickFormatter={(v) => fmtCurrency(v, { compact: true })} />
-                                    <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} width={80} />
-                                    <Tooltip formatter={(v: number) => [fmtCurrency(v, { compact: true }), 'Revenue']} contentStyle={{ fontSize: '10px', borderRadius: '6px', border: '1px solid #e2e8f0', padding: '4px 8px' }} />
-                                    <Bar dataKey="revenue" fill="#0ea5e9" radius={[0, 2, 2, 0]} />
+                                    <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} tick={<TruncatedTick />} width={110} interval={0} />
+                                    <Tooltip content={<SalesRepRevTooltip />} />
+                                    <Legend wrapperStyle={{ fontSize: '9px', paddingTop: '2px' }} iconSize={8} />
+                                    <Bar dataKey="revenue" name="Revenue" fill="#0ea5e9" radius={[0, 2, 2, 0]} />
                                 </BarChart>
                             </ResponsiveContainer>
                         </div>
@@ -769,7 +860,8 @@ export default function DashboardPage() {
                                     <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
                                     <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} allowDecimals={false} />
                                     <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} width={80} />
-                                    <Tooltip contentStyle={{ fontSize: '10px', borderRadius: '6px', border: '1px solid #e2e8f0', padding: '4px 8px' }} />
+                                    <Tooltip content={<ClientCountTooltip />} />
+                                    <Legend wrapperStyle={{ fontSize: '9px', paddingTop: '2px' }} iconSize={8} />
                                     <Bar dataKey="value" name="Count" fill="#f59e0b" radius={[0, 2, 2, 0]} />
                                 </BarChart>
                             </ResponsiveContainer>
@@ -832,9 +924,10 @@ export default function DashboardPage() {
                             <thead>
                                 <tr className="border-b border-slate-50 text-left text-slate-400">
                                     <th className="pb-1 font-medium">Manager</th>
-                                    <th className="pb-1 font-medium text-center">Assigned</th>
-                                    <th className="pb-1 font-medium text-center">Acted</th>
-                                    <th className="pb-1 font-medium text-center">Avg Days</th>
+                                    <th className="pb-1 font-medium text-center">Opps</th>
+                                    <th className="pb-1 font-medium text-center">Won</th>
+                                    <th className="pb-1 font-medium text-center">Lost</th>
+                                    <th className="pb-1 font-medium text-right">Revenue</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -842,8 +935,9 @@ export default function DashboardPage() {
                                     <tr key={mgr.name} className="border-b border-slate-50/50 last:border-0">
                                         <td className="py-1.5 font-medium text-slate-700 truncate max-w-[90px]">{mgr.name}</td>
                                         <td className="py-1.5 text-center text-slate-500">{mgr.totalAssigned}</td>
-                                        <td className="py-1.5 text-center text-slate-500">{mgr.responded}</td>
-                                        <td className="py-1.5 text-center text-slate-500">{mgr.avgResponseDays}d</td>
+                                        <td className="py-1.5 text-center text-emerald-600 font-semibold">{mgr.wonCount}</td>
+                                        <td className="py-1.5 text-center text-red-500 font-semibold">{mgr.lostCount}</td>
+                                        <td className="py-1.5 text-right text-slate-600">{fmtCurrency(mgr.totalRevenue || 0, { compact: true })}</td>
                                     </tr>
                                 ))}
                             </tbody>

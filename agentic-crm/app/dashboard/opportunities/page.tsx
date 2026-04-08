@@ -93,11 +93,20 @@ export default function OpportunitiesPage() {
         loadPage(1, "");
     }, []);
 
+    // Reload all opportunities when switching to kanban mode
+    useEffect(() => {
+        if (viewMode === 'kanban') {
+            fetchOpportunities({ page: 1, limit: 100, search: searchTerm });
+        } else {
+            fetchOpportunities({ page: currentPage, limit, search: searchTerm });
+        }
+    }, [viewMode]);
+
     // Debounced search
     useEffect(() => {
         const timer = setTimeout(() => {
             setCurrentPage(1);
-            fetchOpportunities({ page: 1, limit, search: searchTerm });
+            fetchOpportunities({ page: 1, limit: viewMode === 'kanban' ? 100 : limit, search: searchTerm });
         }, 400);
         return () => clearTimeout(timer);
     }, [searchTerm]);

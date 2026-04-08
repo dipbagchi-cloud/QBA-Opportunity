@@ -570,6 +570,43 @@ model NotificationPreference {
   @@map("notification_preferences")
 }
 
+model NotificationRule {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+
+  // Trigger: "stage_change", "data_condition", "approval", "stalled_deal", "health_drop"
+  triggerType String
+
+  // For stage_change triggers: which stage transition fires this
+  fromStage   String?           // null = any stage
+  toStage     String?           // null = any stage
+
+  // For data_condition triggers: JSON array of conditions
+  // e.g. [{"field":"value","operator":"gt","value":"1000000"},{"field":"probability","operator":"gte","value":"75"}]
+  conditions  Json?
+
+  // Who receives: JSON array of role names e.g. ["Admin","Manager","Sales"]
+  recipientRoles Json
+
+  // Notification channels: JSON array e.g. ["in_app","email"]
+  channels    Json
+
+  // Which email template to use (optional)
+  emailTemplateKey String?
+
+  // Custom message for in-app notifications (supports {{variable}} placeholders)
+  messageTemplate  String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([triggerType])
+  @@index([isActive])
+  @@map("notification_rules")
+}
+
 // ============================================================================
 // AI & AGENTIC FEATURES
 // ============================================================================

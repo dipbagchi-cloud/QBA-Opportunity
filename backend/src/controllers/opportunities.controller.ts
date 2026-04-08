@@ -32,6 +32,10 @@ export async function listOpportunities(req: Request, res: Response) {
                     client: true,
                     stage: true,
                     owner: true,
+                    stageHistory: {
+                        orderBy: { enteredAt: 'desc' },
+                        take: 1,
+                    },
                 },
                 orderBy: { updatedAt: 'desc' },
                 skip: (page - 1) * limit,
@@ -70,10 +74,13 @@ export async function listOpportunities(req: Request, res: Response) {
             const maxForStage = probability;
             probability = Math.min(probability + Math.round(completenessBonus * 1.5), Math.min(maxForStage + 15, 100));
 
-            // 2. Days in Stage
-            const lastUpdate = new Date(opp.updatedAt);
+            // 2. Days in Stage - use stageHistory.enteredAt for accurate calculation
+            const currentStageEntry = opp.stageHistory?.[0];
+            const stageEnteredAt = currentStageEntry?.enteredAt 
+                ? new Date(currentStageEntry.enteredAt) 
+                : new Date(opp.createdAt); // fallback to createdAt if no history
             const now = new Date();
-            const daysInStage = Math.floor((now.getTime() - lastUpdate.getTime()) / (1000 * 3600 * 24));
+            const daysInStage = Math.floor((now.getTime() - stageEnteredAt.getTime()) / (1000 * 3600 * 24));
 
             // 3. Stalled detection
             const isStalled = daysInStage > 30 && !['Closed Won', 'Closed Lost'].includes(stageName);

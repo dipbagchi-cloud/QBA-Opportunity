@@ -5,28 +5,32 @@ import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
     PieChart, Pie, Cell, LineChart, Line, AreaChart, Area
 } from 'recharts';
-import { Loader2, DollarSign, Activity, TrendingUp, Users, Target, Clock, FileText, CheckCircle, Trophy, XCircle, RefreshCw, Briefcase } from "lucide-react";
+import { Loader2, IndianRupee, Activity, TrendingUp, Users, Target, Clock, FileText, CheckCircle, Trophy, XCircle, RefreshCw, Briefcase } from "lucide-react";
 
 import { API_URL, getAuthHeaders } from '@/lib/api';
+import { useCurrency } from '@/components/providers/currency-provider';
 
 const COLORS = ['#6366f1', '#ec4899', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444'];
 
 export default function AnalyticsPage() {
     const [data, setData] = useState<any>(null);
+    const [opportunities, setOpportunities] = useState<any[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [activeTab, setActiveTab] = useState("dashboard");
+    const { symbol, convert, format } = useCurrency();
 
     useEffect(() => {
-        fetch(`${API_URL}/api/analytics`, { headers: getAuthHeaders() })
-            .then(res => res.json())
-            .then(data => {
-                setData(data);
-                setIsLoading(false);
-            })
-            .catch(err => {
-                console.error(err);
-                setIsLoading(false);
-            });
+        Promise.all([
+            fetch(`${API_URL}/api/analytics`, { headers: getAuthHeaders() }).then(r => r.json()),
+            fetch(`${API_URL}/api/opportunities?limit=500`, { headers: getAuthHeaders() }).then(r => r.json()),
+        ]).then(([analyticsData, oppsData]) => {
+            setData(analyticsData);
+            setOpportunities(Array.isArray(oppsData) ? oppsData : (oppsData.data ?? []));
+            setIsLoading(false);
+        }).catch(err => {
+            console.error(err);
+            setIsLoading(false);
+        });
     }, []);
 
     if (isLoading) return <div className="p-10 flex justify-center"><Loader2 className="animate-spin text-indigo-600" /></div>;
@@ -37,6 +41,80 @@ export default function AnalyticsPage() {
     if (!dashboard) {
         return <div className="p-10">Data formatting error. Please check console.</div>;
     }
+
+    // Helper function to format compact currency (e.g., 1.2M)
+    const fmtCompact = (v: number) => `${symbol}${(convert(v) / 1e6).toFixed(1)}M`;
+    const fmtFull = (v: number) => format(v);
+
+    // Build project-name lookup maps for tooltips
+    const STAGE_GROUP: Record<string, string> = {
+        'Discovery': 'Pipeline', 'Pipeline': 'Pipeline', 'Qualification': 'Qualification',
+        'Presales': 'Qualification', 'Proposal': 'Proposal', 'Sales': 'Proposal',
+        'Negotiation': 'Negotiation', 'Closed Won': 'Closed Won', 'Closed Lost': 'Closed Lost',
+        'Proposal Lost': 'Proposal Lost',
+    };
+    const techProjectsMap: Record<string, string[]> = {};
+    const ownerProjectsMap: Record<string, string[]> = {};
+    const clientProjectsMap: Record<string, string[]> = {};
+    const salesRepProjectsMap: Record<string, string[]> = {};
+    const stageProjectsMap: Record<string, string[]> = {};
+    opportunities.forEach((opp: any) => {
+        const oppName = opp.name || 'Unnamed';
+        if (opp.technology) {
+            opp.technology.split(',').map((t: string) => t.trim()).filter(Boolean).forEach((tech: string) => {
+                if (!techProjectsMap[tech]) techProjectsMap[tech] = [];
+                if (!techProjectsMap[tech].includes(oppName)) techProjectsMap[tech].push(oppName);
+            });
+        }
+        const ownerKey = opp.owner || 'Unassigned';
+        if (!ownerProjectsMap[ownerKey]) ownerProjectsMap[ownerKey] = [];
+        if (!ownerProjectsMap[ownerKey].includes(oppName)) ownerProjectsMap[ownerKey].push(oppName);
+        const repKey = opp.salesRepName || opp.owner || 'Unknown';
+        if (!salesRepProjectsMap[repKey]) salesRepProjectsMap[repKey] = [];
+        if (!salesRepProjectsMap[repKey].includes(oppName)) salesRepProjectsMap[repKey].push(oppName);
+        const cKey = opp.client || 'Unknown';
+        if (!clientProjectsMap[cKey]) clientProjectsMap[cKey] = [];
+        if (!clientProjectsMap[cKey].includes(oppName)) clientProjectsMap[cKey].push(oppName);
+        const rawStage = opp.currentStage || 'Unknown';
+        const groupedStage = STAGE_GROUP[rawStage] || rawStage;
+        if (!stageProjectsMap[groupedStage]) stageProjectsMap[groupedStage] = [];
+        if (!stageProjectsMap[groupedStage].includes(oppName)) stageProjectsMap[groupedStage].push(oppName);
+    });
+
+    // Generic tooltip with project names
+    const ProjectTooltip = ({ active, payload, label, projectsMap, isCurrency: isCur }: any) => {
+        if (!active || !payload?.length) return null;
+        const category = label || payload[0]?.payload?.name;
+        const projects: string[] = (projectsMap || {})[category] || [];
+        return (
+            <div className="bg-white border border-slate-200 rounded-lg shadow-lg p-2.5 max-w-[260px]">
+                <p className="text-xs font-bold text-slate-800 mb-1">{category}</p>
+                {payload.map((entry: any, i: number) => (
+                    <p key={i} className="text-xs text-purple-600 font-semibold">
+                        {entry.name || entry.dataKey}: {isCur ? fmtFull(entry.value) : entry.value}
+                    </p>
+                ))}
+                {projects.length > 0 && (
+                    <div className="border-t border-slate-100 pt-1.5 mt-1.5">
+                        <p className="text-[10px] text-slate-400 font-semibold uppercase mb-0.5">Projects</p>
+                        {projects.slice(0, 8).map((p: string, i: number) => (
+                            <p key={i} className="text-[11px] text-slate-600 truncate">{p}</p>
+                        ))}
+                        {projects.length > 8 && <p className="text-[10px] text-slate-400">+{projects.length - 8} more</p>}
+                    </div>
+                )}
+            </div>
+        );
+    };
+
+    const TechTooltip = (props: any) => <ProjectTooltip {...props} projectsMap={techProjectsMap} isCurrency />;
+    const ClientRevTooltip = (props: any) => <ProjectTooltip {...props} projectsMap={clientProjectsMap} isCurrency />;
+    const ClientCountTooltip = (props: any) => <ProjectTooltip {...props} projectsMap={clientProjectsMap} />;
+    const OwnerRevTooltip = (props: any) => <ProjectTooltip {...props} projectsMap={ownerProjectsMap} isCurrency />;
+    const OwnerCountTooltip = (props: any) => <ProjectTooltip {...props} projectsMap={ownerProjectsMap} />;
+    const SalesRepCountTooltip = (props: any) => <ProjectTooltip {...props} projectsMap={salesRepProjectsMap} />;
+    const SalesRepRevTooltip = (props: any) => <ProjectTooltip {...props} projectsMap={salesRepProjectsMap} isCurrency />;
+    const StageTooltip = (props: any) => <ProjectTooltip {...props} projectsMap={stageProjectsMap} />;
 
     // Helper Components to replace missing shadcn/ui
     const TabButton = ({ id, label }: { id: string, label: string }) => (
@@ -71,8 +149,8 @@ export default function AnalyticsPage() {
                 <div className="space-y-4 animate-in fade-in">
                     {/* Summary Cards */}
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-                        <MetricCard title="Projected Revenue" value={`$${((dashboard.projectedRevenue || 0) / 1e6).toFixed(1)}M`} icon={TrendingUp} color="text-indigo-600" bg="bg-indigo-50" />
-                        <MetricCard title="Won Revenue" value={`$${((dashboard.closedRevenue || 0) / 1e6).toFixed(1)}M`} icon={DollarSign} color="text-emerald-600" bg="bg-emerald-50" />
+                        <MetricCard title="Projected Revenue" value={fmtCompact(dashboard.projectedRevenue || 0)} icon={TrendingUp} color="text-indigo-600" bg="bg-indigo-50" />
+                        <MetricCard title="Won Revenue" value={fmtCompact(dashboard.closedRevenue || 0)} icon={IndianRupee} color="text-emerald-600" bg="bg-emerald-50" />
                         <MetricCard title="Total Opportunities" value={pipeline?.totalOpps || 0} icon={Briefcase} color="text-blue-600" bg="bg-blue-50" />
                         <MetricCard title="Win Rate" value={`${(pipeline?.conversionRate || 0).toFixed(1)}%`} icon={Trophy} color="text-amber-600" bg="bg-amber-50" />
                     </div>
@@ -89,8 +167,8 @@ export default function AnalyticsPage() {
                                     <BarChart data={dashboard.revenueProjection || []}>
                                         <CartesianGrid strokeDasharray="3 3" vertical={false} />
                                         <XAxis dataKey="name" fontSize={11} />
-                                        <YAxis fontSize={11} tickFormatter={(v) => `${(v / 1e6).toFixed(1)}M`} />
-                                        <Tooltip formatter={(value: number) => `$${value.toLocaleString()}`} />
+                                        <YAxis fontSize={11} tickFormatter={(v) => `${symbol}${(convert(v) / 1e6).toFixed(1)}M`} />
+                                        <Tooltip formatter={(value: number) => fmtFull(value)} />
                                         <Legend />
                                         <Bar dataKey="proposed" name="Proposed" stackId="a" fill="#6366f1" radius={[0, 0, 4, 4]} />
                                         <Bar dataKey="actual" name="Won" stackId="a" fill="#10b981" radius={[4, 4, 0, 0]} />
@@ -114,7 +192,7 @@ export default function AnalyticsPage() {
                                                 <Cell key={i} fill={COLORS[i % COLORS.length]} />
                                             ))}
                                         </Pie>
-                                        <Tooltip />
+                                        <Tooltip content={<StageTooltip />} />
                                         <Legend verticalAlign="bottom" height={36} />
                                     </PieChart>
                                 </ResponsiveContainer>
@@ -133,9 +211,9 @@ export default function AnalyticsPage() {
                                 <ResponsiveContainer width="100%" height="100%">
                                     <BarChart data={(dashboard.revenueByTech || []).slice(0, 8)} layout="vertical" margin={{ left: 10 }}>
                                         <CartesianGrid strokeDasharray="3 3" horizontal vertical={false} />
-                                        <XAxis type="number" fontSize={11} tickFormatter={(v) => `${(v / 1e6).toFixed(1)}M`} />
+                                        <XAxis type="number" fontSize={11} tickFormatter={(v) => `${symbol}${(convert(v) / 1e6).toFixed(1)}M`} />
                                         <YAxis dataKey="name" type="category" width={100} fontSize={11} />
-                                        <Tooltip formatter={(v: number) => `$${v.toLocaleString()}`} />
+                                        <Tooltip content={<TechTooltip />} />
                                         <Bar dataKey="value" fill="#8b5cf6" radius={[0, 4, 4, 0]} barSize={18} />
                                     </BarChart>
                                 </ResponsiveContainer>
@@ -152,9 +230,9 @@ export default function AnalyticsPage() {
                                 <ResponsiveContainer width="100%" height="100%">
                                     <BarChart data={(dashboard.revenueByClient || []).slice(0, 8)} layout="vertical" margin={{ left: 10 }}>
                                         <CartesianGrid strokeDasharray="3 3" horizontal vertical={false} />
-                                        <XAxis type="number" fontSize={11} tickFormatter={(v) => `${(v / 1e6).toFixed(1)}M`} />
+                                        <XAxis type="number" fontSize={11} tickFormatter={(v) => `${symbol}${(convert(v) / 1e6).toFixed(1)}M`} />
                                         <YAxis dataKey="name" type="category" width={100} fontSize={11} />
-                                        <Tooltip formatter={(v: number) => `$${v.toLocaleString()}`} />
+                                        <Tooltip content={<ClientRevTooltip />} />
                                         <Bar dataKey="value" fill="#ec4899" radius={[0, 4, 4, 0]} barSize={18} />
                                     </BarChart>
                                 </ResponsiveContainer>
@@ -175,7 +253,7 @@ export default function AnalyticsPage() {
                                         <CartesianGrid strokeDasharray="3 3" horizontal vertical={false} />
                                         <XAxis type="number" fontSize={11} />
                                         <YAxis dataKey="name" type="category" width={100} fontSize={11} />
-                                        <Tooltip />
+                                        <Tooltip content={<ClientCountTooltip />} />
                                         <Bar dataKey="value" fill="#6366f1" radius={[0, 4, 4, 0]} barSize={18} />
                                     </BarChart>
                                 </ResponsiveContainer>
@@ -192,9 +270,9 @@ export default function AnalyticsPage() {
                                 <ResponsiveContainer width="100%" height="100%">
                                     <BarChart data={dashboard.revenueByOwner || []} layout="vertical" margin={{ left: 10 }}>
                                         <CartesianGrid strokeDasharray="3 3" horizontal vertical={false} />
-                                        <XAxis type="number" fontSize={11} tickFormatter={(v) => `${(v / 1e6).toFixed(1)}M`} />
+                                        <XAxis type="number" fontSize={11} tickFormatter={(v) => `${symbol}${(convert(v) / 1e6).toFixed(1)}M`} />
                                         <YAxis dataKey="name" type="category" width={80} fontSize={11} />
-                                        <Tooltip formatter={(v: number) => `$${v.toLocaleString()}`} />
+                                        <Tooltip content={<OwnerRevTooltip />} />
                                         <Bar dataKey="revenue" fill="#10b981" radius={[0, 4, 4, 0]} barSize={18} />
                                     </BarChart>
                                 </ResponsiveContainer>
@@ -209,8 +287,8 @@ export default function AnalyticsPage() {
                 <div className="space-y-4 animate-in fade-in">
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
                         <MetricCard title="Active Projects" value={pipeline.activeProjects} icon={Activity} color="text-blue-600" bg="bg-blue-50" />
-                        <MetricCard title="Pipeline Value" value={`$${((pipeline.pipelineValue || 0) / 1e6).toFixed(1)}M`} icon={DollarSign} color="text-emerald-600" bg="bg-emerald-50" />
-                        <MetricCard title="Avg Deal Size" value={`$${((pipeline.avgDealValue || 0) / 1e6).toFixed(2)}M`} icon={Target} color="text-purple-600" bg="bg-purple-50" />
+                        <MetricCard title="Pipeline Value" value={fmtCompact(pipeline.pipelineValue || 0)} icon={IndianRupee} color="text-emerald-600" bg="bg-emerald-50" />
+                        <MetricCard title="Avg Deal Size" value={`${symbol}${(convert(pipeline.avgDealValue || 0) / 1e6).toFixed(2)}M`} icon={Target} color="text-purple-600" bg="bg-purple-50" />
                         <MetricCard title="Win Rate" value={`${(pipeline.conversionRate || 0).toFixed(1)}%`} icon={TrendingUp} color="text-amber-600" bg="bg-amber-50" />
                     </div>
 
@@ -225,15 +303,15 @@ export default function AnalyticsPage() {
                                 </div>
                                 <div className="flex justify-between items-center py-2 border-b border-slate-100">
                                     <span className="text-sm text-slate-600">Active Pipeline Value</span>
-                                    <span className="font-bold text-emerald-600">${((pipeline.pipelineValue || 0) / 1e6).toFixed(2)}M</span>
+                                    <span className="font-bold text-emerald-600">{symbol}{(convert(pipeline.pipelineValue || 0) / 1e6).toFixed(2)}M</span>
                                 </div>
                                 <div className="flex justify-between items-center py-2 border-b border-slate-100">
                                     <span className="text-sm text-slate-600">Weighted Pipeline Value</span>
-                                    <span className="font-bold text-indigo-600">${((pipeline.weightedPipeline || 0) / 1e6).toFixed(2)}M</span>
+                                    <span className="font-bold text-indigo-600">{symbol}{(convert(pipeline.weightedPipeline || 0) / 1e6).toFixed(2)}M</span>
                                 </div>
                                 <div className="flex justify-between items-center py-2">
                                     <span className="text-sm text-slate-600">Avg Deal Size</span>
-                                    <span className="font-bold text-purple-600">${((pipeline.avgDealValue || 0) / 1e6).toFixed(2)}M</span>
+                                    <span className="font-bold text-purple-600">{symbol}{(convert(pipeline.avgDealValue || 0) / 1e6).toFixed(2)}M</span>
                                 </div>
                             </div>
                         </div>
@@ -250,7 +328,7 @@ export default function AnalyticsPage() {
                                         <CartesianGrid strokeDasharray="3 3" vertical={false} />
                                         <XAxis dataKey="name" fontSize={10} angle={-20} textAnchor="end" height={50} />
                                         <YAxis fontSize={11} allowDecimals={false} />
-                                        <Tooltip />
+                                        <Tooltip content={<StageTooltip />} />
                                         <Bar dataKey="value" name="Count" fill="#6366f1" radius={[4, 4, 0, 0]} barSize={30} />
                                     </BarChart>
                                 </ResponsiveContainer>
@@ -270,8 +348,8 @@ export default function AnalyticsPage() {
                                     <BarChart data={dashboard.countBySalesRep || []} layout="vertical" margin={{ left: 10 }}>
                                         <CartesianGrid strokeDasharray="3 3" horizontal vertical={false} />
                                         <XAxis type="number" fontSize={11} allowDecimals={false} />
-                                        <YAxis dataKey="name" type="category" width={80} fontSize={11} />
-                                        <Tooltip />
+                                        <YAxis dataKey="name" type="category" width={110} fontSize={10} interval={0} />
+                                        <Tooltip content={<SalesRepCountTooltip />} />
                                         <Legend />
                                         <Bar dataKey="total" name="Total" fill="#94a3b8" barSize={12} />
                                         <Bar dataKey="active" name="Active" fill="#6366f1" barSize={12} />
@@ -290,9 +368,9 @@ export default function AnalyticsPage() {
                                 <ResponsiveContainer width="100%" height="100%">
                                     <BarChart data={dashboard.revenueBySalesRep || []} layout="vertical" margin={{ left: 10 }}>
                                         <CartesianGrid strokeDasharray="3 3" horizontal vertical={false} />
-                                        <XAxis type="number" fontSize={11} tickFormatter={(v) => `${(v / 1e6).toFixed(1)}M`} />
-                                        <YAxis dataKey="name" type="category" width={80} fontSize={11} />
-                                        <Tooltip formatter={(v: number) => `$${v.toLocaleString()}`} />
+                                        <XAxis type="number" fontSize={11} tickFormatter={(v) => `${symbol}${(convert(v) / 1e6).toFixed(1)}M`} />
+                                        <YAxis dataKey="name" type="category" width={110} fontSize={10} interval={0} />
+                                        <Tooltip content={<SalesRepRevTooltip />} />
                                         <Bar dataKey="revenue" name="Revenue" fill="#f59e0b" radius={[0, 4, 4, 0]} barSize={18} />
                                     </BarChart>
                                 </ResponsiveContainer>
@@ -307,7 +385,7 @@ export default function AnalyticsPage() {
                 <div className="space-y-4 animate-in fade-in">
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
                         <MetricCard title="Proposal Success Rate" value={`${(presales.proposalSuccessRate || 0).toFixed(1)}%`} icon={CheckCircle} color="text-emerald-600" bg="bg-emerald-50" />
-                        <MetricCard title="Avg Effort Cost / Opp" value={`$${Math.round(presales.effortPerOpp || 0).toLocaleString()}`} icon={Users} color="text-indigo-600" bg="bg-indigo-50" />
+                        <MetricCard title="Avg Effort Cost / Opp" value={format(presales.effortPerOpp || 0)} icon={Users} color="text-indigo-600" bg="bg-indigo-50" />
                         <MetricCard title="Total Presales Opps" value={presales.totalPresalesOpps || 0} icon={FileText} color="text-slate-600" bg="bg-slate-50" />
                         <MetricCard title="Avg Re-estimate Iterations" value={(presales.avgReEstimateIterations || 0).toFixed(1)} icon={RefreshCw} color="text-orange-600" bg="bg-orange-50" />
                     </div>
@@ -348,7 +426,7 @@ export default function AnalyticsPage() {
                                         <CartesianGrid strokeDasharray="3 3" horizontal vertical={false} />
                                         <XAxis type="number" fontSize={11} allowDecimals={false} />
                                         <YAxis dataKey="name" type="category" width={80} fontSize={11} />
-                                        <Tooltip />
+                                        <Tooltip content={<OwnerCountTooltip />} />
                                         <Legend />
                                         <Bar dataKey="active" name="Active" fill="#6366f1" barSize={12} />
                                         <Bar dataKey="won" name="Won" fill="#10b981" barSize={12} />

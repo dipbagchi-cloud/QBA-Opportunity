@@ -73,6 +73,12 @@ import {
   addCurrencyRate,
   deleteCurrencyRate,
 } from '../controllers/currency.controller';
+import {
+  listNotificationRules,
+  createNotificationRule,
+  updateNotificationRule,
+  deleteNotificationRule,
+} from '../controllers/notification-rules.controller';
 
 const router = Router();
 
@@ -168,5 +174,11 @@ router.get('/qpeople-mappings/designations', authorize(PERMISSIONS.ROLES_MANAGE)
 router.post('/qpeople-mappings', authorize(PERMISSIONS.ROLES_MANAGE), upsertQPeopleMapping);
 router.post('/qpeople-mappings/apply', authorize(PERMISSIONS.ROLES_MANAGE), applyQPeopleMappings);
 router.delete('/qpeople-mappings/:id', authorize(PERMISSIONS.ROLES_MANAGE), deleteQPeopleMapping);
+
+// Notification rules (requires settings:manage)
+router.get('/notification-rules', authorize(PERMISSIONS.SETTINGS_MANAGE), listNotificationRules);
+router.post('/notification-rules', authorize(PERMISSIONS.SETTINGS_MANAGE), createNotificationRule);
+router.patch('/notification-rules/:id', authorize(PERMISSIONS.SETTINGS_MANAGE), updateNotificationRule);
+router.delete('/notification-rules/:id', authorize(PERMISSIONS.SETTINGS_MANAGE), deleteNotificationRule);
 
 export default router;

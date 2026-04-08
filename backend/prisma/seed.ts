@@ -496,6 +496,78 @@ async function main() {
 <p style="color:#64748b;font-size:12px;margin-top:24px">This is an automated notification from Q-CRM.</p>
 </div>`,
         },
+        {
+            eventKey: 'moved_to_sales',
+            name: 'Moved to Sales',
+            subject: 'Q-CRM: "{{opportunityTitle}}" moved to Sales Stage',
+            body: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+<h2 style="color:#4f46e5">Moved to Sales</h2>
+<p>Hi {{recipientName}},</p>
+<p>The opportunity <strong>{{opportunityTitle}}</strong> for <strong>{{clientName}}</strong> has been moved to the <strong>Sales</strong> stage.</p>
+<p><strong>Value:</strong> {{value}}</p>
+<p><strong>Sales Rep:</strong> {{salesRepName}}</p>
+<p><strong>Manager:</strong> {{managerName}}</p>
+<p>Please review and proceed with the sales process.</p>
+<p style="color:#64748b;font-size:12px;margin-top:24px">This is an automated notification from Q-CRM.</p>
+</div>`,
+        },
+        {
+            eventKey: 'sent_to_client',
+            name: 'Proposal Sent to Client',
+            subject: 'Q-CRM: Proposal for "{{opportunityTitle}}" sent to client',
+            body: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+<h2 style="color:#4f46e5">Proposal Sent to Client</h2>
+<p>Hi {{recipientName}},</p>
+<p>The proposal for opportunity <strong>{{opportunityTitle}}</strong> has been sent to the client <strong>{{clientName}}</strong>.</p>
+<p><strong>Proposed Value:</strong> {{value}}</p>
+<p><strong>Sales Rep:</strong> {{salesRepName}}</p>
+<p style="color:#64748b;font-size:12px;margin-top:24px">This is an automated notification from Q-CRM.</p>
+</div>`,
+        },
+        {
+            eventKey: 'sent_back_to_reestimate',
+            name: 'Sent Back for Re-Estimation',
+            subject: 'Q-CRM: "{{opportunityTitle}}" sent back for re-estimation',
+            body: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+<h2 style="color:#4f46e5">Re-Estimation Required</h2>
+<p>Hi {{recipientName}},</p>
+<p>The opportunity <strong>{{opportunityTitle}}</strong> for <strong>{{clientName}}</strong> has been sent back for re-estimation.</p>
+<p><strong>Reason:</strong> {{reason}}</p>
+<p><strong>Re-estimate Count:</strong> {{reEstimateCount}}</p>
+<p><strong>Sent by:</strong> {{updatedBy}}</p>
+<p>Please review the estimation and make necessary adjustments.</p>
+<p style="color:#64748b;font-size:12px;margin-top:24px">This is an automated notification from Q-CRM.</p>
+</div>`,
+        },
+        {
+            eventKey: 'proposal_lost',
+            name: 'Proposal Lost',
+            subject: 'Q-CRM: "{{opportunityTitle}}" — Proposal Lost',
+            body: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+<h2 style="color:#e11d48">Proposal Lost</h2>
+<p>Hi {{recipientName}},</p>
+<p>Unfortunately, the opportunity <strong>{{opportunityTitle}}</strong> for <strong>{{clientName}}</strong> has been marked as <strong>Proposal Lost</strong>.</p>
+<p><strong>Value:</strong> {{value}}</p>
+<p><strong>Loss Reason:</strong> {{lossReason}}</p>
+<p><strong>Updated by:</strong> {{updatedBy}}</p>
+<p style="color:#64748b;font-size:12px;margin-top:24px">This is an automated notification from Q-CRM.</p>
+</div>`,
+        },
+        {
+            eventKey: 'proposal_won',
+            name: 'Proposal Won / Closed Won',
+            subject: 'Q-CRM: 🎉 "{{opportunityTitle}}" — Closed Won!',
+            body: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+<h2 style="color:#16a34a">🎉 Deal Won!</h2>
+<p>Hi {{recipientName}},</p>
+<p>Great news! The opportunity <strong>{{opportunityTitle}}</strong> for <strong>{{clientName}}</strong> has been marked as <strong>Closed Won</strong>!</p>
+<p><strong>Deal Value:</strong> {{value}}</p>
+<p><strong>Sales Rep:</strong> {{salesRepName}}</p>
+<p><strong>Manager:</strong> {{managerName}}</p>
+<p>Congratulations to the team!</p>
+<p style="color:#64748b;font-size:12px;margin-top:24px">This is an automated notification from Q-CRM.</p>
+</div>`,
+        },
     ];
 
     for (const tmpl of emailTemplates) {

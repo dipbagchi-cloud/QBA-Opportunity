@@ -116,13 +116,11 @@ export async function getAnalytics(req: Request, res: Response) {
             else if (stageName !== 'Closed Lost' && stageName !== 'Proposal Lost') countByOwner[ownerName].active += 1;
 
             // Revenue by Technology (Tech Stack) — split comma-separated into individual techs
-            // Only count Closed Won deals for actual revenue
+            // Count all deals for pipeline revenue visibility
             const techStr = opp.technology || 'unknown';
             const techs = techStr.split(',').map((t: string) => t.trim()).filter(Boolean);
-            if (stageName === 'Closed Won') {
-                for (const t of techs.length > 0 ? techs : ['unknown']) {
-                    revenueByTech[t] = (revenueByTech[t] || 0) + rev;
-                }
+            for (const t of techs.length > 0 ? techs : ['unknown']) {
+                revenueByTech[t] = (revenueByTech[t] || 0) + rev;
             }
 
             // Revenue by Client — only Closed Won deals
@@ -327,32 +325,35 @@ export async function getAnalytics(req: Request, res: Response) {
         const oppsWithReEstimates = opportunities.filter(o => ((o as any).reEstimateCount || 0) > 0).length;
         const avgReEstimateIterations = oppsWithReEstimates > 0 ? totalReEstimateCount / oppsWithReEstimates : 0;
 
-        // Manager response KPI: count of opportunities assigned to each manager, avg lifecycle days
-        const managerStats: Record<string, { name: string; totalAssigned: number; responded: number; totalDays: number; respondedWithDays: number }> = {};
+        // Manager response KPI: count of opportunities per manager, won/lost, revenue
+        const managerStats: Record<string, { name: string; totalAssigned: number; wonCount: number; lostCount: number; totalRevenue: number; totalDays: number; closedCount: number }> = {};
         opportunities.forEach(o => {
             const mgr = (o as any).managerName;
             if (!mgr) return;
-            if (!managerStats[mgr]) managerStats[mgr] = { name: mgr, totalAssigned: 0, responded: 0, totalDays: 0, respondedWithDays: 0 };
+            if (!managerStats[mgr]) managerStats[mgr] = { name: mgr, totalAssigned: 0, wonCount: 0, lostCount: 0, totalRevenue: 0, totalDays: 0, closedCount: 0 };
             managerStats[mgr].totalAssigned += 1;
-            // Count as responded if past Qualification stage
             const sn = o.stage?.name || o.currentStage || '';
-            const hasResponded = ['Proposal', 'Sales', 'Negotiation', 'Closed Won', 'Closed Lost', 'Proposal Lost'].includes(sn);
-            if (hasResponded) {
-                managerStats[mgr].responded += 1;
-                // Use stage transition time: if opportunity has moved beyond Qualification, 
-                // estimate response time from createdAt to updatedAt (best proxy without audit log query)
-                if (o.updatedAt && o.createdAt) {
-                    const days = Math.max(0, (new Date(o.updatedAt).getTime() - new Date(o.createdAt).getTime()) / (1000 * 3600 * 24));
-                    managerStats[mgr].totalDays += days;
-                    managerStats[mgr].respondedWithDays += 1;
-                }
+            if (sn === 'Closed Won') {
+                managerStats[mgr].wonCount += 1;
+                managerStats[mgr].totalRevenue += getRevenue(o);
+            } else if (sn === 'Closed Lost' || sn === 'Proposal Lost') {
+                managerStats[mgr].lostCount += 1;
+            }
+            // Avg days to close for won deals
+            if (sn === 'Closed Won' && o.actualCloseDate && o.createdAt) {
+                const days = Math.max(0, Math.floor((new Date(o.actualCloseDate).getTime() - new Date(o.createdAt).getTime()) / (1000 * 3600 * 24)));
+                managerStats[mgr].totalDays += days;
+                managerStats[mgr].closedCount += 1;
             }
         });
         const managerKpiData = Object.values(managerStats).map(m => ({
             name: m.name,
             totalAssigned: m.totalAssigned,
-            responded: m.responded,
-            avgResponseDays: m.respondedWithDays > 0 ? Math.round(m.totalDays / m.respondedWithDays) : 0,
+            responded: m.wonCount,
+            avgResponseDays: m.closedCount > 0 ? Math.round(m.totalDays / m.closedCount) : 0,
+            wonCount: m.wonCount,
+            lostCount: m.lostCount,
+            totalRevenue: m.totalRevenue,
         }));
 
         res.json({
