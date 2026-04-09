@@ -590,14 +590,16 @@ function UsersTab() {
     };
 
     const handleToggleMuteNotification = async (u: AdminUser) => {
+        const newVal = !u.muteNotification;
         try {
             await apiClient(`/api/admin/users/${u.id}`, {
                 method: "PATCH",
-                body: JSON.stringify({ muteNotification: !u.muteNotification }),
+                body: JSON.stringify({ muteNotification: newVal }),
             });
             fetchUsers(userPage, userSearch);
+            setStatus({ type: "success", message: newVal ? `Notifications muted for ${u.name}.` : `Notifications enabled for ${u.name}.` });
         } catch (err: any) {
-            setStatus({ type: "error", message: err.message });
+            setStatus({ type: "error", message: err.message || "Failed to update notification setting." });
         }
     };
 
@@ -3393,6 +3395,7 @@ interface NotifRule {
     recipientRoles: string[];
     channels: string[];
     emailTemplateKey: string | null;
+    titleTemplate: string | null;
     messageTemplate: string | null;
     createdAt: string;
     updatedAt: string;
@@ -3423,6 +3426,7 @@ function NotificationRulesTab() {
     const [formRecipientRoles, setFormRecipientRoles] = useState<string[]>([]);
     const [formChannels, setFormChannels] = useState<string[]>(["in_app"]);
     const [formEmailTemplateKey, setFormEmailTemplateKey] = useState("");
+    const [formTitleTemplate, setFormTitleTemplate] = useState("");
     const [formMessageTemplate, setFormMessageTemplate] = useState("");
 
     const load = useCallback(async () => {
@@ -3455,6 +3459,7 @@ function NotificationRulesTab() {
         setFormRecipientRoles([]);
         setFormChannels(["in_app"]);
         setFormEmailTemplateKey("");
+        setFormTitleTemplate("");
         setFormMessageTemplate("");
         setEditingRule(null);
     }
@@ -3475,6 +3480,7 @@ function NotificationRulesTab() {
         setFormRecipientRoles(Array.isArray(rule.recipientRoles) ? rule.recipientRoles : []);
         setFormChannels(Array.isArray(rule.channels) ? rule.channels : ["in_app"]);
         setFormEmailTemplateKey(rule.emailTemplateKey || "");
+        setFormTitleTemplate(rule.titleTemplate || "");
         setFormMessageTemplate(rule.messageTemplate || "");
         setShowModal(true);
     }
@@ -3493,6 +3499,7 @@ function NotificationRulesTab() {
                 recipientRoles: formRecipientRoles,
                 channels: formChannels,
                 emailTemplateKey: formEmailTemplateKey || null,
+                titleTemplate: formTitleTemplate.trim() || null,
                 messageTemplate: formMessageTemplate.trim() || null,
             };
 
@@ -3812,13 +3819,22 @@ function NotificationRulesTab() {
                                 </div>
                             )}
 
+                            {/* In-App Title Template */}
+                            <div>
+                                <label className="block text-xs font-medium text-slate-700 mb-1">In-App Title Template</label>
+                                <input value={formTitleTemplate} onChange={e => setFormTitleTemplate(e.target.value)}
+                                    className="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                                    placeholder="e.g. {{dealName}} moved to {{stage}}" />
+                                <p className="text-[10px] text-slate-400 mt-0.5">Leave blank for default title. Variables: {"{{dealName}}, {{stage}}, {{previousStage}}, {{client}}, {{userName}}"}</p>
+                            </div>
+
                             {/* Message Template */}
                             <div>
-                                <label className="block text-xs font-medium text-slate-700 mb-1">Message Template</label>
+                                <label className="block text-xs font-medium text-slate-700 mb-1">In-App Message Template</label>
                                 <textarea value={formMessageTemplate} onChange={e => setFormMessageTemplate(e.target.value)} rows={2}
                                     className="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none resize-none"
-                                    placeholder="e.g. Deal {{dealName}} moved to {{stage}} by {{userName}}. Use {{variable}} for placeholders." />
-                                <p className="text-[10px] text-slate-400 mt-0.5">Available: {"{{dealName}}, {{stage}}, {{value}}, {{userName}}, {{client}}, {{technology}}, {{probability}}"}</p>
+                                    placeholder='e.g. {{dealName}} ({{client}}) moved from {{previousStage}} to {{stage}} by {{userName}}, value: {{value}}' />
+                                <p className="text-[10px] text-slate-400 mt-0.5">Leave blank for default message. Variables: {"{{dealName}}, {{stage}}, {{previousStage}}, {{client}}, {{owner}}, {{salesRep}}, {{manager}}, {{userName}}, {{value}}, {{probability}}, {{region}}, {{technology}}"}</p>
                             </div>
                         </div>
 

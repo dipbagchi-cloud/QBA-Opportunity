@@ -597,6 +597,9 @@ model NotificationRule {
   // Which email template to use (optional)
   emailTemplateKey String?
 
+  // Custom title for in-app notifications (supports {{variable}} placeholders)
+  titleTemplate    String?
+
   // Custom message for in-app notifications (supports {{variable}} placeholders)
   messageTemplate  String?
 

@@ -1,8 +1,9 @@
 # Agentic CRM — Detailed Technical Documentation
 
-> **Last Updated:** March 24, 2026  
+> **Last Updated:** April 10, 2026  
 > **Project Location:** `d:\Opportunity\Jaydeep_work\`  
-> **Status:** Active Development
+> **Production URL:** `https://qcrm.qbadvisory.com`  
+> **Status:** Active Development & Production Deployment
 
 ---
 
@@ -21,7 +22,8 @@
 11. [UI/UX Design System](#11-uiux-design-system)
 12. [Work Log — All Changes Delivered](#12-work-log--all-changes-delivered)
 13. [Known Limitations & Future Enhancements](#13-known-limitations--future-enhancements)
-14. [How to Run](#14-how-to-run)
+14. [Production Deployment](#14-production-deployment)
+15. [How to Run](#15-how-to-run)
 
 ---
 
@@ -362,10 +364,46 @@ Key fields: `firstName`, `lastName`, `email`, `phone`, `title`, `department`, `i
 **LeadScore** (`lead_scores`) — Computed score with factors and recommended action (1:1 with Opportunity).  
 **VectorEmbedding** (`vector_embeddings`) — RAG-ready embeddings (schema prepared, not yet utilized).
 
-#### 4.10 Notifications
+#### 4.10 Notifications & Email System
 
-**Notification** (`notifications`) — System notifications (type, title, message, link, isRead).  
+**Notification** (`notifications`) — In-app notifications for stage changes, data conditions, etc.
+| Field | Type | Description |
+|-------|------|-------------|
+| type | String | "stage_change", "data_condition", "approval", etc. |
+| title | String | Notification headline |
+| message | String | Notification body text |
+| link | String? | Deep-link to related entity (e.g., `/dashboard/opportunities/{id}`) |
+| isRead | Boolean | Read status (default false) |
+| readAt | DateTime? | When the user read it |
+| userId | FK → User | |
+
 **NotificationPreference** (`notification_preferences`) — Per-user channel/type toggle.
+
+**NotificationRule** (`notification_rules`) — Configurable rules that trigger notifications:
+| Field | Type | Description |
+|-------|------|-------------|
+| name | String | Rule name |
+| description | String? | Rule description |
+| isActive | Boolean | Enable/disable toggle |
+| triggerType | String | "stage_change", "data_condition", "approval", "stalled_deal", "health_drop" |
+| fromStage | String? | For stage_change: source stage (null = any) |
+| toStage | String? | For stage_change: target stage (null = any) |
+| conditions | Json? | For data_condition: array of `{field, operator, value}` |
+| recipientRoles | Json | Array of role names e.g. `["Admin","Manager"]` |
+| channels | Json | Array of channels e.g. `["in_app","email"]` |
+| emailTemplateKey | String? | Which EmailTemplate to use for email channel |
+| messageTemplate | String? | Custom message with `{{variable}}` placeholders |
+
+**EmailTemplate** (`email_templates`) — Reusable email templates:
+| Field | Type | Description |
+|-------|------|-------------|
+| eventKey | String (unique) | Template identifier (e.g., "moved_to_presales") |
+| name | String | Display name |
+| subject | String | Email subject with `{{variable}}` placeholders |
+| body | String | HTML body with `{{variable}}` placeholders |
+| isActive | Boolean | Enable/disable |
+
+**User.muteNotification** (`Boolean @default(true)`) — When true, email notifications are suppressed for this user. Admins can toggle this per-user in the Settings → Users tab. In-app notifications are NOT affected by this flag.
 
 #### 4.11 Audit & Config
 
@@ -620,7 +658,53 @@ Otherwise → Pending, logged to audit trail.
 | Pricing Models | GET/POST/PATCH/DELETE `/admin/pricing-models` | `metadata:manage` |
 | Budget Assumptions | GET (any auth), PUT `/admin/budget-assumptions` | `settings:manage` |
 
-### 6.8 Other Endpoints
+### 6.8 Notifications (`/api/notifications`)
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET | `/api/notifications` | ✅ | List notifications for current user (supports `?unreadOnly=true&limit=50&offset=0`) |
+| GET | `/api/notifications/unread-count` | ✅ | Get unread notification count (used by bell badge) |
+| PATCH | `/api/notifications/:id/read` | ✅ | Mark a single notification as read |
+| PATCH | `/api/notifications/read-all` | ✅ | Mark all notifications as read |
+
+**List Response:**
+```json
+{
+  "notifications": [
+    {
+      "id": "cuid...",
+      "type": "stage_change",
+      "title": "Stage Change: Pipeline → Presales",
+      "message": "Opportunity \"Project Phoenix\" moved from Pipeline to Presales",
+      "link": "/dashboard/opportunities/clx...",
+      "isRead": false,
+      "createdAt": "2026-04-10T..."
+    }
+  ],
+  "total": 15,
+  "unreadCount": 3
+}
+```
+
+### 6.9 Admin Notification Rules (`/api/admin/notification-rules`)
+
+| Method | Endpoint | Permission | Description |
+|--------|----------|-----------|-------------|
+| GET | `/api/admin/notification-rules` | `settings:manage` | List all notification rules |
+| POST | `/api/admin/notification-rules` | `settings:manage` | Create notification rule |
+| PATCH | `/api/admin/notification-rules/:id` | `settings:manage` | Update notification rule |
+| DELETE | `/api/admin/notification-rules/:id` | `settings:manage` | Delete notification rule |
+
+### 6.10 Admin Email Templates (`/api/admin/email-templates`)
+
+| Method | Endpoint | Permission | Description |
+|--------|----------|-----------|-------------|
+| GET | `/api/admin/email-templates` | `settings:manage` | List all email templates |
+| POST | `/api/admin/email-templates` | `settings:manage` | Create email template |
+| PATCH | `/api/admin/email-templates/:id` | `settings:manage` | Update email template |
+| DELETE | `/api/admin/email-templates/:id` | `settings:manage` | Delete email template |
+
+### 6.11 Other Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -668,8 +752,19 @@ Otherwise → Pending, logged to audit trail.
   - GOM Calculator (`gom:view`)
   - Settings (`settings:view`)
 - User profile card with initials avatar, role badge, and logout
-- Fixed header with search bar and notification bell (with pulse indicator)
+- Fixed header with search bar, currency selector, and **notification bell with dropdown panel**
 - `AuthProvider` wrapper that validates JWT on mount
+
+**NotificationBell Component** (embedded in layout):
+- Polls `/api/notifications/unread-count` every 30 seconds
+- Bell icon with red badge showing unread count (99+ cap)
+- Click opens dropdown panel (max 396px width, 384px height scroll)
+- Panel header with "Mark all read" button
+- Each notification shows: unread dot, title, message (2-line clamp), time ago, link icon
+- Click notification: marks as read + navigates to linked entity
+- Individual "mark read" button per notification
+- Click outside closes the panel
+- Empty state with bell icon and "No notifications yet" message
 
 ### 7.4 Dashboard Page (`app/dashboard/page.tsx`)
 
@@ -1227,35 +1322,145 @@ Keyword-based sentiment detection:
 - ✅ Added `Closed Won` and `Closed Lost` to dashboard color maps
 - ✅ Added `PIE_COLOR_MAP` for consistent named stage colors in pie chart
 
+### Session 12: Production Deployment to Azure VM
+- ✅ Deployed full stack to Azure VM (Standard_B2ms, 2 vCPU, 8GB RAM)
+- ✅ Nginx reverse proxy with SSL (Let's Encrypt) on qcrm.qbadvisory.com
+- ✅ PM2 process manager with `qcrm-backend` and `qcrm-frontend` services
+- ✅ Backend compiled via `tsc` → runs as `node dist/index.js`
+- ✅ Frontend built via `npm run build` → Next.js production SSR
+- ✅ PostgreSQL on localhost:5432 with 308 users synced from QPeople HRMS
+- ✅ Azure AD SSO integration (Tenant: 2ec62294-dda7-4517-b84d-4845795e0d29)
+
+### Session 13: Mute Notification Feature
+- ✅ Added `muteNotification Boolean @default(true)` to User model in Prisma schema
+- ✅ Backend admin controller: listUsers returns muteNotification, createUser sets to true, updateUser accepts toggle
+- ✅ Frontend Settings → Users tab: "Mute Notification" checkbox column between Status and Actions
+- ✅ Email guard in `sendNotificationEmail()`: checks `recipient.muteNotification`, skips if true with log message
+- ✅ Toast notifications on toggle: "Notifications muted for {name}" / "Notifications enabled for {name}"
+- ✅ Deployed to production: raw SQL migration (ALTER TABLE), tsc recompile, PM2 restart
+- ✅ Discovered and fixed stale compiled JS issue (SCP'd .ts files but forgot `npx tsc`)
+
+### Session 14: Email System — Microsoft Graph API OAuth2
+- ✅ Updated `email.ts` to support Microsoft Graph API with OAuth2 client credentials flow
+- ✅ Dual-mode: Uses Graph API when Azure credentials configured, falls back to SMTP/nodemailer
+- ✅ Token caching with automatic refresh (60-second buffer before expiry)
+- ✅ Configured `.env` on server: `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `SMTP_FROM`
+- ✅ Added `Mail.Send` application permission to Azure AD app registration
+- ⏳ Pending: Admin consent for Mail.Send (requires Global Admin) OR dedicated SMTP mailbox setup
+- ℹ️ Alternative planned: Admin to create `qcrm.noreply@qbadvisory.com` with SMTP AUTH enabled
+
+### Session 15: In-App Notification System (Full Build)
+- ✅ Built **Notification Engine** (`backend/src/lib/notification-engine.ts`):
+  - `evaluateStageChangeRules()` — Evaluates all active `stage_change` rules when opportunity moves stages
+  - `evaluateDataConditionRules()` — Evaluates `data_condition` rules on every opportunity update
+  - Matches rules by fromStage/toStage, checks conditions with operators (eq, neq, gt, gte, lt, lte, contains)
+  - Resolves recipients by role, creates in-app Notification records, triggers emails via template
+  - Renders `{{variable}}` placeholders in message templates
+  - Fire-and-forget (never blocks the main request)
+- ✅ Built **Notification API** (`backend/src/controllers/notifications.controller.ts`):
+  - `GET /api/notifications` — List user's notifications with pagination and unread filter
+  - `GET /api/notifications/unread-count` — Badge count for the bell icon
+  - `PATCH /api/notifications/:id/read` — Mark single as read
+  - `PATCH /api/notifications/read-all` — Mark all as read
+- ✅ Created **notification routes** (`backend/src/routes/notifications.routes.ts`) and registered in `index.ts`
+- ✅ **Integrated engine into opportunities controller**:
+  - Stage change triggers `evaluateStageChangeRules()` with full context (title, stages, client, owner, rep, manager, value)
+  - Every update triggers `evaluateDataConditionRules()` for condition-based rules
+- ✅ Built **NotificationBell component** in dashboard layout:
+  - Polls unread count every 30s
+  - Red badge with count (caps at 99+)
+  - Dropdown panel with notification list (unread highlighted in indigo)
+  - Click to navigate + auto-mark read
+  - "Mark all read" header action
+  - Click outside to close
+  - Time-ago display (Just now, Xm, Xh, Xd)
+  - Empty state with icon
+
 ---
 
 ## 13. Known Limitations & Future Enhancements
 
 ### Current Limitations
 1. **Probability not persisted** — Computed at API time, not stored in DB; could be synced on stage transitions
-2. **No real-time updates** — Dashboard doesn't auto-refresh; could add polling or WebSocket
+2. **No real-time updates** — Dashboard doesn't auto-refresh; notification bell polls every 30s but not WebSocket-based
 3. **Contacts page is static** — Mock data, no API integration
 4. **Agent AI is simulated** — SSE streaming with mock data, no real LLM integration
-5. **No email integration** — Outreach agent doesn't send real emails
-6. **No file upload** — Attachment schema exists but no upload endpoint
-7. **Single-tenant** — No multi-tenancy support
-8. **No password recovery** — No forgot-password/email flow
+5. **No file upload** — Attachment schema exists but no upload endpoint
+6. **Single-tenant** — No multi-tenancy support
+7. **No password recovery** — No forgot-password/email flow
+8. **Email sending pending** — Graph API requires Global Admin consent; SMTP mailbox being set up by admin (`qcrm.noreply@qbadvisory.com`)
+9. **All users muted by default** — `muteNotification` defaults to `true`; admins must uncheck per-user to enable email notifications.
 
 ### Planned Enhancements
 1. Real LLM integration (OpenAI/Azure OpenAI) for AI agents
 2. RAG system using VectorEmbedding model (pgvector)
-3. Real email drafting and sending via agents
+3. Dedicated SMTP mailbox (`qcrm.noreply@qbadvisory.com`) for reliable email delivery
 4. Activity timeline on opportunity detail
 5. Drag-and-drop Kanban with stage transitions
 6. Dashboard auto-refresh with configurable interval
 7. Export analytics to CSV/PDF
-8. Notification system with real-time delivery
+8. WebSocket-based real-time notification delivery (replace polling)
 9. QPeople HRMS integration for resource data
-10. Azure AD SSO authentication
+10. Stalled deal and health drop notification rules (engine supports it, needs periodic scheduler)
 
 ---
 
-## 14. How to Run
+## 14. Production Deployment
+
+### Infrastructure
+
+| Component | Details |
+|-----------|---------|
+| **VM** | Azure Standard_B2ms (2 vCPU, 8GB RAM), Ubuntu 22.04 |
+| **IP** | 20.124.178.41 |
+| **Domain** | qcrm.qbadvisory.com |
+| **SSL** | Let's Encrypt via Certbot (auto-renewal) |
+| **Reverse Proxy** | Nginx (port 443 → localhost:3000 for frontend, `/api` → localhost:3001 for backend) |
+| **Process Manager** | PM2 (`qcrm-backend`, `qcrm-frontend`) |
+| **Database** | PostgreSQL 14 at localhost:5432, database `agentic_crm` |
+| **Users** | 308 users synced from QPeople HRMS |
+
+### Deployment Process
+
+```bash
+# 1. Upload changed source files
+Get-Content file.ts -Raw | ssh azureuser@20.124.178.41 "cat > /path/on/server/file.ts"
+
+# 2. Backend: Compile TypeScript and restart
+ssh azureuser@20.124.178.41 "cd /home/azureuser/app/backend && npx tsc"
+ssh azureuser@20.124.178.41 "pm2 restart qcrm-backend"
+
+# 3. Frontend: Rebuild Next.js and restart
+ssh azureuser@20.124.178.41 "cd /home/azureuser/app/agentic-crm && npm run build"
+ssh azureuser@20.124.178.41 "pm2 restart qcrm-frontend"
+
+# 4. DB schema changes: Use raw SQL (prisma db push OOM-kills on 2vCPU)
+ssh azureuser@20.124.178.41 "psql postgresql://postgres:postgres@localhost:5432/agentic_crm -c 'ALTER TABLE ...'"
+ssh azureuser@20.124.178.41 "cd /home/azureuser/app/backend && npx prisma generate"
+```
+
+### Key Configuration Files
+
+- **Backend .env**: `/home/azureuser/app/backend/.env`
+  - `DATABASE_URL`, `JWT_SECRET`, `FRONTEND_URL`
+  - `AZURE_AD_TENANT_ID`, `AZURE_AD_CLIENT_ID`, `AZURE_AD_CLIENT_SECRET` (SSO)
+  - `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET` (Graph API email)
+  - `SMTP_FROM`, `SMTP_FROM_NAME` (email sender identity)
+- **Frontend .env.local**: `/home/azureuser/app/agentic-crm/.env.local`
+  - `NEXT_PUBLIC_API_URL=https://qcrm.qbadvisory.com`
+- **Nginx**: `/etc/nginx/sites-available/qcrm`
+- **PM2 ecosystem**: `pm2 save` persists process list to `/home/azureuser/.pm2/dump.pm2`
+
+### Important Deployment Notes
+
+1. **Backend runs compiled JS** — Always run `npx tsc` after uploading `.ts` source files. PM2 runs `node dist/index.js`, NOT the TypeScript sources.
+2. **`npm run build` can OOM** — The 2vCPU/8GB VM sometimes kills the build process. Do NOT pipe build output through `tail` or other commands. Run the build command directly.
+3. **DB migrations via raw SQL** — `prisma db push` also OOM-kills. Use `ALTER TABLE` for column additions, `prisma generate` afterward.
+4. **Column naming in PostgreSQL** — Prisma uses camelCase. Quote column names in SQL: `"muteNotification"`, NOT `mutenotification`.
+
+---
+
+## 15. How to Run
 
 ### Prerequisites
 - Node.js 18+

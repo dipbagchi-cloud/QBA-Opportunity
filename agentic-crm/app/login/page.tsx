@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
@@ -23,7 +23,9 @@ function LoginContent() {
     const [showPassword, setShowPassword] = useState(false);
     const [formData, setFormData] = useState({ email: "", password: "" });
     const [ssoProcessing, setSsoProcessing] = useState(false);
+    const [pageReady, setPageReady] = useState(false);
     const [authInfo, setAuthInfo] = useState<{ mode: string; ssoDomain: string; ssoConfigured: boolean } | null>(null);
+    const ssoCallbackStarted = useRef(false);
 
     // Fetch auth mode info on mount
     useEffect(() => {
@@ -37,18 +39,23 @@ function LoginContent() {
     // Handle Microsoft OAuth redirect callback
     useEffect(() => {
         const code = searchParams.get('code');
-        if (code && !ssoProcessing) {
+        if (code && !ssoCallbackStarted.current) {
+            ssoCallbackStarted.current = true;
             setSsoProcessing(true);
             // Clean URL immediately
             window.history.replaceState({}, '', '/login');
             ssoCallback(code).then((success) => {
                 if (success) {
                     router.push("/dashboard");
+                } else {
+                    setSsoProcessing(false);
+                    setPageReady(true);
                 }
-                setSsoProcessing(false);
             });
+        } else if (!ssoCallbackStarted.current) {
+            setPageReady(true);
         }
-    }, [searchParams, ssoCallback, router, ssoProcessing]);
+    }, [searchParams, ssoCallback, router]);
 
     // Set-password modal state
     const [newPassword, setNewPassword] = useState("");
@@ -70,7 +77,7 @@ function LoginContent() {
             success = await login(formData.email, formData.password);
         }
 
-        if (success && !useAuthStore.getState().mustChangePassword) {
+        if (success && !isSSO && !useAuthStore.getState().mustChangePassword) {
             router.push("/dashboard");
         }
     };
@@ -108,6 +115,13 @@ function LoginContent() {
             setSetSaving(false);
         }
     };
+
+    // Show blank screen until we know if this is an SSO callback or a normal visit
+    if (!pageReady && !ssoProcessing) {
+        return (
+            <div className="min-h-screen bg-gradient-to-br from-neutral-950 via-neutral-900 to-neutral-950" />
+        );
+    }
 
     // Show processing screen while handling SSO callback
     if (ssoProcessing) {

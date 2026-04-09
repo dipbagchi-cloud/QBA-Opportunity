@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { sendNotificationEmail } from '../lib/email';
+import { evaluateStageChangeRules, evaluateDataConditionRules } from '../lib/notification-engine';
 import path from 'path';
 import fs from 'fs';
 
@@ -543,6 +544,41 @@ export async function updateOpportunity(req: Request, res: Response) {
                 sendNotificationEmail('presales_submitted_back', ownerEmail, ownerName, emailVars);
             }
         }
+
+        // ── Notification Rules Engine (fire-and-forget) ──
+        if (newStageName && newStageName !== (previous?.stage?.name || previous?.currentStage)) {
+            evaluateStageChangeRules({
+                opportunityId: id,
+                opportunityTitle: updatedOpp.title,
+                previousStage: previous?.stage?.name || previous?.currentStage || '',
+                newStage: newStageName,
+                clientName: previous?.client?.name || '',
+                ownerName: ownerName,
+                ownerEmail: ownerEmail || '',
+                salesRepName: (updatedOpp as any).salesRepName || '',
+                managerName: (updatedOpp as any).managerName || '',
+                updatedByName: previous?.owner?.name || 'System',
+                value: updatedOpp.value ? Number(updatedOpp.value) : null,
+                probability: updatedOpp.probability,
+                region: updatedOpp.region || undefined,
+                technology: updatedOpp.technology || undefined,
+            });
+        }
+
+        // Evaluate data condition rules on every update
+        evaluateDataConditionRules({
+            id,
+            title: updatedOpp.title,
+            value: updatedOpp.value ? Number(updatedOpp.value) : null,
+            probability: updatedOpp.probability,
+            currentStage: newStageName || previous?.stage?.name || previous?.currentStage,
+            region: updatedOpp.region,
+            technology: updatedOpp.technology,
+            client: previous?.client ? { name: previous.client.name } : null,
+            owner: previous?.owner ? { id: previous.owner.id, name: previous.owner.name, email: previous.owner.email } : null,
+            salesRepName: (updatedOpp as any).salesRepName,
+            managerName: (updatedOpp as any).managerName,
+        });
 
         res.json(updatedOpp);
     } catch (error) {
