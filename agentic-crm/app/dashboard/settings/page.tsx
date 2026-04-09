@@ -102,6 +102,7 @@ interface AdminUser {
     reportingManagerName?: string;
     qpeopleId?: string;
     isActive: boolean;
+    muteNotification: boolean;
     roles: { id: string; name: string }[];
     team?: { id: string; name: string } | null;
     createdAt: string;
@@ -588,6 +589,18 @@ function UsersTab() {
         }
     };
 
+    const handleToggleMuteNotification = async (u: AdminUser) => {
+        try {
+            await apiClient(`/api/admin/users/${u.id}`, {
+                method: "PATCH",
+                body: JSON.stringify({ muteNotification: !u.muteNotification }),
+            });
+            fetchUsers(userPage, userSearch);
+        } catch (err: any) {
+            setStatus({ type: "error", message: err.message });
+        }
+    };
+
     const handleResetPassword = async () => {
         if (!resetUserId || resetPassword.length < 6) {
             setStatus({ type: "error", message: "Password must be at least 6 characters." });
@@ -819,6 +832,7 @@ function UsersTab() {
                                 <th className="text-left px-3 py-2 font-medium text-slate-600">
                                     <ColumnFilter label="Status" value={filterStatus} options={filterOptions.statuses} onChange={setFilterStatus} />
                                 </th>
+                                <th className="text-center px-3 py-2 font-medium text-slate-600">Mute Notification</th>
                                 <th className="text-right px-3 py-2 font-medium text-slate-600">Actions</th>
                             </tr>
                         </thead>
@@ -852,6 +866,15 @@ function UsersTab() {
                                                 </span>
                                             )}
                                         </button>
+                                    </td>
+                                    <td className="px-3 py-2 text-center">
+                                        <input
+                                            type="checkbox"
+                                            checked={u.muteNotification ?? true}
+                                            onChange={() => handleToggleMuteNotification(u)}
+                                            className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                                            title={u.muteNotification ? "Notifications muted — click to unmute" : "Notifications active — click to mute"}
+                                        />
                                     </td>
                                     <td className="px-3 py-2 text-right">
                                         {u.email.toLowerCase().endsWith("@qbadvisory.com") ? (

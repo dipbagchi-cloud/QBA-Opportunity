@@ -76,6 +76,7 @@ export async function listUsers(req: Request, res: Response) {
         phone: u.phone,
         qpeopleId: u.qpeopleId,
         isActive: u.isActive,
+        muteNotification: (u as any).muteNotification ?? true,
         lastLoginAt: u.lastLoginAt,
         createdAt: u.createdAt,
         roles: u.roles.map((r: any) => ({ id: r.id, name: r.name })),
@@ -142,6 +143,7 @@ export async function createUser(req: Request, res: Response) {
         name,
         ...(passwordHash ? { passwordHash } : {}),
         ...(mustChangePassword ? { mustChangePassword: true } : {}),
+        muteNotification: true,
         roles: { connect: resolvedRoleIds.map(id => ({ id })) },
         activeRoleId: resolvedRoleIds[0],
         teamId: teamId || undefined,
@@ -211,6 +213,7 @@ export async function updateUser(req: Request, res: Response) {
     }
 
     if (isActive !== undefined) updateData.isActive = isActive;
+    if (req.body.muteNotification !== undefined) updateData.muteNotification = req.body.muteNotification;
     if (name !== undefined) updateData.name = name;
     if (title !== undefined) updateData.title = title;
     if (department !== undefined) updateData.department = department;
@@ -238,6 +241,7 @@ export async function updateUser(req: Request, res: Response) {
       email: updated.email,
       name: updated.name,
       isActive: updated.isActive,
+      muteNotification: (updated as any).muteNotification ?? true,
       roles: updated.roles.map((r: any) => ({ id: r.id, name: r.name })),
       team: updated.team ? { id: updated.team.id, name: updated.team.name } : null,
     });
@@ -619,6 +623,7 @@ export async function syncQPeopleUsers(req: Request, res: Response) {
             roles: { connect: assignRoleIds.map((rid: string) => ({ id: rid })) },
             activeRoleId: assignRoleIds[0],
             isActive: true,
+            muteNotification: true,
           },
         });
         created++;

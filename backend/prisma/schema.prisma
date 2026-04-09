@@ -26,6 +26,7 @@ model User {
   jobBand       String?
   phone         String?
   isActive      Boolean   @default(true)
+  muteNotification Boolean @default(true)
   externalId    String?   @unique
   qpeopleId     String?   @unique
   createdAt     DateTime  @default(now())

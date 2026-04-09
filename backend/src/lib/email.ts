@@ -34,6 +34,16 @@ export async function sendNotificationEmail(
   variables: Record<string, string>
 ): Promise<boolean> {
   try {
+    // Check if recipient has muted notifications
+    const recipient = await prisma.user.findUnique({
+      where: { email: recipientEmail },
+      select: { muteNotification: true },
+    });
+    if (recipient?.muteNotification) {
+      console.log(`[Email] User ${recipientEmail} has muted notifications — skipping '${eventKey}'.`);
+      return false;
+    }
+
     // Look up the template
     const template = await prisma.emailTemplate.findUnique({
       where: { eventKey },
