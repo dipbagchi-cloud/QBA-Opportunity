@@ -6,3 +6,8 @@ node_modules
 dist
 coverage
 .vscode
+
+# Runtime user uploads (not source)
+backend/uploads/attachments/
+backend/uploads/sow-exports/
+backend/uploads/sow-templates/

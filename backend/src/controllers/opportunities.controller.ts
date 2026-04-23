@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { sendNotificationEmail } from '../lib/email';
-import { evaluateStageChangeRules, evaluateDataConditionRules } from '../lib/notification-engine';
+import { evaluateStageChangeRules, evaluateDataConditionRules, evaluateOpportunityCreatedRules } from '../lib/notification-engine';
 import path from 'path';
 import fs from 'fs';
 
@@ -251,6 +251,35 @@ export async function createOpportunity(req: Request, res: Response) {
                 changes: { title: newOpp.title, value: newOpp.value, client: newOpp.client?.name, stage: newOpp.stage?.name },
             },
         });
+
+        // Fire-and-forget: notify configured recipients about the new opportunity
+        try {
+            const creator = await prisma.user.findUnique({ where: { id: ownerId }, select: { name: true, email: true } });
+            evaluateOpportunityCreatedRules({
+                opportunityId: newOpp.id,
+                opportunityTitle: newOpp.title,
+                clientName: newOpp.client?.name || clientName || '',
+                stageName: newOpp.stage?.name || 'Discovery',
+                ownerName: creator?.name || '',
+                ownerEmail: creator?.email || '',
+                salesRepName: (newOpp as any).salesRepName || creator?.name || '',
+                createdByName: creator?.name || '',
+                value: newOpp.value != null ? Number(newOpp.value) : null,
+                probability: newOpp.probability,
+                region: (newOpp as any).region || undefined,
+                technology: (newOpp as any).technology || undefined,
+                practice: (newOpp as any).practice || undefined,
+                projectType: (newOpp as any).projectType || undefined,
+                pricingModel: (newOpp as any).pricingModel || undefined,
+                description: newOpp.description || undefined,
+                tentativeStartDate: (newOpp as any).tentativeStartDate ? new Date((newOpp as any).tentativeStartDate).toISOString().slice(0, 10) : undefined,
+                tentativeDuration: (newOpp as any).tentativeDuration != null
+                    ? `${(newOpp as any).tentativeDuration} ${(newOpp as any).tentativeDurationUnit || ''}`.trim()
+                    : undefined,
+            });
+        } catch (notifyErr) {
+            console.error('[opportunity_created] notification dispatch failed:', notifyErr);
+        }
 
         res.json(newOpp);
     } catch (error) {
@@ -838,7 +867,8 @@ export async function getOpportunityAuditLog(req: Request, res: Response) {
 
 // ── Attachment endpoints ──
 
-const UPLOAD_DIR = path.join(__dirname, '../../uploads');
+const PROJECT_ROOT = path.resolve(__dirname, '../..');
+const UPLOAD_DIR = path.join(PROJECT_ROOT, 'uploads', 'attachments');
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 // POST /api/opportunities/:id/attachments
@@ -851,12 +881,14 @@ export async function uploadAttachment(req: Request, res: Response) {
         const opp = await prisma.opportunity.findUnique({ where: { id } });
         if (!opp) return res.status(404).json({ error: 'Opportunity not found' });
 
+        // Store relative path from project root for portability
+        const relativePath = path.relative(PROJECT_ROOT, file.path);
         const attachment = await prisma.attachment.create({
             data: {
                 fileName: file.originalname,
                 fileType: file.mimetype,
                 fileSize: file.size,
-                filePath: file.path,
+                filePath: relativePath,
                 opportunityId: id,
             },
             select: { id: true, fileName: true, fileType: true, fileSize: true, uploadedAt: true },
@@ -876,13 +908,18 @@ export async function downloadAttachment(req: Request, res: Response) {
         const attachment = await prisma.attachment.findUnique({ where: { id: attachmentId } });
         if (!attachment) return res.status(404).json({ error: 'Attachment not found' });
 
-        if (!fs.existsSync(attachment.filePath)) {
+        // Resolve relative path to absolute for file access
+        const absPath = path.isAbsolute(attachment.filePath)
+            ? attachment.filePath
+            : path.join(PROJECT_ROOT, attachment.filePath);
+
+        if (!fs.existsSync(absPath)) {
             return res.status(404).json({ error: 'File not found on server' });
         }
 
-        res.setHeader('Content-Disposition', `attachment; filename="${attachment.fileName}"`);
+        res.setHeader('Content-Disposition', `inline; filename="${attachment.fileName}"`);
         res.setHeader('Content-Type', attachment.fileType);
-        fs.createReadStream(attachment.filePath).pipe(res);
+        fs.createReadStream(absPath).pipe(res);
     } catch (error) {
         console.error('Download attachment error:', error);
         res.status(500).json({ error: 'Failed to download attachment' });
@@ -896,9 +933,14 @@ export async function deleteAttachment(req: Request, res: Response) {
         const attachment = await prisma.attachment.findUnique({ where: { id: attachmentId } });
         if (!attachment) return res.status(404).json({ error: 'Attachment not found' });
 
+        // Resolve relative path to absolute for file deletion
+        const absPath = path.isAbsolute(attachment.filePath)
+            ? attachment.filePath
+            : path.join(PROJECT_ROOT, attachment.filePath);
+
         // Remove file from disk
-        if (fs.existsSync(attachment.filePath)) {
-            fs.unlinkSync(attachment.filePath);
+        if (fs.existsSync(absPath)) {
+            fs.unlinkSync(absPath);
         }
 
         await prisma.attachment.delete({ where: { id: attachmentId } });

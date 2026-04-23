@@ -42,6 +42,11 @@ export const PERMISSIONS = {
 
   // Audit Logs
   AUDITLOGS_VIEW: 'auditlogs:view',
+
+  // SOW Studio
+  SOW_VIEW: 'sow:view',
+  SOW_WRITE: 'sow:write',
+  SOW_ADMIN: 'sow:admin',
 } as const;
 
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
@@ -67,6 +72,8 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     PERMISSIONS.LEADS_MANAGE,
     PERMISSIONS.RESOURCES_MANAGE,
     PERMISSIONS.AUDITLOGS_VIEW,
+    PERMISSIONS.SOW_VIEW,
+    PERMISSIONS.SOW_WRITE,
   ],
   Sales: [
     PERMISSIONS.PIPELINE_VIEW,
@@ -77,6 +84,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     PERMISSIONS.ANALYTICS_VIEW,
     PERMISSIONS.AGENTS_EXECUTE,
     PERMISSIONS.LEADS_MANAGE,
+    PERMISSIONS.SOW_VIEW,
   ],
   Presales: [
     PERMISSIONS.PIPELINE_VIEW,
@@ -86,6 +94,8 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     PERMISSIONS.SALES_VIEW,
     PERMISSIONS.ANALYTICS_VIEW,
     PERMISSIONS.AGENTS_EXECUTE,
+    PERMISSIONS.SOW_VIEW,
+    PERMISSIONS.SOW_WRITE,
   ],
   'Read-Only': [
     PERMISSIONS.PIPELINE_VIEW,

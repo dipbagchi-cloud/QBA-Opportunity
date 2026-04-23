@@ -295,9 +295,13 @@ export async function listSalespersons(req: Request, res: Response) {
 // ── Departments from QPeople ──
 export async function listDepartments(req: Request, res: Response) {
     try {
+        const qpeopleToken = process.env.QPEOPLE_API_TOKEN;
+        if (!qpeopleToken) {
+          return res.status(500).json({ error: 'QPEOPLE_API_TOKEN not configured' });
+        }
         const response = await fetch(
             'https://hr.qbadvisory.com/api/method/hrms.api.employee.get_all_managers_with_departments',
-            { headers: { 'Authorization': 'token 762913b0eb9f140:1205f410c1b7b31' } }
+            { headers: { 'Authorization': `token ${qpeopleToken}` } }
         );
         const json: any = await response.json();
         const departments = [...new Set(

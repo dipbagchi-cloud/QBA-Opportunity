@@ -79,6 +79,39 @@ import {
   updateNotificationRule,
   deleteNotificationRule,
 } from '../controllers/notification-rules.controller';
+import {
+  listSowTemplates,
+  createSowTemplate,
+  updateSowTemplate,
+  deleteSowTemplate,
+  downloadSowTemplate,
+  sowTemplateUpload,
+  listTemplateAnchors,
+  upsertTemplateAnchors,
+  listMetadataCategories,
+  createMetadataCategory,
+  updateMetadataCategory,
+  deleteMetadataCategory,
+  createMetadataValue,
+  updateMetadataValue,
+  deleteMetadataValue,
+  listStaticContent,
+  createStaticContent,
+  updateStaticContent,
+  deleteStaticContent,
+  listClauses,
+  createClause,
+  updateClause,
+  deleteClause,
+  listSectionRules,
+  createSectionRule,
+  updateSectionRule,
+  deleteSectionRule,
+  listApprovalConfig,
+  upsertApprovalConfig,
+  getNumberingConfig,
+  updateNumberingConfig,
+} from '../controllers/sow-admin.controller';
 
 const router = Router();
 
@@ -180,5 +213,55 @@ router.get('/notification-rules', authorize(PERMISSIONS.SETTINGS_MANAGE), listNo
 router.post('/notification-rules', authorize(PERMISSIONS.SETTINGS_MANAGE), createNotificationRule);
 router.patch('/notification-rules/:id', authorize(PERMISSIONS.SETTINGS_MANAGE), updateNotificationRule);
 router.delete('/notification-rules/:id', authorize(PERMISSIONS.SETTINGS_MANAGE), deleteNotificationRule);
+
+// ==========================================================================
+// SOW ADMINISTRATION
+// ==========================================================================
+
+// SOW Templates (requires settings:manage or sow:admin)
+router.get('/sow/templates', authorize(PERMISSIONS.SETTINGS_MANAGE), listSowTemplates);
+router.post('/sow/templates', authorize(PERMISSIONS.SETTINGS_MANAGE), sowTemplateUpload.single('templateFile'), createSowTemplate);
+router.patch('/sow/templates/:id', authorize(PERMISSIONS.SETTINGS_MANAGE), sowTemplateUpload.single('templateFile'), updateSowTemplate);
+router.delete('/sow/templates/:id', authorize(PERMISSIONS.SETTINGS_MANAGE), deleteSowTemplate);
+router.get('/sow/templates/:id/download', authorize(PERMISSIONS.SETTINGS_MANAGE), downloadSowTemplate);
+
+// Template anchor mappings
+router.get('/sow/templates/:templateId/anchors', authorize(PERMISSIONS.SETTINGS_MANAGE), listTemplateAnchors);
+router.put('/sow/templates/:templateId/anchors', authorize(PERMISSIONS.SETTINGS_MANAGE), upsertTemplateAnchors);
+
+// SOW Metadata categories & values
+router.get('/sow/metadata', authorize(PERMISSIONS.SETTINGS_MANAGE), listMetadataCategories);
+router.post('/sow/metadata', authorize(PERMISSIONS.SETTINGS_MANAGE), createMetadataCategory);
+router.patch('/sow/metadata/:id', authorize(PERMISSIONS.SETTINGS_MANAGE), updateMetadataCategory);
+router.delete('/sow/metadata/:id', authorize(PERMISSIONS.SETTINGS_MANAGE), deleteMetadataCategory);
+router.post('/sow/metadata/:categoryId/values', authorize(PERMISSIONS.SETTINGS_MANAGE), createMetadataValue);
+router.patch('/sow/metadata/values/:id', authorize(PERMISSIONS.SETTINGS_MANAGE), updateMetadataValue);
+router.delete('/sow/metadata/values/:id', authorize(PERMISSIONS.SETTINGS_MANAGE), deleteMetadataValue);
+
+// SOW Static content library
+router.get('/sow/static-content', authorize(PERMISSIONS.SETTINGS_MANAGE), listStaticContent);
+router.post('/sow/static-content', authorize(PERMISSIONS.SETTINGS_MANAGE), createStaticContent);
+router.patch('/sow/static-content/:id', authorize(PERMISSIONS.SETTINGS_MANAGE), updateStaticContent);
+router.delete('/sow/static-content/:id', authorize(PERMISSIONS.SETTINGS_MANAGE), deleteStaticContent);
+
+// SOW Clause library
+router.get('/sow/clauses', authorize(PERMISSIONS.SETTINGS_MANAGE), listClauses);
+router.post('/sow/clauses', authorize(PERMISSIONS.SETTINGS_MANAGE), createClause);
+router.patch('/sow/clauses/:id', authorize(PERMISSIONS.SETTINGS_MANAGE), updateClause);
+router.delete('/sow/clauses/:id', authorize(PERMISSIONS.SETTINGS_MANAGE), deleteClause);
+
+// SOW Section rules
+router.get('/sow/section-rules', authorize(PERMISSIONS.SETTINGS_MANAGE), listSectionRules);
+router.post('/sow/section-rules', authorize(PERMISSIONS.SETTINGS_MANAGE), createSectionRule);
+router.patch('/sow/section-rules/:id', authorize(PERMISSIONS.SETTINGS_MANAGE), updateSectionRule);
+router.delete('/sow/section-rules/:id', authorize(PERMISSIONS.SETTINGS_MANAGE), deleteSectionRule);
+
+// SOW Approval configuration
+router.get('/sow/approval-config', authorize(PERMISSIONS.SETTINGS_MANAGE), listApprovalConfig);
+router.put('/sow/approval-config', authorize(PERMISSIONS.SETTINGS_MANAGE), upsertApprovalConfig);
+
+// SOW Numbering configuration
+router.get('/sow/numbering-config', authorize(PERMISSIONS.SETTINGS_MANAGE), getNumberingConfig);
+router.put('/sow/numbering-config', authorize(PERMISSIONS.SETTINGS_MANAGE), updateNumberingConfig);
 
 export default router;

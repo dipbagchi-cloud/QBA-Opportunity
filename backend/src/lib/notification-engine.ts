@@ -18,6 +18,134 @@ interface StageChangeContext {
   technology?: string;
 }
 
+interface OpportunityCreatedContext {
+  opportunityId: string;
+  opportunityTitle: string;
+  clientName: string;
+  stageName: string;
+  ownerName: string;
+  ownerEmail: string;
+  salesRepName: string;
+  createdByName: string;
+  value?: number | null;
+  probability?: number | null;
+  region?: string;
+  technology?: string;
+  practice?: string;
+  projectType?: string;
+  pricingModel?: string;
+  description?: string;
+  tentativeStartDate?: string;
+  tentativeDuration?: string;
+}
+
+/**
+ * Evaluate all active notification rules for a new opportunity creation event.
+ * Creates in-app notifications and sends emails as configured.
+ */
+export async function evaluateOpportunityCreatedRules(ctx: OpportunityCreatedContext): Promise<void> {
+  try {
+    const rules = await prisma.notificationRule.findMany({
+      where: {
+        isActive: true,
+        triggerType: 'opportunity_created',
+      },
+    });
+
+    for (const rule of rules) {
+      const recipientRoles = (rule.recipientRoles as string[]) || [];
+      const recipientRolesCc = ((rule as any).recipientRolesCc as string[]) || [];
+      const channels = (rule.channels as string[]) || [];
+
+      if (recipientRoles.length === 0 || channels.length === 0) continue;
+
+      const toUsers = await prisma.user.findMany({
+        where: {
+          isActive: true,
+          roles: { some: { name: { in: recipientRoles } } },
+        },
+        select: { id: true, email: true, name: true, muteNotification: true },
+      });
+
+      const ccUsers = recipientRolesCc.length > 0
+        ? await prisma.user.findMany({
+            where: {
+              isActive: true,
+              roles: { some: { name: { in: recipientRolesCc } } },
+              // Exclude users already in To list
+              NOT: { id: { in: toUsers.map(u => u.id) } },
+            },
+            select: { id: true, email: true, name: true, muteNotification: true },
+          })
+        : [];
+
+      const variables: Record<string, string> = {
+        dealName: ctx.opportunityTitle,
+        opportunityTitle: ctx.opportunityTitle,
+        opportunityId: ctx.opportunityId,
+        stage: ctx.stageName,
+        stageName: ctx.stageName,
+        client: ctx.clientName,
+        clientName: ctx.clientName,
+        owner: ctx.ownerName,
+        ownerName: ctx.ownerName,
+        ownerEmail: ctx.ownerEmail,
+        salesRep: ctx.salesRepName,
+        salesRepName: ctx.salesRepName,
+        createdBy: ctx.createdByName,
+        updatedBy: ctx.createdByName,
+        value: ctx.value != null ? String(ctx.value) : '',
+        probability: ctx.probability != null ? String(ctx.probability) : '',
+        region: ctx.region || '',
+        technology: ctx.technology || '',
+        practice: ctx.practice || '',
+        projectType: ctx.projectType || '',
+        pricingModel: ctx.pricingModel || '',
+        description: ctx.description || '',
+        tentativeStartDate: ctx.tentativeStartDate || '',
+        tentativeDuration: ctx.tentativeDuration || '',
+      };
+
+      const title = rule.titleTemplate
+        ? renderTemplate(rule.titleTemplate, variables)
+        : `New Opportunity: ${ctx.opportunityTitle}`;
+
+      const message = rule.messageTemplate
+        ? renderTemplate(rule.messageTemplate, variables)
+        : `A new opportunity "${ctx.opportunityTitle}" for ${ctx.clientName} was created by ${ctx.createdByName}`;
+
+      // In-app notifications: one per user (To + CC combined)
+      if (channels.includes('in_app')) {
+        for (const user of [...toUsers, ...ccUsers]) {
+          await prisma.notification.create({
+            data: {
+              type: 'opportunity_created',
+              title,
+              message,
+              link: `/dashboard/opportunities/${ctx.opportunityId}`,
+              userId: user.id,
+            },
+          });
+        }
+      }
+
+      // Email: single message with all To recipients + CC recipients
+      if (channels.includes('email') && rule.emailTemplateKey) {
+        const toEmails = toUsers.filter(u => !u.muteNotification).map(u => u.email);
+        const ccEmails = ccUsers.filter(u => !u.muteNotification).map(u => u.email);
+        if (toEmails.length > 0 || ccEmails.length > 0) {
+          const primaryName = toUsers[0]?.name || 'Recipient';
+          sendNotificationEmail(rule.emailTemplateKey, toEmails, primaryName, variables, ccEmails);
+        }
+      }
+
+      console.log(`[NotificationEngine] opportunity_created rule "${rule.name}" matched: ${toUsers.length} To + ${ccUsers.length} CC via [${channels.join(', ')}]`);
+    }
+  } catch (error) {
+    console.error('[NotificationEngine] Error evaluating opportunity_created rules:', error);
+  }
+}
+
 /**
  * Evaluate all active notification rules for a stage change event.
  * Creates in-app notifications and sends emails as configured.

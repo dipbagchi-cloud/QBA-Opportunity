@@ -95,22 +95,50 @@ function renderTemplate(template: string, variables: Record<string, string>): st
  * Send a notification email for a given event.
  * Looks up the template by eventKey, renders it with variables, and sends.
  * Fails silently (logs errors) so it never blocks the main flow.
+ *
+ * `recipientEmail` may be a single address string or an array for bulk To.
+ * `ccEmails` is optional array of CC addresses.
  */
 export async function sendNotificationEmail(
   eventKey: string,
-  recipientEmail: string,
+  recipientEmail: string | string[],
   recipientName: string,
-  variables: Record<string, string>
+  variables: Record<string, string>,
+  ccEmails?: string[]
 ): Promise<boolean> {
   try {
-    // Check if recipient has muted notifications
-    const recipient = await prisma.user.findUnique({
-      where: { email: recipientEmail },
-      select: { muteNotification: true },
-    });
-    if (recipient?.muteNotification) {
-      console.log(`[Email] User ${recipientEmail} has muted notifications — skipping '${eventKey}'.`);
-      return false;
+    // Normalise inputs to arrays
+    const toList = Array.isArray(recipientEmail) ? recipientEmail : [recipientEmail];
+    const ccList = Array.isArray(ccEmails) ? ccEmails : [];
+    const originalToLabel = toList.join(',');
+
+    // Test-mode override: when EMAIL_TEST_OVERRIDE is set, all emails are
+    // redirected to that address and the recipient's mute flag is ignored.
+    // The original recipient is annotated in the subject for visibility.
+    const testOverride = (process.env.EMAIL_TEST_OVERRIDE || '').trim();
+    const isOverride = testOverride.length > 0;
+
+    let actualTo: string[];
+    let actualCc: string[];
+    if (isOverride) {
+      actualTo = [testOverride];
+      actualCc = [];
+    } else {
+      // Check mute flags for each recipient — drop muted ones
+      const allEmails = [...toList, ...ccList];
+      const muteRows = allEmails.length > 0
+        ? await prisma.user.findMany({
+            where: { email: { in: allEmails } },
+            select: { email: true, muteNotification: true },
+          })
+        : [];
+      const mutedSet = new Set(muteRows.filter(r => r.muteNotification).map(r => r.email.toLowerCase()));
+      actualTo = toList.filter(e => !mutedSet.has(e.toLowerCase()));
+      actualCc = ccList.filter(e => !mutedSet.has(e.toLowerCase()));
+      if (actualTo.length === 0 && actualCc.length === 0) {
+        console.log(`[Email] All recipients muted — skipping '${eventKey}'.`);
+        return false;
+      }
     }
 
     // Look up the template
@@ -124,26 +152,51 @@ export async function sendNotificationEmail(
     }
 
     // Merge in recipient info to variables
-    const allVars = { ...variables, recipientName, recipientEmail };
+    const allVars = { ...variables, recipientName, recipientEmail: originalToLabel };
 
-    const subject = renderTemplate(template.subject, allVars);
+    let subject = renderTemplate(template.subject, allVars);
     const htmlBody = renderTemplate(template.body, allVars);
 
+    if (isOverride) {
+      subject = `[TEST→${originalToLabel}${ccList.length > 0 ? ` cc:${ccList.join(',')}` : ''}] ${subject}`;
+    }
+
     if (USE_GRAPH_API) {
-      await sendViaGraphApi(recipientEmail, subject, htmlBody);
+      // Graph API supports cc via message.ccRecipients
+      const token = await getGraphAccessToken();
+      const graphUrl = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(FROM_EMAIL)}/sendMail`;
+      const response = await fetch(graphUrl, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: {
+            subject,
+            body: { contentType: 'HTML', content: htmlBody },
+            toRecipients: actualTo.map(a => ({ emailAddress: { address: a } })),
+            ccRecipients: actualCc.map(a => ({ emailAddress: { address: a } })),
+            from: { emailAddress: { name: FROM_NAME, address: FROM_EMAIL } },
+          },
+          saveToSentItems: false,
+        }),
+      });
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Graph API sendMail failed: ${response.status} ${errorText}`);
+      }
     } else {
       await transporter!.sendMail({
         from: `"${FROM_NAME}" <${FROM_EMAIL}>`,
-        to: recipientEmail,
+        to: actualTo.join(', '),
+        cc: actualCc.length > 0 ? actualCc.join(', ') : undefined,
         subject,
         html: htmlBody,
       });
     }
 
-    console.log(`[Email] Sent '${eventKey}' to ${recipientEmail} via ${USE_GRAPH_API ? 'Graph API' : 'SMTP'}`);
+    console.log(`[Email] Sent '${eventKey}' to [${actualTo.join(',')}]${actualCc.length > 0 ? ` cc:[${actualCc.join(',')}]` : ''}${isOverride ? ` (orig to:${originalToLabel})` : ''} via ${USE_GRAPH_API ? 'Graph API' : 'SMTP'}`);
     return true;
   } catch (error) {
-    console.error(`[Email] Failed to send '${eventKey}' to ${recipientEmail}:`, error);
+    console.error(`[Email] Failed to send '${eventKey}' to ${Array.isArray(recipientEmail) ? recipientEmail.join(',') : recipientEmail}:`, error);
     return false;
   }
 }

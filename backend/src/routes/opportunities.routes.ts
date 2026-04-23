@@ -23,8 +23,10 @@ import { PERMISSIONS } from '../lib/permissions';
 const router = Router();
 
 // Multer config for attachment uploads
+const attachmentDir = path.join(__dirname, '../../uploads/attachments');
+if (!require('fs').existsSync(attachmentDir)) require('fs').mkdirSync(attachmentDir, { recursive: true });
 const storage = multer.diskStorage({
-    destination: path.join(__dirname, '../../uploads'),
+    destination: attachmentDir,
     filename: (_req, file, cb) => {
         const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
         cb(null, `${unique}-${file.originalname}`);

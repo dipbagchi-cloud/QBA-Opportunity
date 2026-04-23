@@ -13,9 +13,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const verify = async () => {
+      const nextParam = pathname && pathname !== "/login"
+        ? `?next=${encodeURIComponent(pathname)}`
+        : "";
+
       if (!token) {
         setIsChecking(false);
-        router.replace("/login");
+        router.replace(`/login${nextParam}`);
         return;
       }
 
@@ -23,12 +27,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setIsChecking(false);
 
       if (!valid) {
-        router.replace("/login");
+        router.replace(`/login${nextParam}`);
       }
     };
 
     verify();
-  }, [token, checkAuth, router]);
+  }, [token, checkAuth, router, pathname]);
 
   if (isChecking) {
     return (

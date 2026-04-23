@@ -16,11 +16,12 @@ export async function listUsers(req: Request, res: Response) {
     const filterRole = (req.query.role as string || '').trim();
     const filterStatus = (req.query.status as string || '').trim();
     const filterManager = (req.query.reportingManager as string || '').trim();
+    const filterMute = (req.query.muteNotification as string || '').trim();
     const sortBy = (req.query.sortBy as string || 'name').trim();
     const sortDir = (req.query.sortDir as string || 'asc').trim() === 'desc' ? 'desc' : 'asc';
 
     // Validate sortBy to prevent Prisma injection
-    const allowedSortFields = ['name', 'email', 'department', 'designation', 'reportingManagerName', 'isActive', 'createdAt', 'lastLoginAt'];
+    const allowedSortFields = ['name', 'email', 'department', 'designation', 'reportingManagerName', 'isActive', 'muteNotification', 'createdAt', 'lastLoginAt'];
     const safeSortBy = allowedSortFields.includes(sortBy) ? sortBy : 'name';
 
     const where: any = {};
@@ -40,6 +41,8 @@ export async function listUsers(req: Request, res: Response) {
     if (filterManager) andConditions.push({ reportingManagerName: { equals: filterManager, mode: 'insensitive' } });
     if (filterStatus === 'active') andConditions.push({ isActive: true });
     else if (filterStatus === 'inactive') andConditions.push({ isActive: false });
+    if (filterMute === 'muted') andConditions.push({ muteNotification: true });
+    else if (filterMute === 'unmuted') andConditions.push({ muteNotification: false });
     if (filterRole) andConditions.push({ roles: { some: { name: { equals: filterRole, mode: 'insensitive' } } } });
 
     if (andConditions.length > 0) where.AND = andConditions;
@@ -92,6 +95,7 @@ export async function listUsers(req: Request, res: Response) {
         managers: managers.map(m => m.reportingManagerName).filter(Boolean),
         roles: rolesList.map(r => r.name),
         statuses: ['active', 'inactive'],
+        mutes: ['muted', 'unmuted'],
       },
     });
   } catch (error) {
@@ -525,9 +529,13 @@ export async function listTeams(req: Request, res: Response) {
 // POST /api/admin/users/sync-qpeople — Sync users from QPeople HRMS
 export async function syncQPeopleUsers(req: Request, res: Response) {
   try {
+    const qpeopleToken = process.env.QPEOPLE_API_TOKEN;
+    if (!qpeopleToken) {
+      return res.status(500).json({ error: 'QPEOPLE_API_TOKEN not configured' });
+    }
     const qpeopleRes = await fetch(
       'https://hr.qbadvisory.com/api/method/hrms.api.employee.get_all_users_details',
-      { headers: { 'Authorization': 'token 762913b0eb9f140:1205f410c1b7b31' } }
+      { headers: { 'Authorization': `token ${qpeopleToken}` } }
     );
     if (!qpeopleRes.ok) {
       return res.status(502).json({ error: 'Failed to fetch from QPeople API' });

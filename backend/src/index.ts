@@ -15,6 +15,7 @@ import adminRoutes from './routes/admin.routes';
 import contactsRoutes from './routes/contacts.routes';
 import chatbotRoutes from './routes/chatbot.routes';
 import notificationsRoutes from './routes/notifications.routes';
+import sowRoutes from './routes/sow.routes';
 import { getPublicStats } from './controllers/public.controller';
 import { errorHandler } from './middleware/errorHandler';
 
@@ -53,6 +54,7 @@ app.use('/api/master', masterDataRoutes);
 app.use('/api/contacts', contactsRoutes);
 app.use('/api/chatbot', chatbotRoutes);
 app.use('/api/notifications', notificationsRoutes);
+app.use('/api', sowRoutes);
 
 // Health check (public)
 app.get('/api/health', (req, res) => {

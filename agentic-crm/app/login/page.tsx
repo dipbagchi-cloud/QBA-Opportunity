@@ -36,6 +36,16 @@ function LoginContent() {
         ? false
         : formData.email.toLowerCase().endsWith(authInfo?.ssoDomain || "@qbadvisory.com");
 
+    // Resolve safe post-login redirect target.
+    // Accepts `?next=` only when it's a same-origin path (prevents open redirect).
+    const resolveNextTarget = (): string => {
+        const fromQuery = searchParams.get('next');
+        const fromStorage = typeof window !== 'undefined' ? localStorage.getItem('sso_next_url') : null;
+        const candidate = fromQuery || fromStorage || '/dashboard';
+        if (candidate.startsWith('/') && !candidate.startsWith('//')) return candidate;
+        return '/dashboard';
+    };
+
     // Handle Microsoft OAuth redirect callback
     useEffect(() => {
         const code = searchParams.get('code');
@@ -46,7 +56,9 @@ function LoginContent() {
             window.history.replaceState({}, '', '/login');
             ssoCallback(code).then((success) => {
                 if (success) {
-                    router.push("/dashboard");
+                    const target = resolveNextTarget();
+                    localStorage.removeItem('sso_next_url');
+                    router.push(target);
                 } else {
                     setSsoProcessing(false);
                     setPageReady(true);
@@ -70,6 +82,12 @@ function LoginContent() {
         e.preventDefault();
         clearError();
 
+        // Stash the `next` target before SSO redirect so it survives the Microsoft round-trip
+        const nextTarget = resolveNextTarget();
+        if (isSSO && nextTarget !== '/dashboard') {
+            localStorage.setItem('sso_next_url', nextTarget);
+        }
+
         let success: boolean;
         if (isSSO) {
             success = await ssoLogin(formData.email);
@@ -78,7 +96,7 @@ function LoginContent() {
         }
 
         if (success && !isSSO && !useAuthStore.getState().mustChangePassword) {
-            router.push("/dashboard");
+            router.push(nextTarget);
         }
     };
 
@@ -108,7 +126,8 @@ function LoginContent() {
             setSetPasswordDone(true);
             // Clear mustChangePassword flag in store, then redirect
             useAuthStore.setState({ mustChangePassword: false });
-            setTimeout(() => router.push("/dashboard"), 1200);
+            const target = resolveNextTarget();
+            setTimeout(() => router.push(target), 1200);
         } catch {
             setSetPasswordError("Network error. Please try again.");
         } finally {

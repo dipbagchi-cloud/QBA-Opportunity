@@ -5,6 +5,7 @@ import { User, Lock, Users, Shield, Plus, X, Check, AlertCircle, RotateCcw, Penc
 import { useAuthStore } from "@/lib/auth-store";
 import { apiClient } from "@/lib/api";
 import { useCurrency } from "@/components/providers/currency-provider";
+import { SowAdminTab } from "./components/SowAdminTab";
 
 // ── Permission categories for the checkbox grid ──
 const PERMISSION_CATEGORIES = [
@@ -123,7 +124,7 @@ interface TeamOption {
     name: string;
 }
 
-type Tab = "profile" | "security" | "users" | "roles" | "qpeoplemapping" | "authconfig" | "ratecards" | "budgetassumptions" | "currencyrates" | "gomcalculator" | "clients" | "regions" | "technologies" | "pricingmodels" | "projecttypes" | "auditlog" | "emailtemplates" | "notificationrules";
+type Tab = "profile" | "security" | "users" | "roles" | "qpeoplemapping" | "authconfig" | "ratecards" | "budgetassumptions" | "currencyrates" | "gomcalculator" | "clients" | "regions" | "technologies" | "pricingmodels" | "projecttypes" | "auditlog" | "emailtemplates" | "notificationrules" | "sowadmin";
 
 export default function SettingsPage() {
     const { user, hasPermission } = useAuthStore();
@@ -170,6 +171,13 @@ export default function SettingsPage() {
                 { key: "technologies", label: "Technologies", icon: Cpu, adminOnly: true },
                 { key: "pricingmodels", label: "Pricing Models", icon: Tag, adminOnly: true },
                 { key: "projecttypes", label: "Project Types", icon: Briefcase, adminOnly: true },
+            ],
+        },
+        {
+            label: "SOW Management",
+            adminOnly: true,
+            tabs: [
+                { key: "sowadmin", label: "SOW Administration", icon: FileText, adminOnly: true },
             ],
         },
         {
@@ -280,6 +288,7 @@ export default function SettingsPage() {
                     {activeTab === "technologies" && canManageMetadata && <MasterDataTab entity="technologies" label="Technology" />}
                     {activeTab === "pricingmodels" && canManageMetadata && <MasterDataTab entity="pricing-models" label="Pricing Model" />}
                     {activeTab === "projecttypes" && canManageMetadata && <MasterDataTab entity="project-types" label="Project Type" />}
+                    {activeTab === "sowadmin" && isAdmin && <SowAdminTab />}
                     {activeTab === "auditlog" && canViewAuditLogs && <AuditLogTab />}
                     {activeTab === "emailtemplates" && isAdmin && <EmailTemplatesTab />}
                     {activeTab === "notificationrules" && isAdmin && <NotificationRulesTab />}
@@ -480,7 +489,8 @@ function UsersTab() {
     const [filterRole, setFilterRole] = useState("");
     const [filterStatus, setFilterStatus] = useState("");
     const [filterManager, setFilterManager] = useState("");
-    const [filterOptions, setFilterOptions] = useState<{ departments: string[]; designations: string[]; managers: string[]; roles: string[]; statuses: string[] }>({ departments: [], designations: [], managers: [], roles: [], statuses: ['active', 'inactive'] });
+    const [filterMute, setFilterMute] = useState("");
+    const [filterOptions, setFilterOptions] = useState<{ departments: string[]; designations: string[]; managers: string[]; roles: string[]; statuses: string[]; mutes: string[] }>({ departments: [], designations: [], managers: [], roles: [], statuses: ['active', 'inactive'], mutes: ['muted', 'unmuted'] });
 
     // Sort
     const [userSortKey, setUserSortKey] = useState("name");
@@ -511,6 +521,7 @@ function UsersTab() {
             if (filterRole) qp.set("role", filterRole);
             if (filterStatus) qp.set("status", filterStatus);
             if (filterManager) qp.set("reportingManager", filterManager);
+            if (filterMute) qp.set("muteNotification", filterMute);
             if (userSortKey && userSortDir) { qp.set("sortBy", userSortKey); qp.set("sortDir", userSortDir); }
             const res = await apiClient<any>(`/api/admin/users?${qp.toString()}`);
             // Support paginated { data, total } or legacy array
@@ -529,7 +540,7 @@ function UsersTab() {
         } catch {
             setStatus({ type: "error", message: "Failed to load users." });
         }
-    }, [userLimit, filterDept, filterDesig, filterRole, filterStatus, filterManager, userSortKey, userSortDir]);
+    }, [userLimit, filterDept, filterDesig, filterRole, filterStatus, filterManager, filterMute, userSortKey, userSortDir]);
 
     const fetchData = useCallback(async () => {
         setLoading(true);
@@ -662,7 +673,7 @@ function UsersTab() {
             fetchUsers(1, userSearch);
         }, 400);
         return () => clearTimeout(timer);
-    }, [userSearch, fetchUsers, filterDept, filterDesig, filterRole, filterStatus, filterManager]);
+    }, [userSearch, fetchUsers, filterDept, filterDesig, filterRole, filterStatus, filterManager, filterMute]);
 
     if (loading) {
         return <div className="text-center py-12 text-slate-400">Loading users...</div>;
@@ -799,7 +810,7 @@ function UsersTab() {
             )}
 
             {/* Active column filters */}
-            {(filterDept || filterDesig || filterRole || filterStatus || filterManager) && (
+            {(filterDept || filterDesig || filterRole || filterStatus || filterManager || filterMute) && (
                 <div className="flex flex-wrap items-center gap-1.5 text-xs">
                     <span className="text-slate-400">Filters:</span>
                     {filterDept && <span className="bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full flex items-center gap-1">{filterDept}<button onClick={() => setFilterDept("")}><X className="w-3 h-3" /></button></span>}
@@ -807,7 +818,8 @@ function UsersTab() {
                     {filterManager && <span className="bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full flex items-center gap-1">{filterManager}<button onClick={() => setFilterManager("")}><X className="w-3 h-3" /></button></span>}
                     {filterRole && <span className="bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full flex items-center gap-1">{filterRole}<button onClick={() => setFilterRole("")}><X className="w-3 h-3" /></button></span>}
                     {filterStatus && <span className="bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full flex items-center gap-1">{filterStatus}<button onClick={() => setFilterStatus("")}><X className="w-3 h-3" /></button></span>}
-                    <button onClick={() => { setFilterDept(""); setFilterDesig(""); setFilterRole(""); setFilterStatus(""); setFilterManager(""); }} className="text-red-500 hover:underline ml-1">Clear all</button>
+                    {filterMute && <span className="bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full flex items-center gap-1">{filterMute}<button onClick={() => setFilterMute("")}><X className="w-3 h-3" /></button></span>}
+                    <button onClick={() => { setFilterDept(""); setFilterDesig(""); setFilterRole(""); setFilterStatus(""); setFilterManager(""); setFilterMute(""); }} className="text-red-500 hover:underline ml-1">Clear all</button>
                 </div>
             )}
 
@@ -834,7 +846,20 @@ function UsersTab() {
                                 <th className="text-left px-3 py-2 font-medium text-slate-600">
                                     <ColumnFilter label="Status" value={filterStatus} options={filterOptions.statuses} onChange={setFilterStatus} />
                                 </th>
-                                <th className="text-center px-3 py-2 font-medium text-slate-600">Mute Notification</th>
+                                <th className="text-center px-3 py-2 font-medium text-slate-600">
+                                    <div className="flex items-center justify-center gap-1">
+                                        <button
+                                            onClick={() => handleUserSort('muteNotification', userSortKey === 'muteNotification' ? (userSortDir === 'asc' ? 'desc' : null) : 'asc')}
+                                            className="inline-flex items-center gap-1 hover:text-indigo-600 select-none"
+                                        >
+                                            Mute Notification
+                                            {userSortKey === 'muteNotification' && userSortDir === 'asc' && <ChevronUp className="w-3 h-3 text-indigo-600" />}
+                                            {userSortKey === 'muteNotification' && userSortDir === 'desc' && <ChevronDown className="w-3 h-3 text-indigo-600" />}
+                                            {userSortKey !== 'muteNotification' && <ChevronDown className="w-3 h-3 text-slate-300" />}
+                                        </button>
+                                        <ColumnFilter label="" value={filterMute} options={filterOptions.mutes || ['muted', 'unmuted']} onChange={setFilterMute} />
+                                    </div>
+                                </th>
                                 <th className="text-right px-3 py-2 font-medium text-slate-600">Actions</th>
                             </tr>
                         </thead>
@@ -3350,6 +3375,7 @@ function QPeopleMappingTab() {
 /* ─────────────── Notification Rules Tab ─────────────── */
 
 const TRIGGER_TYPES = [
+    { value: "opportunity_created", label: "New Opportunity", description: "When a new opportunity is created" },
     { value: "stage_change", label: "Stage Change", description: "When an opportunity moves between stages" },
     { value: "data_condition", label: "Data Condition", description: "When opportunity data matches a condition" },
     { value: "approval", label: "Approval Required", description: "When an approval action is needed" },
@@ -3393,6 +3419,7 @@ interface NotifRule {
     toStage: string | null;
     conditions: any[] | null;
     recipientRoles: string[];
+    recipientRolesCc: string[] | null;
     channels: string[];
     emailTemplateKey: string | null;
     titleTemplate: string | null;
@@ -3424,6 +3451,7 @@ function NotificationRulesTab() {
     const [formToStage, setFormToStage] = useState("");
     const [formConditions, setFormConditions] = useState<ConditionRow[]>([]);
     const [formRecipientRoles, setFormRecipientRoles] = useState<string[]>([]);
+    const [formRecipientRolesCc, setFormRecipientRolesCc] = useState<string[]>([]);
     const [formChannels, setFormChannels] = useState<string[]>(["in_app"]);
     const [formEmailTemplateKey, setFormEmailTemplateKey] = useState("");
     const [formTitleTemplate, setFormTitleTemplate] = useState("");
@@ -3457,6 +3485,7 @@ function NotificationRulesTab() {
         setFormToStage("");
         setFormConditions([]);
         setFormRecipientRoles([]);
+        setFormRecipientRolesCc([]);
         setFormChannels(["in_app"]);
         setFormEmailTemplateKey("");
         setFormTitleTemplate("");
@@ -3478,6 +3507,7 @@ function NotificationRulesTab() {
         setFormToStage(rule.toStage || "");
         setFormConditions(Array.isArray(rule.conditions) ? rule.conditions : []);
         setFormRecipientRoles(Array.isArray(rule.recipientRoles) ? rule.recipientRoles : []);
+        setFormRecipientRolesCc(Array.isArray(rule.recipientRolesCc) ? rule.recipientRolesCc : []);
         setFormChannels(Array.isArray(rule.channels) ? rule.channels : ["in_app"]);
         setFormEmailTemplateKey(rule.emailTemplateKey || "");
         setFormTitleTemplate(rule.titleTemplate || "");
@@ -3497,6 +3527,7 @@ function NotificationRulesTab() {
                 toStage: formToStage || null,
                 conditions: formConditions.length > 0 ? formConditions : null,
                 recipientRoles: formRecipientRoles,
+                recipientRolesCc: formRecipientRolesCc.length > 0 ? formRecipientRolesCc : null,
                 channels: formChannels,
                 emailTemplateKey: formEmailTemplateKey || null,
                 titleTemplate: formTitleTemplate.trim() || null,
@@ -3549,6 +3580,16 @@ function NotificationRulesTab() {
         setFormRecipientRoles(prev =>
             prev.includes(roleName) ? prev.filter(r => r !== roleName) : [...prev, roleName]
         );
+        // Ensure role can't be in both To and CC at the same time
+        setFormRecipientRolesCc(prev => prev.filter(r => r !== roleName));
+    }
+
+    function toggleRoleCc(roleName: string) {
+        setFormRecipientRolesCc(prev =>
+            prev.includes(roleName) ? prev.filter(r => r !== roleName) : [...prev, roleName]
+        );
+        // Ensure role can't be in both To and CC at the same time
+        setFormRecipientRoles(prev => prev.filter(r => r !== roleName));
     }
 
     function toggleChannel(ch: string) {
@@ -3638,7 +3679,10 @@ function NotificationRulesTab() {
                                         )}
                                         <span className="flex items-center gap-1">
                                             <Users className="w-3 h-3" />
-                                            {Array.isArray(rule.recipientRoles) ? rule.recipientRoles.join(', ') : '—'}
+                                            To: {Array.isArray(rule.recipientRoles) ? rule.recipientRoles.join(', ') : '—'}
+                                            {Array.isArray(rule.recipientRolesCc) && rule.recipientRolesCc.length > 0 && (
+                                                <span className="ml-1 text-amber-600">CC: {rule.recipientRolesCc.join(', ')}</span>
+                                            )}
                                         </span>
                                         <span className="flex items-center gap-1">
                                             <Zap className="w-3 h-3" />
@@ -3764,9 +3808,9 @@ function NotificationRulesTab() {
                                 </div>
                             )}
 
-                            {/* Recipient Roles */}
+                            {/* Recipient Roles — To */}
                             <div>
-                                <label className="block text-xs font-medium text-slate-700 mb-1.5">Recipient Roles *</label>
+                                <label className="block text-xs font-medium text-slate-700 mb-1.5">Recipient Roles — To *</label>
                                 <div className="flex flex-wrap gap-2">
                                     {roles.map(role => (
                                         <button
@@ -3785,6 +3829,31 @@ function NotificationRulesTab() {
                                     ))}
                                 </div>
                             </div>
+
+                            {/* Recipient Roles — CC (email only) */}
+                            {formChannels.includes('email') && (
+                                <div>
+                                    <label className="block text-xs font-medium text-slate-700 mb-1.5">Recipient Roles — CC</label>
+                                    <div className="flex flex-wrap gap-2">
+                                        {roles.map(role => (
+                                            <button
+                                                key={role.id}
+                                                type="button"
+                                                onClick={() => toggleRoleCc(role.name)}
+                                                className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                                                    formRecipientRolesCc.includes(role.name)
+                                                        ? 'bg-amber-50 border-amber-300 text-amber-700'
+                                                        : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
+                                                }`}
+                                            >
+                                                {formRecipientRolesCc.includes(role.name) && <Check className="w-3 h-3 inline mr-1" />}
+                                                {role.name}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <p className="text-[10px] text-slate-400 mt-1">CC applies to email only. Users are automatically removed from CC if they are already in To.</p>
+                                </div>
+                            )}
 
                             {/* Channels */}
                             <div>

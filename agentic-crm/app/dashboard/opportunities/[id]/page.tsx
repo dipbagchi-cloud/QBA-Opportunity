@@ -35,6 +35,7 @@ import { OpportunityEstimationProvider, useOpportunityEstimation } from "./conte
 import { useCurrency } from "@/components/providers/currency-provider";
 import { CommentsPanel } from "./components/CommentsPanel";
 import { AuditLogPane } from "./components/AuditLogPane";
+import { SowStudio } from "./components/SowStudio";
 
 // Static dropdowns (not master-data driven)
 const DURATION_UNITS = ["days", "weeks", "months"];
@@ -177,7 +178,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const [activeStep, setActiveStep] = useState(0); // 0: Pipeline, 1: Presales
     const [opportunityStage, setOpportunityStage] = useState(0); // actual DB stage (0-3), stays fixed when navigating steps
     const [currentStageName, setCurrentStageName] = useState(''); // actual Kanban stage name (Discovery, Qualification, Proposal, Negotiation, Closed Won, Closed Lost)
-    const steps = ["Pipeline", "Presales", "Sales", "Project"];
+    const steps = ["Pipeline", "Presales", "Sales", "SOW", "Project"];
 
     // Sales view collapsible sections
     const [salesPipelineOpen, setSalesPipelineOpen] = useState(false);
@@ -456,7 +457,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 } else if (stageName === 'Presales' || stageName === 'Qualification') {
                     stageIdx = 1;
                 }
-                setActiveStep(stageIdx);
+                setActiveStep(stageIdx === 3 ? 4 : stageIdx);
                 setOpportunityStage(stageIdx);
 
                 // Load presales data from saved record (Project Details tab fields)
@@ -528,15 +529,9 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             if (!res.ok) throw new Error("Download failed");
             const blob = await res.blob();
             const url = window.URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = fileName;
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            window.URL.revokeObjectURL(url);
+            window.open(url, '_blank');
         } catch {
-            toast({ title: "Error", description: "Failed to download file." });
+            toast({ title: "Error", description: "Failed to open file." });
         }
     };
 
@@ -835,13 +830,13 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             const data = await res.json();
             if (res.ok) {
                 setCurrentStageName('Closed Won');
-                setActiveStep(3);
+                setActiveStep(4);
                 setOpportunityStage(3);
                 toast({ title: "Success", description: "Opportunity converted to Project!" });
             } else if (res.status === 409) {
                 // Project already exists — just navigate to project view
                 setCurrentStageName('Closed Won');
-                setActiveStep(3);
+                setActiveStep(4);
                 setOpportunityStage(3);
                 toast({ title: "Info", description: "Project already exists for this opportunity." });
             } else {
@@ -996,9 +991,11 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             <div className="bg-white p-3 rounded-lg shadow-sm border border-slate-200">
                 <div className="flex w-full mt-1 h-8 bg-slate-50 rounded-full overflow-hidden border border-slate-200">
                     {steps.map((step, idx) => {
-                        const isCompleted = idx < opportunityStage || (idx === 3 && opportunityStage === 3);
+                        // Map step idx to DB stage: 0=Pipeline, 1=Presales, 2=Sales, 3=SOW (accessible at stage 2+), 4=Project (stage 3)
+                        const stageForIdx = idx <= 2 ? idx : idx === 3 ? 2 : 3;
+                        const isCompleted = idx <= 2 ? idx < opportunityStage : idx === 3 ? opportunityStage >= 3 : opportunityStage === 3;
                         const isActive = idx === activeStep;
-                        const isAccessible = idx <= opportunityStage;
+                        const isAccessible = opportunityStage >= stageForIdx;
 
                         let bgClass = "bg-slate-100 text-slate-300 cursor-not-allowed";
                         if (isAccessible) {
@@ -2304,8 +2301,13 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 </div>
             )}
 
-            {/* PROJECT VIEW (Step 3) — Converted project info */}
+            {/* SOW STUDIO (Step 3) */}
             {activeStep === 3 && (
+                <SowStudio opportunityId={id} />
+            )}
+
+            {/* PROJECT VIEW (Step 4) — Converted project info */}
+            {activeStep === 4 && (
                 <div className="space-y-4 animate-in fade-in duration-300">
                     <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-5 text-center">
                         <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-emerald-100 mb-3">

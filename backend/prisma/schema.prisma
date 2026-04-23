@@ -54,6 +54,7 @@ model User {
   notificationPreferences NotificationPreference[]
   projectMembers          ProjectMember[]
   managedProjects         Project[]
+  sowDocumentsCreated     SowDocument[]    @relation("SowDocCreator")
 
   @@index([email])
   @@index([teamId])
@@ -354,6 +355,7 @@ model Opportunity {
   leadScore         LeadScore?
   vectorEmbedding   VectorEmbedding?
   project           Project?
+  sowDocument       SowDocument?
 
   @@index([clientId])
   @@index([ownerId])
@@ -588,8 +590,11 @@ model NotificationRule {
   // e.g. [{"field":"value","operator":"gt","value":"1000000"},{"field":"probability","operator":"gte","value":"75"}]
   conditions  Json?
 
-  // Who receives: JSON array of role names e.g. ["Admin","Manager","Sales"]
+  // Who receives (primary / "To"): JSON array of role names e.g. ["Admin","Manager","Sales"]
   recipientRoles Json
+
+  // Who receives as CC: JSON array of role names e.g. ["Presales"]
+  recipientRolesCc Json?
 
   // Notification channels: JSON array e.g. ["in_app","email"]
   channels    Json
@@ -818,4 +823,450 @@ model ProjectMember {
 
   @@unique([projectId, userId])
   @@map("project_members")
+}
+
+// ============================================================================
+// SOW STUDIO MODULE
+// ============================================================================
+
+// -- SOW Templates (admin-uploaded master DOCX templates) --
+model SowTemplate {
+  id              String   @id @default(cuid())
+  name            String
+  code            String   @unique
+  description     String?
+  version         String   @default("1.0")
+  isActive        Boolean  @default(true)
+  isDefault       Boolean  @default(false)
+  
+  // Applicability filters
+  businessUnit    String?
+  serviceLine     String?
+  geography       String?
+  projectType     String?
+  legalEntity     String?
+  
+  // File references
+  templateFilePath String        // Path to uploaded DOCX on disk
+  templateFileName String
+  templateFileSize Int
+  previewFilePath  String?       // Optional preview image/PDF
+  
+  // Approval
+  approvalStatus  String   @default("Draft") // Draft, Pending, Approved, Deprecated
+  approvedBy      String?
+  approvedAt      DateTime?
+  
+  // Metadata
+  createdBy       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  anchorMappings  SowTemplateAnchor[]
+  documents       SowDocument[]
+  versionHistory  SowTemplateVersion[]
+
+  @@index([isActive])
+  @@index([code])
+  @@map("sow_templates")
+}
+
+model SowTemplateVersion {
+  id              String   @id @default(cuid())
+  version         String
+  templateFilePath String
+  templateFileName String
+  templateFileSize Int
+  changeNotes     String?
+  createdBy       String?
+  createdAt       DateTime @default(now())
+  
+  template        SowTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  templateId      String
+
+  @@index([templateId])
+  @@map("sow_template_versions")
+}
+
+model SowTemplateAnchor {
+  id              String   @id @default(cuid())
+  anchorKey       String          // e.g. "{{CLIENT_NAME}}", "[[SECTION:SCOPE_OF_WORK]]"
+  anchorType      String          // "token" | "section" | "table" | "repeatable" | "conditional"
+  sectionKey      String?         // Maps to SowSection key
+  description     String?
+  isRequired      Boolean  @default(false)
+  fallbackText    String?         // Default if data missing
+  
+  template        SowTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  templateId      String
+
+  @@unique([templateId, anchorKey])
+  @@index([templateId])
+  @@map("sow_template_anchors")
+}
+
+// -- SOW Metadata (admin-managed categories and values) --
+model SowMetadataCategory {
+  id          String   @id @default(cuid())
+  key         String   @unique    // e.g. "document_types", "delivery_models"
+  name        String              // Display name
+  description String?
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  values      SowMetadataValue[]
+
+  @@map("sow_metadata_categories")
+}
+
+model SowMetadataValue {
+  id          String   @id @default(cuid())
+  value       String
+  label       String
+  description String?
+  isActive    Boolean  @default(true)
+  isDefault   Boolean  @default(false)
+  sortOrder   Int      @default(0)
+  metadata    Json?              // Additional config per value
+  
+  category    SowMetadataCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  categoryId  String
+
+  @@unique([categoryId, value])
+  @@index([categoryId])
+  @@map("sow_metadata_values")
+}
+
+// -- SOW Static Content Library --
+model SowStaticContent {
+  id          String   @id @default(cuid())
+  key         String   @unique    // e.g. "qba_executive_summary", "confidentiality"
+  title       String
+  content     String              // Rich text / HTML content
+  category    String?             // Grouping
+  version     String   @default("1.0")
+  isActive    Boolean  @default(true)
+  
+  // Applicability
+  businessUnit String?
+  serviceLine  String?
+  legalEntity  String?
+  
+  createdBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([category])
+  @@map("sow_static_content")
+}
+
+// -- SOW Clause Library --
+model SowClause {
+  id          String   @id @default(cuid())
+  category    String              // e.g. "confidentiality", "payment_terms"
+  clauseKey   String   @unique
+  title       String
+  text        String              // Full clause text
+  version     String   @default("1.0")
+  isActive    Boolean  @default(true)
+  isMandatory Boolean  @default(false)
+  
+  // Applicability filters
+  industry    String?
+  serviceLine String?
+  geography   String?
+  jurisdiction String?
+  legalEntity String?
+  tags        String?             // Comma-separated tags
+  
+  // Default inclusion
+  defaultInclude Boolean @default(false)  // Auto-include in SOW
+  
+  createdBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([category])
+  @@index([isMandatory])
+  @@map("sow_clauses")
+}
+
+// -- SOW Section Rules (admin-configured per section) --
+model SowSectionRule {
+  id              String   @id @default(cuid())
+  sectionKey      String   @unique  // e.g. "scope_of_work", "commercials"
+  title           String
+  sortOrder       Int      @default(0)
+  
+  isRequired      Boolean  @default(true)
+  sourceType      String   @default("ai")  // "static" | "dynamic" | "ai" | "hybrid"
+  isEditable      Boolean  @default(true)
+  isLocked        Boolean  @default(false)
+  allowRegeneration Boolean @default(true)
+  requiresApproval Boolean @default(false)
+  
+  // Data source config
+  dataSources     Json?            // Allowed data sources for this section
+  staticContentKey String?         // Link to SowStaticContent
+  clauseKeys      String?          // Comma-separated clause keys
+  fallbackBehavior String?         // "placeholder" | "omit" | "warning"
+  
+  // Template anchor
+  templateAnchor  String?          // Default anchor key in template
+  
+  description     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([sortOrder])
+  @@map("sow_section_rules")
+}
+
+// -- SOW Document (per opportunity) --
+model SowDocument {
+  id              String   @id @default(cuid())
+  documentNumber  String?  @unique  // e.g. "SOW-2026-0042"
+  
+  // Status lifecycle
+  status          String   @default("Not Started")
+  // Not Started | Drafting | AI Generated | In Review | Requires Inputs |
+  // Approved Internally | Shared with Client | Revision Requested | Finalized | Signed / Archived
+  
+  // Version
+  version         String   @default("0.1")
+  versionLabel    String?           // e.g. "AI Draft", "Edited", "Final"
+  
+  // Readiness
+  readinessScore  Int?     @default(0)
+  readinessData   Json?             // Detailed readiness breakdown
+  
+  // User-entered metadata
+  documentTitle   String?
+  dealNotes       String?           // Bespoke notes
+  customAssumptions String?
+  specialExclusions String?
+  
+  // SOW metadata selections (from admin-managed values)
+  documentType    String?
+  serviceCategory String?
+  deliveryModel   String?
+  methodology     String?
+  supportModel    String?
+  pricingModelSow String?
+  jurisdictionVariant String?
+  
+  // Generation metadata
+  lastGeneratedAt DateTime?
+  generationModel String?           // AI model used
+  
+  // Source data snapshot hash (detect staleness)
+  sourceDataHash  String?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  opportunity     Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  opportunityId   String     @unique
+  
+  template        SowTemplate? @relation(fields: [templateId], references: [id])
+  templateId      String?
+  
+  createdBy       User?    @relation("SowDocCreator", fields: [createdById], references: [id])
+  createdById     String?
+  
+  sections        SowSection[]
+  approvals       SowApproval[]
+  exports         SowExport[]
+  generationRuns  SowGenerationRun[]
+  versions        SowDocumentVersion[]
+
+  @@index([opportunityId])
+  @@index([status])
+  @@map("sow_documents")
+}
+
+model SowDocumentVersion {
+  id              String   @id @default(cuid())
+  version         String
+  versionLabel    String?
+  sectionsSnapshot Json             // Full snapshot of all sections content
+  sourceDataSnapshot Json?          // Snapshot of source data used
+  templateVersion String?
+  changeNotes     String?
+  
+  createdBy       String?
+  createdAt       DateTime @default(now())
+  
+  document        SowDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  documentId      String
+
+  @@index([documentId])
+  @@map("sow_document_versions")
+}
+
+// -- SOW Sections (per document, per section) --
+model SowSection {
+  id              String   @id @default(cuid())
+  sectionKey      String            // e.g. "scope_of_work"
+  title           String
+  sortOrder       Int      @default(0)
+  
+  // Content
+  generatedContent String?          // AI/system generated
+  editedContent   String?           // User edits
+  finalContent    String?           // Final resolved content
+  
+  // Source type / state
+  sourceType      String   @default("ai")  // "static" | "dynamic" | "ai" | "hybrid"
+  isLocked        Boolean  @default(false)
+  isStale         Boolean  @default(false)
+  staleReason     String?
+  
+  // Template mapping
+  templateAnchor  String?           // Which anchor in template
+  
+  // Version / audit
+  contentVersion  Int      @default(1)
+  lastEditedBy    String?
+  lastEditedAt    DateTime?
+  lastGeneratedAt DateTime?
+  
+  // Approval at section level
+  approvalStatus  String?           // null | "Pending" | "Approved" | "Rejected"
+  approvedBy      String?
+  approvedAt      DateTime?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  document        SowDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  documentId      String
+
+  @@unique([documentId, sectionKey])
+  @@index([documentId])
+  @@map("sow_sections")
+}
+
+// -- SOW Generation Runs (audit each AI generation) --
+model SowGenerationRun {
+  id              String   @id @default(cuid())
+  runType         String            // "full_draft" | "section"
+  sectionKey      String?           // If section-level generation
+  
+  // Input snapshot
+  sourceDataSnapshot Json?
+  promptUsed      String?
+  modelUsed       String?
+  
+  // Output
+  generatedContent String?
+  contentHash     String?
+  
+  // Performance
+  tokensUsed      Int?
+  latencyMs       Int?
+  cost            Decimal?
+  
+  // Status
+  status          String   @default("Pending") // Pending | Completed | Failed | Rejected
+  errorMessage    String?
+  
+  createdBy       String?
+  createdAt       DateTime @default(now())
+
+  document        SowDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  documentId      String
+
+  @@index([documentId])
+  @@map("sow_generation_runs")
+}
+
+// -- SOW Approvals --
+model SowApproval {
+  id          String   @id @default(cuid())
+  type        String            // "sales_review" | "presales_review" | "manager_approval" | "finance_review" | "legal_review"
+  status      String   @default("Pending") // Pending | Approved | Rejected
+  comments    String?
+  
+  // What was reviewed
+  version     String?           // Document version reviewed
+  sectionKey  String?           // If section-level approval
+  
+  requestedAt DateTime @default(now())
+  reviewedAt  DateTime?
+  
+  requesterId String?
+  reviewerId  String?
+  
+  document    SowDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  documentId  String
+
+  @@index([documentId])
+  @@index([status])
+  @@map("sow_approvals")
+}
+
+// -- SOW Exports --
+model SowExport {
+  id          String   @id @default(cuid())
+  format      String            // "docx" | "pdf"
+  filePath    String
+  fileName    String
+  fileSize    Int?
+  
+  version     String?           // Document version exported
+  templateVersion String?       // Template version used
+  
+  exportedBy  String?
+  exportedAt  DateTime @default(now())
+  
+  document    SowDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  documentId  String
+
+  @@index([documentId])
+  @@map("sow_exports")
+}
+
+// -- SOW Approval Configuration (admin) --
+model SowApprovalConfig {
+  id          String   @id @default(cuid())
+  stepOrder   Int
+  stepType    String            // "sales_review" | "presales_review" | "manager_approval" | "finance_review" | "legal_review"
+  stepLabel   String
+  isRequired  Boolean  @default(true)
+  reviewerRoles Json?           // JSON array of role names
+  escalationHours Int?
+  
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([stepType])
+  @@map("sow_approval_config")
+}
+
+// -- SOW Numbering Config (admin) --
+model SowNumberingConfig {
+  id              String   @id @default(cuid())
+  prefix          String   @default("SOW")
+  separator       String   @default("-")
+  includeYear     Boolean  @default(true)
+  sequenceLength  Int      @default(4)  // Pad to 4 digits
+  currentSequence Int      @default(0)
+  
+  // Filename pattern
+  filenamePattern String   @default("{{PREFIX}}-{{YEAR}}-{{SEQ}}_{{CLIENT}}_{{PROJECT}}")
+  
+  // Version rules
+  draftVersionPrefix String @default("0")
+  approvedVersionStart String @default("1.0")
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("sow_numbering_config")
 }

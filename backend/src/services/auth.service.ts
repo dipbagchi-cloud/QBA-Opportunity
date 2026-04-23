@@ -2,7 +2,10 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'agentic-crm-jwt-secret-change-in-production';
+const JWT_SECRET: string = process.env.JWT_SECRET!;
+if (!process.env.JWT_SECRET) {
+  throw new Error('JWT_SECRET environment variable is required');
+}
 const JWT_EXPIRES_IN = '24h';
 const BCRYPT_ROUNDS = 12;
 
