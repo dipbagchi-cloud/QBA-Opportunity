@@ -88,7 +88,51 @@ async function sendViaGraphApi(to: string, subject: string, htmlBody: string): P
  * Replace {{variable}} placeholders in a template string with actual values
  */
 function renderTemplate(template: string, variables: Record<string, string>): string {
-  return template.replace(/\{\{(\w+)\}\}/g, (_, key) => variables[key] ?? '');
+  return template.replace(/\{\{([\w.:]+)\}\}/g, (_, key) => variables[key] ?? '');
+}
+
+/**
+ * Evaluate a user-defined formula with variable references like {value}, {probability}.
+ * Supports: math operators, IF(), CONCAT(), UPPER(), LOWER(), ROUND(), FORMAT_NUMBER()
+ */
+function evaluateCustomFormula(formula: string, data: Record<string, string>): string {
+  try {
+    let expr = formula;
+    // Replace {fieldName} with actual values
+    expr = expr.replace(/\{([\w.:]+)\}/g, (_, key) => {
+      const val = data[key] ?? '';
+      return isNaN(Number(val)) || val === '' ? `"${val.replace(/"/g, '\\"')}"` : val;
+    });
+    // IF(cond, trueVal, falseVal)
+    expr = expr.replace(/IF\s*\(([^,]+),\s*([^,]+),\s*([^)]+)\)/gi, (_, cond, t, f) => {
+      try {
+        const result = new Function(`"use strict"; return (${cond});`)();
+        return result ? t.trim() : f.trim();
+      } catch { return '""'; }
+    });
+    // CONCAT(a, b, ...)
+    expr = expr.replace(/CONCAT\s*\(([^)]+)\)/gi, (_, args: string) => {
+      const parts = args.split(',').map(s => s.trim().replace(/^["']|["']$/g, ''));
+      return `"${parts.join('')}"`;
+    });
+    // UPPER / LOWER
+    expr = expr.replace(/UPPER\s*\(([^)]+)\)/gi, (_, v) => `"${String(v).replace(/^["']|["']$/g, '').toUpperCase()}"`);
+    expr = expr.replace(/LOWER\s*\(([^)]+)\)/gi, (_, v) => `"${String(v).replace(/^["']|["']$/g, '').toLowerCase()}"`);
+    // ROUND(x, decimals)
+    expr = expr.replace(/ROUND\s*\(([^,]+),\s*(\d+)\)/gi, (_, val, dec) => {
+      const num = Number(val);
+      return isNaN(num) ? '""' : String(Number(num.toFixed(Number(dec))));
+    });
+    // FORMAT_NUMBER(x)
+    expr = expr.replace(/FORMAT_NUMBER\s*\(([^)]+)\)/gi, (_, val) => {
+      const num = Number(String(val).replace(/^["']|["']$/g, ''));
+      return isNaN(num) ? '""' : `"${num.toLocaleString('en-US')}"`;
+    });
+    const result = new Function(`"use strict"; return (${expr});`)();
+    return String(result);
+  } catch {
+    return '';
+  }
 }
 
 /**
@@ -152,10 +196,37 @@ export async function sendNotificationEmail(
     }
 
     // Merge in recipient info to variables
-    const allVars = { ...variables, recipientName, recipientEmail: originalToLabel };
+    const allVars: Record<string, string> = { ...variables, recipientName, recipientEmail: originalToLabel };
+
+    // Resolve custom calculated fields from template metadata
+    const metadata = (template as any).metadata as any;
+    if (metadata?.customCalcFields && Array.isArray(metadata.customCalcFields)) {
+      for (const cf of metadata.customCalcFields) {
+        if (cf.id && cf.formula) {
+          try {
+            allVars[`custom:${cf.id}`] = evaluateCustomFormula(cf.formula, allVars);
+          } catch {
+            allVars[`custom:${cf.id}`] = '';
+          }
+        }
+      }
+    }
+
+    // Auto-prepend "Dear <To recipient names>," — not editable in templates
+    const toUserRows = actualTo.length > 0
+      ? await prisma.user.findMany({
+          where: { email: { in: actualTo, mode: 'insensitive' } },
+          select: { email: true, name: true },
+        })
+      : [];
+    const nameMap = new Map(toUserRows.map(u => [u.email.toLowerCase(), u.name]));
+    const recipientNames = actualTo
+      .map(e => nameMap.get(e.toLowerCase()) || e.split('@')[0])
+      .join(', ');
+    const greetingHtml = `<p style="margin:0 0 12px 0;">Dear ${recipientNames},</p>`;
 
     let subject = renderTemplate(template.subject, allVars);
-    const htmlBody = renderTemplate(template.body, allVars);
+    const htmlBody = greetingHtml + renderTemplate(template.body, allVars);
 
     if (isOverride) {
       subject = `[TEST→${originalToLabel}${ccList.length > 0 ? ` cc:${ccList.join(',')}` : ''}] ${subject}`;

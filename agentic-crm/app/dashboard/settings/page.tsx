@@ -6,6 +6,7 @@ import { useAuthStore } from "@/lib/auth-store";
 import { apiClient } from "@/lib/api";
 import { useCurrency } from "@/components/providers/currency-provider";
 import { SowAdminTab } from "./components/SowAdminTab";
+import EmailTemplateBuilder, { CustomCalcField } from "@/components/email-templates/EmailTemplateBuilder";
 
 // ── Permission categories for the checkbox grid ──
 const PERMISSION_CATEGORIES = [
@@ -2532,9 +2533,12 @@ function EmailTemplatesTab() {
     const [templates, setTemplates] = useState<EmailTemplateData[]>([]);
     const [loading, setLoading] = useState(true);
     const [editingId, setEditingId] = useState<string | null>(null);
-    const [form, setForm] = useState({ name: "", subject: "", body: "", isActive: true });
+    const [isCreating, setIsCreating] = useState(false);
+    const [form, setForm] = useState({ eventKey: "", name: "", subject: "", body: "", isActive: true });
+    const [customCalcFields, setCustomCalcFields] = useState<CustomCalcField[]>([]);
     const [saving, setSaving] = useState(false);
     const [status, setStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
+    const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
     const [testEmail, setTestEmail] = useState("");
     const [sendingTest, setSendingTest] = useState(false);
     const [etSortKey, setEtSortKey] = useState(""); const [etSortDir, setEtSortDir] = useState<SortDir>(null);
@@ -2555,28 +2559,98 @@ function EmailTemplatesTab() {
 
     useEffect(() => { fetchTemplates(); }, [fetchTemplates]);
 
+    // Auto-generate eventKey from name: "Aging Opportunities" → "aging_opportunities"
+    const nameToEventKey = (name: string) => name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+
     const openEdit = (t: EmailTemplateData) => {
+        setIsCreating(false);
         setEditingId(t.id);
-        setForm({ name: t.name, subject: t.subject, body: t.body, isActive: t.isActive });
+        setForm({ eventKey: t.eventKey, name: t.name, subject: t.subject, body: t.body, isActive: t.isActive });
+        setCustomCalcFields((t as any).metadata?.customCalcFields || []);
         setStatus(null);
+        setFieldErrors({});
+    };
+
+    const openCreate = () => {
+        setIsCreating(true);
+        setEditingId(null);
+        setForm({
+            eventKey: "",
+            name: "",
+            subject: "",
+            body: `<p>This is to inform you about the following opportunity:</p>\n<p><b>Opportunity:</b> {{opportunityTitle}}</p>\n<p><b>Client:</b> {{clientName}}</p>\n<p><b>Stage:</b> {{stageName}}</p>\n<p><b>Owner:</b> {{ownerName}}</p>\n<p><b>Value:</b> {{value}}</p>\n<br/>\n<p>Please take the necessary action.</p>\n<p>Regards,<br/>QCRM System</p>`,
+            isActive: true,
+        });
+        setCustomCalcFields([]);
+        setStatus(null);
+        setFieldErrors({});
+    };
+
+    const closeEditor = () => {
+        setIsCreating(false);
+        setEditingId(null);
+        setFieldErrors({});
+    };
+
+    const handleNameChange = (name: string) => {
+        const newForm = { ...form, name };
+        if (isCreating) {
+            newForm.eventKey = nameToEventKey(name);
+        }
+        setForm(newForm);
+        if (fieldErrors.name) setFieldErrors(e => ({ ...e, name: "" }));
+    };
+
+    const validate = (): boolean => {
+        const errs: Record<string, string> = {};
+        if (!form.name.trim()) errs.name = "Template name is required";
+        if (!form.subject.trim()) errs.subject = "Subject line is required";
+        if (!form.body.trim()) errs.body = "Email body cannot be empty";
+        if (isCreating && !nameToEventKey(form.name)) errs.name = "Enter a valid template name";
+        setFieldErrors(errs);
+        return Object.keys(errs).length === 0;
     };
 
     const handleSave = async () => {
-        if (!editingId) return;
+        if (!validate()) return;
         setSaving(true);
         setStatus(null);
+        const metadata = customCalcFields.length > 0 ? { customCalcFields } : null;
         try {
-            await apiClient(`/api/admin/email-templates/${editingId}`, {
-                method: "PATCH",
-                body: JSON.stringify(form),
-            });
-            setStatus({ type: "success", message: "Template saved." });
-            setEditingId(null);
+            if (isCreating) {
+                await apiClient(`/api/admin/email-templates`, {
+                    method: "POST",
+                    body: JSON.stringify({ ...form, eventKey: nameToEventKey(form.name), metadata }),
+                });
+                setStatus({ type: "success", message: `Template "${form.name}" created successfully!` });
+            } else if (editingId) {
+                const { eventKey: _omit, ...patch } = form;
+                await apiClient(`/api/admin/email-templates/${editingId}`, {
+                    method: "PATCH",
+                    body: JSON.stringify({ ...patch, metadata }),
+                });
+                setStatus({ type: "success", message: "Template saved." });
+            } else {
+                return;
+            }
+            closeEditor();
             fetchTemplates();
         } catch (err: any) {
             setStatus({ type: "error", message: err.message || "Failed to save." });
         } finally {
             setSaving(false);
+        }
+    };
+
+    const handleDelete = async (t: EmailTemplateData) => {
+        if (!confirm(`Delete template "${t.name}"? This cannot be undone.`)) return;
+        try {
+            await apiClient(`/api/admin/email-templates/${t.id}`, { method: "DELETE" });
+            setStatus({ type: "success", message: "Template deleted." });
+            if (editingId === t.id) closeEditor();
+            fetchTemplates();
+        } catch (err: any) {
+            setStatus({ type: "error", message: err.message || "Failed to delete." });
         }
     };
 
@@ -2612,15 +2686,25 @@ function EmailTemplatesTab() {
         }
     };
 
-    const PLACEHOLDER_HELP = "Available: {{opportunityTitle}}, {{clientName}}, {{stageName}}, {{previousStage}}, {{salesRepName}}, {{managerName}}, {{updatedBy}}, {{comment}}, {{recipientName}}";
+    const editorOpen = isCreating || !!editingId;
 
     if (loading) return <div className="text-center py-12 text-slate-400">Loading email templates...</div>;
 
     return (
         <div className="space-y-4">
-            <div>
-                <h3 className="text-base font-bold text-slate-900">Email Notification Templates</h3>
-                <p className="text-xs text-slate-500 mt-0.5">Configure email notifications sent when opportunities change stage.</p>
+            <div className="flex items-start justify-between gap-4">
+                <div>
+                    <h3 className="text-base font-bold text-slate-900">Email Notification Templates</h3>
+                    <p className="text-xs text-slate-500 mt-0.5">Create and manage email templates. Click &quot;New Template&quot; to get started.</p>
+                </div>
+                {!editorOpen && (
+                    <button
+                        onClick={openCreate}
+                        className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 whitespace-nowrap shadow-sm"
+                    >
+                        <Plus className="w-4 h-4" /> New Template
+                    </button>
+                )}
             </div>
 
             {status && (
@@ -2630,53 +2714,101 @@ function EmailTemplatesTab() {
                 </div>
             )}
 
-            {editingId && (
-                <div className="bg-white p-4 rounded-xl border border-indigo-200 shadow-sm space-y-3">
+            {editorOpen && (
+                <div className="bg-white p-5 rounded-xl border border-indigo-200 shadow-sm space-y-5">
                     <div className="flex items-center justify-between">
-                        <h4 className="font-semibold text-sm text-slate-800">Edit Template</h4>
-                        <button onClick={() => setEditingId(null)} className="p-1 text-slate-400 hover:text-slate-600"><X className="w-4 h-4" /></button>
+                        <div>
+                            <h4 className="font-bold text-base text-slate-900">{isCreating ? "Create New Email Template" : "Edit Template"}</h4>
+                            <p className="text-xs text-slate-500 mt-0.5">{isCreating ? "Fill in the details below. Use the field panel on the left to insert dynamic data." : "Modify the template and save."}</p>
+                        </div>
+                        <button onClick={closeEditor} className="p-1.5 text-slate-400 hover:text-slate-600 rounded hover:bg-slate-100"><X className="w-5 h-5" /></button>
                     </div>
-                    <div>
-                        <label className="block text-xs font-medium text-slate-700 mb-1">Display Name</label>
-                        <input className="w-full px-3 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+
+                    {/* STEP 1: Name */}
+                    <div className="space-y-1">
+                        <div className="flex items-center gap-2 mb-2">
+                            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 text-xs font-bold">1</span>
+                            <label className="text-sm font-semibold text-slate-800">Template Name <span className="text-rose-500">*</span></label>
+                        </div>
+                        <input
+                            className={`w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 ${fieldErrors.name ? "border-rose-400 bg-rose-50" : "border-slate-200"}`}
+                            value={form.name}
+                            onChange={(e) => handleNameChange(e.target.value)}
+                            placeholder="e.g. Aging Opportunities Alert"
+                        />
+                        {fieldErrors.name && <p className="text-xs text-rose-600">{fieldErrors.name}</p>}
+                        {isCreating && form.name.trim() && (
+                            <p className="text-[11px] text-slate-400">Event key (auto-generated): <code className="bg-slate-100 px-1 rounded">{nameToEventKey(form.name)}</code></p>
+                        )}
                     </div>
-                    <div>
-                        <label className="block text-xs font-medium text-slate-700 mb-1">Subject</label>
-                        <input className="w-full px-3 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm" value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} />
+
+                    {/* STEP 2: Subject */}
+                    <div className="space-y-1">
+                        <div className="flex items-center gap-2 mb-2">
+                            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 text-xs font-bold">2</span>
+                            <label className="text-sm font-semibold text-slate-800">Subject Line <span className="text-rose-500">*</span></label>
+                        </div>
+                        <input
+                            className={`w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 ${fieldErrors.subject ? "border-rose-400 bg-rose-50" : "border-slate-200"}`}
+                            value={form.subject}
+                            onChange={(e) => { setForm({ ...form, subject: e.target.value }); if (fieldErrors.subject) setFieldErrors(e2 => ({ ...e2, subject: "" })); }}
+                            placeholder='e.g. Action Required: Aging Opportunity "{{opportunityTitle}}"'
+                        />
+                        {fieldErrors.subject && <p className="text-xs text-rose-600">{fieldErrors.subject}</p>}
+                        <p className="text-[11px] text-slate-400">You can use merge fields in the subject too, e.g. {"{{opportunityTitle}}"}</p>
                     </div>
-                    <div>
-                        <label className="block text-xs font-medium text-slate-700 mb-1">Body (HTML)</label>
-                        <textarea rows={8} className="w-full px-3 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm font-mono" value={form.body} onChange={(e) => setForm({ ...form, body: e.target.value })} />
+
+                    {/* STEP 3: Body */}
+                    <div className="space-y-1">
+                        <div className="flex items-center gap-2 mb-2">
+                            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 text-xs font-bold">3</span>
+                            <label className="text-sm font-semibold text-slate-800">Email Body <span className="text-rose-500">*</span></label>
+                        </div>
+                        {fieldErrors.body && <p className="text-xs text-rose-600 mb-1">{fieldErrors.body}</p>}
+                        <EmailTemplateBuilder
+                            key={editingId || "new-template"}
+                            initialHtml={form.body}
+                            onChange={(html) => { setForm((f) => ({ ...f, body: html })); if (fieldErrors.body) setFieldErrors(e => ({ ...e, body: "" })); }}
+                            customCalcFields={customCalcFields}
+                            onCustomCalcFieldsChange={setCustomCalcFields}
+                        />
                     </div>
-                    <p className="text-[11px] text-slate-400">{PLACEHOLDER_HELP}</p>
-                    <div className="flex items-center gap-3">
-                        <label className="flex items-center gap-2 text-xs text-slate-600 cursor-pointer">
+
+                    {/* Active toggle */}
+                    <div className="flex items-center gap-3 pt-2 border-t border-slate-100">
+                        <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
                             <button type="button" onClick={() => setForm({ ...form, isActive: !form.isActive })} className="text-slate-400 hover:text-indigo-600">
                                 {form.isActive ? <ToggleRight className="w-5 h-5 text-indigo-600" /> : <ToggleLeft className="w-5 h-5" />}
                             </button>
-                            {form.isActive ? "Active" : "Disabled"}
+                            {form.isActive ? "Active — this template will be used when triggered" : "Disabled — this template will not send emails"}
                         </label>
                     </div>
-                    <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
-                        <input
-                            type="email"
-                            placeholder="Test email address"
-                            className="flex-1 px-3 py-1.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
-                            value={testEmail}
-                            onChange={(e) => setTestEmail(e.target.value)}
-                        />
-                        <button
-                            onClick={() => handleSendTest(editingId)}
-                            disabled={sendingTest}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-50"
-                        >
-                            <Send className="w-3.5 h-3.5" /> {sendingTest ? "Sending..." : "Send Test"}
-                        </button>
-                    </div>
-                    <div className="flex justify-end gap-2 pt-2">
-                        <button onClick={() => setEditingId(null)} className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-600 hover:bg-slate-50">Cancel</button>
-                        <button disabled={saving} onClick={handleSave} className="px-4 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 disabled:opacity-50">
-                            {saving ? "Saving..." : "Save Template"}
+
+                    {/* Test email (only for existing templates) */}
+                    {!isCreating && editingId && (
+                        <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
+                            <input
+                                type="email"
+                                placeholder="Test email address"
+                                className="flex-1 px-3 py-1.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                                value={testEmail}
+                                onChange={(e) => setTestEmail(e.target.value)}
+                            />
+                            <button
+                                onClick={() => handleSendTest(editingId)}
+                                disabled={sendingTest}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                            >
+                                <Send className="w-3.5 h-3.5" /> {sendingTest ? "Sending..." : "Send Test"}
+                            </button>
+                        </div>
+                    )}
+
+                    {/* Buttons */}
+                    <div className="flex justify-end gap-2 pt-3">
+                        <button onClick={closeEditor} className="px-4 py-2 rounded-lg border border-slate-200 text-sm text-slate-600 hover:bg-slate-50">Cancel</button>
+                        <button disabled={saving} onClick={handleSave} className="px-5 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 shadow-sm">
+                            {saving ? "Saving..." : isCreating ? "Create Template" : "Save Template"}
                         </button>
                     </div>
                 </div>
@@ -2706,12 +2838,13 @@ function EmailTemplatesTab() {
                                 </td>
                                 <td className="px-3 py-2 text-right">
                                     <button onClick={() => openEdit(t)} className="p-1.5 text-slate-400 hover:text-indigo-600" title="Edit"><Pencil className="w-3.5 h-3.5" /></button>
+                                    <button onClick={() => handleDelete(t)} className="p-1.5 text-slate-400 hover:text-rose-600" title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>
                                 </td>
                             </tr>
                         ))}
                     </tbody>
                 </table>
-                {templates.length === 0 && <div className="text-center py-8 text-slate-400">No email templates configured. Run the seed script to create default templates.</div>}
+                {templates.length === 0 && <div className="text-center py-8 text-slate-400">No email templates configured. Click &quot;New Template&quot; to create one.</div>}
             </div>
         </div>
     );

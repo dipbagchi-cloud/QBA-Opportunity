@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { sendNotificationEmail } from '../lib/email';
-import { evaluateStageChangeRules, evaluateDataConditionRules, evaluateOpportunityCreatedRules } from '../lib/notification-engine';
+import { evaluateStageChangeRules, evaluateDataConditionRules, evaluateOpportunityCreatedRules, resolveCalculatedFields } from '../lib/notification-engine';
 import path from 'path';
 import fs from 'fs';
 
@@ -538,7 +538,21 @@ export async function updateOpportunity(req: Request, res: Response) {
             managerName: (updatedOpp as any).managerName || '',
             updatedBy: previous?.owner?.name || 'System',
             comment: body.presalesData?.comment || body.salesData?.notes || '',
+            ownerName: previous?.owner?.name || '',
+            ownerEmail: previous?.owner?.email || '',
+            value: updatedOpp.value != null ? String(updatedOpp.value) : '',
+            probability: updatedOpp.probability != null ? String(updatedOpp.probability) : '',
+            region: updatedOpp.region || '',
+            technology: updatedOpp.technology || '',
+            practice: (updatedOpp as any).practice || '',
+            projectType: (updatedOpp as any).projectType || '',
+            pricingModel: (updatedOpp as any).pricingModel || '',
+            description: updatedOpp.description || '',
+            opportunityLink: `${process.env.FRONTEND_URL || 'https://qcrm.qbadvisory.com'}/dashboard/opportunities/${id}`,
         };
+
+        // Merge calculated fields into emailVars
+        try { Object.assign(emailVars, await resolveCalculatedFields(id)); } catch {}
 
         const ownerEmail = previous?.owner?.email;
         const ownerName = previous?.owner?.name || '';

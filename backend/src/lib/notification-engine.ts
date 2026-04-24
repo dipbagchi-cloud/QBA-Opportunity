@@ -104,7 +104,12 @@ export async function evaluateOpportunityCreatedRules(ctx: OpportunityCreatedCon
         description: ctx.description || '',
         tentativeStartDate: ctx.tentativeStartDate || '',
         tentativeDuration: ctx.tentativeDuration || '',
+        opportunityLink: `${process.env.FRONTEND_URL || 'https://qcrm.qbadvisory.com'}/dashboard/opportunities/${ctx.opportunityId}`,
       };
+
+      // Merge calculated fields
+      const calcFields = await resolveCalculatedFields(ctx.opportunityId);
+      Object.assign(variables, calcFields);
 
       const title = rule.titleTemplate
         ? renderTemplate(rule.titleTemplate, variables)
@@ -200,7 +205,12 @@ export async function evaluateStageChangeRules(ctx: StageChangeContext): Promise
         probability: ctx.probability != null ? String(ctx.probability) : '',
         region: ctx.region || '',
         technology: ctx.technology || '',
+        opportunityLink: `${process.env.FRONTEND_URL || 'https://qcrm.qbadvisory.com'}/dashboard/opportunities/${ctx.opportunityId}`,
       };
+
+      // Merge calculated fields
+      const calcFields = await resolveCalculatedFields(ctx.opportunityId);
+      Object.assign(variables, calcFields);
 
       // Build notification title and message from templates or defaults
       const title = rule.titleTemplate
@@ -305,7 +315,12 @@ export async function evaluateDataConditionRules(opportunity: {
         region: opportunity.region || '',
         technology: opportunity.technology || '',
         ruleName: rule.name,
+        opportunityLink: `${process.env.FRONTEND_URL || 'https://qcrm.qbadvisory.com'}/dashboard/opportunities/${opportunity.id}`,
       };
+
+      // Merge calculated fields
+      const calcFields = await resolveCalculatedFields(opportunity.id);
+      Object.assign(variables, calcFields);
 
       const title = rule.titleTemplate
         ? renderTemplate(rule.titleTemplate, variables)
@@ -343,7 +358,98 @@ export async function evaluateDataConditionRules(opportunity: {
 }
 
 function renderTemplate(template: string, variables: Record<string, string>): string {
-  return template.replace(/\{\{(\w+)\}\}/g, (_, key) => variables[key] ?? '');
+  return template.replace(/\{\{([\w.:]+)\}\}/g, (_, key) => variables[key] ?? '');
+}
+
+/**
+ * Resolve calculated fields (calc:xxx) for an opportunity.
+ * Fetches the opportunity with relations and computes derived values.
+ */
+export async function resolveCalculatedFields(opportunityId: string): Promise<Record<string, string>> {
+  const calc: Record<string, string> = {};
+  try {
+    const opp = await prisma.opportunity.findUnique({
+      where: { id: opportunityId },
+      include: {
+        stage: true,
+        stageHistory: { orderBy: { enteredAt: 'desc' }, take: 1 },
+      },
+    }) as any;
+    if (!opp) return calc;
+
+    const now = new Date();
+
+    // calc:opportunityAge — days since created
+    const createdAt = new Date(opp.createdAt);
+    const ageDays = Math.floor((now.getTime() - createdAt.getTime()) / 86400000);
+    calc['calc:opportunityAge'] = String(ageDays);
+
+    // calc:daysInStage — days since last stage change (or creation if no history)
+    const lastStageChange = opp.stageHistory?.[0]?.enteredAt;
+    const stageStart = lastStageChange ? new Date(lastStageChange) : createdAt;
+    const daysInStage = Math.floor((now.getTime() - stageStart.getTime()) / 86400000);
+    calc['calc:daysInStage'] = String(daysInStage);
+
+    // calc:daysUntilClose — days until expected close
+    if (opp.expectedCloseDate) {
+      const closeDate = new Date(opp.expectedCloseDate);
+      const daysUntil = Math.ceil((closeDate.getTime() - now.getTime()) / 86400000);
+      calc['calc:daysUntilClose'] = String(daysUntil);
+    } else {
+      calc['calc:daysUntilClose'] = 'N/A';
+    }
+
+    // calc:formattedValue — value with currency
+    const currency = (opp as any).currency || 'USD';
+    const value = opp.value != null ? Number(opp.value) : null;
+    calc['calc:formattedValue'] = value != null
+      ? `${currency} ${value.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+      : 'N/A';
+
+    // calc:weightedValue — value × probability / 100
+    const prob = opp.probability ?? 0;
+    calc['calc:weightedValue'] = value != null
+      ? `${currency} ${Math.round(value * prob / 100).toLocaleString('en-US')}`
+      : 'N/A';
+
+    // calc:stageProgress — current stage order / total stages as percentage
+    if (opp.stage) {
+      const totalStages = await prisma.stage.count();
+      const progress = totalStages > 0 ? Math.round((opp.stage.order / totalStages) * 100) : 0;
+      calc['calc:stageProgress'] = `${progress}%`;
+    } else {
+      calc['calc:stageProgress'] = 'N/A';
+    }
+
+    // calc:stageSLA — SLA status (On Track / Overdue)
+    if (opp.stage && opp.stage.slaHours) {
+      const slaHours = opp.stage.slaHours;
+      const hoursInStage = (now.getTime() - stageStart.getTime()) / 3600000;
+      calc['calc:stageSLA'] = hoursInStage <= slaHours ? 'On Track' : 'Overdue';
+    } else {
+      calc['calc:stageSLA'] = 'N/A';
+    }
+
+    // calc:currentDate — today formatted
+    calc['calc:currentDate'] = now.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+
+    // calc:currentTime — now formatted with time
+    calc['calc:currentTime'] = now.toLocaleString('en-US', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+    // calc:expectedCloseFormatted — expected close date formatted
+    if (opp.expectedCloseDate) {
+      calc['calc:expectedCloseFormatted'] = new Date(opp.expectedCloseDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+    } else {
+      calc['calc:expectedCloseFormatted'] = 'N/A';
+    }
+
+    // calc:createdDateFormatted — created date formatted
+    calc['calc:createdDateFormatted'] = createdAt.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+
+  } catch (error) {
+    console.error('[NotificationEngine] Error resolving calculated fields:', error);
+  }
+  return calc;
 }
 
 function getFieldValue(opp: any, field: string): any {

@@ -62,6 +62,8 @@ import {
   listEmailTemplates,
   getEmailTemplate,
   updateEmailTemplate,
+  createEmailTemplate,
+  deleteEmailTemplate,
   sendTestEmail,
 } from '../controllers/email-templates.controller';
 import {
@@ -188,8 +190,10 @@ router.get('/audit-logs/actions', authorize(PERMISSIONS.AUDITLOGS_VIEW), listAud
 
 // Email templates (requires settings:manage)
 router.get('/email-templates', authorize(PERMISSIONS.SETTINGS_MANAGE), listEmailTemplates);
+router.post('/email-templates', authorize(PERMISSIONS.SETTINGS_MANAGE), createEmailTemplate);
 router.get('/email-templates/:id', authorize(PERMISSIONS.SETTINGS_MANAGE), getEmailTemplate);
 router.patch('/email-templates/:id', authorize(PERMISSIONS.SETTINGS_MANAGE), updateEmailTemplate);
+router.delete('/email-templates/:id', authorize(PERMISSIONS.SETTINGS_MANAGE), deleteEmailTemplate);
 router.post('/email-templates/test', authorize(PERMISSIONS.SETTINGS_MANAGE), sendTestEmail);
 
 // Currency rates (requires settings:manage for mutations, any auth for list)
