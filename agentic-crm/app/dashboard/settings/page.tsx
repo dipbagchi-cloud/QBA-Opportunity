@@ -1064,39 +1064,39 @@ function PaginationControls({ page, totalPages, total, limit, onPageChange, onLi
     );
 }
 
-/* ─────────────── Roles Tab (Admin) ─────────────── */
+/* ─────────────── Roles Tab (Admin) — Matrix View ─────────────── */
 function RolesTab() {
     const [roles, setRoles] = useState<AdminRole[]>([]);
     const [loading, setLoading] = useState(true);
-    const [editingRole, setEditingRole] = useState<AdminRole | null>(null);
-    const [showCreate, setShowCreate] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const [resetting, setResetting] = useState(false);
     const [status, setStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
-    // Search and sort
-    const [roleSearch, setRoleSearch] = useState("");
-    const [roleSortKey, setRoleSortKey] = useState("name");
-    const [roleSortDir, setRoleSortDir] = useState<SortDir>("asc");
-    const handleRoleSort = (key: string, dir: SortDir) => { setRoleSortKey(dir ? key : "name"); setRoleSortDir(dir); };
+    // Pending changes: roleId → Set<permKey> (unsaved edits buffer)
+    const [pendingPerms, setPendingPerms] = useState<Record<string, string[]>>({});
+    const [dirty, setDirty] = useState(false);
 
-    // Form state
-    const [formName, setFormName] = useState("");
-    const [formDescription, setFormDescription] = useState("");
-    const [formPermissions, setFormPermissions] = useState<string[]>([]);
-    const [saving, setSaving] = useState(false);
-
-    // Expand/Collapse state for role user list
+    // User management
     const [expandedRoleId, setExpandedRoleId] = useState<string | null>(null);
-
-    // All users list (for "add user" dropdown)
     const [allUsers, setAllUsers] = useState<{ id: string; name: string; email: string }[]>([]);
     const [addUserSearch, setAddUserSearch] = useState("");
     const [showAddUserDropdown, setShowAddUserDropdown] = useState(false);
+
+    // Create role
+    const [showCreate, setShowCreate] = useState(false);
+    const [formName, setFormName] = useState("");
+    const [formDescription, setFormDescription] = useState("");
 
     const fetchRoles = useCallback(async () => {
         setLoading(true);
         try {
             const r = await apiClient<AdminRole[]>("/api/admin/roles");
             setRoles(r);
+            // Init pending perms from server data
+            const init: Record<string, string[]> = {};
+            r.forEach(role => { init[role.id] = [...(role.permissions as string[])]; });
+            setPendingPerms(init);
+            setDirty(false);
         } catch {
             setStatus({ type: "error", message: "Failed to load roles." });
         } finally {
@@ -1106,7 +1106,6 @@ function RolesTab() {
 
     useEffect(() => { fetchRoles(); }, [fetchRoles]);
 
-    // Fetch all users once for the add-user dropdown
     useEffect(() => {
         (async () => {
             try {
@@ -1116,74 +1115,113 @@ function RolesTab() {
         })();
     }, []);
 
-    const openEdit = (role: AdminRole) => {
-        setEditingRole(role);
-        setFormName(role.name);
-        setFormDescription(role.description || "");
-        setFormPermissions([...(role.permissions as string[])]);
-        setShowCreate(false);
+    // ── Permission toggle ──
+    const togglePerm = (roleId: string, permKey: string) => {
+        setPendingPerms(prev => {
+            const current = prev[roleId] || [];
+            const next = current.includes(permKey)
+                ? current.filter(p => p !== permKey)
+                : [...current, permKey];
+            return { ...prev, [roleId]: next };
+        });
+        setDirty(true);
     };
 
-    const openCreate = () => {
-        setEditingRole(null);
-        setFormName("");
-        setFormDescription("");
-        setFormPermissions([]);
-        setShowCreate(true);
+    const toggleWildcard = (roleId: string) => {
+        setPendingPerms(prev => {
+            const current = prev[roleId] || [];
+            const next = current.includes("*") ? [] : ["*"];
+            return { ...prev, [roleId]: next };
+        });
+        setDirty(true);
     };
 
-    const togglePermission = (perm: string) => {
-        setFormPermissions((prev) =>
-            prev.includes(perm) ? prev.filter((p) => p !== perm) : [...prev, perm]
-        );
-    };
-
-    const handleSave = async () => {
-        setStatus(null);
-        if (!formName.trim()) {
-            setStatus({ type: "error", message: "Role name is required." });
-            return;
-        }
+    // ── Save all changes ──
+    const handleSaveAll = async () => {
         setSaving(true);
+        setStatus(null);
         try {
-            if (editingRole) {
-                await apiClient(`/api/admin/roles/${editingRole.id}`, {
+            const promises = roles.map(role => {
+                const newPerms = pendingPerms[role.id] || [];
+                const oldPerms = role.permissions as string[];
+                if (JSON.stringify(newPerms.sort()) === JSON.stringify([...oldPerms].sort())) return null;
+                return apiClient(`/api/admin/roles/${role.id}`, {
                     method: "PATCH",
-                    body: JSON.stringify({ name: formName, description: formDescription, permissions: formPermissions }),
+                    body: JSON.stringify({ permissions: newPerms }),
                 });
-                setStatus({ type: "success", message: "Role updated." });
-            } else {
-                await apiClient("/api/admin/roles", {
-                    method: "POST",
-                    body: JSON.stringify({ name: formName, description: formDescription, permissions: formPermissions }),
-                });
-                setStatus({ type: "success", message: "Role created." });
+            }).filter(Boolean);
+
+            if (promises.length === 0) {
+                setStatus({ type: "success", message: "No changes to save." });
+                setSaving(false);
+                return;
             }
-            setEditingRole(null);
-            setShowCreate(false);
+
+            await Promise.all(promises);
+            setStatus({ type: "success", message: `Saved changes for ${promises.length} role(s).` });
             fetchRoles();
         } catch (err: any) {
-            setStatus({ type: "error", message: err.message || "Failed to save role." });
+            setStatus({ type: "error", message: err.message || "Failed to save." });
         } finally {
             setSaving(false);
         }
     };
 
+    // ── Reset all roles to defaults ──
+    const handleResetDefaults = async () => {
+        if (!confirm("Reset ALL system role permissions to factory defaults? This cannot be undone.")) return;
+        setResetting(true);
+        setStatus(null);
+        try {
+            await apiClient("/api/admin/roles/reset-defaults", { method: "POST" });
+            setStatus({ type: "success", message: "All system roles reset to default permissions." });
+            fetchRoles();
+        } catch (err: any) {
+            setStatus({ type: "error", message: err.message || "Failed to reset." });
+        } finally {
+            setResetting(false);
+        }
+    };
+
+    // ── Create role ──
+    const handleCreate = async () => {
+        if (!formName.trim()) { setStatus({ type: "error", message: "Role name is required." }); return; }
+        setSaving(true);
+        try {
+            await apiClient("/api/admin/roles", {
+                method: "POST",
+                body: JSON.stringify({ name: formName, description: formDescription, permissions: [] }),
+            });
+            setStatus({ type: "success", message: `Role "${formName}" created.` });
+            setShowCreate(false);
+            setFormName("");
+            setFormDescription("");
+            fetchRoles();
+        } catch (err: any) {
+            setStatus({ type: "error", message: err.message || "Failed to create role." });
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    // ── Delete role ──
     const handleDelete = async (role: AdminRole) => {
         if (role.isSystem) return;
         if (role.userCount > 0) {
-            setStatus({ type: "error", message: `Cannot delete "${role.name}" — it has ${role.userCount} user(s) assigned.` });
+            setStatus({ type: "error", message: `Cannot delete "${role.name}" — it has ${role.userCount} user(s).` });
             return;
         }
+        if (!confirm(`Delete role "${role.name}"?`)) return;
         try {
             await apiClient(`/api/admin/roles/${role.id}`, { method: "DELETE" });
             fetchRoles();
             setStatus({ type: "success", message: "Role deleted." });
         } catch (err: any) {
-            setStatus({ type: "error", message: err.message || "Failed to delete role." });
+            setStatus({ type: "error", message: err.message || "Failed to delete." });
         }
     };
 
+    // ── User management ──
     const handleAddUser = async (roleId: string, userId: string) => {
         try {
             await apiClient(`/api/admin/roles/${roleId}/users`, {
@@ -1209,22 +1247,33 @@ function RolesTab() {
         }
     };
 
-    const isEditing = editingRole !== null || showCreate;
-    const isWildcard = formPermissions.includes("*");
+    if (loading) return <div className="text-center py-12 text-slate-400">Loading roles...</div>;
 
-    if (loading) {
-        return <div className="text-center py-12 text-slate-400">Loading roles...</div>;
-    }
+    // Build flat list of all permission keys from categories
+    const allPermKeys = PERMISSION_CATEGORIES.flatMap(cat => cat.permissions.map(p => p.key));
 
     return (
         <div className="space-y-4">
-            <div className="flex items-center justify-between">
-                <h3 className="text-base font-bold text-slate-900">Role Management</h3>
-                {!isEditing && (
-                    <button onClick={openCreate} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 transition-colors">
+            {/* Header */}
+            <div className="flex items-center justify-between flex-wrap gap-2">
+                <h3 className="text-base font-bold text-slate-900">Role-Permission Matrix</h3>
+                <div className="flex items-center gap-2">
+                    <button onClick={handleResetDefaults} disabled={resetting}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-amber-300 bg-amber-50 text-amber-700 text-xs font-medium hover:bg-amber-100 disabled:opacity-50 transition-colors">
+                        <RotateCcw className={`w-3.5 h-3.5 ${resetting ? 'animate-spin' : ''}`} /> Reset Defaults
+                    </button>
+                    {dirty && (
+                        <button onClick={handleSaveAll} disabled={saving}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+                            {saving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                            {saving ? "Saving..." : "Save Changes"}
+                        </button>
+                    )}
+                    <button onClick={() => setShowCreate(!showCreate)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 transition-colors">
                         <Plus className="w-3.5 h-3.5" /> New Role
                     </button>
-                )}
+                </div>
             </div>
 
             {status && (
@@ -1234,203 +1283,221 @@ function RolesTab() {
                 </div>
             )}
 
-            {/* Role editor */}
-            {isEditing && (
-                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-4">
+            {/* Create role form */}
+            {showCreate && (
+                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-3">
                     <div className="flex items-center justify-between">
-                        <h4 className="font-semibold text-sm text-slate-800">{editingRole ? `Edit: ${editingRole.name}` : "Create Role"}</h4>
-                        <button onClick={() => { setEditingRole(null); setShowCreate(false); }} className="p-1 text-slate-400 hover:text-slate-600"><X className="w-4 h-4" /></button>
+                        <h4 className="font-semibold text-sm text-slate-800">Create New Role</h4>
+                        <button onClick={() => setShowCreate(false)} className="p-1 text-slate-400 hover:text-slate-600"><X className="w-4 h-4" /></button>
                     </div>
-
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         <div>
                             <label className="block text-xs font-medium text-slate-700 mb-1">Role Name</label>
-                            <input className="w-full px-3 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm" value={formName} onChange={(e) => setFormName(e.target.value)} disabled={editingRole?.isSystem} />
+                            <input className="w-full px-3 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm" value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="e.g. Finance" />
                         </div>
                         <div>
                             <label className="block text-xs font-medium text-slate-700 mb-1">Description</label>
-                            <input className="w-full px-3 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm" value={formDescription} onChange={(e) => setFormDescription(e.target.value)} />
+                            <input className="w-full px-3 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm" value={formDescription} onChange={(e) => setFormDescription(e.target.value)} placeholder="Optional description" />
                         </div>
                     </div>
-
-                    {/* Wildcard (Admin) toggle */}
-                    <div className="flex items-center gap-3">
-                        <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" checked={isWildcard} onChange={() => {
-                                if (isWildcard) {
-                                    setFormPermissions(formPermissions.filter(p => p !== "*"));
-                                } else {
-                                    setFormPermissions(["*"]);
-                                }
-                            }} className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
-                            <span className="text-sm font-medium text-slate-700">Full Admin Access (wildcard *)</span>
-                        </label>
-                    </div>
-
-                    {/* Permission grid */}
-                    {!isWildcard && (
-                        <div className="space-y-3">
-                            <h5 className="text-xs font-semibold text-slate-700">Permissions</h5>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                {PERMISSION_CATEGORIES.map((cat) => (
-                                    <div key={cat.label} className="border border-slate-100 rounded-lg p-3">
-                                        <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-2">{cat.label}</p>
-                                        <div className="space-y-1.5">
-                                            {cat.permissions.map((p) => (
-                                                <label key={p.key} className="flex items-center gap-2 cursor-pointer">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={formPermissions.includes(p.key)}
-                                                        onChange={() => togglePermission(p.key)}
-                                                        className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                                                    />
-                                                    <span className="text-sm text-slate-700">{p.label}</span>
-                                                    <span className="text-xs text-slate-400 ml-auto font-mono">{p.key}</span>
-                                                </label>
-                                            ))}
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-
-                    <div className="pt-3 border-t border-slate-100 flex justify-end gap-2">
-                        <button onClick={() => { setEditingRole(null); setShowCreate(false); }} className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-600 hover:bg-slate-50 transition-colors">Cancel</button>
-                        <button disabled={saving} onClick={handleSave} className="px-4 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors">
-                            {saving ? "Saving..." : editingRole ? "Update Role" : "Create Role"}
+                    <div className="flex justify-end gap-2">
+                        <button onClick={() => setShowCreate(false)} className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-600 hover:bg-slate-50">Cancel</button>
+                        <button disabled={saving} onClick={handleCreate} className="px-4 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 disabled:opacity-50">
+                            {saving ? "Creating..." : "Create Role"}
                         </button>
                     </div>
                 </div>
             )}
 
-            {/* Search */}
-            <div className="relative max-w-md">
-                <Search className="absolute left-3 top-2 w-4 h-4 text-slate-400" />
-                <input
-                    type="text"
-                    placeholder="Search roles..."
-                    className="w-full pl-9 pr-4 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm"
-                    value={roleSearch}
-                    onChange={(e) => setRoleSearch(e.target.value)}
-                />
+            {/* ── Permission Matrix Table ── */}
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="overflow-x-auto">
+                    <table className="w-full text-xs border-collapse">
+                        <thead>
+                            {/* Category header row */}
+                            <tr className="bg-slate-50">
+                                <th className="sticky left-0 z-10 bg-slate-50 px-3 py-2 text-left font-semibold text-slate-700 border-b border-r border-slate-200 min-w-[140px]">Role</th>
+                                <th className="px-2 py-2 text-center font-semibold text-indigo-600 border-b border-r border-slate-200 min-w-[50px]" title="Full Admin Access (wildcard *)">
+                                    <div className="flex flex-col items-center">
+                                        <Shield className="w-3.5 h-3.5 mb-0.5" />
+                                        <span>All</span>
+                                    </div>
+                                </th>
+                                {PERMISSION_CATEGORIES.map(cat => (
+                                    <th key={cat.label} colSpan={cat.permissions.length} className="px-2 py-2 text-center font-semibold text-slate-600 border-b border-r border-slate-200 bg-slate-100/50">
+                                        {cat.label}
+                                    </th>
+                                ))}
+                                <th className="px-2 py-2 text-center font-semibold text-slate-500 border-b border-slate-200 min-w-[80px]">Actions</th>
+                            </tr>
+                            {/* Sub-header: individual permission labels */}
+                            <tr className="bg-white">
+                                <th className="sticky left-0 z-10 bg-white px-3 py-1.5 text-left font-medium text-slate-500 border-b border-r border-slate-200"></th>
+                                <th className="px-2 py-1.5 text-center text-[10px] font-medium text-indigo-500 border-b border-r border-slate-200">*</th>
+                                {PERMISSION_CATEGORIES.map(cat =>
+                                    cat.permissions.map((p, idx) => (
+                                        <th key={p.key} className={`px-2 py-1.5 text-center text-[10px] font-medium text-slate-500 border-b border-slate-200 ${idx === cat.permissions.length - 1 ? 'border-r' : ''}`} title={p.key}>
+                                            {p.label}
+                                        </th>
+                                    ))
+                                )}
+                                <th className="px-2 py-1.5 border-b border-slate-200"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {roles.map((role, rowIdx) => {
+                                const perms = pendingPerms[role.id] || [];
+                                const isWildcard = perms.includes("*");
+                                const isExpanded = expandedRoleId === role.id;
+                                const roleUsers = role.users || [];
+                                const assignedUserIds = new Set(roleUsers.map(u => u.id));
+                                const availableUsers = allUsers.filter(u => !assignedUserIds.has(u.id) && (
+                                    !addUserSearch || u.name.toLowerCase().includes(addUserSearch.toLowerCase()) || u.email.toLowerCase().includes(addUserSearch.toLowerCase())
+                                ));
+
+                                return (
+                                    <React.Fragment key={role.id}>
+                                        <tr className={`${rowIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'} hover:bg-indigo-50/30 transition-colors`}>
+                                            {/* Role name cell */}
+                                            <td className={`sticky left-0 z-10 ${rowIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50'} px-3 py-2 border-b border-r border-slate-200`}>
+                                                <div className="flex items-center gap-2">
+                                                    <button onClick={() => { setExpandedRoleId(isExpanded ? null : role.id); setShowAddUserDropdown(false); setAddUserSearch(""); }}
+                                                        className="text-slate-400 hover:text-slate-600">
+                                                        {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                                                    </button>
+                                                    <div>
+                                                        <div className="flex items-center gap-1.5">
+                                                            <span className="font-semibold text-slate-800 text-xs">{role.name}</span>
+                                                            {role.isSystem && <span className="text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-full font-medium">SYS</span>}
+                                                        </div>
+                                                        <span className="text-[10px] text-slate-400">{role.userCount} user{role.userCount !== 1 ? 's' : ''}</span>
+                                                    </div>
+                                                </div>
+                                            </td>
+
+                                            {/* Wildcard (*) cell */}
+                                            <td className="px-2 py-2 text-center border-b border-r border-slate-200">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={isWildcard}
+                                                    onChange={() => toggleWildcard(role.id)}
+                                                    className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                                                    title="Full Admin Access"
+                                                />
+                                            </td>
+
+                                            {/* Permission cells */}
+                                            {PERMISSION_CATEGORIES.map(cat =>
+                                                cat.permissions.map((p, idx) => (
+                                                    <td key={p.key} className={`px-2 py-2 text-center border-b border-slate-200 ${idx === cat.permissions.length - 1 ? 'border-r' : ''}`}>
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={isWildcard || perms.includes(p.key)}
+                                                            disabled={isWildcard}
+                                                            onChange={() => togglePerm(role.id, p.key)}
+                                                            className={`w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 ${isWildcard ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                                                            title={p.key}
+                                                        />
+                                                    </td>
+                                                ))
+                                            )}
+
+                                            {/* Actions cell */}
+                                            <td className="px-2 py-2 text-center border-b border-slate-200">
+                                                <div className="flex items-center justify-center gap-1">
+                                                    <button onClick={() => { setExpandedRoleId(isExpanded ? null : role.id); setShowAddUserDropdown(false); }}
+                                                        className="p-1 text-slate-400 hover:text-indigo-600" title="Manage users">
+                                                        <Users className="w-3.5 h-3.5" />
+                                                    </button>
+                                                    {!role.isSystem && (
+                                                        <button onClick={() => handleDelete(role)}
+                                                            className="p-1 text-slate-400 hover:text-red-600" title="Delete role">
+                                                            <Trash2 className="w-3.5 h-3.5" />
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </td>
+                                        </tr>
+
+                                        {/* Expanded user management row */}
+                                        {isExpanded && (
+                                            <tr>
+                                                <td colSpan={allPermKeys.length + 3} className="bg-slate-50/70 border-b border-slate-200 px-4 py-3">
+                                                    <div className="max-w-2xl">
+                                                        <div className="flex items-center justify-between mb-2">
+                                                            <h5 className="text-xs font-semibold text-slate-600 uppercase tracking-wider flex items-center gap-1.5">
+                                                                <Users className="w-3.5 h-3.5" /> {role.name} — Assigned Users ({roleUsers.length})
+                                                            </h5>
+                                                            <div className="relative">
+                                                                <button onClick={() => setShowAddUserDropdown(!showAddUserDropdown)}
+                                                                    className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50 rounded transition-colors">
+                                                                    <UserPlus className="w-3.5 h-3.5" /> Add User
+                                                                </button>
+                                                                {showAddUserDropdown && (
+                                                                    <div className="absolute right-0 top-8 z-20 bg-white border border-slate-200 rounded-lg shadow-lg w-72 max-h-60 overflow-hidden">
+                                                                        <div className="p-2 border-b border-slate-100">
+                                                                            <div className="relative">
+                                                                                <Search className="absolute left-2.5 top-2 w-3.5 h-3.5 text-slate-400" />
+                                                                                <input type="text" placeholder="Search users..." value={addUserSearch}
+                                                                                    onChange={(e) => setAddUserSearch(e.target.value)}
+                                                                                    className="w-full pl-8 pr-3 py-1.5 text-xs border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500" autoFocus />
+                                                                            </div>
+                                                                        </div>
+                                                                        <div className="max-h-44 overflow-y-auto">
+                                                                            {availableUsers.length === 0 ? (
+                                                                                <p className="text-xs text-slate-400 text-center py-3">No users available</p>
+                                                                            ) : availableUsers.slice(0, 20).map(u => (
+                                                                                <button key={u.id} onClick={() => handleAddUser(role.id, u.id)}
+                                                                                    className="w-full text-left px-3 py-2 text-xs hover:bg-indigo-50 flex items-center justify-between">
+                                                                                    <div>
+                                                                                        <span className="font-medium text-slate-700">{u.name}</span>
+                                                                                        <span className="text-slate-400 ml-2">{u.email}</span>
+                                                                                    </div>
+                                                                                    <Plus className="w-3.5 h-3.5 text-indigo-500" />
+                                                                                </button>
+                                                                            ))}
+                                                                        </div>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                        {roleUsers.length === 0 ? (
+                                                            <p className="text-xs text-slate-400 italic py-2">No users assigned.</p>
+                                                        ) : (
+                                                            <div className="space-y-1">
+                                                                {roleUsers.map(u => (
+                                                                    <div key={u.id} className="flex items-center justify-between bg-white border border-slate-100 rounded-md px-3 py-1.5 text-xs">
+                                                                        <div className="flex items-center gap-2">
+                                                                            <div className="w-6 h-6 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center text-[10px] font-bold">
+                                                                                {u.name.charAt(0).toUpperCase()}
+                                                                            </div>
+                                                                            <span className="font-medium text-slate-700">{u.name}</span>
+                                                                            <span className="text-slate-400">{u.email}</span>
+                                                                        </div>
+                                                                        <button onClick={() => handleRemoveUser(role.id, u.id)} className="text-slate-400 hover:text-red-600 transition-colors" title="Remove user">
+                                                                            <UserMinus className="w-3.5 h-3.5" />
+                                                                        </button>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        )}
+                                    </React.Fragment>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
             </div>
 
-            {/* Roles list */}
-            <div className="grid grid-cols-1 gap-3">
-                {sortData(roles.filter(r => !roleSearch || r.name.toLowerCase().includes(roleSearch.toLowerCase()) || (r.description || '').toLowerCase().includes(roleSearch.toLowerCase())), roleSortKey, roleSortDir).map((role) => {
-                    const isExpanded = expandedRoleId === role.id;
-                    const roleUsers = role.users || [];
-                    const assignedUserIds = new Set(roleUsers.map(u => u.id));
-                    const availableUsers = allUsers.filter(u => !assignedUserIds.has(u.id) && (
-                        !addUserSearch || u.name.toLowerCase().includes(addUserSearch.toLowerCase()) || u.email.toLowerCase().includes(addUserSearch.toLowerCase())
-                    ));
-
-                    return (
-                    <div key={role.id} className="bg-white rounded-lg border border-slate-200 hover:shadow-sm transition-shadow">
-                        <div className="p-3 flex items-center justify-between">
-                            <div className="flex-1 min-w-0 cursor-pointer" onClick={() => { setExpandedRoleId(isExpanded ? null : role.id); setShowAddUserDropdown(false); setAddUserSearch(""); }}>
-                                <div className="flex items-center gap-2">
-                                    {isExpanded ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
-                                    <span className="font-semibold text-slate-800">{role.name}</span>
-                                    {role.isSystem && <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-medium">SYSTEM</span>}
-                                    <span className="text-xs text-slate-400">{role.userCount} user{role.userCount !== 1 ? "s" : ""}</span>
-                                </div>
-                                {role.description && <p className="text-xs text-slate-500 mt-0.5 ml-6">{role.description}</p>}
-                                <div className="flex flex-wrap gap-1 mt-2 ml-6">
-                                    {(role.permissions as string[]).includes("*") ? (
-                                        <span className="text-[10px] bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full font-medium">ALL PERMISSIONS</span>
-                                    ) : (
-                                        (role.permissions as string[]).slice(0, 6).map((p) => (
-                                            <span key={p} className="text-[10px] bg-slate-50 text-slate-500 px-2 py-0.5 rounded-full font-mono">{p}</span>
-                                        ))
-                                    )}
-                                    {!((role.permissions as string[]).includes("*")) && (role.permissions as string[]).length > 6 && (
-                                        <span className="text-[10px] text-slate-400">+{(role.permissions as string[]).length - 6} more</span>
-                                    )}
-                                </div>
-                            </div>
-                            <div className="flex items-center gap-2 ml-4">
-                                <button onClick={() => openEdit(role)} className="p-2 text-slate-400 hover:text-indigo-600 transition-colors" title="Edit"><Pencil className="w-4 h-4" /></button>
-                                {!role.isSystem && (
-                                    <button onClick={() => handleDelete(role)} className="p-2 text-slate-400 hover:text-red-600 transition-colors" title="Delete"><X className="w-4 h-4" /></button>
-                                )}
-                            </div>
-                        </div>
-
-                        {/* Expanded user list */}
-                        {isExpanded && (
-                            <div className="border-t border-slate-100 px-4 py-3 bg-slate-50/50">
-                                <div className="flex items-center justify-between mb-2">
-                                    <h5 className="text-xs font-semibold text-slate-600 uppercase tracking-wider flex items-center gap-1.5">
-                                        <Users className="w-3.5 h-3.5" /> Assigned Users ({roleUsers.length})
-                                    </h5>
-                                    <div className="relative">
-                                        <button onClick={() => setShowAddUserDropdown(!showAddUserDropdown)} className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50 rounded transition-colors">
-                                            <UserPlus className="w-3.5 h-3.5" /> Add User
-                                        </button>
-                                        {showAddUserDropdown && (
-                                            <div className="absolute right-0 top-8 z-20 bg-white border border-slate-200 rounded-lg shadow-lg w-72 max-h-60 overflow-hidden">
-                                                <div className="p-2 border-b border-slate-100">
-                                                    <div className="relative">
-                                                        <Search className="absolute left-2.5 top-2 w-3.5 h-3.5 text-slate-400" />
-                                                        <input
-                                                            type="text"
-                                                            placeholder="Search users..."
-                                                            value={addUserSearch}
-                                                            onChange={(e) => setAddUserSearch(e.target.value)}
-                                                            className="w-full pl-8 pr-3 py-1.5 text-xs border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                                                            autoFocus
-                                                        />
-                                                    </div>
-                                                </div>
-                                                <div className="max-h-44 overflow-y-auto">
-                                                    {availableUsers.length === 0 ? (
-                                                        <p className="text-xs text-slate-400 text-center py-3">No users available</p>
-                                                    ) : availableUsers.slice(0, 20).map(u => (
-                                                        <button
-                                                            key={u.id}
-                                                            onClick={() => handleAddUser(role.id, u.id)}
-                                                            className="w-full text-left px-3 py-2 text-xs hover:bg-indigo-50 flex items-center justify-between"
-                                                        >
-                                                            <div>
-                                                                <span className="font-medium text-slate-700">{u.name}</span>
-                                                                <span className="text-slate-400 ml-2">{u.email}</span>
-                                                            </div>
-                                                            <Plus className="w-3.5 h-3.5 text-indigo-500" />
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-
-                                {roleUsers.length === 0 ? (
-                                    <p className="text-xs text-slate-400 italic py-2">No users assigned to this role.</p>
-                                ) : (
-                                    <div className="space-y-1">
-                                        {roleUsers.map(u => (
-                                            <div key={u.id} className="flex items-center justify-between bg-white border border-slate-100 rounded-md px-3 py-1.5 text-xs">
-                                                <div className="flex items-center gap-2">
-                                                    <div className="w-6 h-6 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center text-[10px] font-bold">
-                                                        {u.name.charAt(0).toUpperCase()}
-                                                    </div>
-                                                    <span className="font-medium text-slate-700">{u.name}</span>
-                                                    <span className="text-slate-400">{u.email}</span>
-                                                </div>
-                                                <button onClick={() => handleRemoveUser(role.id, u.id)} className="text-slate-400 hover:text-red-600 transition-colors" title="Remove user">
-                                                    <UserMinus className="w-3.5 h-3.5" />
-                                                </button>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                    </div>
-                    );
-                })}
+            {/* Legend */}
+            <div className="flex items-center gap-4 text-[10px] text-slate-500 px-1">
+                <span className="flex items-center gap-1"><Shield className="w-3 h-3 text-indigo-500" /> <b>All</b> = wildcard (*) — grants every permission</span>
+                <span className="flex items-center gap-1"><span className="text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-full font-medium">SYS</span> = system role (cannot be deleted)</span>
+                <span>Click a role row&apos;s <Users className="w-3 h-3 inline" /> icon to manage its users</span>
             </div>
         </div>
     );
@@ -3314,6 +3381,17 @@ function QPeopleMappingTab() {
         setApplying(false);
     }
 
+    async function handleResetAll() {
+        if (!confirm("Delete ALL QPeople role mappings and reset all synced users to Read-Only? This cannot be undone.")) return;
+        setApplying(true);
+        try {
+            const res = await apiClient<any>("/api/admin/qpeople-mappings/reset-all", { method: "DELETE" });
+            alert(res.message || "All mappings reset.");
+            await load();
+        } catch (e: any) { alert(e.message || "Failed to reset"); }
+        setApplying(false);
+    }
+
     function toggleEditRole(roleId: string) {
         if (!editRow) return;
         setEditRow({
@@ -3333,11 +3411,17 @@ function QPeopleMappingTab() {
                     <h2 className="text-lg font-bold text-slate-800">QPeople Role Mapping</h2>
                     <p className="text-xs text-slate-500">Map QPeople designations to one or more Q-CRM roles. During sync, users are auto-assigned the mapped roles.</p>
                 </div>
+                <div className="flex items-center gap-2">
                 <button onClick={handleApplyAll} disabled={applying || mappings.length === 0}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700 disabled:opacity-50">
                     {applying ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
                     Apply Mappings to Users
                 </button>
+                <button onClick={handleResetAll} disabled={applying || mappings.length === 0}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-300 bg-red-50 text-red-700 text-xs font-semibold hover:bg-red-100 disabled:opacity-50">
+                    <RotateCcw className="w-3.5 h-3.5" /> Reset All Mappings
+                </button>
+                </div>
             </div>
 
             {/* Search */}

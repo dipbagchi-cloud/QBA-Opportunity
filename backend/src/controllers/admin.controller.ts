@@ -512,6 +512,70 @@ export async function removeUserFromRole(req: Request, res: Response) {
   }
 }
 
+// POST /api/admin/roles/reset-defaults — Reset all system roles to default permissions
+const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
+  'Admin': ['*'],
+  'Manager': [
+    'dashboard:view', 'pipeline:view', 'pipeline:write', 'presales:view', 'presales:write',
+    'sales:view', 'sales:write', 'estimation:manage', 'approvals:manage',
+    'contacts:view', 'contacts:write', 'analytics:view', 'analytics:export',
+    'agents:execute', 'gom:view', 'leads:manage', 'resources:manage', 'settings:view', 'auditlogs:view',
+  ],
+  'Sales': [
+    'dashboard:view', 'pipeline:view', 'pipeline:write', 'presales:view',
+    'sales:view', 'sales:write', 'contacts:view', 'contacts:write',
+    'analytics:view', 'agents:execute', 'gom:view', 'leads:manage', 'settings:view',
+  ],
+  'Presales': [
+    'dashboard:view', 'pipeline:view', 'presales:view', 'presales:write',
+    'estimation:manage', 'sales:view', 'contacts:view', 'analytics:view',
+    'agents:execute', 'gom:view', 'settings:view',
+  ],
+  'Read-Only': [
+    'dashboard:view', 'pipeline:view', 'presales:view', 'sales:view',
+    'contacts:view', 'analytics:view', 'gom:view', 'settings:view',
+  ],
+  'Management': [
+    'dashboard:view', 'pipeline:view', 'presales:view', 'sales:view',
+    'contacts:view', 'analytics:view', 'analytics:export', 'approvals:manage',
+    'auditlogs:view', 'gom:view', 'settings:view',
+  ],
+};
+
+export async function resetRoleDefaults(req: Request, res: Response) {
+  try {
+    const results: { role: string; status: string }[] = [];
+
+    for (const [roleName, defaultPerms] of Object.entries(DEFAULT_ROLE_PERMISSIONS)) {
+      const role = await prisma.role.findUnique({ where: { name: roleName } });
+      if (role) {
+        await prisma.role.update({
+          where: { id: role.id },
+          data: { permissions: defaultPerms },
+        });
+        results.push({ role: roleName, status: 'reset' });
+      } else {
+        results.push({ role: roleName, status: 'not_found' });
+      }
+    }
+
+    await prisma.auditLog.create({
+      data: {
+        entity: 'Role',
+        entityId: 'system',
+        action: 'RESET_ROLE_DEFAULTS',
+        userId: req.user!.userId,
+        changes: { results },
+      },
+    });
+
+    res.json({ message: 'System role permissions reset to defaults', results });
+  } catch (error) {
+    console.error('Reset role defaults error:', error);
+    res.status(500).json({ error: 'Failed to reset role defaults' });
+  }
+}
+
 // GET /api/admin/teams
 export async function listTeams(req: Request, res: Response) {
   try {
@@ -901,6 +965,45 @@ export async function deleteQPeopleMapping(req: Request, res: Response) {
   } catch (error) {
     console.error('Delete QPeople mapping error:', error);
     res.status(500).json({ error: 'Failed to delete mapping' });
+  }
+}
+
+// DELETE /api/admin/qpeople-mappings/reset-all — delete all mappings and reset users to Read-Only
+export async function resetAllQPeopleMappings(req: Request, res: Response) {
+  try {
+    const count = await (prisma as any).qPeopleRoleMapping.count();
+    if (count === 0) return res.json({ message: 'No mappings to reset', deleted: 0, usersReset: 0 });
+
+    await (prisma as any).qPeopleRoleMapping.deleteMany();
+
+    // Reset all QPeople-synced users (those with qpeopleId) to Read-Only
+    const readOnlyRole = await prisma.role.findFirst({ where: { name: 'Read-Only' } });
+    let usersReset = 0;
+    if (readOnlyRole) {
+      const qpUsers = await prisma.user.findMany({ where: { qpeopleId: { not: null } } });
+      for (const user of qpUsers) {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { roles: { set: [{ id: readOnlyRole.id }] }, activeRoleId: readOnlyRole.id },
+        });
+        usersReset++;
+      }
+    }
+
+    await prisma.auditLog.create({
+      data: {
+        entity: 'QPeopleRoleMapping',
+        entityId: 'all',
+        action: 'RESET_ALL_MAPPINGS',
+        userId: req.user!.userId,
+        changes: { deleted: count, usersReset },
+      },
+    });
+
+    res.json({ message: `Deleted ${count} mapping(s) and reset ${usersReset} user(s) to Read-Only.`, deleted: count, usersReset });
+  } catch (error) {
+    console.error('Reset all QPeople mappings error:', error);
+    res.status(500).json({ error: 'Failed to reset mappings' });
   }
 }
 

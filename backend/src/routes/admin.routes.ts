@@ -15,11 +15,13 @@ import {
   deleteRole,
   addUserToRole,
   removeUserFromRole,
+  resetRoleDefaults,
   listTeams,
   listQPeopleMappings,
   listQPeopleDesignations,
   upsertQPeopleMapping,
   deleteQPeopleMapping,
+  resetAllQPeopleMappings,
   applyQPeopleMappings,
   getAuthConfig,
   updateAuthConfig,
@@ -134,6 +136,7 @@ router.put('/auth-config', authorize(PERMISSIONS.SETTINGS_MANAGE), updateAuthCon
 
 // Role management (requires roles:manage)
 router.get('/roles', authorize(PERMISSIONS.ROLES_MANAGE), listRoles);
+router.post('/roles/reset-defaults', authorize(PERMISSIONS.ROLES_MANAGE), resetRoleDefaults);
 router.post('/roles', authorize(PERMISSIONS.ROLES_MANAGE), createRole);
 router.patch('/roles/:id', authorize(PERMISSIONS.ROLES_MANAGE), updateRole);
 router.delete('/roles/:id', authorize(PERMISSIONS.ROLES_MANAGE), deleteRole);
@@ -210,6 +213,7 @@ router.get('/qpeople-mappings', authorize(PERMISSIONS.ROLES_MANAGE), listQPeople
 router.get('/qpeople-mappings/designations', authorize(PERMISSIONS.ROLES_MANAGE), listQPeopleDesignations);
 router.post('/qpeople-mappings', authorize(PERMISSIONS.ROLES_MANAGE), upsertQPeopleMapping);
 router.post('/qpeople-mappings/apply', authorize(PERMISSIONS.ROLES_MANAGE), applyQPeopleMappings);
+router.delete('/qpeople-mappings/reset-all', authorize(PERMISSIONS.ROLES_MANAGE), resetAllQPeopleMappings);
 router.delete('/qpeople-mappings/:id', authorize(PERMISSIONS.ROLES_MANAGE), deleteQPeopleMapping);
 
 // Notification rules (requires settings:manage)

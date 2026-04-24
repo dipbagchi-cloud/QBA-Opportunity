@@ -1,6 +1,6 @@
 # Q-CRM — Detailed Functional Implementation Reference
 
-> **Last Updated:** April 10, 2026  
+> **Last Updated:** April 24, 2026  
 > **Production:** https://qcrm.qbadvisory.com  
 > **Stack:** Next.js 15 (frontend) · Express.js + TypeScript (backend) · PostgreSQL + Prisma (database)
 
@@ -512,6 +512,18 @@ Supported trigger types: `stage_change`, `data_condition`, `approval`, `stalled_
 
 **File:** `backend/src/lib/notification-engine.ts`
 
+#### `evaluateOpportunityCreatedRules(ctx)`
+
+Called from `opportunities.controller.ts` when a new opportunity is created.
+
+**Logic:**
+1. Fetches all active rules with `triggerType: 'opportunity_created'`.
+2. Resolves To and CC recipient users by querying users whose roles match `recipientRoles` and `recipientRolesCc`.
+3. Renders templates with merge variables.
+4. For `in_app` channel: creates `Notification` records.
+5. For `email` channel: sends a single email with all To recipients + CC recipients.
+6. Merges calculated fields via `resolveCalculatedFields()`.
+
 #### `evaluateStageChangeRules(ctx)`
 
 Called from `opportunities.controller.ts` when a stage change occurs (fire-and-forget, doesn't block the HTTP response).
@@ -523,6 +535,7 @@ Called from `opportunities.controller.ts` when a stage change occurs (fire-and-f
 4. Renders `messageTemplate` with `{{variable}}` placeholders (opportunityTitle, previousStage, stageName, clientName, ownerName, etc.).
 5. For `in_app` channel: creates `Notification` record in database.
 6. For `email` channel: calls `sendNotificationEmail()` with the rule's `emailTemplateKey`.
+7. Merges in `resolveCalculatedFields()` for calc:xxx variables.
 
 #### `evaluateDataConditionRules(opportunity)`
 
@@ -540,6 +553,45 @@ Supported operators: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `contains`.
 Supported fields: `value`, `probability`, `stage`, `region`, `technology`, `client`, `ownerName`, `salesRepName`, `managerName`.
 
 All conditions must match (AND logic) for the rule to fire.
+
+#### `resolveCalculatedFields(opportunityId)`
+
+Fetches the opportunity with relations and computes 11 derived values:
+
+| Field | Description |
+|-------|-------------|
+| `calc:opportunityAge` | Days since created |
+| `calc:daysInStage` | Days since last stage change |
+| `calc:daysUntilClose` | Days until expected close |
+| `calc:formattedValue` | Currency-formatted value (e.g., "USD 1,500,000") |
+| `calc:weightedValue` | Value × probability / 100 |
+| `calc:stageProgress` | Stage order / total stages as percentage |
+| `calc:stageSLA` | "On Track" or "Overdue" based on stage SLA hours |
+| `calc:currentDate` | Today formatted |
+| `calc:currentTime` | Now with time |
+| `calc:expectedCloseFormatted` | Expected close date formatted |
+| `calc:createdDateFormatted` | Created date formatted |
+
+These are available as `{{calc:fieldName}}` in email templates and notification messages.
+
+#### Seeded Notification Rules
+
+10 default notification rules are seeded covering all email templates:
+
+| Rule | Template | Trigger | To Roles | CC Roles |
+|------|----------|---------|----------|----------|
+| New Opportunity → Admin & Manager | `opportunity_created` | Created | Admin, Manager | Sales |
+| Pipeline Saved → Owner | `pipeline_saved` | → Discovery | Sales | Admin |
+| Moved to Presales → Manager | `moved_to_presales` | → Qualification | Manager, Presales | Admin |
+| Presales Complete → Sales | `presales_submitted_back` | → Proposal | Sales | Manager |
+| Moved to Negotiation | `moved_to_sales` | → Negotiation | Sales, Manager | Admin |
+| Proposal Won → All Teams | `proposal_won` | → Closed Won | All roles | — |
+| Deal Lost | `proposal_lost` | → Closed Lost | Admin, Manager | Sales |
+| Proposal Lost | `proposal_lost` | → Proposal Lost | Admin, Manager | Sales |
+| Proposal Sent to Client | `sent_to_client` | Proposal → Negotiation | Admin, Manager, Sales | Presales |
+| Sent Back for Re-Estimation | `sent_back_to_reestimate` | Proposal → Qualification | Presales, Manager | Sales |
+
+Seed script: `backend/prisma/seed-notification-rules.ts`
 
 ### Notification API
 
@@ -597,17 +649,51 @@ Subject: "New Opportunity: {{opportunityTitle}} moved to {{stageName}}"
 Body: "<h2>Hi {{recipientName}}</h2><p>{{opportunityTitle}} for {{clientName}} has been moved to {{stageName}}...</p>"
 ```
 
-Available template variables: `opportunityTitle`, `opportunityId`, `clientName`, `stageName`, `previousStage`, `salesRepName`, `managerName`, `recipientName`, `recipientEmail`, `updatedBy`, `comment`.
+Available template variables include 23+ merge fields from the Merge Variables catalog, 11 calculated fields (`calc:xxx`), and user-defined custom formula fields (`custom:xxx`).
 
-### `sendNotificationEmail(eventKey, recipientEmail, recipientName, variables)`
+Template rendering uses regex `/\{\{([\w.:]+)\}\}/g` to support dotted keys like `calc:opportunityAge` and `custom:myField`.
+
+### `sendNotificationEmail(eventKey, recipientEmail, recipientName, variables, ccEmails?)`
 
 **Logic:**
-1. Checks if recipient has `muteNotification: true` → skips if muted.
-2. Looks up template by `eventKey` (e.g., `pipeline_saved`, `moved_to_presales`).
-3. If template not found or `isActive: false` → skips silently.
-4. Renders subject and body with `{{variable}}` replacement.
-5. Sends via Graph API or SMTP based on configuration.
-6. Returns `true`/`false`, never throws (fire-and-forget pattern).
+1. Normalises `recipientEmail` to array (supports bulk To) and optional `ccEmails` array.
+2. Checks `EMAIL_TEST_OVERRIDE` env var — if set, redirects all emails to test address.
+3. Checks each recipient's `muteNotification` flag — drops muted recipients.
+4. Looks up template by `eventKey` (e.g., `pipeline_saved`, `moved_to_presales`).
+5. If template not found or `isActive: false` → skips silently.
+6. Resolves custom calculated fields from template `metadata.customCalcFields` using `evaluateCustomFormula()`.
+7. **Auto-prepends "Dear [To recipient names],"** — looks up actual user names from DB for each To address. Not editable in templates.
+8. Renders subject and body with `{{variable}}` replacement.
+9. Sends via Graph API or SMTP based on configuration (Graph API supports CC via `ccRecipients`).
+10. Returns `true`/`false`, never throws (fire-and-forget pattern).
+
+### Custom Formula Evaluator
+
+**`evaluateCustomFormula(formula, variables)`** — evaluates user-defined formulas stored in template metadata.
+
+Supported functions: `IF(condition, trueVal, falseVal)`, `CONCAT(a, b, ...)`, `UPPER(text)`, `LOWER(text)`, `ROUND(number, decimals)`, `FORMAT_NUMBER(number)`.
+
+Examples:
+- `IF(probability > 75, "Hot Lead", "Standard")` → evaluates against template variables
+- `CONCAT(clientName, " - ", opportunityTitle)` → string concatenation
+- `FORMAT_NUMBER(value)` → locale-formatted number
+
+### WYSIWYG Email Template Builder
+
+**File:** `agentic-crm/components/email-templates/EmailTemplateBuilder.tsx`
+
+Rich text editor for designing email templates with:
+
+1. **Formatting Toolbar**: Bold, Italic, Underline, H1/H2/H3/H4, Bullet/Numbered lists, Left/Center/Right alignment, Text color, Background color, Font size, Horizontal rule.
+2. **View Opportunity CTA Button**: Inserts styled deep-link button using `{{opportunityLink}}` variable.
+3. **Merge Field Catalog**: Accordion with search across 15+ tables:
+   - Merge Variables (23 fields including opportunityLink)
+   - Calculated Fields (11 `calc:xxx` fields)
+   - 13 database tables (Opportunity, Client, User, Stage, etc.)
+   - Custom Formulas (user-defined, stored in template metadata)
+4. **Custom Formula Builder**: Define formulas with name, formula expression, and description. Evaluated server-side at send time.
+5. **Live Preview**: Replaces merge tags with sample data. Green badges = resolved, amber = unresolved. Preview shows "Dear To recipients (auto)" indicator.
+6. **Template Metadata**: Custom calc fields stored in `EmailTemplate.metadata` (Json?) column.
 
 ### Admin Endpoints
 
@@ -615,7 +701,8 @@ Available template variables: `opportunityTitle`, `opportunityId`, `clientName`,
 |----------|--------|-------------|
 | `/api/admin/email-templates` | GET | List all templates |
 | `/api/admin/email-templates/:id` | GET | Get single template |
-| `/api/admin/email-templates/:id` | PATCH | Update subject/body/isActive |
+| `/api/admin/email-templates` | POST | Create template (with metadata) |
+| `/api/admin/email-templates/:id` | PATCH | Update subject/body/isActive/metadata |
 | `/api/admin/email-templates/test` | POST | Send test email with mock data |
 
 ---
@@ -866,6 +953,40 @@ Returns `filters` object with distinct values for each filter dropdown (departme
 | `/api/admin/roles/:id` | DELETE | Delete role (blocked if system role or has users) |
 | `/api/admin/roles/:id/users` | POST | Assign user to role |
 | `/api/admin/roles/:id/users/:userId` | DELETE | Remove user from role |
+| `/api/admin/roles/reset-defaults` | POST | Reset all system roles to factory-default permissions |
+
+#### Role-Permission Matrix UI
+
+The Roles tab displays a **tabular matrix** view:
+- **Rows** = roles (Admin, Manager, Sales, Presales, Read-Only, Management, + custom)
+- **Columns** = permission categories (Dashboard, Pipeline, Presales, Estimation, Sales, Approvals, Contacts, Analytics, Agents/AI, GOM, Leads, Resources, Settings, Administration)
+- **Cells** = checkboxes for each permission — toggle directly in-place
+- First column = wildcard (*) checkbox for full admin access
+- Changes are buffered client-side; "Save Changes" button batch-saves all edits
+- **Reset Defaults** button resets all 6 system roles to factory permissions with confirmation
+- **User management**: expand any role row to see/add/remove assigned users
+
+#### Default System Role Permissions
+
+| Role | Key Permissions |
+|------|----------------|
+| Admin | `*` (wildcard — everything) |
+| Manager | Dashboard, Pipeline R/W, Presales R/W, Sales R/W, Estimation, Approvals, Contacts R/W, Analytics R/W, Agents, GOM, Leads, Resources, Settings (view), Audit Logs |
+| Sales | Dashboard, Pipeline R/W, Presales (view), Sales R/W, Contacts R/W, Analytics (view), Agents, GOM, Leads, Settings (view) |
+| Presales | Dashboard, Pipeline (view), Presales R/W, Estimation, Sales (view), Contacts (view), Analytics (view), Agents, GOM, Settings (view) |
+| Read-Only | Dashboard, Pipeline (view), Presales (view), Sales (view), Contacts (view), Analytics (view), GOM, Settings (view) |
+| Management | Dashboard, Pipeline (view), Presales (view), Sales (view), Contacts (view), Analytics R/W, Approvals, Audit Logs, GOM, Settings (view) |
+
+### QPeople Role Mapping
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/admin/qpeople-mappings` | GET | List all mappings |
+| `/api/admin/qpeople-mappings/designations` | GET | List all QPeople designations |
+| `/api/admin/qpeople-mappings` | POST | Create/update mapping |
+| `/api/admin/qpeople-mappings/apply` | POST | Apply mappings to all synced users |
+| `/api/admin/qpeople-mappings/:id` | DELETE | Delete single mapping (resets affected users to Read-Only) |
+| `/api/admin/qpeople-mappings/reset-all` | DELETE | Delete ALL mappings and reset all QPeople-synced users to Read-Only |
 
 ### System Configuration
 
@@ -880,14 +1001,16 @@ Admin can manage:
 
 Tabbed settings page:
 1. **Users Tab**: User table with search, column filters, sort, pagination. Inline toggle for active/mute. Edit modal for roles/details.
-2. **Roles Tab**: Role cards showing permissions and assigned users. Create/edit role with permission checkboxes.
-3. **Notification Rules Tab**: Create/edit/delete notification rules with trigger type, stage conditions, recipient roles, channels.
-4. **Email Templates Tab**: View and edit templates, send test emails.
-5. **Master Data Tab**: Manage regions, technologies, pricing models, project types, clients.
-6. **Rate Cards Tab**: View/edit cost card table.
-7. **Budget Assumptions Tab**: Configure GOM calculation parameters.
-8. **Auth Settings Tab**: Switch between SSO/local/hybrid modes.
-9. **Audit Logs Tab**: Searchable, filterable audit log viewer.
+2. **Roles Tab**: Role-permission matrix table with inline checkbox editing, wildcard toggle, reset defaults, and user management.
+3. **QPeople Role Mapping Tab**: Map QPeople designations to CRM roles. Table with mapped/unmapped sections, Apply All and Reset All buttons.
+4. **Notification Rules Tab**: Create/edit/delete notification rules with trigger type, stage conditions, recipient roles, channels.
+5. **Email Templates Tab**: WYSIWYG template builder with merge field catalog, custom formulas, live preview, and test send.
+6. **Master Data Tab**: Manage regions, technologies, pricing models, project types, clients.
+7. **Rate Cards Tab**: View/edit cost card table.
+8. **Budget Assumptions Tab**: Configure GOM calculation parameters.
+9. **Auth Settings Tab**: Switch between SSO/local/hybrid modes.
+10. **Audit Logs Tab**: Searchable, filterable audit log viewer.
+11. **SOW Admin Tab**: SOW template and section rule management.
 
 ---
 
