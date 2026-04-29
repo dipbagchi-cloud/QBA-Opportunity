@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
-import { Plus, Trash2, Search } from "lucide-react";
+import { Plus, Trash2, Search, Edit2, X } from "lucide-react";
 import { fetchRateCards } from "@/lib/rate-cards";
 import { useOpportunityEstimation, ResourceRow } from "../context/OpportunityEstimationContext";
 import { calculateRateCard } from "@/lib/gom-calculator";
@@ -38,6 +38,7 @@ export function ResourceAssignmentTab() {
     const [isAdding, setIsAdding] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
     const [rateCards, setRateCards] = useState<any[]>([]);
+    const [editingResource, setEditingResource] = useState<ResourceRow | null>(null);
 
     useEffect(() => {
         fetchRateCards().then(setRateCards).catch(() => setRateCards([]));
@@ -369,7 +370,14 @@ export function ResourceAssignmentTab() {
                                         </td>
                                     ))}
                                     {!readOnly && (
-                                        <td className="p-2 text-center">
+                                        <td className="p-2 text-center flex items-center justify-center gap-2">
+                                            <button
+                                                onClick={() => setEditingResource(row)}
+                                                className="text-slate-400 hover:text-blue-600 transition-colors p-1"
+                                                title="Edit Resource"
+                                            >
+                                                <Edit2 className="w-4 h-4" />
+                                            </button>
                                             <button
                                                 onClick={() => removeRow(row.id)}
                                                 className="text-slate-400 hover:text-red-600 transition-colors p-1"
@@ -418,6 +426,78 @@ export function ResourceAssignmentTab() {
                     </div>
                 </div>
             </div>
+
+            {/* Edit Resource Modal */}
+            {editingResource && (
+                <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-lg shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                        <div className="flex items-center justify-between p-4 border-b border-slate-100 bg-slate-50">
+                            <h3 className="font-bold text-slate-800">Edit Resource Details</h3>
+                            <button onClick={() => setEditingResource(null)} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-200/50 transition-colors">
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+                        <div className="p-5 space-y-4">
+                            <div className="space-y-1.5">
+                                <label className="text-sm font-semibold text-slate-700">Role / Skill</label>
+                                <input
+                                    type="text"
+                                    value={editingResource.skill || editingResource.role || ''}
+                                    onChange={(e) => setEditingResource({ ...editingResource, skill: e.target.value, role: e.target.value })}
+                                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                />
+                            </div>
+                            <div className="space-y-1.5">
+                                <label className="text-sm font-semibold text-slate-700">Experience Band</label>
+                                <input
+                                    type="text"
+                                    value={editingResource.experienceBand || ''}
+                                    onChange={(e) => setEditingResource({ ...editingResource, experienceBand: e.target.value })}
+                                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                />
+                            </div>
+                            <div className="space-y-1.5">
+                                <label className="text-sm font-semibold text-slate-700">Annual CTC (INR)</label>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    value={editingResource.annualCTC || 0}
+                                    onChange={(e) => {
+                                        const ctc = Number(e.target.value) || 0;
+                                        const rateCardResult = calculateRateCard({
+                                            annualCtc: ctc,
+                                            monthsPerYear: 12,
+                                            ...assumptions
+                                        });
+                                        const dailyRate = rateCardResult.dailyCost * (1 + (markupPercent / 100));
+                                        setEditingResource({ ...editingResource, annualCTC: ctc, dailyCost: rateCardResult.dailyCost, dailyRate });
+                                    }}
+                                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                />
+                                <p className="text-xs text-slate-500">Daily Cost & Rate will be auto-calculated.</p>
+                            </div>
+                        </div>
+                        <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-2">
+                            <button
+                                onClick={() => setEditingResource(null)}
+                                className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-800 bg-white border border-slate-300 rounded-md shadow-sm hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-2"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setResources(resources.map(r => r.id === editingResource.id ? editingResource : r));
+                                    setEditingResource(null);
+                                }}
+                                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                            >
+                                Save Changes
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
         </div>
     );
 }

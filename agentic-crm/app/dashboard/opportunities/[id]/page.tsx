@@ -135,8 +135,10 @@ function formatDuration(value: string, unit: string): string {
 
 // Save button that uses the estimation context (must be inside the provider)
 function PresalesSaveButton() {
-    const { saveEstimation, isSaving } = useOpportunityEstimation();
+    const { saveEstimation, isSaving, readOnly } = useOpportunityEstimation();
     const { toast } = useToast();
+
+    if (readOnly) return null;
 
     const handleSave = async () => {
         try {
@@ -449,8 +451,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     if (budgetData.minGomPercent !== undefined) {
                         setMinGomPercent(budgetData.minGomPercent);
                     }
-                    if (budgetData.gomAutoApprovePercent !== undefined) {
-                        setGomAutoApprovePercent(budgetData.gomAutoApprovePercent);
+                    if (budgetData.gomAutoApprovePercent !== undefined || budgetData.marginPercent !== undefined) {
+                        setGomAutoApprovePercent(budgetData.gomAutoApprovePercent || budgetData.marginPercent || 35);
                     }
                 }
             } catch (err) {
@@ -1046,7 +1048,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const getBadgeText = () => {
         if (isStalled) return 'On Hold';
         if (isLost) return currentStageName === 'Proposal Lost' ? 'Proposal Lost' : 'Closed Lost';
-        if (detailedStatus === 'Sent for Re-estimate') return 'Sent for Re-estimate';
+        if (detailedStatus === 'Sent for Re-estimate' || detailedStatus === 'Re-estimation') return 'Sent for Re-estimate';
         if (detailedStatus === 'Estimation Submitted') return 'Estimation Submitted';
         if (opportunityStage === 3) return 'SOW Approved';
         if (opportunityStage >= 2) return currentStageName === 'Negotiation' ? 'Under Negotiation' : 'Proposal Submitted';
@@ -1056,7 +1058,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const getBadgeClass = () => {
         if (isStalled) return 'bg-amber-100 text-amber-800 border-amber-300';
         if (isLost) return 'bg-red-50 text-red-700 border-red-200';
-        if (detailedStatus === 'Sent for Re-estimate') return 'bg-rose-50 text-rose-700 border-rose-200';
+        if (detailedStatus === 'Sent for Re-estimate' || detailedStatus === 'Re-estimation') return 'bg-rose-50 text-rose-700 border-rose-200';
         if (detailedStatus === 'Estimation Submitted') return 'bg-blue-50 text-blue-700 border-blue-200';
         if (opportunityStage === 3) return 'bg-emerald-50 text-emerald-700 border-emerald-200';
         if (opportunityStage >= 2) return 'bg-amber-50 text-amber-700 border-amber-200';
@@ -1103,7 +1105,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     {opportunityStage === 0 && !isLost && (
                         <button
                             onClick={() => setShowPresalesModal(true)}
-                            className="px-4 py-2 bg-blue-600 text-white rounded-md font-medium hover:bg-blue-700"
+                            disabled={isStalled}
+                            className={`px-4 py-2 text-white rounded-md font-medium ${isStalled ? 'bg-slate-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
                         >
                             Move to Presales
                         </button>
@@ -1112,15 +1115,15 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                         <>
                             <button
                                 onClick={() => { setLostModalType('Proposal Lost'); setShowLostModal(true); }}
-                                disabled={isSaving}
+                                disabled={isSaving || isStalled}
                                 className="px-4 py-2 bg-white border border-rose-300 text-rose-600 rounded-md font-medium hover:bg-rose-50 disabled:opacity-50"
                             >
                                 <span className="flex items-center gap-1.5"><XCircle className="w-4 h-4" /> Proposal Lost</span>
                             </button>
                             <button
                                 onClick={handleMoveToSales}
-                                disabled={isSaving}
-                                className={`px-4 py-2 rounded-md font-medium disabled:opacity-50 ${gomApproved ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-slate-300 text-slate-600 cursor-not-allowed'}`}
+                                disabled={isSaving || isStalled || !gomApproved}
+                                className={`px-4 py-2 rounded-md font-medium disabled:opacity-50 ${gomApproved && !isStalled ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-slate-300 text-slate-600 cursor-not-allowed'}`}
                                 title={!gomApproved ? 'GOM must be approved first (see GOM Calculator tab)' : ''}
                             >
                                 {isSaving ? 'Moving...' : 'Move to Sales'}
@@ -1131,21 +1134,21 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                         <>
                             <button
                                 onClick={() => { setLostModalType('Proposal Lost'); setShowLostModal(true); }}
-                                disabled={isSaving}
+                                disabled={isSaving || isStalled}
                                 className="px-4 py-2 bg-white border border-rose-300 text-rose-600 rounded-md font-medium hover:bg-rose-50 disabled:opacity-50"
                             >
                                 <span className="flex items-center gap-1.5"><XCircle className="w-4 h-4" /> Proposal Lost</span>
                             </button>
                             <button
                                 onClick={handleSendBackForReestimate}
-                                disabled={isSaving}
+                                disabled={isSaving || isStalled}
                                 className="px-4 py-2 bg-white border border-amber-300 text-amber-700 rounded-md font-medium hover:bg-amber-50 disabled:opacity-50"
                             >
                                 {isSaving ? 'Sending...' : 'Send Back for Re-estimate'}
                             </button>
                             <button
                                 onClick={handleProposalSent}
-                                disabled={isSaving}
+                                disabled={isSaving || isStalled}
                                 className="px-4 py-2 bg-orange-600 text-white rounded-md font-medium hover:bg-orange-700 disabled:opacity-50"
                             >
                                 {isSaving ? 'Sending...' : 'Proposal Sent'}
@@ -1156,21 +1159,21 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                         <>
                             <button
                                 onClick={() => { setLostModalType('Closed Lost'); setShowLostModal(true); }}
-                                disabled={isSaving}
+                                disabled={isSaving || isStalled}
                                 className="px-4 py-2 bg-white border border-red-300 text-red-600 rounded-md font-medium hover:bg-red-50 disabled:opacity-50"
                             >
                                 <span className="flex items-center gap-1.5"><XCircle className="w-4 h-4" /> Mark as Lost</span>
                             </button>
                             <button
                                 onClick={handleSendBackForReestimate}
-                                disabled={isSaving}
+                                disabled={isSaving || isStalled}
                                 className="px-4 py-2 bg-white border border-amber-300 text-amber-700 rounded-md font-medium hover:bg-amber-50 disabled:opacity-50"
                             >
                                 {isSaving ? 'Sending...' : 'Send Back for Re-estimate'}
                             </button>
                             <button
                                 onClick={handleMoveToProject}
-                                disabled={isSaving}
+                                disabled={isSaving || isStalled}
                                 className="px-4 py-2 bg-emerald-600 text-white rounded-md font-medium hover:bg-emerald-700 disabled:opacity-50"
                             >
                                 {isSaving ? 'Converting...' : 'Move to Project'}
@@ -1194,7 +1197,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             </div>
 
             {/* Detailed Status Banner */}
-            {detailedStatus === 'Sent for Re-estimate' && (
+            {(detailedStatus === 'Sent for Re-estimate' || detailedStatus === 'Re-estimation') && (
                 <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-amber-800">
                     <RefreshCw className="w-4 h-4 flex-shrink-0 text-amber-500" />
                     <div>
@@ -1274,6 +1277,11 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                         {!isPipelineEditable && !isLost && (
                             <span className="px-3 py-1 rounded-full bg-slate-100 text-slate-500 text-xs font-semibold border border-slate-200">
                                 Read Only
+                            </span>
+                        )}
+                        {(isStalled || detailedStatus === 'On Hold') && (
+                            <span className="px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-semibold border border-amber-300">
+                                On Hold
                             </span>
                         )}
                         {isLost && (
@@ -1741,6 +1749,10 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     <div>
                                         <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Pricing Model</label>
                                         <div className="font-semibold text-slate-800">{formData.pricingModel}</div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Duration</label>
+                                        <div className="font-semibold text-slate-800">{formData.duration ? `${formData.duration} ${formData.durationUnit || 'months'}` : "N/A"}</div>
                                     </div>
                                     {formData.expectedDayRate && (
                                     <div>
@@ -2231,7 +2243,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             </div>
                             <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
                                 <p className="text-xs text-slate-500 mb-1">Duration</p>
-                                <p className="font-semibold text-slate-800">{formData.duration || "N/A"}</p>
+                                <p className="font-semibold text-slate-800">{formData.duration ? `${formData.duration} ${formData.durationUnit || 'months'}` : "N/A"}</p>
                             </div>
                             <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
                                 <p className="text-xs text-slate-500 mb-1">Day Rate</p>
@@ -2330,7 +2342,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     </div>
                                     <div>
                                         <span className="text-xs text-slate-500 uppercase tracking-wide">Duration</span>
-                                        <p className="font-medium text-slate-800 mt-1">{formData.duration || "N/A"}</p>
+                                        <p className="font-medium text-slate-800 mt-1">{formData.duration ? `${formData.duration} ${formData.durationUnit || 'months'}` : "N/A"}</p>
                                     </div>
                                     <div>
                                         <span className="text-xs text-slate-500 uppercase tracking-wide">Expected Day Rate</span>
@@ -2403,27 +2415,45 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
                                 {/* GOM Summary */}
                                 <h4 className="text-xs font-semibold text-slate-700 mb-2 pt-3 border-t border-slate-100">GOM Summary</h4>
-                                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                                    <div className="bg-blue-50 rounded-lg p-3 border border-blue-200">
-                                        <p className="text-xs text-blue-600 mb-1">Revenue</p>
-                                        <p className="text-sm font-bold text-blue-700">
-                                            {cSym}{getPresalesConverted(rawPresalesData?.gomSummary?.totalRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</p>
-                                    </div>
-                                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
-                                        <p className="text-xs text-slate-500 mb-1">Total Cost</p>
-                                        <p className="text-sm font-bold text-slate-700">
-                                            {cSym}{getPresalesConverted(rawPresalesData?.gomSummary?.totalCost || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</p>
-                                    </div>
-                                    <div className={`rounded-lg p-3 border ${(rawPresalesData?.gomSummary?.gomPercent || 0) >= 20 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
-                                        <p className="text-xs text-slate-500 mb-1">GOM %</p>
-                                        <p className={`text-sm font-bold ${(rawPresalesData?.gomSummary?.gomPercent || 0) >= 20 ? 'text-green-700' : 'text-red-700'}`}>{(rawPresalesData?.gomSummary?.gomPercent || 0).toFixed(1)}%</p>
-                                    </div>
-                                    <div className="bg-purple-50 rounded-lg p-3 border border-purple-200">
-                                        <p className="text-xs text-purple-600 mb-1">Profit</p>
-                                        <p className="text-sm font-bold text-purple-700">
-                                            {cSym}{getPresalesConverted(rawPresalesData?.gomSummary?.profit || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</p>
-                                    </div>
-                                </div>
+                                {(() => {
+                                    const pd = rawPresalesData || {};
+                                    const baseCost = pd.gomSummary?.totalCost || 0;
+                                    const markup = pd.markupPercent || 0;
+                                    const commPercent = pd.salesCommissionPercent || 0;
+                                    const preSalesPercent = pd.preSalesCostPercent || 0;
+                                    
+                                    const rev = pd.finalRevenue !== undefined ? pd.finalRevenue : (pd.adjustedEstimatedValue > 0 ? pd.adjustedEstimatedValue : baseCost * (1 + markup / 100));
+                                    const comm = rev * (commPercent / 100);
+                                    const pre = rev * (preSalesPercent / 100);
+                                    
+                                    const totalC = pd.finalTotalCost !== undefined ? pd.finalTotalCost : (baseCost + comm + pre);
+                                    const gom = pd.finalGomPercent !== undefined ? pd.finalGomPercent : (rev > 0 ? ((rev - totalC) / rev) * 100 : 0);
+                                    const profit = pd.finalProfit !== undefined ? pd.finalProfit : (rev - totalC);
+
+                                    return (
+                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                            <div className="bg-blue-50 rounded-lg p-3 border border-blue-200">
+                                                <p className="text-xs text-blue-600 mb-1">Revenue</p>
+                                                <p className="text-sm font-bold text-blue-700">
+                                                    {cSym}{getPresalesConverted(rev).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</p>
+                                            </div>
+                                            <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
+                                                <p className="text-xs text-slate-500 mb-1">Total Cost</p>
+                                                <p className="text-sm font-bold text-slate-700">
+                                                    {cSym}{getPresalesConverted(totalC).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</p>
+                                            </div>
+                                            <div className={`rounded-lg p-3 border ${gom >= 20 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                                                <p className="text-xs text-slate-500 mb-1">GOM %</p>
+                                                <p className={`text-sm font-bold ${gom >= 20 ? 'text-green-700' : 'text-red-700'}`}>{gom.toFixed(1)}%</p>
+                                            </div>
+                                            <div className="bg-purple-50 rounded-lg p-3 border border-purple-200">
+                                                <p className="text-xs text-purple-600 mb-1">Profit</p>
+                                                <p className="text-sm font-bold text-purple-700">
+                                                    {cSym}{getPresalesConverted(profit).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</p>
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
                             </div>
                         )}
                     </div>

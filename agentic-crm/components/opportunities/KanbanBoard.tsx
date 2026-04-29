@@ -89,7 +89,7 @@ export default function KanbanBoard() {
                                                         {...provided.draggableProps}
                                                         {...dragHandleProps(provided.dragHandleProps)}
                                                         className={`bg-white p-2.5 rounded-md shadow-sm border group hover:shadow-md transition-all ${snapshot.isDragging ? 'shadow-lg rotate-2 ring-2 ring-indigo-500/20 z-50' : ''
-                                                            } ${opp.isStalled ? 'border-amber-300 bg-amber-50/30' : 'border-slate-200'}
+                                                            } ${(opp.status === 'stalled' || opp.detailedStatus === 'On Hold') ? 'border-amber-300 bg-amber-50/30' : 'border-slate-200'}
                                                             `}
                                                         style={provided.draggableProps.style}
                                                         title={`${opp.name}\nClient: ${opp.client}\nOwner: ${opp.owner || 'N/A'}\nStage: ${stage.title}\nValue: ${(opp.value || 0).toLocaleString()}\nProbability: ${opp.probability}%\nDays in Stage: ${opp.daysInStage || 0}\nHealth: ${opp.healthScore ?? 'N/A'}/100\nStatus: ${opp.status}\nSales Rep: ${opp.salesRepName || 'N/A'}\nManager: ${opp.managerName || 'N/A'}\nCreated: ${opp.createdAt || 'N/A'}\nExpected Close: ${opp.expectedCloseDate || 'N/A'}\nStart Date: ${opp.tentativeStartDate || 'N/A'}\nEnd Date: ${opp.tentativeEndDate || 'N/A'}`}
@@ -100,10 +100,10 @@ export default function KanbanBoard() {
                                                                 {opp.name}
                                                             </Link>
                                                             <div className="flex items-center gap-1 flex-shrink-0">
-                                                                {opp.isStalled && (
-                                                                    <div className="text-[10px] font-bold bg-amber-100 text-amber-600 px-1 rounded uppercase tracking-wider flex items-center gap-0.5" title="Stalled: No movement for >30 days">
+                                                                {(opp.status === 'stalled' || opp.detailedStatus === 'On Hold') && (
+                                                                    <div className="text-[10px] font-bold bg-amber-100 text-amber-600 px-1 rounded uppercase tracking-wider flex items-center gap-0.5" title="On Hold">
                                                                         <Clock className="w-3 h-3" />
-                                                                        Stalled
+                                                                        On Hold
                                                                     </div>
                                                                 )}
                                                                 {(opp.status === 'at-risk' || opp.status === 'critical') && (

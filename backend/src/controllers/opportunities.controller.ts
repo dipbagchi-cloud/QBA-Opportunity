@@ -707,7 +707,7 @@ export async function approveGom(req: Request, res: Response) {
         // Get auto-approve threshold from budget assumptions
         const config = await prisma.systemConfig.findUnique({ where: { key: 'budget_assumptions' } });
         const assumptions = (config?.value as any) || {};
-        const autoApproveThreshold = assumptions.gomAutoApprovePercent || 0;
+        const autoApproveThreshold = assumptions.gomAutoApprovePercent || assumptions.marginPercent || 35;
 
         // If GOM% >= threshold (or threshold not set), auto-approve directly
         if (autoApproveThreshold <= 0 || (gomPercent !== undefined && gomPercent >= autoApproveThreshold)) {

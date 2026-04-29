@@ -42,7 +42,7 @@ router.post('/', authorizeAny(PERMISSIONS.PIPELINE_WRITE, PERMISSIONS.PRESALES_W
 router.get('/:id', authorizeAny(PERMISSIONS.PIPELINE_VIEW, PERMISSIONS.PRESALES_VIEW, PERMISSIONS.SALES_VIEW), getOpportunity);
 router.patch('/:id', authorizeAny(PERMISSIONS.PIPELINE_WRITE, PERMISSIONS.PRESALES_WRITE, PERMISSIONS.SALES_WRITE), updateOpportunity);
 router.post('/:id/convert', authorize(PERMISSIONS.SALES_WRITE), convertOpportunity);
-router.patch('/:id/approve-gom', authorize(PERMISSIONS.PRESALES_WRITE), approveGom);
+router.patch('/:id/approve-gom', authorizeAny(PERMISSIONS.PRESALES_WRITE, PERMISSIONS.SALES_WRITE, PERMISSIONS.PIPELINE_WRITE), approveGom);
 router.get('/:id/gom-approval-status', authorizeAny(PERMISSIONS.PIPELINE_VIEW, PERMISSIONS.PRESALES_VIEW, PERMISSIONS.SALES_VIEW), getGomApprovalStatus);
 router.patch('/:id/review-gom-approval', authorize(PERMISSIONS.PRESALES_WRITE), reviewGomApproval);
 router.get('/:id/comments', authorizeAny(PERMISSIONS.PIPELINE_VIEW, PERMISSIONS.PRESALES_VIEW, PERMISSIONS.SALES_VIEW), listComments);

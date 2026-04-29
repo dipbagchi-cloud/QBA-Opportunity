@@ -17,10 +17,15 @@ export async function listNotificationRules(req: Request, res: Response) {
 // POST /api/admin/notification-rules
 export async function createNotificationRule(req: Request, res: Response) {
   try {
-    const { name, description, triggerType, fromStage, toStage, conditions, recipientRoles, recipientRolesCc, channels, emailTemplateKey, titleTemplate, messageTemplate } = req.body;
+    const { name, description, ruleType, triggerType, fromStage, toStage, conditions, recipientRoles, recipientRolesCc, recipientUsers, channels, emailTemplateKey, titleTemplate, messageTemplate } = req.body;
 
     if (!name || !triggerType || !recipientRoles || !channels) {
       return res.status(400).json({ error: 'name, triggerType, recipientRoles, and channels are required' });
+    }
+
+    const validRuleTypes = ['event_driven', 'time_driven', 'time_driven_mis'];
+    if (ruleType && !validRuleTypes.includes(ruleType)) {
+      return res.status(400).json({ error: `ruleType must be one of: ${validRuleTypes.join(', ')}` });
     }
 
     const validTriggers = ['stage_change', 'data_condition', 'approval', 'stalled_deal', 'health_drop', 'opportunity_created'];
@@ -32,12 +37,14 @@ export async function createNotificationRule(req: Request, res: Response) {
       data: {
         name,
         description: description || null,
+        ruleType: ruleType || 'event_driven',
         triggerType,
         fromStage: fromStage || null,
         toStage: toStage || null,
         conditions: conditions || null,
         recipientRoles,
         recipientRolesCc: recipientRolesCc || null,
+        recipientUsers: recipientUsers || null,
         channels,
         emailTemplateKey: emailTemplateKey || null,
         titleTemplate: titleTemplate || null,
@@ -56,7 +63,7 @@ export async function createNotificationRule(req: Request, res: Response) {
 export async function updateNotificationRule(req: Request, res: Response) {
   try {
     const { id } = req.params;
-    const { name, description, isActive, triggerType, fromStage, toStage, conditions, recipientRoles, recipientRolesCc, channels, emailTemplateKey, titleTemplate, messageTemplate } = req.body;
+    const { name, description, isActive, ruleType, triggerType, fromStage, toStage, conditions, recipientRoles, recipientRolesCc, recipientUsers, channels, emailTemplateKey, titleTemplate, messageTemplate } = req.body;
 
     const existing = await prisma.notificationRule.findUnique({ where: { id } });
     if (!existing) {
@@ -69,12 +76,14 @@ export async function updateNotificationRule(req: Request, res: Response) {
         ...(name !== undefined && { name }),
         ...(description !== undefined && { description }),
         ...(isActive !== undefined && { isActive }),
+        ...(ruleType !== undefined && { ruleType }),
         ...(triggerType !== undefined && { triggerType }),
         ...(fromStage !== undefined && { fromStage }),
         ...(toStage !== undefined && { toStage }),
         ...(conditions !== undefined && { conditions }),
         ...(recipientRoles !== undefined && { recipientRoles }),
         ...(recipientRolesCc !== undefined && { recipientRolesCc }),
+        ...(recipientUsers !== undefined && { recipientUsers }),
         ...(channels !== undefined && { channels }),
         ...(emailTemplateKey !== undefined && { emailTemplateKey }),
         ...(titleTemplate !== undefined && { titleTemplate }),

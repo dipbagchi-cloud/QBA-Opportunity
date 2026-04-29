@@ -186,7 +186,8 @@ export default function OpportunitiesPage() {
     const endRecord = Math.min(currentPage * limit, total);
 
     return (
-        <div className="space-y-4 animate-in fade-in duration-500 min-h-screen pb-8">
+        <div className="flex flex-col h-[calc(100vh-80px)] animate-in fade-in duration-500 overflow-hidden">
+            <div className="flex-none space-y-4 pb-4">
             {/* Page Header */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
                 <div>
@@ -391,13 +392,14 @@ export default function OpportunitiesPage() {
                     </button>
                 </div>
             )}
+            </div>
 
             {/* Opportunities View */}
             {viewMode === 'list' ? (
-                <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-visible">
-                    <div className="overflow-visible">
-                        <table className="w-full">
-                            <thead className="bg-slate-50 border-b border-slate-200">
+                <div className="flex-1 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col min-h-0">
+                    <div className="flex-1 overflow-auto">
+                        <table className="w-full relative">
+                            <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-20 shadow-sm">
                                 <tr>
                                     {[['name','Opportunity Name'],['stage','Stage'],['value','Estimated value'],['quote','Quote'],['probability','Prob.'],['salesRep','Sales Rep'],['manager','Manager'],['createdAt','Created'],['startDate','Start Date'],['endDate','Est. End'],['closeDate','Close Date'],['lastActivity','Last Activity']].map(([key, label]) => (
                                         <th key={key} className="text-left py-2.5 px-4 font-semibold text-slate-600 text-xs cursor-pointer select-none hover:bg-slate-100" onClick={() => handleSort(key)}>
@@ -437,21 +439,25 @@ export default function OpportunitiesPage() {
                                             </td>
                                             <td className="py-2.5 px-4">
                                                 <div className="flex flex-col gap-1 items-start">
-                                                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border
-                                                ${opp.stage === 'Negotiation' ? 'bg-purple-50 text-purple-700 border-purple-200' :
-                                                            opp.stage === 'Closed Won' || opp.stage === 'Commit' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
-                                                            opp.stage === 'Closed Lost' ? 'bg-red-50 text-red-700 border-red-200' :
-                                                            opp.stage === 'Proposal Lost' ? 'bg-rose-50 text-rose-700 border-rose-200' :
-                                                            opp.stage === 'Proposal' ? 'bg-pink-50 text-pink-700 border-pink-200' :
-                                                                'bg-slate-100 text-slate-700 border-slate-200'}
-                                             `}>
+                                                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${
+                                                        opp.stage === 'Negotiation' ? 'bg-purple-50 text-purple-700 border-purple-200' :
+                                                        opp.stage === 'Closed Won' || opp.stage === 'Commit' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                                                        opp.stage === 'Closed Lost' ? 'bg-red-50 text-red-700 border-red-200' :
+                                                        opp.stage === 'Proposal Lost' ? 'bg-rose-50 text-rose-700 border-rose-200' :
+                                                        opp.stage === 'Proposal' ? 'bg-pink-50 text-pink-700 border-pink-200' :
+                                                        'bg-slate-100 text-slate-700 border-slate-200'
+                                                    }`}>
                                                         {opp.stage}
                                                     </span>
-                                                    {opp.detailedStatus && !['Lost', 'Won', 'Open'].includes(opp.detailedStatus) && (
+                                                    {(opp.status === 'stalled' || opp.detailedStatus === 'On Hold') ? (
+                                                        <span className="text-[10px] text-amber-800 font-medium px-1.5 py-0.5 bg-amber-100 rounded-md border border-amber-300">
+                                                            On Hold
+                                                        </span>
+                                                    ) : opp.detailedStatus && !['Lost', 'Won', 'Open'].includes(opp.detailedStatus) ? (
                                                         <span className="text-[10px] text-slate-500 font-medium px-1 bg-slate-100 rounded border border-slate-200">
                                                             {opp.detailedStatus}
                                                         </span>
-                                                    )}
+                                                    ) : null}
                                                 </div>
                                             </td>
                                             <td className="py-2.5 px-4">

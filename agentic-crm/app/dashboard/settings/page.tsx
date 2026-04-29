@@ -4023,12 +4023,14 @@ interface NotifRule {
     conditions: any[] | null;
     recipientRoles: string[];
     recipientRolesCc: string[] | null;
+    recipientUsers: Record<string, string[]> | null;
     channels: string[];
     emailTemplateKey: string | null;
     titleTemplate: string | null;
     messageTemplate: string | null;
     createdAt: string;
     updatedAt: string;
+    ruleType?: string;
 }
 
 interface ConditionRow {
@@ -4040,6 +4042,7 @@ interface ConditionRow {
 function NotificationRulesTab() {
     const [rules, setRules] = useState<NotifRule[]>([]);
     const [roles, setRoles] = useState<{ id: string; name: string }[]>([]);
+    const [users, setUsers] = useState<{ id: string; name: string; roles?: { name: string }[] }[]>([]);
     const [emailTemplates, setEmailTemplates] = useState<{ id: string; eventKey: string; name: string }[]>([]);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -4049,12 +4052,14 @@ function NotificationRulesTab() {
     // Form state
     const [formName, setFormName] = useState("");
     const [formDescription, setFormDescription] = useState("");
+    const [formRuleType, setFormRuleType] = useState("event_driven");
     const [formTriggerType, setFormTriggerType] = useState("stage_change");
     const [formFromStage, setFormFromStage] = useState("");
     const [formToStage, setFormToStage] = useState("");
     const [formConditions, setFormConditions] = useState<ConditionRow[]>([]);
     const [formRecipientRoles, setFormRecipientRoles] = useState<string[]>([]);
     const [formRecipientRolesCc, setFormRecipientRolesCc] = useState<string[]>([]);
+    const [formRecipientUsers, setFormRecipientUsers] = useState<Record<string, string[]>>({});
     const [formChannels, setFormChannels] = useState<string[]>(["in_app"]);
     const [formEmailTemplateKey, setFormEmailTemplateKey] = useState("");
     const [formTitleTemplate, setFormTitleTemplate] = useState("");
@@ -4063,15 +4068,17 @@ function NotificationRulesTab() {
     const load = useCallback(async () => {
         setLoading(true);
         try {
-            const [rulesData, rolesData, templatesData] = await Promise.all([
+            const [rulesData, rolesData, templatesData, usersData] = await Promise.all([
                 apiClient<any>("/api/admin/notification-rules"),
                 apiClient<any>("/api/admin/roles"),
                 apiClient<any>("/api/admin/email-templates"),
+                apiClient<any>("/api/admin/users?limit=1000"),
             ]);
             setRules(Array.isArray(rulesData) ? rulesData : []);
             const roleList = (rolesData.roles || rolesData || []).map((r: any) => ({ id: r.id, name: r.name }));
             setRoles(roleList);
             setEmailTemplates(Array.isArray(templatesData) ? templatesData : []);
+            setUsers(usersData.data ? usersData.data : (Array.isArray(usersData) ? usersData : []));
         } catch (e) {
             console.error("Failed to load notification rules:", e);
         }
@@ -4083,12 +4090,14 @@ function NotificationRulesTab() {
     function resetForm() {
         setFormName("");
         setFormDescription("");
+        setFormRuleType("event_driven");
         setFormTriggerType("stage_change");
         setFormFromStage("");
         setFormToStage("");
         setFormConditions([]);
         setFormRecipientRoles([]);
         setFormRecipientRolesCc([]);
+        setFormRecipientUsers({});
         setFormChannels(["in_app"]);
         setFormEmailTemplateKey("");
         setFormTitleTemplate("");
@@ -4105,12 +4114,14 @@ function NotificationRulesTab() {
         setEditingRule(rule);
         setFormName(rule.name);
         setFormDescription(rule.description || "");
+        setFormRuleType(rule.ruleType || "event_driven");
         setFormTriggerType(rule.triggerType);
         setFormFromStage(rule.fromStage || "");
         setFormToStage(rule.toStage || "");
         setFormConditions(Array.isArray(rule.conditions) ? rule.conditions : []);
         setFormRecipientRoles(Array.isArray(rule.recipientRoles) ? rule.recipientRoles : []);
         setFormRecipientRolesCc(Array.isArray(rule.recipientRolesCc) ? rule.recipientRolesCc : []);
+        setFormRecipientUsers(rule.recipientUsers || {});
         setFormChannels(Array.isArray(rule.channels) ? rule.channels : ["in_app"]);
         setFormEmailTemplateKey(rule.emailTemplateKey || "");
         setFormTitleTemplate(rule.titleTemplate || "");
@@ -4125,12 +4136,14 @@ function NotificationRulesTab() {
             const payload: any = {
                 name: formName.trim(),
                 description: formDescription.trim() || null,
+                ruleType: formRuleType,
                 triggerType: formTriggerType,
                 fromStage: formFromStage || null,
                 toStage: formToStage || null,
                 conditions: formConditions.length > 0 ? formConditions : null,
                 recipientRoles: formRecipientRoles,
                 recipientRolesCc: formRecipientRolesCc.length > 0 ? formRecipientRolesCc : null,
+                recipientUsers: Object.keys(formRecipientUsers).length > 0 ? formRecipientUsers : null,
                 channels: formChannels,
                 emailTemplateKey: formEmailTemplateKey || null,
                 titleTemplate: formTitleTemplate.trim() || null,
@@ -4195,6 +4208,42 @@ function NotificationRulesTab() {
         setFormRecipientRoles(prev => prev.filter(r => r !== roleName));
     }
 
+    function toggleUserSelection(roleName: string, userId: string) {
+        setFormRecipientUsers(prev => {
+            const current = prev[roleName] || [];
+            if (userId === "ALL") {
+                const next = { ...prev };
+                delete next[roleName];
+                return next;
+            }
+            const isSelected = current.includes(userId);
+            let nextUsers = isSelected ? current.filter(id => id !== userId) : [...current, userId];
+
+            // Auto consider hierarchy in rule setup
+            if (!isSelected) {
+                // Find user and their manager recursively
+                let currentUser = users.find(u => u.id === userId);
+                while (currentUser && (currentUser as any).reportingManagerName) {
+                    const managerName = (currentUser as any).reportingManagerName;
+                    const manager = users.find(m => m.name === managerName);
+                    if (manager && !nextUsers.includes(manager.id)) {
+                        nextUsers.push(manager.id);
+                        currentUser = manager;
+                    } else {
+                        break;
+                    }
+                }
+            }
+
+            if (nextUsers.length === 0) {
+                const next = { ...prev };
+                delete next[roleName];
+                return next;
+            }
+            return { ...prev, [roleName]: nextUsers };
+        });
+    }
+
     function toggleChannel(ch: string) {
         setFormChannels(prev =>
             prev.includes(ch) ? prev.filter(c => c !== ch) : [...prev, ch]
@@ -4256,6 +4305,13 @@ function NotificationRulesTab() {
                                 <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-2 mb-1">
                                         <span className="font-semibold text-sm text-slate-900">{rule.name}</span>
+                                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                                            rule.ruleType === 'time_driven' ? 'bg-indigo-50 text-indigo-700' :
+                                            rule.ruleType === 'time_driven_mis' ? 'bg-purple-50 text-purple-700' :
+                                            'bg-slate-100 text-slate-700'
+                                        }`}>
+                                            {rule.ruleType === 'time_driven' ? 'Time Driven' : rule.ruleType === 'time_driven_mis' ? 'Time Driven MIS' : 'Event Driven'}
+                                        </span>
                                         <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
                                             rule.triggerType === 'stage_change' ? 'bg-blue-50 text-blue-700' :
                                             rule.triggerType === 'data_condition' ? 'bg-amber-50 text-amber-700' :
@@ -4328,6 +4384,31 @@ function NotificationRulesTab() {
                                 <div>
                                     <label className="block text-xs font-medium text-slate-700 mb-1">Description</label>
                                     <input value={formDescription} onChange={e => setFormDescription(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none" placeholder="Optional description" />
+                                </div>
+                            </div>
+
+                            {/* Rule Type */}
+                            <div>
+                                <label className="block text-xs font-medium text-slate-700 mb-1.5">Rule Type *</label>
+                                <div className="flex gap-3">
+                                    {[
+                                        { value: 'event_driven', label: 'Event Driven' },
+                                        { value: 'time_driven', label: 'Time Driven' },
+                                        { value: 'time_driven_mis', label: 'Time Driven MIS' },
+                                    ].map(rt => (
+                                        <button
+                                            key={rt.value}
+                                            type="button"
+                                            onClick={() => setFormRuleType(rt.value)}
+                                            className={`px-4 py-2 rounded-lg text-xs font-medium border transition-colors ${
+                                                formRuleType === rt.value
+                                                    ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
+                                                    : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
+                                            }`}
+                                        >
+                                            {rt.label}
+                                        </button>
+                                    ))}
                                 </div>
                             </div>
 
@@ -4414,22 +4495,69 @@ function NotificationRulesTab() {
                             {/* Recipient Roles — To */}
                             <div>
                                 <label className="block text-xs font-medium text-slate-700 mb-1.5">Recipient Roles — To *</label>
-                                <div className="flex flex-wrap gap-2">
-                                    {roles.map(role => (
-                                        <button
-                                            key={role.id}
-                                            type="button"
-                                            onClick={() => toggleRole(role.name)}
-                                            className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                                                formRecipientRoles.includes(role.name)
-                                                    ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
-                                                    : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
-                                            }`}
-                                        >
-                                            {formRecipientRoles.includes(role.name) && <Check className="w-3 h-3 inline mr-1" />}
-                                            {role.name}
-                                        </button>
-                                    ))}
+                                <div className="space-y-3">
+                                    <div className="flex flex-wrap gap-2">
+                                        {roles.map(role => (
+                                            <button
+                                                key={role.id}
+                                                type="button"
+                                                onClick={() => toggleRole(role.name)}
+                                                className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                                                    formRecipientRoles.includes(role.name)
+                                                        ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
+                                                        : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
+                                                }`}
+                                            >
+                                                {formRecipientRoles.includes(role.name) && <Check className="w-3 h-3 inline mr-1" />}
+                                                {role.name}
+                                            </button>
+                                        ))}
+                                    </div>
+
+                                    {/* Specific User Selection for Selected Roles */}
+                                    {formRecipientRoles.length > 0 && (
+                                        <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-3">
+                                            <p className="text-[11px] font-medium text-slate-600">Select specific users (or keep "All" to send to everyone in the role):</p>
+                                            {formRecipientRoles.map(roleName => {
+                                                const usersInRole = users.filter(u => u.roles?.some((r: any) => r.name === roleName));
+                                                const selectedUsers = formRecipientUsers[roleName] || [];
+                                                const isAllSelected = selectedUsers.length === 0;
+
+                                                return (
+                                                    <div key={roleName} className="border-t border-slate-200 pt-2 first:border-0 first:pt-0">
+                                                        <span className="text-[11px] font-bold text-slate-700 mr-2">{roleName}:</span>
+                                                        <div className="inline-flex flex-wrap gap-1">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => toggleUserSelection(roleName, "ALL")}
+                                                                className={`px-2 py-1 rounded-md text-[10px] font-medium border transition-colors ${
+                                                                    isAllSelected ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
+                                                                }`}
+                                                            >
+                                                                All Users
+                                                            </button>
+                                                            {usersInRole.map(u => (
+                                                                <button
+                                                                    key={u.id}
+                                                                    type="button"
+                                                                    onClick={() => toggleUserSelection(roleName, u.id)}
+                                                                    className={`px-2 py-1 rounded-md text-[10px] font-medium border transition-colors ${
+                                                                        !isAllSelected && selectedUsers.includes(u.id) ? 'bg-indigo-100 border-indigo-300 text-indigo-800' : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
+                                                                    }`}
+                                                                >
+                                                                    {!isAllSelected && selectedUsers.includes(u.id) && <Check className="w-2.5 h-2.5 inline mr-0.5" />}
+                                                                    {u.name}
+                                                                </button>
+                                                            ))}
+                                                            {usersInRole.length === 0 && (
+                                                                <span className="text-[10px] text-slate-400 py-1 italic">No users found for this role</span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
 

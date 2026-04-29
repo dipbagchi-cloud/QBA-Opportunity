@@ -25,10 +25,11 @@ export function EstimationTab() {
         exchangeRatesSnapshot,
     } = useOpportunityEstimation();
 
-    const { currencies, getRate, getSymbol } = useCurrency();
+    const { currencies, getRate, getSymbol, currency: globalCurrency } = useCurrency();
 
     const convert = (valInInr: number) => {
-        const rate = exchangeRatesSnapshot ? exchangeRatesSnapshot[currency] : getRate(currency);
+        const targetCurrency = exchangeRatesSnapshot ? currency : globalCurrency;
+        const rate = exchangeRatesSnapshot ? exchangeRatesSnapshot[targetCurrency] : getRate(targetCurrency);
         return rate > 0 ? valInInr / rate : valInInr;
     };
 
@@ -36,7 +37,7 @@ export function EstimationTab() {
         if (!isCurrency) return val.toFixed(2);
         return new Intl.NumberFormat('en-US', {
             style: 'currency',
-            currency: currency,
+            currency: exchangeRatesSnapshot ? currency : globalCurrency,
             maximumFractionDigits: 0
         }).format(val);
     };
@@ -227,7 +228,7 @@ export function EstimationTab() {
             {/* Grid 2: Salary Cost */}
             <div className="border rounded-lg bg-white shadow-sm overflow-hidden flex flex-col max-h-[500px]">
                 <div className="bg-slate-50 p-3 border-b bg-cyan-50/50 sticky top-0 z-20">
-                    <h3 className="font-semibold text-slate-800 text-sm">2. Salary Cost for Billed hours ({currency})</h3>
+                    <h3 className="font-semibold text-slate-800 text-sm">2. Salary Cost for Billed hours ({exchangeRatesSnapshot ? currency : globalCurrency})</h3>
                 </div>
                 <div className="overflow-auto flex-1">
                     <table className="w-full text-xs text-left border-collapse">
@@ -269,7 +270,7 @@ export function EstimationTab() {
             {/* Grid 3: GOM Summary */}
             <div className="border rounded-lg bg-white shadow-sm overflow-hidden">
                 <div className="bg-slate-50 p-3 border-b bg-green-50/50">
-                    <h3 className="font-semibold text-slate-800 text-sm">3. GOM Analysis ({currency})</h3>
+                    <h3 className="font-semibold text-slate-800 text-sm">3. GOM Analysis ({exchangeRatesSnapshot ? currency : globalCurrency})</h3>
                 </div>
                 <div className="overflow-x-auto">
                     <table className="w-full text-xs text-left">

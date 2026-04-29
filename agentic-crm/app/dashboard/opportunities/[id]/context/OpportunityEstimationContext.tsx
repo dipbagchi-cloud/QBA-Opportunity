@@ -223,6 +223,10 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
                     effortType,
                     selectedYear,
                     gomSummary,
+                    finalRevenue: revenue,
+                    finalTotalCost: totalCost,
+                    finalGomPercent: gomPercent,
+                    finalProfit: revenue - totalCost,
                 },
             };
             await fetch(`${API_URL}/api/opportunities/${opportunityId}`, {
@@ -233,7 +237,7 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
         } finally {
             setIsSaving(false);
         }
-    }, [opportunityId, resources, travelCosts, specialCosts, markupPercent, salesCommissionPercent, preSalesCostPercent, currency, effortType, selectedYear, gomSummary]);
+    }, [opportunityId, resources, travelCosts, specialCosts, markupPercent, salesCommissionPercent, preSalesCostPercent, currency, effortType, selectedYear, gomSummary, revenue, totalCost, gomPercent]);
 
     // Calculate months from resources
     useEffect(() => {

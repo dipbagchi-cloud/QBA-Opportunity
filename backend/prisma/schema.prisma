@@ -585,6 +585,8 @@ model NotificationRule {
   description String?
   isActive    Boolean  @default(true)
 
+  ruleType    String   @default("event_driven") // "event_driven", "time_driven", "time_driven_mis"
+
   // Trigger: "stage_change", "data_condition", "approval", "stalled_deal", "health_drop"
   triggerType String
 
@@ -601,6 +603,9 @@ model NotificationRule {
 
   // Who receives as CC: JSON array of role names e.g. ["Presales"]
   recipientRolesCc Json?
+
+  // Specific user selection per role: JSON object e.g. { "Sales": ["user_id_1", "user_id_2"], "Manager": "ALL" }
+  recipientUsers Json?
 
   // Notification channels: JSON array e.g. ["in_app","email"]
   channels    Json

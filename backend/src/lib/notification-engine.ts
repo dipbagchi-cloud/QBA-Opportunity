@@ -61,15 +61,25 @@ export async function evaluateOpportunityCreatedRules(ctx: OpportunityCreatedCon
 
       if (recipientRoles.length === 0 || channels.length === 0) continue;
 
-      const toUsers = await prisma.user.findMany({
+      let toUsers = await prisma.user.findMany({
         where: {
           isActive: true,
           roles: { some: { name: { in: recipientRoles } } },
         },
-        select: { id: true, email: true, name: true, muteNotification: true },
+        select: { id: true, email: true, name: true, muteNotification: true, roles: { select: { name: true } } },
       });
 
-      const ccUsers = recipientRolesCc.length > 0
+      const recipientUsers = rule.recipientUsers as Record<string, string[]> | null;
+      if (recipientUsers) {
+        toUsers = toUsers.filter(u => u.roles.some((r: any) => {
+          if (!recipientRoles.includes(r.name)) return false;
+          const specific = recipientUsers[r.name];
+          if (!specific || specific.length === 0) return true;
+          return specific.includes(u.id);
+        }));
+      }
+
+      let ccUsers = recipientRolesCc.length > 0
         ? await prisma.user.findMany({
             where: {
               isActive: true,
@@ -77,9 +87,18 @@ export async function evaluateOpportunityCreatedRules(ctx: OpportunityCreatedCon
               // Exclude users already in To list
               NOT: { id: { in: toUsers.map(u => u.id) } },
             },
-            select: { id: true, email: true, name: true, muteNotification: true },
+            select: { id: true, email: true, name: true, muteNotification: true, roles: { select: { name: true } } },
           })
         : [];
+
+      if (recipientUsers && ccUsers.length > 0) {
+        ccUsers = ccUsers.filter(u => u.roles.some((r: any) => {
+          if (!recipientRolesCc.includes(r.name)) return false;
+          const specific = recipientUsers[r.name];
+          if (!specific || specific.length === 0) return true;
+          return specific.includes(u.id);
+        }));
+      }
 
       const variables: Record<string, string> = {
         dealName: ctx.opportunityTitle,
@@ -177,13 +196,23 @@ export async function evaluateStageChangeRules(ctx: StageChangeContext): Promise
 
       if (recipientRoles.length === 0 || channels.length === 0) continue;
 
-      const recipients = await prisma.user.findMany({
+      let recipients = await prisma.user.findMany({
         where: {
           isActive: true,
           roles: { some: { name: { in: recipientRoles } } },
         },
-        select: { id: true, email: true, name: true, muteNotification: true },
+        select: { id: true, email: true, name: true, muteNotification: true, roles: { select: { name: true } } },
       });
+
+      const recipientUsers = rule.recipientUsers as Record<string, string[]> | null;
+      if (recipientUsers) {
+        recipients = recipients.filter(u => u.roles.some((r: any) => {
+          if (!recipientRoles.includes(r.name)) return false;
+          const specific = recipientUsers[r.name];
+          if (!specific || specific.length === 0) return true;
+          return specific.includes(u.id);
+        }));
+      }
 
       // Template variables for message rendering
       const variables: Record<string, string> = {
@@ -292,13 +321,23 @@ export async function evaluateDataConditionRules(opportunity: {
       const recipientRoles = (rule.recipientRoles as string[]) || [];
       const channels = (rule.channels as string[]) || [];
 
-      const recipients = await prisma.user.findMany({
+      let recipients = await prisma.user.findMany({
         where: {
           isActive: true,
           roles: { some: { name: { in: recipientRoles } } },
         },
-        select: { id: true, email: true, name: true, muteNotification: true },
+        select: { id: true, email: true, name: true, muteNotification: true, roles: { select: { name: true } } },
       });
+
+      const recipientUsers = rule.recipientUsers as Record<string, string[]> | null;
+      if (recipientUsers) {
+        recipients = recipients.filter(u => u.roles.some((r: any) => {
+          if (!recipientRoles.includes(r.name)) return false;
+          const specific = recipientUsers[r.name];
+          if (!specific || specific.length === 0) return true;
+          return specific.includes(u.id);
+        }));
+      }
 
       const variables: Record<string, string> = {
         dealName: opportunity.title,

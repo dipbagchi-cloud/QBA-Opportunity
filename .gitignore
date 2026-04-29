@@ -4,6 +4,12 @@ node_modules
 .env.local
 .DS_Store
 dist
+node_modules
+.next
+.env
+.env.local
+.DS_Store
+dist
 coverage
 .vscode
 
@@ -11,3 +17,5 @@ coverage
 backend/uploads/attachments/
 backend/uploads/sow-exports/
 backend/uploads/sow-templates/
+*.tar
+*.tar.gz

@@ -188,6 +188,7 @@ function DataBlock({ data }: { data: any }) {
 
 export default function ChatBot() {
     const [isOpen, setIsOpen] = useState(false);
+    const [isHidden, setIsHidden] = useState(false);
     const [messages, setMessages] = useState<ChatMsg[]>([]);
     const [input, setInput] = useState("");
     const [loading, setLoading] = useState(false);
@@ -264,14 +265,23 @@ export default function ChatBot() {
     return (
         <>
             {/* Floating toggle button */}
-            {!isOpen && (
-                <button
-                    onClick={() => setIsOpen(true)}
-                    className="fixed bottom-6 right-6 z-50 w-14 h-14 rounded-full bg-gradient-to-tr from-indigo-600 to-purple-600 text-white flex items-center justify-center shadow-lg hover:shadow-xl hover:scale-105 transition-all duration-200"
-                    title="AI Assistant"
-                >
-                    <Sparkles className="w-6 h-6" />
-                </button>
+            {!isOpen && !isHidden && (
+                <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end group animate-in fade-in duration-300">
+                    <button
+                        onClick={(e) => { e.stopPropagation(); setIsHidden(true); }}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity p-1 bg-white border border-slate-200 rounded-full shadow-sm text-slate-400 hover:text-slate-600 hover:bg-slate-50 absolute -top-2 -right-2 z-10"
+                        title="Hide AI Assistant"
+                    >
+                        <X className="w-3 h-3" />
+                    </button>
+                    <button
+                        onClick={() => setIsOpen(true)}
+                        className="w-14 h-14 rounded-full bg-gradient-to-tr from-indigo-600 to-purple-600 text-white flex items-center justify-center shadow-lg hover:shadow-xl hover:scale-105 transition-all duration-200"
+                        title="AI Assistant"
+                    >
+                        <Sparkles className="w-6 h-6" />
+                    </button>
+                </div>
             )}
 
             {/* Chat panel */}
