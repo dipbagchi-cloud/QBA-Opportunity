@@ -979,7 +979,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         }
         setIsSaving(true);
         try {
-            const payload: any = { stageName: 'Qualification', reEstimateComment: reEstimateComment.trim() };
+            const payload: any = { stageName: 'Qualification', detailedStatus: 'Re-estimation', reEstimateComment: reEstimateComment.trim() };
             if (adjustedEstimatedValue && Number(adjustedEstimatedValue) > 0) {
                 payload.adjustedEstimatedValue = Number(adjustedEstimatedValue);
             }
@@ -2550,29 +2550,36 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     <div className="bg-blue-50 rounded-lg p-3 border border-blue-200">
                                         <p className="text-xs text-blue-600 mb-1">Revenue</p>
                                         <p className="text-sm font-bold text-blue-700">
-                                            {cSym}{Math.round(gomResults.offshoreRevenue * (gomInputs.workingDays || 1)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                            {cSym}{Number(presalesData?.gomSummary?.totalRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
                                             {opportunityCurrency && globalCurrency && opportunityCurrency !== globalCurrency && (
                                                 <span className="text-xs text-slate-500 ml-1">
-                                                    ({getSymbol(globalCurrency)}{(Math.round(gomResults.offshoreRevenue * (gomInputs.workingDays || 1)) * getRate(globalCurrency) / getRate(opportunityCurrency)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
+                                                    ({getSymbol(globalCurrency)}{(Number(presalesData?.gomSummary?.totalRevenue || 0) * getRate(globalCurrency) / getRate(opportunityCurrency)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
                                                 </span>
                                             )}
                                         </p>
                                     </div>
                                     <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
-                                        <p className="text-xs text-slate-500 mb-1">Offshore Day Rate</p>
-                                        <p className="text-sm font-bold text-slate-700">{gomResults.offshoreDayRate.toLocaleString()}</p>
-                                    </div>
-                                    <div className={`rounded-lg p-3 border ${gomResults.offshoreGom >= 20 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
-                                        <p className="text-xs text-slate-500 mb-1">GOM %</p>
-                                        <p className={`text-sm font-bold ${gomResults.offshoreGom >= 20 ? 'text-green-700' : 'text-red-700'}`}>{gomResults.offshoreGom.toFixed(1)}%</p>
-                                    </div>
-                                    <div className="bg-purple-50 rounded-lg p-3 border border-purple-200">
-                                        <p className="text-xs text-purple-600 mb-1">Adjusted Cost</p>
-                                        <p className="text-sm font-bold text-purple-700">
-                                            {cSym}{Math.round(gomResults.adjustedCost).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                        <p className="text-xs text-slate-500 mb-1">Total Cost</p>
+                                        <p className="text-sm font-bold text-slate-700">
+                                            {cSym}{Number(presalesData?.gomSummary?.totalCost || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
                                             {opportunityCurrency && globalCurrency && opportunityCurrency !== globalCurrency && (
                                                 <span className="text-xs text-slate-500 ml-1">
-                                                    ({getSymbol(globalCurrency)}{(Math.round(gomResults.adjustedCost) * getRate(globalCurrency) / getRate(opportunityCurrency)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
+                                                    ({getSymbol(globalCurrency)}{(Number(presalesData?.gomSummary?.totalCost || 0) * getRate(globalCurrency) / getRate(opportunityCurrency)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
+                                                </span>
+                                            )}
+                                        </p>
+                                    </div>
+                                    <div className={`rounded-lg p-3 border ${(presalesData?.gomSummary?.gomPercent || 0) >= 20 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                                        <p className="text-xs text-slate-500 mb-1">GOM %</p>
+                                        <p className={`text-sm font-bold ${(presalesData?.gomSummary?.gomPercent || 0) >= 20 ? 'text-green-700' : 'text-red-700'}`}>{(presalesData?.gomSummary?.gomPercent || 0).toFixed(1)}%</p>
+                                    </div>
+                                    <div className="bg-purple-50 rounded-lg p-3 border border-purple-200">
+                                        <p className="text-xs text-purple-600 mb-1">Profit</p>
+                                        <p className="text-sm font-bold text-purple-700">
+                                            {cSym}{Number(presalesData?.gomSummary?.profit || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                            {opportunityCurrency && globalCurrency && opportunityCurrency !== globalCurrency && (
+                                                <span className="text-xs text-slate-500 ml-1">
+                                                    ({getSymbol(globalCurrency)}{(Number(presalesData?.gomSummary?.profit || 0) * getRate(globalCurrency) / getRate(opportunityCurrency)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
                                                 </span>
                                             )}
                                         </p>

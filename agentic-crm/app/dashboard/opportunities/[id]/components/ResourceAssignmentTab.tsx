@@ -98,7 +98,7 @@ export function ResourceAssignmentTab() {
 
         const newRow: ResourceRow = {
             id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : (Date.now() + '-' + Math.random().toString(36).slice(2)),
-            role: roleItem.role,
+            role: `${roleItem.skill || roleItem.role} | ${roleItem.experienceBand || '-'} | CTC: ₹${(roleItem.annualCtc / 100000).toFixed(1)}L`,
             baseLocation: "India",
             deliveryFrom: "Hyderabad",
             type: "Offshore",
