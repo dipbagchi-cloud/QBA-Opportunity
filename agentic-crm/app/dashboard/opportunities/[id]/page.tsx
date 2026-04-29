@@ -1679,7 +1679,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
             {/* PRESALES VIEW (Step 1) */}
             {activeStep === 1 && (
-                <OpportunityEstimationProvider opportunityId={id} readOnly={opportunityStage >= 2 || isStalled || isLost} startDate={formData.tentativeStartDate} endDate={formData.tentativeEndDate} adjustedEstimatedValue={Number(adjustedEstimatedValue) || 0}>
+                <OpportunityEstimationProvider opportunityId={id} readOnly={opportunityStage >= 2 || isStalled || isLost} startDate={formData.tentativeStartDate} endDate={formData.tentativeEndDate} adjustedEstimatedValue={Number(adjustedEstimatedValue) || 0} initialCurrency={globalCurrency}>
                     <GomPercentSync onGomPercentChange={setContextGomPercent} />
                     {opportunityStage < 2 && <PresalesSaveButton />}
                     <div className="bg-white rounded-lg shadow-sm border border-slate-200">

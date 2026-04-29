@@ -92,11 +92,12 @@ interface OpportunityEstimationContextType {
     // Date range for calendar columns
     startDate: string;
     endDate: string;
+    exchangeRatesSnapshot?: Record<string, number>;
 }
 
 const OpportunityEstimationContext = createContext<OpportunityEstimationContextType | undefined>(undefined);
 
-export function OpportunityEstimationProvider({ children, opportunityId, readOnly = false, startDate = '', endDate = '', adjustedEstimatedValue = 0 }: { children: ReactNode; opportunityId?: string; readOnly?: boolean; startDate?: string; endDate?: string; adjustedEstimatedValue?: number }) {
+export function OpportunityEstimationProvider({ children, opportunityId, readOnly = false, startDate = '', endDate = '', adjustedEstimatedValue = 0, initialCurrency = "INR" }: { children: ReactNode; opportunityId?: string; readOnly?: boolean; startDate?: string; endDate?: string; adjustedEstimatedValue?: number; initialCurrency?: string }) {
     // State
     const [assumptions, setAssumptions] = useState<BudgetAssumptions>(DEFAULT_ASSUMPTIONS);
     const [resources, setResources] = useState<ResourceRow[]>([]);
@@ -121,10 +122,11 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
     const [markupPercent, setMarkupPercentRaw] = useState<number>(0);
     const [salesCommissionPercent, setSalesCommissionPercent] = useState<number>(0);
     const [preSalesCostPercent, setPreSalesCostPercent] = useState<number>(0);
-    const [currency, setCurrency] = useState<string>("INR");
+    const [currency, setCurrency] = useState<string>(initialCurrency);
     const [effortType, setEffortType] = useState<string>("QBA");
     const [isSaving, setIsSaving] = useState(false);
     const [isLoaded, setIsLoaded] = useState(false);
+    const [exchangeRatesSnapshot, setExchangeRatesSnapshot] = useState<Record<string, number> | undefined>();
 
     // Wrap setMarkupPercent to also recalculate all resources' dailyRate
     const setMarkupPercent = useCallback((newMarkup: number) => {
@@ -169,6 +171,9 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
                     if (saved.currency) setCurrency(saved.currency);
                     if (saved.effortType) setEffortType(saved.effortType);
                     if (saved.selectedYear) setSelectedYear(saved.selectedYear);
+                }
+                if (opp.metadata && typeof opp.metadata === "object" && !Array.isArray(opp.metadata) && opp.metadata.exchangeRatesSnapshot) {
+                    setExchangeRatesSnapshot(opp.metadata.exchangeRatesSnapshot as Record<string, number>);
                 }
             } catch {
                 // silently use defaults
@@ -439,6 +444,7 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
         readOnly,
         startDate,
         endDate,
+        exchangeRatesSnapshot,
     };
 
     return (

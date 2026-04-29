@@ -408,11 +408,9 @@ export default function NewOpportunityPage() {
                                     options={clients.map(c => ({ label: c.name, value: c.name }))}
                                 />
                             </div>
-                            {user?.role?.name !== 'Sales' && (
-                                <button type="button" onClick={() => setShowAddClient(true)} className="p-2.5 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors">
-                                    <Plus className="w-5 h-5" />
-                                </button>
-                            )}
+                            <button type="button" onClick={() => setShowAddClient(true)} className="p-2.5 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors">
+                                <Plus className="w-5 h-5" />
+                            </button>
                         </div>
                     </div>
 

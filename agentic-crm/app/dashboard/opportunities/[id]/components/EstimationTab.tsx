@@ -21,12 +21,14 @@ export function EstimationTab() {
         revenue,
         gomPercent,
         otherCosts,
+        readOnly,
+        exchangeRatesSnapshot,
     } = useOpportunityEstimation();
 
     const { currencies, getRate, getSymbol } = useCurrency();
 
     const convert = (valInInr: number) => {
-        const rate = getRate(currency);
+        const rate = exchangeRatesSnapshot ? exchangeRatesSnapshot[currency] : getRate(currency);
         return rate > 0 ? valInInr / rate : valInInr;
     };
 
@@ -177,9 +179,10 @@ export function EstimationTab() {
                 <div className="flex items-center gap-4 bg-white/10 p-2 rounded-lg backdrop-blur-sm">
                     <span className="text-sm font-medium px-2">Display Currency:</span>
                     <select
-                        className="bg-transparent border border-white/20 rounded px-3 py-1 text-sm focus:outline-none focus:bg-slate-800 transition-colors"
+                        className="bg-transparent border border-white/20 rounded px-3 py-1 text-sm focus:outline-none focus:bg-slate-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                         value={currency}
                         onChange={(e) => setCurrency(e.target.value)}
+                        disabled={readOnly}
                     >
                         {currencies.map(c => (
                             <option key={c.code} value={c.code}>{c.code} ({c.symbol})</option>
