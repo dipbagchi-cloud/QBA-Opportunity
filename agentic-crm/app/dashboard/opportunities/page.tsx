@@ -62,7 +62,7 @@ export default function OpportunitiesPage() {
     const limit = 10;
 
     const [viewMode, setViewMode] = useState<'list' | 'kanban'>('list');
-    const { format: fmtCurrency } = useCurrency();
+    const { currency: globalCurrency, getSymbol, getRate } = useCurrency();
 
     const [sortKey, setSortKey] = useState<string | null>(null);
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
@@ -399,7 +399,7 @@ export default function OpportunitiesPage() {
                         <table className="w-full">
                             <thead className="bg-slate-50 border-b border-slate-200">
                                 <tr>
-                                    {[['name','Opportunity Name'],['stage','Stage'],['value','Value'],['probability','Prob.'],['salesRep','Sales Rep'],['manager','Manager'],['createdAt','Created'],['startDate','Start Date'],['endDate','Est. End'],['closeDate','Close Date'],['lastActivity','Last Activity']].map(([key, label]) => (
+                                    {[['name','Opportunity Name'],['stage','Stage'],['value','Estimated value'],['quote','Quote'],['probability','Prob.'],['salesRep','Sales Rep'],['manager','Manager'],['createdAt','Created'],['startDate','Start Date'],['endDate','Est. End'],['closeDate','Close Date'],['lastActivity','Last Activity']].map(([key, label]) => (
                                         <th key={key} className="text-left py-2.5 px-4 font-semibold text-slate-600 text-xs cursor-pointer select-none hover:bg-slate-100" onClick={() => handleSort(key)}>
                                             <span className="flex items-center gap-1">{label}<SortIcon col={key} /></span>
                                         </th>
@@ -410,7 +410,7 @@ export default function OpportunitiesPage() {
                             <tbody className="divide-y divide-slate-100">
                                 {opportunities.length === 0 ? (
                                     <tr>
-                                        <td colSpan={12} className="py-8 text-center text-slate-400 text-sm">
+                                        <td colSpan={13} className="py-8 text-center text-slate-400 text-sm">
                                             No opportunities found for the current search/filter selection.
                                         </td>
                                     </tr>
@@ -428,10 +428,10 @@ export default function OpportunitiesPage() {
                                                         title={`Status: ${opp.status} (Health: ${opp.healthScore}/100)`}
                                                     />
                                                     <div>
-                                                        <Link href={`/dashboard/opportunities/${opp.id}`} className="font-semibold text-sm text-slate-800 hover:text-indigo-600 hover:underline">
+                                                        <Link href={`/dashboard/opportunities/${opp.id}`} className="font-semibold text-xs text-slate-800 hover:text-indigo-600 hover:underline">
                                                             {opp.name}
                                                         </Link>
-                                                        <div className="text-xs text-slate-500">{opp.client} • {opp.owner}</div>
+                                                        <div className="text-[11px] text-slate-500">{opp.client} • {opp.owner}</div>
                                                     </div>
                                                 </div>
                                             </td>
@@ -448,8 +448,60 @@ export default function OpportunitiesPage() {
                                                 </span>
                                             </td>
                                             <td className="py-2.5 px-4">
-                                                <span className="font-medium text-sm text-slate-700">
-                                                    {fmtCurrency(typeof opp.value === 'number' ? opp.value : Number(opp.value) || 0)}
+                                                <span className="font-medium text-xs text-slate-700">
+                                                    {(() => {
+                                                        const val = typeof opp.value === 'number' ? opp.value : Number(opp.value) || 0;
+                                                        const oppCurr = (opp as any).currency || 'USD';
+                                                        if (oppCurr === globalCurrency) {
+                                                            return `${getSymbol(globalCurrency)}${val.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+                                                        }
+                                                        
+                                                        const rates = (opp as any).metadata?.exchangeRatesSnapshot;
+                                                        if (rates && rates[oppCurr] && rates[globalCurrency]) {
+                                                            const converted = (val * rates[globalCurrency]) / rates[oppCurr];
+                                                            return (
+                                                                <>
+                                                                    {getSymbol(globalCurrency)}{converted.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                                                    <span className="text-[11px] text-slate-500 ml-1 font-normal">
+                                                                        ({getSymbol(oppCurr)}{val.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
+                                                                    </span>
+                                                                </>
+                                                            );
+                                                        }
+                                                        
+                                                        const convertedLive = (val * getRate(globalCurrency)) / getRate(oppCurr);
+                                                        return (
+                                                            <>
+                                                                {getSymbol(globalCurrency)}{convertedLive.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                                                <span className="text-[11px] text-slate-500 ml-1 font-normal">
+                                                                    ({getSymbol(oppCurr)}{val.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
+                                                                </span>
+                                                            </>
+                                                        );
+                                                    })()}
+                                                </span>
+                                            </td>
+                                            <td className="py-2.5 px-4">
+                                                <span className="font-medium text-xs text-slate-700">
+                                                    {(opp as any).quote != null ? (
+                                                        <>
+                                                            {getSymbol(globalCurrency)}
+                                                            {(() => {
+                                                                const val = Number((opp as any).quote);
+                                                                const oppCurr = (opp as any).currency || 'USD';
+                                                                if (oppCurr === globalCurrency) {
+                                                                    return val.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+                                                                }
+                                                                const rates = (opp as any).metadata?.exchangeRatesSnapshot;
+                                                                if (rates && rates[oppCurr] && rates[globalCurrency]) {
+                                                                    return ((val * rates[globalCurrency]) / rates[oppCurr]).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+                                                                }
+                                                                return ((val * getRate(globalCurrency)) / getRate(oppCurr)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+                                                            })()}
+                                                        </>
+                                                    ) : (
+                                                        <span className="text-slate-300">—</span>
+                                                    )}
                                                 </span>
                                             </td>
                                             <td className="py-2.5 px-4">
@@ -460,40 +512,40 @@ export default function OpportunitiesPage() {
                                                             style={{ width: `${opp.probability}%` }}
                                                         />
                                                     </div>
-                                                    <span className="text-xs font-medium text-slate-600">{opp.probability}%</span>
+                                                    <span className="text-[11px] font-medium text-slate-600">{opp.probability}%</span>
                                                 </div>
                                             </td>
-                                            <td className="py-2.5 px-4 text-xs text-slate-600">
+                                            <td className="py-2.5 px-4 text-[11px] text-slate-600">
                                                 {opp.salesRepName || <span className="text-slate-300">—</span>}
                                             </td>
-                                            <td className="py-2.5 px-4 text-xs text-slate-600">
+                                            <td className="py-2.5 px-4 text-[11px] text-slate-600">
                                                 {opp.managerName || <span className="text-slate-300">—</span>}
                                             </td>
-                                            <td className="py-2.5 px-4 text-xs text-slate-500 whitespace-nowrap">
+                                            <td className="py-2.5 px-4 text-[11px] text-slate-500 whitespace-nowrap">
                                                 {opp.createdAt
                                                     ? <span className="flex items-center gap-1"><Calendar className="w-3 h-3 text-slate-400" />{opp.createdAt}</span>
                                                     : <span className="text-slate-300">—</span>}
                                             </td>
-                                            <td className="py-2.5 px-4 text-xs whitespace-nowrap">
+                                            <td className="py-2.5 px-4 text-[11px] whitespace-nowrap">
                                                 {opp.tentativeStartDate
                                                     ? <span className="flex items-center gap-1 text-indigo-600"><CalendarClock className="w-3 h-3" />{opp.tentativeStartDate}</span>
                                                     : <span className="text-slate-300">—</span>}
                                             </td>
-                                            <td className="py-2.5 px-4 text-xs whitespace-nowrap">
+                                            <td className="py-2.5 px-4 text-[11px] whitespace-nowrap">
                                                 {opp.actualCloseDate
                                                     ? <span className="flex items-center gap-1 text-purple-600 font-medium"><CalendarClock className="w-3 h-3" />{opp.actualCloseDate}</span>
                                                     : opp.tentativeEndDate
                                                         ? <span className="flex items-center gap-1 text-slate-500"><CalendarClock className="w-3 h-3 text-slate-400" />Est. {opp.tentativeEndDate}</span>
                                                         : <span className="text-slate-300">—</span>}
                                             </td>
-                                            <td className="py-2.5 px-4 text-xs whitespace-nowrap">
+                                            <td className="py-2.5 px-4 text-[11px] whitespace-nowrap">
                                                 {opp.actualCloseDate
                                                     ? <span className="flex items-center gap-1 text-emerald-600 font-medium"><CalendarCheck className="w-3 h-3" />{opp.actualCloseDate}</span>
                                                     : opp.expectedCloseDate
                                                         ? <span className="flex items-center gap-1 text-amber-600"><CalendarCheck className="w-3 h-3" />{opp.expectedCloseDate}</span>
                                                         : <span className="text-slate-300">—</span>}
                                             </td>
-                                            <td className="py-2.5 px-4 text-xs text-slate-500">
+                                            <td className="py-2.5 px-4 text-[11px] text-slate-500">
                                                 {opp.lastActivity}
                                             </td>
                                             <td className="py-2.5 px-4 relative">

@@ -105,7 +105,15 @@ function GomPercentSync({ onGomPercentChange }: { onGomPercentChange: (pct: numb
 
 export default function OpportunityDetailsPage({ params }: { params: Promise<{ id: string }> }) {
     const router = useRouter();
-    const { format: fmtCurrency, symbol: cSym, setCurrency } = useCurrency();
+    const { currency: globalCurrency, getSymbol, getRate, setCurrency } = useCurrency();
+    const [opportunityCurrency, setOpportunityCurrency] = useState<string>('INR');
+    const [opportunityMetadata, setOpportunityMetadata] = useState<any>(null);
+    const [originalData, setOriginalData] = useState<{value: number, currency: string} | null>(null);
+    const prevCurrencyRef = useRef(globalCurrency);
+
+
+
+
     const { id } = use(params);
     const { updateOpportunity } = useOpportunityStore();
     const { toast } = useToast();
@@ -145,6 +153,23 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         description: "",
         value: 0
     });
+    useEffect(() => {
+        if (prevCurrencyRef.current && prevCurrencyRef.current !== globalCurrency) {
+            if (formData.value && !isNaN(Number(formData.value))) {
+                const oldRate = getRate(prevCurrencyRef.current);
+                const newRate = getRate(globalCurrency);
+                const converted = (Number(formData.value) * newRate) / oldRate;
+                setFormData(prev => ({
+                    ...prev,
+                    value: Math.round(converted * 100) / 100,
+                    expectedDayRate: formData.expectedDayRate ? String(Math.round(((Number(formData.expectedDayRate) * newRate) / oldRate) * 100) / 100) : ""
+                }));
+            }
+            prevCurrencyRef.current = globalCurrency;
+            setOpportunityCurrency(globalCurrency);
+        }
+    }, [globalCurrency, getRate, formData.value, formData.expectedDayRate]);
+
 
     // Country → Region + Currency mapping (fetched from API)
     const [countryRegionMap, setCountryRegionMap] = useState<Record<string, { region: string; currency: string }>>({});
@@ -436,8 +461,25 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     pricingModel: data.pricingModel || "",
                     expectedDayRate: data.expectedDayRate || "",
                     description: data.description || "",
-                    value: data.value || 0
+                    value: (() => {
+                        let loadedValue = data.value || 0;
+                        const dataCurr = data.currency || 'USD';
+                        if (dataCurr !== globalCurrency) {
+                            const rates = data.metadata?.exchangeRatesSnapshot;
+                            if (rates && rates[dataCurr] && rates[globalCurrency]) {
+                                loadedValue = (loadedValue * rates[globalCurrency]) / rates[dataCurr];
+                            } else {
+                                loadedValue = (loadedValue * getRate(globalCurrency)) / getRate(dataCurr);
+                            }
+                            loadedValue = Math.round(loadedValue * 100) / 100;
+                        }
+                        return loadedValue;
+                    })()
                 });
+
+                setOriginalData({ value: data.value || 0, currency: data.currency || 'USD' });
+                setOpportunityCurrency(globalCurrency);
+                setOpportunityMetadata(data.metadata || null);
 
                 // Load attachments
                 if (data.attachments && Array.isArray(data.attachments)) {
@@ -505,12 +547,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         if (id) fetchDetails();
     }, [id]);
 
-    // Auto-switch global currency when opportunity loads with a country
-    useEffect(() => {
-        if (formData.country && countryRegionMap[formData.country]?.currency) {
-            setCurrency(countryRegionMap[formData.country].currency);
-        }
-    }, [formData.country, countryRegionMap]);
+
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
         const { name, value } = e.target;
@@ -624,7 +661,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             const res = await fetch(`${API_URL}/api/opportunities/${id}`, {
                 method: 'PATCH',
                 headers: getAuthHeaders(),
-                body: JSON.stringify(formData)
+                body: JSON.stringify({ ...formData, currency: globalCurrency })
             });
 
             if (res.ok) {
@@ -632,7 +669,9 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 const optimisticUpdates: any = { name: formData.projectName };
                 const rawValue: any = formData.value;
                 if (rawValue !== '' && rawValue !== undefined) optimisticUpdates.value = Number(rawValue);
+                optimisticUpdates.currency = globalCurrency;
                 await updateOpportunity(id, optimisticUpdates);
+                setOpportunityCurrency(globalCurrency);
                 toast({ title: "Success", description: "Opportunity updated successfully!" });
             } else {
                 toast({ title: "Error", description: "Failed to save changes. Please check all fields." });
@@ -916,6 +955,9 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     };
 
     if (isLoading) return <div className="p-6">Loading Opportunity...</div>;
+
+    // Helper for currency symbol
+    const cSym = getSymbol(opportunityCurrency);
 
     return (
         <div className="max-w-[1400px] mx-auto space-y-4 relative">
@@ -1321,7 +1363,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                         {/* Day Rate (only for Staffing) */}
                         {formData.projectType === 'Staffing' && (
                         <div className="space-y-1.5">
-                            <label className="block text-sm font-bold text-slate-700">Expected Day Rate ({cSym}) *</label>
+                            <label className="block text-sm font-bold text-slate-700">Expected Day Rate ({getSymbol(globalCurrency)}) *</label>
                             <input
                                 type="number"
                                 name="expectedDayRate"
@@ -1337,7 +1379,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
                         {/* Value */}
                         <div className="space-y-1.5">
-                            <label className="block text-sm font-bold text-slate-700">Estimated Value ({cSym})</label>
+                            <label className="block text-sm font-bold text-slate-700">Estimated Value ({getSymbol(globalCurrency)})</label>
                             {formData.projectType === 'Staffing' ? (
                             <>
                                 <input
@@ -1360,6 +1402,12 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     className={`w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm shadow-sm ${isPipelineEditable ? 'bg-white' : 'bg-slate-50 cursor-not-allowed opacity-70'}`}
                                     onChange={(e) => setFormData(prev => ({ ...prev, value: e.target.value === '' ? ('' as any) : Number(e.target.value) }))}
                                 />
+                            )}
+                            {originalData && originalData.currency !== globalCurrency && originalData.value > 0 && (
+                                <div className="text-xs text-slate-500 font-medium mt-1">
+                                    <span className="text-slate-400 mr-1 font-normal">Original:</span>
+                                    {getSymbol(originalData.currency)}{originalData.value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                </div>
                             )}
                         </div>
 
@@ -1588,7 +1636,14 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     {Number(adjustedEstimatedValue) > 0 && (
                                     <div>
                                         <label className="block text-xs font-semibold text-amber-600 uppercase mb-1">Adjusted Estimated Value</label>
-                                        <div className="font-bold text-amber-700">{fmtCurrency(Number(adjustedEstimatedValue))}</div>
+                                        <div className="font-bold text-amber-700">
+                                            {cSym}{Number(adjustedEstimatedValue).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                            {opportunityCurrency && globalCurrency && opportunityCurrency !== globalCurrency && (
+                                                <span className="text-xs text-slate-500 ml-1">
+                                                    ({getSymbol(globalCurrency)}{(Number(adjustedEstimatedValue) * getRate(globalCurrency) / getRate(opportunityCurrency)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
+                                                </span>
+                                            )}
+                                        </div>
                                     </div>
                                     )}
                                     <div className="col-span-2">
@@ -2219,12 +2274,26 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             </div>
                             <div className="bg-indigo-50 rounded-lg p-3 border border-indigo-200">
                                 <p className="text-xs text-indigo-600 mb-1">Estimated Value</p>
-                                <p className="font-semibold text-indigo-700">{fmtCurrency(Number(formData.value))}</p>
+                                <p className="font-semibold text-indigo-700">
+                                    {cSym}{Number(formData.value).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                    {opportunityCurrency && globalCurrency && opportunityCurrency !== globalCurrency && (
+                                        <span className="text-xs text-slate-500 ml-1">
+                                            ({getSymbol(globalCurrency)}{(Number(formData.value) * getRate(globalCurrency) / getRate(opportunityCurrency)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
+                                        </span>
+                                    )}
+                                </p>
                             </div>
                             {Number(adjustedEstimatedValue) > 0 && (
                             <div className="bg-amber-50 rounded-lg p-3 border border-amber-200">
                                 <p className="text-xs text-amber-600 mb-1">Adjusted Value</p>
-                                <p className="font-bold text-amber-700">{fmtCurrency(Number(adjustedEstimatedValue))}</p>
+                                <p className="font-bold text-amber-700">
+                                    {cSym}{Number(adjustedEstimatedValue).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                    {opportunityCurrency && globalCurrency && opportunityCurrency !== globalCurrency && (
+                                        <span className="text-xs text-slate-500 ml-1">
+                                            ({getSymbol(globalCurrency)}{(Number(adjustedEstimatedValue) * getRate(globalCurrency) / getRate(opportunityCurrency)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
+                                        </span>
+                                    )}
+                                </p>
                             </div>
                             )}
                         </div>
@@ -2342,23 +2411,58 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     </div>
                                     <div>
                                         <span className="text-xs text-slate-500 uppercase tracking-wide">Round Trip Cost</span>
-                                        <p className="font-medium text-slate-800 mt-1">{fmtCurrency(Number(presalesData.roundTripCost))}</p>
+                                        <p className="font-medium text-slate-800 mt-1">
+                                            {cSym}{Number(presalesData.roundTripCost).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                            {opportunityCurrency && globalCurrency && opportunityCurrency !== globalCurrency && (
+                                                <span className="text-xs text-slate-500 ml-1">
+                                                    ({getSymbol(globalCurrency)}{(Number(presalesData.roundTripCost) * getRate(globalCurrency) / getRate(opportunityCurrency)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
+                                                </span>
+                                            )}
+                                        </p>
                                     </div>
                                     <div>
                                         <span className="text-xs text-slate-500 uppercase tracking-wide">Medical Insurance</span>
-                                        <p className="font-medium text-slate-800 mt-1">{fmtCurrency(Number(presalesData.medicalInsuranceCost))}</p>
+                                        <p className="font-medium text-slate-800 mt-1">
+                                            {cSym}{Number(presalesData.medicalInsuranceCost).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                            {opportunityCurrency && globalCurrency && opportunityCurrency !== globalCurrency && (
+                                                <span className="text-xs text-slate-500 ml-1">
+                                                    ({getSymbol(globalCurrency)}{(Number(presalesData.medicalInsuranceCost) * getRate(globalCurrency) / getRate(opportunityCurrency)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
+                                                </span>
+                                            )}
+                                        </p>
                                     </div>
                                     <div>
                                         <span className="text-xs text-slate-500 uppercase tracking-wide">Visa Cost</span>
-                                        <p className="font-medium text-slate-800 mt-1">{fmtCurrency(Number(presalesData.visaCost))}</p>
+                                        <p className="font-medium text-slate-800 mt-1">
+                                            {cSym}{Number(presalesData.visaCost).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                            {opportunityCurrency && globalCurrency && opportunityCurrency !== globalCurrency && (
+                                                <span className="text-xs text-slate-500 ml-1">
+                                                    ({getSymbol(globalCurrency)}{(Number(presalesData.visaCost) * getRate(globalCurrency) / getRate(opportunityCurrency)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
+                                                </span>
+                                            )}
+                                        </p>
                                     </div>
                                     <div>
                                         <span className="text-xs text-slate-500 uppercase tracking-wide">Vaccine Cost</span>
-                                        <p className="font-medium text-slate-800 mt-1">{fmtCurrency(Number(presalesData.vaccineCost))}</p>
+                                        <p className="font-medium text-slate-800 mt-1">
+                                            {cSym}{Number(presalesData.vaccineCost).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                            {opportunityCurrency && globalCurrency && opportunityCurrency !== globalCurrency && (
+                                                <span className="text-xs text-slate-500 ml-1">
+                                                    ({getSymbol(globalCurrency)}{(Number(presalesData.vaccineCost) * getRate(globalCurrency) / getRate(opportunityCurrency)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
+                                                </span>
+                                            )}
+                                        </p>
                                     </div>
                                     <div>
                                         <span className="text-xs text-slate-500 uppercase tracking-wide">Hotel Cost</span>
-                                        <p className="font-medium text-slate-800 mt-1">{fmtCurrency(Number(presalesData.hotelCost))}</p>
+                                        <p className="font-medium text-slate-800 mt-1">
+                                            {cSym}{Number(presalesData.hotelCost).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                            {opportunityCurrency && globalCurrency && opportunityCurrency !== globalCurrency && (
+                                                <span className="text-xs text-slate-500 ml-1">
+                                                    ({getSymbol(globalCurrency)}{(Number(presalesData.hotelCost) * getRate(globalCurrency) / getRate(opportunityCurrency)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
+                                                </span>
+                                            )}
+                                        </p>
                                     </div>
                                 </div>
 
@@ -2367,7 +2471,14 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                                     <div className="bg-blue-50 rounded-lg p-3 border border-blue-200">
                                         <p className="text-xs text-blue-600 mb-1">Revenue</p>
-                                        <p className="text-sm font-bold text-blue-700">{fmtCurrency(Math.round(gomResults.offshoreRevenue * (gomInputs.workingDays || 1)))}</p>
+                                        <p className="text-sm font-bold text-blue-700">
+                                            {cSym}{Math.round(gomResults.offshoreRevenue * (gomInputs.workingDays || 1)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                            {opportunityCurrency && globalCurrency && opportunityCurrency !== globalCurrency && (
+                                                <span className="text-xs text-slate-500 ml-1">
+                                                    ({getSymbol(globalCurrency)}{(Math.round(gomResults.offshoreRevenue * (gomInputs.workingDays || 1)) * getRate(globalCurrency) / getRate(opportunityCurrency)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
+                                                </span>
+                                            )}
+                                        </p>
                                     </div>
                                     <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
                                         <p className="text-xs text-slate-500 mb-1">Offshore Day Rate</p>
@@ -2379,7 +2490,14 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     </div>
                                     <div className="bg-purple-50 rounded-lg p-3 border border-purple-200">
                                         <p className="text-xs text-purple-600 mb-1">Adjusted Cost</p>
-                                        <p className="text-sm font-bold text-purple-700">{fmtCurrency(Math.round(gomResults.adjustedCost))}</p>
+                                        <p className="text-sm font-bold text-purple-700">
+                                            {cSym}{Math.round(gomResults.adjustedCost).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                            {opportunityCurrency && globalCurrency && opportunityCurrency !== globalCurrency && (
+                                                <span className="text-xs text-slate-500 ml-1">
+                                                    ({getSymbol(globalCurrency)}{(Math.round(gomResults.adjustedCost) * getRate(globalCurrency) / getRate(opportunityCurrency)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
+                                                </span>
+                                            )}
+                                        </p>
                                     </div>
                                 </div>
                             </div>
@@ -2414,7 +2532,14 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             </div>
                             <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
                                 <p className="text-xs text-slate-500 mb-1">Value</p>
-                                <p className="font-semibold text-sm text-slate-800">{fmtCurrency(Number(formData.value))}</p>
+                                <p className="font-semibold text-sm text-slate-800">
+                                    {cSym}{Number(formData.value).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                    {opportunityCurrency && globalCurrency && opportunityCurrency !== globalCurrency && (
+                                        <span className="text-xs text-slate-500 ml-1">
+                                            ({getSymbol(globalCurrency)}{(Number(formData.value) * getRate(globalCurrency) / getRate(opportunityCurrency)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
+                                        </span>
+                                    )}
+                                </p>
                             </div>
                             <div className="bg-emerald-50 rounded-lg p-3 border border-emerald-200">
                                 <p className="text-xs text-emerald-600 mb-1">Status</p>

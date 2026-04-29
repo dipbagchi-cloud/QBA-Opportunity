@@ -46,7 +46,7 @@ function durationToMonths(value: number, unit: string): number {
 
 export default function NewOpportunityPage() {
     const router = useRouter();
-    const { symbol: cSym, setCurrency } = useCurrency();
+    const { currency, symbol: cSym, setCurrency } = useCurrency();
     const { addOpportunity } = useOpportunityStore();
     const [isLoading, setIsLoading] = useState(false);
 
@@ -239,6 +239,7 @@ export default function NewOpportunityPage() {
                     : (formData.projectType === 'Staffing' && formData.expectedDayRate
                         ? Math.round(Number(formData.expectedDayRate) * 20 * durationToMonths(Number(formData.duration) || 0, formData.durationUnit))
                         : undefined),
+                currency, // <-- Add the current currency from context
                 stage: "Pipeline",
                 description: formData.description,
 

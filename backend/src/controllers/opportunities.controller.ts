@@ -168,6 +168,7 @@ export async function listOpportunities(req: Request, res: Response) {
                 name: opp.title,
                 client: opp.client.name,
                 value: Number(opp.value),
+                currency: opp.currency || 'INR',
                 stage: stageName,
                 currentStage: opp.currentStage,
                 probability,
@@ -186,7 +187,9 @@ export async function listOpportunities(req: Request, res: Response) {
                 createdAt: new Date(opp.createdAt).toISOString().slice(0, 10),
                 daysInStage,
                 isStalled,
-                healthScore: finalHealth
+                healthScore: finalHealth,
+                metadata: opp.metadata,
+                quote: opp.adjustedEstimatedValue != null ? Number(opp.adjustedEstimatedValue) : null
             };
         });
 
@@ -246,14 +249,22 @@ export async function createOpportunity(req: Request, res: Response) {
             return res.json(recentDuplicate);
         }
 
+        const currencyRates = await prisma.currencyRate.findMany({ where: { isActive: true } });
+        const ratesSnapshot = currencyRates.reduce((acc: any, rate) => {
+            acc[rate.code] = rate.rateToBase;
+            return acc;
+        }, { INR: 1.0 });
+
         const newOpp = await prisma.opportunity.create({
             data: {
                 title: body.title || body.name,
                 value: body.value !== undefined && body.value !== '' ? body.value : undefined,
+                currency: body.currency || "USD",
                 description: body.description,
                 probability: body.probability || 20,
                 priority: "Medium",
                 tags: "",
+                metadata: { exchangeRatesSnapshot: ratesSnapshot },
 
                 // New Detailed Fields
                 region: body.region,
@@ -430,12 +441,28 @@ export async function updateOpportunity(req: Request, res: Response) {
             });
         }
 
+        let metadataUpdate: any = undefined;
+        if (body.value !== undefined || body.currency !== undefined) {
+            const currencyRates = await prisma.currencyRate.findMany({ where: { isActive: true } });
+            const ratesSnapshot = currencyRates.reduce((acc: any, rate) => {
+                acc[rate.code] = rate.rateToBase;
+                return acc;
+            }, { INR: 1.0 });
+            
+            const existingMetadata = previous?.metadata ? (previous.metadata as any) : {};
+            metadataUpdate = {
+                ...existingMetadata,
+                exchangeRatesSnapshot: ratesSnapshot
+            };
+        }
+
         const updatedOpp = await prisma.opportunity.update({
             where: { id },
             data: {
                 title: body.projectName || body.title,
                 description: body.description,
                 value: body.value !== undefined && body.value !== '' ? body.value : undefined,
+                currency: body.currency || "USD",
 
                 // Detailed Fields
                 region: body.region,
@@ -456,6 +483,7 @@ export async function updateOpportunity(req: Request, res: Response) {
                 // Complex Data
                 presalesData: body.presalesData,
                 salesData: body.salesData,
+                ...(metadataUpdate ? { metadata: metadataUpdate } : {}),
 
                 // Relations if changed
                 clientId: clientId,
@@ -598,36 +626,8 @@ export async function updateOpportunity(req: Request, res: Response) {
         const ownerEmail = previous?.owner?.email;
         const ownerName = previous?.owner?.name || '';
 
-        // Pipeline saved/submitted → salesperson gets notice
-        if (!newStageName || newStageName === 'Pipeline' || newStageName === 'Discovery') {
-            if (ownerEmail) {
-                sendNotificationEmail('pipeline_saved', ownerEmail, ownerName, emailVars);
-            }
-        }
-
-        // Moved to Presales/Qualification → the assigned manager gets email
-        if (newStageName && (newStageName === 'Qualification' || newStageName === 'Presales')) {
-            const managerName = body.managerName || (updatedOpp as any).managerName;
-            if (managerName) {
-                // Try to find a user with that name to get email
-                const managerUser = await prisma.user.findFirst({ where: { name: managerName } });
-                if (managerUser?.email) {
-                    sendNotificationEmail('moved_to_presales', managerUser.email, managerName, emailVars);
-                }
-            }
-            // Also notify the salesperson
-            if (ownerEmail) {
-                sendNotificationEmail('pipeline_saved', ownerEmail, ownerName, emailVars);
-            }
-        }
-
-        // Submitted back from Presales (moved to Proposal/Sales) → presales team gets email
-        if (newStageName && (newStageName === 'Proposal' || newStageName === 'Sales')) {
-            // Notify the salesperson/owner
-            if (ownerEmail) {
-                sendNotificationEmail('presales_submitted_back', ownerEmail, ownerName, emailVars);
-            }
-        }
+        // Note: Hardcoded email rules have been removed to prevent duplicates.
+        // The dynamic Notification Rules Engine handles these now.
 
         // ── Notification Rules Engine (fire-and-forget) ──
         if (newStageName && newStageName !== (previous?.stage?.name || previous?.currentStage)) {

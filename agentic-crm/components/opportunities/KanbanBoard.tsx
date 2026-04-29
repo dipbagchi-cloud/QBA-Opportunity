@@ -19,7 +19,7 @@ const STAGES = [
 
 export default function KanbanBoard() {
     const { opportunities, updateOpportunity } = useOpportunityStore();
-    const { format: fmtCurrency } = useCurrency();
+    const { currency: globalCurrency, getSymbol, getRate } = useCurrency();
 
     // Group opportunities by stage
     const columns = useMemo(() => {
@@ -133,7 +133,38 @@ export default function KanbanBoard() {
                                                         <div className="grid grid-cols-2 gap-1.5 mb-2">
                                                             <div className="bg-slate-50 p-1.5 rounded border border-slate-100">
                                                                 <p className="text-[10px] text-slate-400 uppercase font-semibold">Value</p>
-                                                                <p className="text-xs font-semibold text-slate-700">{fmtCurrency(opp.value, { compact: true })}</p>
+                                                                <p className="text-xs font-semibold text-slate-700">
+                                                                    {(() => {
+                                                                        const val = typeof opp.value === 'number' ? opp.value : Number(opp.value) || 0;
+                                                                        const oppCurr = (opp as any).currency || 'USD';
+                                                                        if (oppCurr === globalCurrency) {
+                                                                            return `${getSymbol(globalCurrency)}${val.toLocaleString(undefined, { notation: 'compact', maximumFractionDigits: 1 })}`;
+                                                                        }
+                                                                        
+                                                                        const rates = (opp as any).metadata?.exchangeRatesSnapshot;
+                                                                        if (rates && rates[oppCurr] && rates[globalCurrency]) {
+                                                                            const converted = (val * rates[globalCurrency]) / rates[oppCurr];
+                                                                            return (
+                                                                                <>
+                                                                                    {getSymbol(globalCurrency)}{converted.toLocaleString(undefined, { notation: 'compact', maximumFractionDigits: 1 })}
+                                                                                    <span className="text-[9px] text-slate-400 ml-1 font-normal">
+                                                                                        ({getSymbol(oppCurr)}{val.toLocaleString(undefined, { notation: 'compact', maximumFractionDigits: 1 })})
+                                                                                    </span>
+                                                                                </>
+                                                                            );
+                                                                        }
+                                                                        
+                                                                        const convertedLive = (val * getRate(globalCurrency)) / getRate(oppCurr);
+                                                                        return (
+                                                                            <>
+                                                                                {getSymbol(globalCurrency)}{convertedLive.toLocaleString(undefined, { notation: 'compact', maximumFractionDigits: 1 })}
+                                                                                <span className="text-[9px] text-slate-400 ml-1 font-normal">
+                                                                                    ({getSymbol(oppCurr)}{val.toLocaleString(undefined, { notation: 'compact', maximumFractionDigits: 1 })})
+                                                                                </span>
+                                                                            </>
+                                                                        );
+                                                                    })()}
+                                                                </p>
                                                             </div>
                                                             <div className="bg-slate-50 p-1.5 rounded border border-slate-100">
                                                                 <p className="text-[10px] text-slate-400 uppercase font-semibold">Days</p>

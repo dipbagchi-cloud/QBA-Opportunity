@@ -31,6 +31,8 @@ interface CurrencyContextType {
     convert: (amountInBase: number) => number;
     /** Format an amount with currency symbol */
     format: (amountInBase: number, opts?: { compact?: boolean; decimals?: number }) => string;
+    /** Format the exact amount with the active currency symbol, NO CONVERSION */
+    formatExact: (amount: number, opts?: { compact?: boolean; decimals?: number }) => string;
     /** Get symbol for a specific currency code */
     getSymbol: (code: string) => string;
     /** Get rate for a specific currency code (relative to INR base) */
@@ -112,8 +114,20 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
         return `${sym}${converted.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`;
     }, [convert, symbol]);
 
+    const formatExact = useCallback((amount: number, opts?: { compact?: boolean; decimals?: number }): string => {
+        const sym = symbol;
+        if (opts?.compact) {
+            const abs = Math.abs(amount);
+            if (abs >= 10000000) return `${sym}${(amount / 10000000).toFixed(1)}Cr`;
+            if (abs >= 100000) return `${sym}${(amount / 100000).toFixed(1)}L`;
+            if (abs >= 1000) return `${sym}${(amount / 1000).toFixed(1)}K`;
+        }
+        const decimals = opts?.decimals ?? 0;
+        return `${sym}${amount.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`;
+    }, [symbol]);
+
     return (
-        <CurrencyContext.Provider value={{ currency, setCurrency, symbol, currencies, convert, format, getSymbol, getRate, loaded }}>
+        <CurrencyContext.Provider value={{ currency, setCurrency, symbol, currencies, convert, format, formatExact, getSymbol, getRate, loaded }}>
             {children}
         </CurrencyContext.Provider>
     );
