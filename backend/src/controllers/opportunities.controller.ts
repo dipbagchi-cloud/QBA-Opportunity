@@ -123,7 +123,7 @@ export async function listOpportunities(req: Request, res: Response) {
             const daysInStage = Math.floor((now.getTime() - stageEnteredAt.getTime()) / (1000 * 3600 * 24));
 
             // 3. Stalled detection
-            const isStalled = daysInStage > 30 && !['Closed Won', 'Closed Lost'].includes(stageName);
+            const isStalled = opp.isStalled || (daysInStage > 30 && !['Closed Won', 'Closed Lost'].includes(stageName));
 
             // 4. Dynamic Health Score (composite of 4 factors)
             //    a) Stage Progress (30%): further along = healthier
@@ -176,7 +176,8 @@ export async function listOpportunities(req: Request, res: Response) {
                 owner: opp.owner.name,
                 salesRepName: opp.salesRepName || '',
                 managerName: (opp as any).managerName || '',
-                status: finalHealth > 70 ? 'healthy' : (finalHealth > 40 ? 'at-risk' : 'critical'),
+                status: opp.isStalled ? 'stalled' : (finalHealth > 70 ? 'healthy' : (finalHealth > 40 ? 'at-risk' : 'critical')),
+                detailedStatus: opp.detailedStatus,
                 description: opp.description,
                 technology: opp.technology || '',
                 region: opp.region || '',
@@ -642,11 +643,17 @@ export async function updateOpportunity(req: Request, res: Response) {
 
         // ── Notification Rules Engine (fire-and-forget) ──
         if (newStageName && newStageName !== (previous?.stage?.name || previous?.currentStage)) {
+            let notificationStageName = newStageName;
+            const prevStageName2 = previous?.stage?.name || previous?.currentStage || '';
+            if (newStageName === 'Qualification' && (prevStageName2 === 'Proposal' || prevStageName2 === 'Negotiation')) {
+                notificationStageName = 'Re-estimation';
+            }
+
             evaluateStageChangeRules({
                 opportunityId: id,
                 opportunityTitle: updatedOpp.title,
                 previousStage: previous?.stage?.name || previous?.currentStage || '',
-                newStage: newStageName,
+                newStage: notificationStageName,
                 clientName: previous?.client?.name || '',
                 ownerName: ownerName,
                 ownerEmail: ownerEmail || '',
