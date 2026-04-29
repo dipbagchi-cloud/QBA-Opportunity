@@ -47,12 +47,18 @@ interface OpportunityEstimationContextType {
     // GOM Calculation Inputs
     markupPercent: number;
     setMarkupPercent: (markup: number) => void;
+    salesCommissionPercent: number;
+    setSalesCommissionPercent: (val: number) => void;
+    preSalesCostPercent: number;
+    setPreSalesCostPercent: (val: number) => void;
     currency: string;
     setCurrency: (currency: string) => void;
 
     // Calculated Values
     totalResourceCost: number;
     totalTravelCost: number;
+    salesCommissionAmount: number;
+    preSalesCostAmount: number;
     totalCost: number;
     revenue: number;
     gomPercent: number;
@@ -95,6 +101,8 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
         hotelCost: 0,
     });
     const [markupPercent, setMarkupPercentRaw] = useState<number>(0);
+    const [salesCommissionPercent, setSalesCommissionPercent] = useState<number>(0);
+    const [preSalesCostPercent, setPreSalesCostPercent] = useState<number>(0);
     const [currency, setCurrency] = useState<string>("INR");
     const [isSaving, setIsSaving] = useState(false);
     const [isLoaded, setIsLoaded] = useState(false);
@@ -136,6 +144,8 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
                     if (saved.resources) setResources(saved.resources);
                     if (saved.travelCosts) setTravelCosts(prev => ({ ...prev, ...saved.travelCosts }));
                     if (saved.markupPercent != null) setMarkupPercent(saved.markupPercent);
+                    if (saved.salesCommissionPercent != null) setSalesCommissionPercent(saved.salesCommissionPercent);
+                    if (saved.preSalesCostPercent != null) setPreSalesCostPercent(saved.preSalesCostPercent);
                     if (saved.currency) setCurrency(saved.currency);
                     if (saved.selectedYear) setSelectedYear(saved.selectedYear);
                 }
@@ -157,6 +167,8 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
                     resources,
                     travelCosts,
                     markupPercent,
+                    salesCommissionPercent,
+                    preSalesCostPercent,
                     currency,
                     selectedYear,
                 },
@@ -169,11 +181,13 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
         } finally {
             setIsSaving(false);
         }
-    }, [opportunityId, resources, travelCosts, markupPercent, currency, selectedYear]);
+    }, [opportunityId, resources, travelCosts, markupPercent, salesCommissionPercent, preSalesCostPercent, currency, selectedYear]);
 
     // Calculated values
     const [totalResourceCost, setTotalResourceCost] = useState(0);
     const [totalTravelCost, setTotalTravelCost] = useState(0);
+    const [salesCommissionAmount, setSalesCommissionAmount] = useState(0);
+    const [preSalesCostAmount, setPreSalesCostAmount] = useState(0);
     const [totalCost, setTotalCost] = useState(0);
     const [revenue, setRevenue] = useState(0);
     const [gomPercent, setGomPercent] = useState(0);
@@ -273,33 +287,54 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
             const summary = calculateProjectGom(resourceLines, otherCosts, assumptions);
             setGomSummary(summary);
 
-            // Calculate totals
-            const finalCost = resCost + totalTravelCost;
-            setTotalCost(finalCost);
+            // Calculate Base Cost
+            const baseCost = resCost + totalTravelCost;
 
             // Use adjustedEstimatedValue as revenue if provided, otherwise use markup calculation
+            // Base Cost is used for markup to determine the sale price.
             const calculatedRevenue = adjustedEstimatedValue > 0
                 ? adjustedEstimatedValue
-                : finalCost * (1 + markupPercent / 100);
+                : baseCost * (1 + markupPercent / 100);
+            
             setRevenue(calculatedRevenue);
+
+            // Calculate Additional Costs based on Revenue
+            const commAmount = calculatedRevenue * (salesCommissionPercent / 100);
+            const preSalesAmount = calculatedRevenue * (preSalesCostPercent / 100);
+            
+            setSalesCommissionAmount(commAmount);
+            setPreSalesCostAmount(preSalesAmount);
+
+            // Final Total Cost includes these additional components
+            const finalCost = baseCost + commAmount + preSalesAmount;
+            setTotalCost(finalCost);
 
             const gom = calculatedRevenue > 0 ? ((calculatedRevenue - finalCost) / calculatedRevenue) * 100 : 0;
             setGomPercent(gom);
         } else {
             // No resources, simple calculation
-            const finalCost = totalTravelCost;
-            setTotalCost(finalCost);
-
+            const baseCost = totalTravelCost;
+            
             const calculatedRevenue = adjustedEstimatedValue > 0
                 ? adjustedEstimatedValue
-                : finalCost * (1 + markupPercent / 100);
+                : baseCost * (1 + markupPercent / 100);
+            
             setRevenue(calculatedRevenue);
+
+            const commAmount = calculatedRevenue * (salesCommissionPercent / 100);
+            const preSalesAmount = calculatedRevenue * (preSalesCostPercent / 100);
+
+            setSalesCommissionAmount(commAmount);
+            setPreSalesCostAmount(preSalesAmount);
+
+            const finalCost = baseCost + commAmount + preSalesAmount;
+            setTotalCost(finalCost);
 
             const gom = calculatedRevenue > 0 ? ((calculatedRevenue - finalCost) / calculatedRevenue) * 100 : 0;
             setGomPercent(gom);
             setGomSummary(null);
         }
-    }, [resources, totalTravelCost, markupPercent, assumptions, selectedYear, months, adjustedEstimatedValue, startDate]);
+    }, [resources, totalTravelCost, markupPercent, salesCommissionPercent, preSalesCostPercent, assumptions, selectedYear, months, adjustedEstimatedValue, startDate]);
 
     // Determine GOM status
     const getGomStatus = () => {
@@ -319,10 +354,16 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
         setTravelCosts,
         markupPercent,
         setMarkupPercent,
+        salesCommissionPercent,
+        setSalesCommissionPercent,
+        preSalesCostPercent,
+        setPreSalesCostPercent,
         currency,
         setCurrency,
         totalResourceCost,
         totalTravelCost,
+        salesCommissionAmount,
+        preSalesCostAmount,
         totalCost,
         revenue,
         gomPercent,

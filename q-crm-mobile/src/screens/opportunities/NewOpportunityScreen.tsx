@@ -117,7 +117,6 @@ export default function NewOpportunityScreen() {
     if (form.technology.length === 0) return 'At least one technology is required';
     if (!form.tentativeStartDate) return 'Start date is required';
     if (isStaffing && !form.expectedDayRate) return 'Day rate is required for staffing';
-    if (!isStaffing && !form.value) return 'Estimated value is required';
     return null;
   };
 
@@ -136,7 +135,7 @@ export default function NewOpportunityScreen() {
       technology: form.technology.join(', '),
       pricingModel: form.pricingModel || undefined,
       expectedDayRate: form.expectedDayRate ? Number(form.expectedDayRate) : undefined,
-      value: isStaffing ? Number(calcValue) : Number(form.value),
+      value: isStaffing ? Number(calcValue) : form.value !== '' ? Number(form.value) : undefined,
       tentativeStartDate: form.tentativeStartDate,
       tentativeDuration: form.tentativeDuration || undefined,
       tentativeDurationUnit: form.tentativeDurationUnit,

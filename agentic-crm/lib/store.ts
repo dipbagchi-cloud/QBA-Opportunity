@@ -32,6 +32,11 @@ export interface PaginationParams {
     limit?: number;
     search?: string;
     stage?: string;
+    stages?: string[];
+    client?: string;
+    owner?: string;
+    salesRep?: string;
+    manager?: string;
 }
 
 interface OpportunityStore {
@@ -42,7 +47,7 @@ interface OpportunityStore {
     limit: number;
     totalPages: number;
     fetchOpportunities: (params?: PaginationParams) => Promise<void>;
-    addOpportunity: (opportunity: any) => Promise<void>;
+    addOpportunity: (opportunity: any) => Promise<any>;
     deleteOpportunity: (id: string) => Promise<void>;
     updateOpportunity: (id: string, updates: Partial<Opportunity>) => Promise<void>;
 }
@@ -63,6 +68,11 @@ export const useOpportunityStore = create<OpportunityStore>((set, get) => ({
             if (params?.limit) qp.set('limit', String(params.limit));
             if (params?.search) qp.set('search', params.search);
             if (params?.stage) qp.set('stage', params.stage);
+            if (params?.stages?.length) qp.set('stages', params.stages.join(','));
+            if (params?.client) qp.set('client', params.client);
+            if (params?.owner) qp.set('owner', params.owner);
+            if (params?.salesRep) qp.set('salesRep', params.salesRep);
+            if (params?.manager) qp.set('manager', params.manager);
             const qs = qp.toString();
             const res = await fetch(`${API_URL}/api/opportunities${qs ? `?${qs}` : ''}`, {
                 headers: getAuthHeaders(),
@@ -98,10 +108,14 @@ export const useOpportunityStore = create<OpportunityStore>((set, get) => ({
                 body: JSON.stringify(opportunity)
             });
             if (res.ok) {
+                const created = await res.json();
                 await get().fetchOpportunities(); // Refresh list
+                return created;
             }
+            return null;
         } catch (error) {
             console.error("Failed to add", error);
+            return null;
         }
     },
 

@@ -2,7 +2,9 @@ import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import fs from 'fs';
 import path from 'path';
+// @ts-ignore
 import PizZip from 'pizzip';
+// @ts-ignore
 import Docxtemplater from 'docxtemplater';
 
 const PROJECT_ROOT = path.resolve(__dirname, '../..');

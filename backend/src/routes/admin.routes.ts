@@ -16,6 +16,7 @@ import {
   addUserToRole,
   removeUserFromRole,
   resetRoleDefaults,
+  resetAllUserRoles,
   listTeams,
   listQPeopleMappings,
   listQPeopleDesignations,
@@ -67,6 +68,9 @@ import {
   createEmailTemplate,
   deleteEmailTemplate,
   sendTestEmail,
+  uploadTemplateAttachment,
+  deleteTemplateAttachment,
+  templateAttachmentUpload,
 } from '../controllers/email-templates.controller';
 import {
   listCurrencyRates,
@@ -126,6 +130,7 @@ router.use(authenticate);
 router.get('/users', authorize(PERMISSIONS.USERS_MANAGE), listUsers);
 router.post('/users', authorize(PERMISSIONS.USERS_MANAGE), createUser);
 router.post('/users/sync-qpeople', authorize(PERMISSIONS.USERS_MANAGE), syncQPeopleUsers);
+router.post('/users/reset-roles', authorize(PERMISSIONS.USERS_MANAGE), resetAllUserRoles);
 router.patch('/users/:id', authorize(PERMISSIONS.USERS_MANAGE), updateUser);
 router.patch('/users/:id/reset-password', authorize(PERMISSIONS.USERS_MANAGE), resetUserPassword);
 router.post('/users/:id/assign-local-password', authorize(PERMISSIONS.USERS_MANAGE), assignLocalPassword);
@@ -198,6 +203,8 @@ router.get('/email-templates/:id', authorize(PERMISSIONS.SETTINGS_MANAGE), getEm
 router.patch('/email-templates/:id', authorize(PERMISSIONS.SETTINGS_MANAGE), updateEmailTemplate);
 router.delete('/email-templates/:id', authorize(PERMISSIONS.SETTINGS_MANAGE), deleteEmailTemplate);
 router.post('/email-templates/test', authorize(PERMISSIONS.SETTINGS_MANAGE), sendTestEmail);
+router.post('/email-templates/:id/attachments', authorize(PERMISSIONS.SETTINGS_MANAGE), templateAttachmentUpload.single('file'), uploadTemplateAttachment);
+router.delete('/email-templates/:id/attachments/:storedName', authorize(PERMISSIONS.SETTINGS_MANAGE), deleteTemplateAttachment);
 
 // Currency rates (requires settings:manage for mutations, any auth for list)
 router.get('/currency-rates', listCurrencyRates);

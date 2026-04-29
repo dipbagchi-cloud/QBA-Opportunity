@@ -15,7 +15,10 @@ import {
     User,
     CheckCircle2,
     Paperclip,
-    X
+    X,
+    Upload,
+    FileText,
+    Trash2
 } from "lucide-react";
 import { useOpportunityStore } from "@/lib/store";
 import { API_URL, getAuthHeaders } from "@/lib/api";
@@ -43,7 +46,7 @@ function durationToMonths(value: number, unit: string): number {
 
 export default function NewOpportunityPage() {
     const router = useRouter();
-    const { symbol: cSym } = useCurrency();
+    const { symbol: cSym, setCurrency } = useCurrency();
     const { addOpportunity } = useOpportunityStore();
     const [isLoading, setIsLoading] = useState(false);
 
@@ -52,13 +55,15 @@ export default function NewOpportunityPage() {
     const [regions, setRegions] = useState<string[]>([]);
     const [technologies, setTechnologies] = useState<string[]>([]);
     const [pricingModels, setPricingModels] = useState<string[]>([]);
-    const [salespersons, setSalespersons] = useState<{ id: string; name: string }[]>([]);
+    const [salespersons, setSalespersons] = useState<{ id: string; name: string; department?: string }[]>([]);
     const [departments, setDepartments] = useState<string[]>([]);
     const [projectTypes, setProjectTypes] = useState<string[]>([]);
 
     // Add Client modal
     const [showAddClient, setShowAddClient] = useState(false);
     const [newClientName, setNewClientName] = useState("");
+    const [newClientContact, setNewClientContact] = useState("");
+    const [newClientAddress, setNewClientAddress] = useState("");
     const [addingClient, setAddingClient] = useState(false);
 
     // Tech dropdown state
@@ -68,6 +73,7 @@ export default function NewOpportunityPage() {
     // Form State
     const [formData, setFormData] = useState({
         clientName: "",
+        country: "",
         region: "",
         projectType: "",
         projectName: "",
@@ -84,6 +90,14 @@ export default function NewOpportunityPage() {
         value: 0
     });
 
+    // Country → Region + Currency mapping (fetched from API)
+    const [countryRegionMap, setCountryRegionMap] = useState<Record<string, { region: string; currency: string }>>({});
+    const countries = Object.keys(countryRegionMap).sort();
+
+    // Attachments State
+    const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
     // Step State
     const [activeStep, setActiveStep] = useState(0);
     const steps = ["Pipeline", "Presales", "Sales", "Project"];
@@ -93,7 +107,7 @@ export default function NewOpportunityPage() {
         const fetchMasterData = async () => {
             const headers = getAuthHeaders();
             try {
-                const [clientsRes, regionsRes, techRes, pricingRes, salesRes, deptRes, projTypesRes] = await Promise.all([
+                const [clientsRes, regionsRes, techRes, pricingRes, salesRes, deptRes, projTypesRes, countryMapRes] = await Promise.all([
                     fetch(`${API_URL}/api/master/clients`, { headers }),
                     fetch(`${API_URL}/api/master/regions`, { headers }),
                     fetch(`${API_URL}/api/master/technologies`, { headers }),
@@ -101,6 +115,7 @@ export default function NewOpportunityPage() {
                     fetch(`${API_URL}/api/master/salespersons`, { headers }),
                     fetch(`${API_URL}/api/master/departments`, { headers }),
                     fetch(`${API_URL}/api/master/project-types`, { headers }),
+                    fetch(`${API_URL}/api/master/country-region-map`, { headers }),
                 ]);
                 if (clientsRes.ok) setClients(await clientsRes.json());
                 if (regionsRes.ok) setRegions((await regionsRes.json()).map((r: any) => r.name));
@@ -109,12 +124,15 @@ export default function NewOpportunityPage() {
                 if (salesRes.ok) setSalespersons(await salesRes.json());
                 if (deptRes.ok) setDepartments(await deptRes.json());
                 if (projTypesRes.ok) setProjectTypes((await projTypesRes.json()).map((p: any) => p.name));
+                if (countryMapRes.ok) setCountryRegionMap(await countryMapRes.json());
             } catch (err) {
                 console.error("Failed to load master data", err);
             }
         };
         fetchMasterData();
     }, []);
+
+
 
     // Auto-calculate tentative end date from start date + duration
     useEffect(() => {
@@ -152,7 +170,17 @@ export default function NewOpportunityPage() {
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
         const { name, value } = e.target;
-        setFormData(prev => ({ ...prev, [name]: value }));
+        if (name === 'country') {
+            const countryInfo = countryRegionMap[value];
+            const autoRegion = countryInfo?.region || '';
+            setFormData(prev => ({ ...prev, country: value, region: autoRegion }));
+            // Auto-switch global currency to the selected country's currency
+            if (countryInfo?.currency) {
+                setCurrency(countryInfo.currency);
+            }
+        } else {
+            setFormData(prev => ({ ...prev, [name]: value }));
+        }
     };
 
     const handleAddClient = async () => {
@@ -162,13 +190,19 @@ export default function NewOpportunityPage() {
             const res = await fetch(`${API_URL}/api/admin/clients`, {
                 method: 'POST',
                 headers: getAuthHeaders(),
-                body: JSON.stringify({ name: newClientName.trim() }),
+                body: JSON.stringify({ 
+                    name: newClientName.trim(),
+                    contactPerson: newClientContact.trim() || undefined,
+                    address: newClientAddress.trim() || undefined,
+                }),
             });
             if (res.ok) {
                 const created = await res.json();
                 setClients(prev => [...prev, created]);
                 setFormData(prev => ({ ...prev, clientName: created.name }));
                 setNewClientName("");
+                setNewClientContact("");
+                setNewClientAddress("");
                 setShowAddClient(false);
             }
         } catch (err) {
@@ -178,19 +212,38 @@ export default function NewOpportunityPage() {
         }
     };
 
+    const handleFileSelect = (files: FileList | null) => {
+        if (!files || files.length === 0) return;
+        const newFiles = Array.from(files);
+        setPendingFiles(prev => [...prev, ...newFiles]);
+        if (fileInputRef.current) {
+            fileInputRef.current.value = "";
+        }
+    };
+
+    const removePendingFile = (index: number) => {
+        setPendingFiles(prev => prev.filter((_, i) => i !== index));
+    };
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setIsLoading(true);
 
         try {
-            await addOpportunity({
+            const rawValue: any = formData.value;
+            const created = await addOpportunity({
                 title: formData.projectName,
                 companyName: formData.clientName, // Store maps this to Client Relation
-                value: Number(formData.value) || (Number(formData.expectedDayRate) * 20), // Fallback calculation
+                value: rawValue !== undefined && rawValue !== ''
+                    ? Number(rawValue)
+                    : (formData.projectType === 'Staffing' && formData.expectedDayRate
+                        ? Math.round(Number(formData.expectedDayRate) * 20 * durationToMonths(Number(formData.duration) || 0, formData.durationUnit))
+                        : undefined),
                 stage: "Pipeline",
                 description: formData.description,
 
                 // Enhanced Fields
+                country: formData.country,
                 region: formData.region,
                 practice: formData.practice,
                 technology: formData.technology,
@@ -208,6 +261,19 @@ export default function NewOpportunityPage() {
                 ownerId: "user-1", // Mock current user
                 source: "Manual Entry"
             });
+
+            if (created && created.id && pendingFiles.length > 0) {
+                // Upload files sequentially to the newly created opportunity
+                for (let i = 0; i < pendingFiles.length; i++) {
+                    const fd = new FormData();
+                    fd.append("file", pendingFiles[i]);
+                    await fetch(`${API_URL}/api/opportunities/${created.id}/attachments`, {
+                        method: "POST",
+                        headers: { Authorization: getAuthHeaders().Authorization },
+                        body: fd,
+                    });
+                }
+            }
 
             router.push("/dashboard/opportunities");
         } catch (error) {
@@ -258,7 +324,7 @@ export default function NewOpportunityPage() {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-4">
 
-                    {/* Row 1 */}
+                    {/* Row 1: Client, Country, Region */}
                     <div className="space-y-1.5">
                         <label className="block text-sm font-bold text-slate-700">Client Name *</label>
                         <div className="flex gap-2">
@@ -282,19 +348,36 @@ export default function NewOpportunityPage() {
                     </div>
 
                     <div className="space-y-1.5">
-                        <label className="block text-sm font-bold text-slate-700">Region *</label>
+                        <label className="block text-sm font-bold text-slate-700">Country *</label>
+                        <select
+                            name="country"
+                            required
+                            value={formData.country}
+                            className="w-full pl-3 pr-10 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
+                            onChange={handleChange}
+                        >
+                            <option value="">Select Country</option>
+                            {countries.map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                        <label className="block text-sm font-bold text-slate-700">Region {formData.country ? '' : '*'}</label>
                         <select
                             name="region"
                             required
                             value={formData.region}
-                            className="w-full pl-3 pr-10 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
+                            disabled={!!formData.country}
+                            className={`w-full pl-3 pr-10 py-2.5 border border-slate-300 rounded-md text-sm shadow-sm ${formData.country ? 'bg-slate-100 text-slate-600' : 'bg-white'}`}
                             onChange={handleChange}
                         >
                             <option value="">Select Region</option>
                             {regions.map(r => <option key={r} value={r}>{r}</option>)}
                         </select>
+                        {formData.country && <p className="text-xs text-slate-400 mt-0.5">Auto-set from country</p>}
                     </div>
 
+                    {/* Row 1b: Project Type */}
                     <div className="space-y-1.5">
                         <label className="block text-sm font-bold text-slate-700">Project Type *</label>
                         <select
@@ -346,7 +429,7 @@ export default function NewOpportunityPage() {
                             onChange={handleChange}
                         >
                             <option value="">Find SalesPerson</option>
-                            {salespersons.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                            {salespersons.map(s => <option key={s.id} value={s.name}>{s.name}{s.department ? ` (${s.department})` : ''}</option>)}
                         </select>
                     </div>
 
@@ -410,7 +493,7 @@ export default function NewOpportunityPage() {
                     </div>
 
                     <div className="space-y-1.5">
-                        <label className="block text-sm font-bold text-slate-700">Duration/Tentative End Date</label>
+                        <label className="block text-sm font-bold text-slate-700">Duration</label>
                         <div className="flex gap-2">
                             <input
                                 type="number"
@@ -473,7 +556,7 @@ export default function NewOpportunityPage() {
                     )}
 
                     <div className="space-y-1.5">
-                        <label className="block text-sm font-bold text-slate-700">Estimated Value ({cSym}){formData.projectType !== 'Staffing' ? ' *' : ''}</label>
+                        <label className="block text-sm font-bold text-slate-700">Estimated Value ({cSym})</label>
                         {formData.projectType === 'Staffing' ? (
                         <>
                             <input
@@ -490,11 +573,10 @@ export default function NewOpportunityPage() {
                         <input
                             type="number"
                             name="value"
-                            required
-                            value={formData.value || ''}
+                            value={formData.value !== undefined ? formData.value : ''}
                             placeholder="0.00"
                             className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
-                            onChange={(e) => setFormData(prev => ({ ...prev, value: Number(e.target.value) || 0 }))}
+                            onChange={(e) => setFormData(prev => ({ ...prev, value: e.target.value === '' ? ('' as any) : Number(e.target.value) }))}
                         />
                         )}
                     </div>
@@ -514,13 +596,43 @@ export default function NewOpportunityPage() {
 
                     <div className="col-span-1 space-y-1.5 flex flex-col">
                         <label className="block text-sm font-bold text-slate-700">Attachments</label>
-                        <div className="flex-1 mt-1 border border-slate-300 rounded-md p-4 bg-white flex flex-col items-center justify-center text-slate-400 gap-2 border-dashed">
-                            <span className="text-xs">There is nothing attached.</span>
-                            <button type="button" className="flex items-center gap-1 text-slate-600 font-semibold text-xs hover:text-indigo-600">
-                                <Paperclip className="w-3 h-3" />
-                                Attach file
-                            </button>
-                        </div>
+                        <input
+                            ref={fileInputRef}
+                            type="file"
+                            multiple
+                            className="hidden"
+                            onChange={(e) => handleFileSelect(e.target.files)}
+                        />
+                        {pendingFiles.length === 0 ? (
+                            <div className="mt-1 border border-slate-300 rounded-md p-4 bg-white flex flex-col items-center justify-center text-slate-400 gap-2 border-dashed h-[120px]">
+                                <span className="text-xs">No files attached.</span>
+                                <button type="button" onClick={() => fileInputRef.current?.click()} className="flex items-center gap-1 text-slate-600 font-semibold text-xs hover:text-indigo-600">
+                                    <Upload className="w-3 h-3" />
+                                    Attach file
+                                </button>
+                            </div>
+                        ) : (
+                            <div className="space-y-2 mt-1">
+                                <div className="max-h-[120px] overflow-y-auto space-y-1.5">
+                                    {pendingFiles.map((f, i) => (
+                                        <div key={i} className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-md px-3 py-1.5 text-xs">
+                                            <div className="flex items-center gap-2 min-w-0">
+                                                <FileText className="w-3.5 h-3.5 text-indigo-500 flex-shrink-0" />
+                                                <span className="text-slate-700 truncate">{f.name}</span>
+                                                <span className="text-slate-400">{(f.size / 1024).toFixed(0)} KB</span>
+                                            </div>
+                                            <button type="button" onClick={() => removePendingFile(i)} className="text-slate-400 hover:text-red-600 flex-shrink-0">
+                                                <Trash2 className="w-3.5 h-3.5" />
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                                <button type="button" onClick={() => fileInputRef.current?.click()} className="flex items-center gap-1 text-slate-600 font-semibold text-xs hover:text-indigo-600">
+                                    <Upload className="w-3 h-3" />
+                                    Attach more
+                                </button>
+                            </div>
+                        )}
                     </div>
 
                 </div>
@@ -554,15 +666,31 @@ export default function NewOpportunityPage() {
                                 <X className="w-5 h-5" />
                             </button>
                         </div>
-                        <input
-                            type="text"
-                            value={newClientName}
-                            onChange={(e) => setNewClientName(e.target.value)}
-                            placeholder="Client Name"
-                            className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm mb-4"
-                            onKeyDown={(e) => e.key === 'Enter' && handleAddClient()}
-                        />
-                        <div className="flex justify-end gap-3">
+                        <div className="space-y-3">
+                            <input
+                                type="text"
+                                value={newClientName}
+                                onChange={(e) => setNewClientName(e.target.value)}
+                                placeholder="Client Name *"
+                                className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
+                                onKeyDown={(e) => e.key === 'Enter' && handleAddClient()}
+                            />
+                            <input
+                                type="text"
+                                value={newClientContact}
+                                onChange={(e) => setNewClientContact(e.target.value)}
+                                placeholder="Client Side Contact Person"
+                                className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
+                            />
+                            <input
+                                type="text"
+                                value={newClientAddress}
+                                onChange={(e) => setNewClientAddress(e.target.value)}
+                                placeholder="Client Address"
+                                className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
+                            />
+                        </div>
+                        <div className="flex justify-end gap-3 mt-4">
                             <button type="button" onClick={() => setShowAddClient(false)} className="px-4 py-2 bg-white border border-slate-300 rounded-md text-sm font-medium hover:bg-slate-50">Cancel</button>
                             <button type="button" onClick={handleAddClient} disabled={addingClient || !newClientName.trim()} className="px-4 py-2 bg-indigo-600 text-white rounded-md text-sm font-bold hover:bg-indigo-700 disabled:opacity-50">{addingClient ? 'Adding...' : 'Add Client'}</button>
                         </div>

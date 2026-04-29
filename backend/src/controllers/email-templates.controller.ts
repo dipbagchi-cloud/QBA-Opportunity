@@ -1,5 +1,24 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
+import path from 'path';
+import fs from 'fs';
+import crypto from 'crypto';
+import multer from 'multer';
+
+const TEMPLATE_ATTACHMENTS_DIR = path.resolve(__dirname, '..', '..', 'uploads', 'attachments');
+
+// Multer upload for template attachments
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    if (!fs.existsSync(TEMPLATE_ATTACHMENTS_DIR)) fs.mkdirSync(TEMPLATE_ATTACHMENTS_DIR, { recursive: true });
+    cb(null, TEMPLATE_ATTACHMENTS_DIR);
+  },
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    cb(null, `tmpl-${crypto.randomBytes(8).toString('hex')}${ext}`);
+  },
+});
+export const templateAttachmentUpload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB max
 
 // GET /api/admin/email-templates
 export async function listEmailTemplates(req: Request, res: Response) {
@@ -150,5 +169,62 @@ export async function sendTestEmail(req: Request, res: Response) {
   } catch (error) {
     console.error('Send test email error:', error);
     res.status(500).json({ error: 'Failed to send test email' });
+  }
+}
+
+// POST /api/admin/email-templates/:id/attachments — Upload attachment to template
+export async function uploadTemplateAttachment(req: Request, res: Response) {
+  try {
+    const template = await prisma.emailTemplate.findUnique({ where: { id: req.params.id } }) as any;
+    if (!template) return res.status(404).json({ error: 'Template not found' });
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+    const meta = template.metadata || {};
+    const attachments: any[] = meta.attachments || [];
+    attachments.push({
+      filename: req.file.originalname,
+      storedName: req.file.filename,
+      size: req.file.size,
+      contentType: req.file.mimetype,
+      uploadedAt: new Date().toISOString(),
+    });
+
+    await prisma.emailTemplate.update({
+      where: { id: req.params.id },
+      data: { metadata: { ...meta, attachments } },
+    });
+
+    res.json({ success: true, attachment: attachments[attachments.length - 1], total: attachments.length });
+  } catch (error) {
+    console.error('Upload template attachment error:', error);
+    res.status(500).json({ error: 'Failed to upload attachment' });
+  }
+}
+
+// DELETE /api/admin/email-templates/:id/attachments/:storedName — Remove attachment from template
+export async function deleteTemplateAttachment(req: Request, res: Response) {
+  try {
+    const template = await prisma.emailTemplate.findUnique({ where: { id: req.params.id } }) as any;
+    if (!template) return res.status(404).json({ error: 'Template not found' });
+
+    const meta = template.metadata || {};
+    const attachments: any[] = meta.attachments || [];
+    const idx = attachments.findIndex((a: any) => a.storedName === req.params.storedName);
+    if (idx === -1) return res.status(404).json({ error: 'Attachment not found' });
+
+    // Delete file from disk
+    const filePath = path.join(TEMPLATE_ATTACHMENTS_DIR, attachments[idx].storedName);
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+
+    attachments.splice(idx, 1);
+    await prisma.emailTemplate.update({
+      where: { id: req.params.id },
+      data: { metadata: { ...meta, attachments } },
+    });
+
+    res.json({ success: true, remaining: attachments.length });
+  } catch (error) {
+    console.error('Delete template attachment error:', error);
+    res.status(500).json({ error: 'Failed to delete attachment' });
   }
 }

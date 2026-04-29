@@ -113,6 +113,8 @@ model Client {
   revenue       Decimal?
   location      String?
   country       String?
+  contactPerson String?
+  address       String?
   description   String?
   logoUrl       String?
   isActive      Boolean  @default(true)
@@ -207,6 +209,7 @@ model RateCard {
 model Region {
   id        String   @id @default(cuid())
   name      String   @unique
+  countries String?  // Comma-separated list of countries mapped to this region
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -288,7 +291,7 @@ model Opportunity {
   id                String   @id @default(cuid())
   title             String
   description       String?
-  value             Decimal
+  value             Decimal?
   currency          String   @default("USD")
   probability       Int      @default(0)
   expectedCloseDate DateTime?
@@ -309,6 +312,7 @@ model Opportunity {
   managerName       String?
   
   // Detailed Fields from UI
+  country           String?
   region            String?
   practice          String?
   technology        String?

@@ -285,7 +285,7 @@ export default function SettingsPage() {
                     {activeTab === "currencyrates" && isAdmin && <CurrencyRatesTab />}
                     {activeTab === "gomcalculator" && isAdmin && <GomCalculatorTab />}
                     {activeTab === "clients" && canManageMetadata && <MasterDataTab entity="clients" label="Client" />}
-                    {activeTab === "regions" && canManageMetadata && <MasterDataTab entity="regions" label="Region" />}
+                    {activeTab === "regions" && canManageMetadata && <RegionManagementTab />}
                     {activeTab === "technologies" && canManageMetadata && <MasterDataTab entity="technologies" label="Technology" />}
                     {activeTab === "pricingmodels" && canManageMetadata && <MasterDataTab entity="pricing-models" label="Pricing Model" />}
                     {activeTab === "projecttypes" && canManageMetadata && <MasterDataTab entity="project-types" label="Project Type" />}
@@ -601,6 +601,22 @@ function UsersTab() {
         }
     };
 
+    const [confirmResetRoles, setConfirmResetRoles] = useState(false);
+    const [resettingRoles, setResettingRoles] = useState(false);
+    const handleResetAllRoles = async () => {
+        setResettingRoles(true);
+        try {
+            const res = await apiClient<{ message: string }>("/api/admin/users/reset-roles", { method: "POST" });
+            setStatus({ type: "success", message: res.message });
+            setConfirmResetRoles(false);
+            fetchUsers(userPage, userSearch);
+        } catch (err: any) {
+            setStatus({ type: "error", message: err.message || "Failed to reset roles." });
+        } finally {
+            setResettingRoles(false);
+        }
+    };
+
     const handleToggleMuteNotification = async (u: AdminUser) => {
         const newVal = !u.muteNotification;
         try {
@@ -687,6 +703,14 @@ function UsersTab() {
                 <h3 className="text-base font-bold text-slate-900">User Management</h3>
                 <div className="flex items-center gap-2">
                     <button
+                        onClick={() => setConfirmResetRoles(true)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 text-white text-xs font-medium hover:bg-red-700 transition-colors"
+                        title="Remove all role assignments (except Admin)"
+                    >
+                        <UserMinus className="w-4 h-4" />
+                        Reset All Roles
+                    </button>
+                    <button
                         onClick={() => setShowCreateUser(true)}
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-600 text-white text-xs font-medium hover:bg-green-700 transition-colors"
                     >
@@ -722,6 +746,20 @@ function UsersTab() {
                 <div className={`flex items-center gap-2 p-3 rounded-lg text-sm ${status.type === "success" ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>
                     {status.type === "success" ? <Check className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
                     {status.message}
+                </div>
+            )}
+
+            {/* Confirm reset all roles */}
+            {confirmResetRoles && (
+                <div className="bg-white p-4 rounded-xl border border-red-200 shadow-sm space-y-3">
+                    <h4 className="font-semibold text-sm text-red-800">Reset All User Roles</h4>
+                    <p className="text-xs text-slate-600">This will remove all role assignments from every user <strong>except Admin</strong>. Admin users will retain their Admin role only. This action cannot be undone.</p>
+                    <div className="flex gap-2">
+                        <button disabled={resettingRoles} onClick={handleResetAllRoles} className="px-3 py-1.5 rounded-lg bg-red-600 text-white text-xs font-medium hover:bg-red-700 disabled:opacity-50 transition-colors">
+                            {resettingRoles ? "Resetting..." : "Confirm Reset"}
+                        </button>
+                        <button onClick={() => setConfirmResetRoles(false)} className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-600 hover:bg-slate-50 transition-colors">Cancel</button>
+                    </div>
                 </div>
             )}
 
@@ -2227,6 +2265,278 @@ function AuditLogTab() {
     );
 }
 
+/* ─────────────── Region Management Tab (with Country Mapping) ─────────────── */
+function RegionManagementTab() {
+    const [items, setItems] = useState<{ id: string; name: string; countries?: string; isActive?: boolean }[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [showCreate, setShowCreate] = useState(false);
+    const [editingId, setEditingId] = useState<string | null>(null);
+    const [formName, setFormName] = useState("");
+    const [formCountries, setFormCountries] = useState("");
+    const [saving, setSaving] = useState(false);
+    const [validating, setValidating] = useState(false);
+    const [status, setStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
+    const [showInactive, setShowInactive] = useState(false);
+    const [searchTerm, setSearchTerm] = useState("");
+    const [expandedId, setExpandedId] = useState<string | null>(null);
+    const [mdSortKey, setMdSortKey] = useState("name");
+    const [mdSortDir, setMdSortDir] = useState<SortDir>("asc");
+    const handleMdSort = (key: string, dir: SortDir) => { setMdSortKey(dir ? key : "name"); setMdSortDir(dir); };
+
+    const fetchData = useCallback(async () => {
+        setLoading(true);
+        try {
+            const data = await apiClient(`/api/admin/regions`);
+            setItems(data);
+        } catch {
+            setStatus({ type: "error", message: "Failed to load regions." });
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    useEffect(() => { fetchData(); }, [fetchData]);
+
+    const filteredItems = (showInactive ? items : items.filter(i => i.isActive !== false))
+        .filter(i => !searchTerm || i.name.toLowerCase().includes(searchTerm.toLowerCase()) || (i.countries || '').toLowerCase().includes(searchTerm.toLowerCase()));
+    const displayItems = sortData(filteredItems, mdSortKey, mdSortDir);
+
+    const resetForm = () => { setFormName(""); setFormCountries(""); setEditingId(null); setShowCreate(false); };
+
+    const openEdit = (item: { id: string; name: string; countries?: string }) => {
+        setEditingId(item.id);
+        setFormName(item.name);
+        setFormCountries(item.countries || "");
+        setShowCreate(false);
+    };
+
+    // Find which countries are new (not in existing item)
+    const getNewCountries = (): string[] => {
+        const typed = formCountries.split(',').map(s => s.trim()).filter(Boolean);
+        if (!editingId) return typed; // all new on create
+        const existing = items.find(i => i.id === editingId);
+        const existingSet = new Set(
+            (existing?.countries || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+        );
+        return typed.filter(c => !existingSet.has(c.toLowerCase()));
+    };
+
+    const handleSave = async () => {
+        setStatus(null);
+        if (!formName.trim()) { setStatus({ type: "error", message: "Name is required." }); return; }
+
+        const newCountries = getNewCountries();
+        let correctedCountries = formCountries;
+        let currencyData: { code: string; name: string; symbol: string }[] = [];
+
+        // Validate new countries via REST Countries API
+        if (newCountries.length > 0) {
+            setValidating(true);
+            try {
+                const validation = await apiClient<{ input: string; valid: boolean; correctedName?: string; currencies?: { code: string; name: string; symbol: string }[] }[]>(
+                    `/api/master/validate-countries`,
+                    { method: "POST", body: JSON.stringify({ countries: newCountries }) }
+                );
+                const invalid = validation.filter(v => !v.valid);
+                if (invalid.length > 0) {
+                    setStatus({ type: "error", message: `Unrecognized country name(s): ${invalid.map(v => v.input).join(', ')}. Please check spelling.` });
+                    setValidating(false);
+                    return;
+                }
+                // Apply spelling corrections
+                const correctionMap = new Map<string, string>();
+                for (const v of validation) {
+                    if (v.correctedName && v.correctedName !== v.input) {
+                        correctionMap.set(v.input.toLowerCase(), v.correctedName);
+                    }
+                    if (v.currencies) {
+                        currencyData.push(...v.currencies);
+                    }
+                }
+                if (correctionMap.size > 0) {
+                    // Apply corrections to the full countries string
+                    const allCountries = formCountries.split(',').map(s => s.trim()).filter(Boolean);
+                    const corrected = allCountries.map(c => correctionMap.get(c.toLowerCase()) || c);
+                    correctedCountries = corrected.join(', ');
+                    setFormCountries(correctedCountries);
+                }
+            } catch {
+                // If validation API fails, proceed without validation
+            } finally {
+                setValidating(false);
+            }
+        }
+
+        setSaving(true);
+        try {
+            const payload: any = { name: formName, countries: correctedCountries };
+            if (currencyData.length > 0) payload.currencyData = currencyData;
+
+            if (editingId) {
+                const result = await apiClient<any>(`/api/admin/regions/${editingId}`, { method: "PATCH", body: JSON.stringify(payload) });
+                const msgs = ["Region updated."];
+                const added = result?.addedCurrencies || (currencyData.length > 0 ? currencyData.map(c => c.code) : []);
+                if (added.length > 0) msgs.push(`Currencies auto-added to Currency Rates: ${added.join(', ')}`);
+                setStatus({ type: "success", message: msgs.join(' ') });
+            } else {
+                const result = await apiClient<any>(`/api/admin/regions`, { method: "POST", body: JSON.stringify(payload) });
+                const msgs = ["Region created."];
+                const added = result?.addedCurrencies || (currencyData.length > 0 ? currencyData.map(c => c.code) : []);
+                if (added.length > 0) msgs.push(`Currencies auto-added to Currency Rates: ${added.join(', ')}`);
+                setStatus({ type: "success", message: msgs.join(' ') });
+            }
+            resetForm();
+            fetchData();
+        } catch (err: any) {
+            setStatus({ type: "error", message: err.message || "Failed to save region." });
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleDelete = async (id: string) => {
+        try {
+            await apiClient(`/api/admin/regions/${id}`, { method: "DELETE" });
+            fetchData();
+            setStatus({ type: "success", message: "Region deleted." });
+        } catch (err: any) {
+            setStatus({ type: "error", message: err.message || "Failed to delete." });
+        }
+    };
+
+    const countryCount = (countries?: string) => countries ? countries.split(',').map(s => s.trim()).filter(Boolean).length : 0;
+
+    if (loading) return <div className="text-center py-12 text-slate-400">Loading regions...</div>;
+
+    return (
+        <div className="space-y-4">
+            <div className="flex items-center justify-between">
+                <h3 className="text-base font-bold text-slate-900">Region Management</h3>
+                <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-1.5 text-xs text-slate-500 cursor-pointer select-none">
+                        <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5" />
+                        Show history
+                    </label>
+                    {!showCreate && !editingId && (
+                        <button onClick={() => { resetForm(); setShowCreate(true); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 transition-colors">
+                            <Plus className="w-3.5 h-3.5" /> Add Region
+                        </button>
+                    )}
+                </div>
+            </div>
+
+            {status && (
+                <div className={`flex items-center gap-2 p-3 rounded-lg text-sm ${status.type === "success" ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>
+                    {status.type === "success" ? <Check className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+                    {status.message}
+                </div>
+            )}
+
+            {(showCreate || editingId) && (
+                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-3">
+                    <div className="flex items-center justify-between">
+                        <h4 className="font-semibold text-sm text-slate-800">{editingId ? "Edit Region" : "New Region"}</h4>
+                        <button onClick={resetForm} className="p-1 text-slate-400 hover:text-slate-600"><X className="w-4 h-4" /></button>
+                    </div>
+                    <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">Region Name</label>
+                        <input className="w-full px-3 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm" placeholder="Region name" value={formName} onChange={(e) => setFormName(e.target.value)} />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">Countries <span className="text-slate-400">(comma-separated)</span></label>
+                        <textarea
+                            className="w-full px-3 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm resize-none"
+                            rows={3}
+                            placeholder="e.g. United States, Canada, Mexico"
+                            value={formCountries}
+                            onChange={(e) => setFormCountries(e.target.value)}
+                        />
+                        <p className="text-[10px] text-slate-400 mt-0.5">Country names are validated for correct spelling. Currencies are auto-added to the conversion master.</p>
+                    </div>
+                    <div className="flex justify-end gap-2 pt-2">
+                        <button onClick={resetForm} className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-600 hover:bg-slate-50 transition-colors">Cancel</button>
+                        <button disabled={saving || validating} onClick={handleSave} className="px-4 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+                            {validating ? "Validating..." : saving ? "Saving..." : editingId ? "Update" : "Create"}
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* Search */}
+            <div className="relative max-w-md">
+                <Search className="absolute left-3 top-2 w-4 h-4 text-slate-400" />
+                <input
+                    type="text"
+                    placeholder="Search regions or countries..."
+                    className="w-full pl-9 pr-4 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                />
+            </div>
+
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                        <thead className="bg-slate-50 border-b border-slate-200">
+                            <tr>
+                                <SortableHeader label="Region" sortKey="name" currentSort={mdSortKey} currentDir={mdSortDir} onSort={handleMdSort} className="text-left px-3 text-slate-600" />
+                                <th className="text-left px-3 py-2 font-medium text-slate-600">Countries</th>
+                                <th className="text-right px-3 py-2 font-medium text-slate-600">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {displayItems.map(item => (
+                                <React.Fragment key={item.id}>
+                                    <tr className={`hover:bg-slate-50/50 ${item.isActive === false ? 'opacity-50' : ''}`}>
+                                        <td className="px-3 py-2 font-medium text-slate-800">
+                                            {item.name}
+                                            {item.isActive === false && (
+                                                <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-400 border border-slate-200">inactive</span>
+                                            )}
+                                        </td>
+                                        <td className="px-3 py-2 text-slate-600">
+                                            {countryCount(item.countries) > 0 ? (
+                                                <button
+                                                    onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}
+                                                    className="text-indigo-600 hover:underline"
+                                                >
+                                                    {countryCount(item.countries)} {countryCount(item.countries) === 1 ? 'country' : 'countries'}
+                                                </button>
+                                            ) : (
+                                                <span className="text-slate-400">None mapped</span>
+                                            )}
+                                        </td>
+                                        <td className="px-3 py-2 text-right">
+                                            {item.isActive !== false && (
+                                                <div className="flex items-center justify-end gap-2">
+                                                    <button onClick={() => openEdit(item)} className="p-1.5 text-slate-400 hover:text-indigo-600 transition-colors" title="Edit"><Pencil className="w-3.5 h-3.5" /></button>
+                                                    <button onClick={() => handleDelete(item.id)} className="p-1.5 text-slate-400 hover:text-red-600 transition-colors" title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>
+                                                </div>
+                                            )}
+                                        </td>
+                                    </tr>
+                                    {expandedId === item.id && item.countries && (
+                                        <tr>
+                                            <td colSpan={3} className="px-3 py-2 bg-slate-50">
+                                                <div className="flex flex-wrap gap-1.5">
+                                                    {item.countries.split(',').map(c => c.trim()).filter(Boolean).map(c => (
+                                                        <span key={c} className="inline-block px-2 py-0.5 bg-indigo-50 text-indigo-700 text-[10px] rounded-full border border-indigo-200">{c}</span>
+                                                    ))}
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    )}
+                                </React.Fragment>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+                {displayItems.length === 0 && <div className="text-center py-8 text-slate-400">No regions found.</div>}
+            </div>
+        </div>
+    );
+}
+
 /* ─────────────── Master Data Tab (Generic CRUD for Clients, Regions, Technologies, Pricing Models) ─────────────── */
 function MasterDataTab({ entity, label }: { entity: string; label: string }) {
     const [items, setItems] = useState<{ id: string; name: string; isActive?: boolean }[]>([]);
@@ -2608,6 +2918,8 @@ function EmailTemplatesTab() {
     const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
     const [testEmail, setTestEmail] = useState("");
     const [sendingTest, setSendingTest] = useState(false);
+    const [attachments, setAttachments] = useState<{ filename: string; storedName: string; size: number; contentType?: string }[]>([]);
+    const [uploadingAttachment, setUploadingAttachment] = useState(false);
     const [etSortKey, setEtSortKey] = useState(""); const [etSortDir, setEtSortDir] = useState<SortDir>(null);
     const handleEtSort = (key: string, dir: SortDir) => { setEtSortKey(dir ? key : ""); setEtSortDir(dir); };
     const sortedTemplates = sortData(templates, etSortKey, etSortDir);
@@ -2634,6 +2946,7 @@ function EmailTemplatesTab() {
         setEditingId(t.id);
         setForm({ eventKey: t.eventKey, name: t.name, subject: t.subject, body: t.body, isActive: t.isActive });
         setCustomCalcFields((t as any).metadata?.customCalcFields || []);
+        setAttachments((t as any).metadata?.attachments || []);
         setStatus(null);
         setFieldErrors({});
     };
@@ -2649,6 +2962,7 @@ function EmailTemplatesTab() {
             isActive: true,
         });
         setCustomCalcFields([]);
+        setAttachments([]);
         setStatus(null);
         setFieldErrors({});
     };
@@ -2682,19 +2996,22 @@ function EmailTemplatesTab() {
         if (!validate()) return;
         setSaving(true);
         setStatus(null);
-        const metadata = customCalcFields.length > 0 ? { customCalcFields } : null;
+        const metadata: any = {};
+        if (customCalcFields.length > 0) metadata.customCalcFields = customCalcFields;
+        if (attachments.length > 0) metadata.attachments = attachments;
+        const metadataPayload = Object.keys(metadata).length > 0 ? metadata : null;
         try {
             if (isCreating) {
                 await apiClient(`/api/admin/email-templates`, {
                     method: "POST",
-                    body: JSON.stringify({ ...form, eventKey: nameToEventKey(form.name), metadata }),
+                    body: JSON.stringify({ ...form, eventKey: nameToEventKey(form.name), metadata: metadataPayload }),
                 });
                 setStatus({ type: "success", message: `Template "${form.name}" created successfully!` });
             } else if (editingId) {
                 const { eventKey: _omit, ...patch } = form;
                 await apiClient(`/api/admin/email-templates/${editingId}`, {
                     method: "PATCH",
-                    body: JSON.stringify({ ...patch, metadata }),
+                    body: JSON.stringify({ ...patch, metadata: metadataPayload }),
                 });
                 setStatus({ type: "success", message: "Template saved." });
             } else {
@@ -2706,6 +3023,43 @@ function EmailTemplatesTab() {
             setStatus({ type: "error", message: err.message || "Failed to save." });
         } finally {
             setSaving(false);
+        }
+    };
+
+    const handleUploadAttachment = async (file: File) => {
+        if (!editingId) {
+            setStatus({ type: "error", message: "Save the template first before uploading attachments." });
+            return;
+        }
+        setUploadingAttachment(true);
+        try {
+            const formData = new FormData();
+            formData.append("file", file);
+            const res = await fetch(`${(window as any).__NEXT_DATA__?.runtimeConfig?.apiUrl || ""}/api/admin/email-templates/${editingId}/attachments`, {
+                method: "POST",
+                headers: { Authorization: `Bearer ${localStorage.getItem("auth_token")}` },
+                body: formData,
+            });
+            if (!res.ok) throw new Error((await res.json()).error || "Upload failed");
+            const data = await res.json();
+            setAttachments(prev => [...prev, data.attachment]);
+            setStatus({ type: "success", message: `Attached "${file.name}" successfully.` });
+        } catch (err: any) {
+            setStatus({ type: "error", message: err.message || "Failed to upload attachment." });
+        } finally {
+            setUploadingAttachment(false);
+        }
+    };
+
+    const handleDeleteAttachment = async (storedName: string, filename: string) => {
+        if (!editingId) return;
+        if (!confirm(`Remove attachment "${filename}"?`)) return;
+        try {
+            await apiClient(`/api/admin/email-templates/${editingId}/attachments/${storedName}`, { method: "DELETE" });
+            setAttachments(prev => prev.filter(a => a.storedName !== storedName));
+            setStatus({ type: "success", message: `Removed "${filename}".` });
+        } catch (err: any) {
+            setStatus({ type: "error", message: err.message || "Failed to remove attachment." });
         }
     };
 
@@ -2849,6 +3203,38 @@ function EmailTemplatesTab() {
                             </button>
                             {form.isActive ? "Active — this template will be used when triggered" : "Disabled — this template will not send emails"}
                         </label>
+                    </div>
+
+                    {/* Attachments */}
+                    <div className="space-y-2 pt-2 border-t border-slate-100">
+                        <div className="flex items-center gap-2">
+                            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 text-xs font-bold">4</span>
+                            <label className="text-sm font-semibold text-slate-800">Attachments</label>
+                            <span className="text-[11px] text-slate-400">(files sent with every email from this template)</span>
+                        </div>
+                        {attachments.length > 0 && (
+                            <div className="space-y-1">
+                                {attachments.map((att) => (
+                                    <div key={att.storedName} className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 rounded-lg border border-slate-200">
+                                        <FileText className="w-4 h-4 text-indigo-500 shrink-0" />
+                                        <span className="text-xs text-slate-700 font-medium truncate flex-1">{att.filename}</span>
+                                        <span className="text-[10px] text-slate-400">{att.size ? `${(att.size / 1024).toFixed(0)} KB` : ''}</span>
+                                        <button onClick={() => handleDeleteAttachment(att.storedName, att.filename)} className="p-1 text-slate-400 hover:text-rose-600" title="Remove">
+                                            <X className="w-3.5 h-3.5" />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                        {!isCreating && editingId ? (
+                            <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-dashed border-slate-300 text-xs text-slate-500 hover:border-indigo-400 hover:text-indigo-600 cursor-pointer transition-colors">
+                                <Plus className="w-3.5 h-3.5" />
+                                {uploadingAttachment ? "Uploading..." : "Add Attachment"}
+                                <input type="file" className="hidden" disabled={uploadingAttachment} onChange={(e) => { if (e.target.files?.[0]) handleUploadAttachment(e.target.files[0]); e.target.value = ''; }} />
+                            </label>
+                        ) : (
+                            <p className="text-[11px] text-slate-400 italic">Save the template first, then add attachments.</p>
+                        )}
                     </div>
 
                     {/* Test email (only for existing templates) */}

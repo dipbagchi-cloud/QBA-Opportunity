@@ -113,9 +113,20 @@ export default function KanbanBoard() {
                                                         </div>
 
                                                         {/* Sub-header: Client */}
-                                                        <div className="flex items-center gap-1 text-xs text-slate-500 mb-2">
-                                                            <User className="w-3 h-3" />
-                                                            <span className="truncate max-w-[120px]">{opp.client}</span>
+                                                        <div className="flex flex-col gap-1.5 mb-2">
+                                                            <div className="flex items-center gap-1 text-xs text-slate-500">
+                                                                <User className="w-3 h-3" />
+                                                                <span className="truncate max-w-[120px]">{opp.client}</span>
+                                                            </div>
+                                                            {/* Sales Rep */}
+                                                            {opp.salesRepName && (
+                                                                <div className="flex items-center">
+                                                                    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border ${getAvatarColor(opp.salesRepName)}`}>
+                                                                        <User className="w-2.5 h-2.5" />
+                                                                        {opp.salesRepName}
+                                                                    </span>
+                                                                </div>
+                                                            )}
                                                         </div>
 
                                                         {/* Metrics Grid */}
@@ -224,4 +235,22 @@ function getHealthBarColor(score: number) {
     if (score >= 70) return 'bg-emerald-500';
     if (score >= 40) return 'bg-amber-500';
     return 'bg-red-500';
+}
+
+function getAvatarColor(name: string) {
+    if (!name) return 'bg-slate-50 text-slate-600 border-slate-200';
+    const colors = [
+        'bg-blue-50 text-blue-600 border-blue-200',
+        'bg-purple-50 text-purple-600 border-purple-200',
+        'bg-pink-50 text-pink-600 border-pink-200',
+        'bg-emerald-50 text-emerald-600 border-emerald-200',
+        'bg-orange-50 text-orange-600 border-orange-200',
+        'bg-teal-50 text-teal-600 border-teal-200',
+        'bg-cyan-50 text-cyan-600 border-cyan-200',
+    ];
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) {
+        hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    return colors[Math.abs(hash) % colors.length];
 }

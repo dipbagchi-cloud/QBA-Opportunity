@@ -566,7 +566,7 @@ export default function OpportunityDetailScreen() {
                 <EditPickerField label="Sales Rep *" value={editFields.salesRepName || opp.salesRepName || opp.owner || ''} onPress={() => openPicker('salesRepName', 'Select Sales Rep', salespersons || [])} />
                 <EditPickerField label="Pricing Model" value={editFields.pricingModel || opp.pricingModel || ''} onPress={() => openPicker('pricingModel', 'Select Pricing Model', pricingModels || [])} />
                 {(editFields.projectType || opp.projectType) === 'Staffing' && <EditInputField label="Expected Day Rate ($)" value={String(editFields.expectedDayRate ?? opp.expectedDayRate ?? '')} onChangeText={(v: string) => setEditFields(f => ({ ...f, expectedDayRate: Number(v) || 0 }))} keyboardType="numeric" />}
-                <EditInputField label="Estimated Value ($)" value={String(editFields.value ?? opp.value ?? '')} onChangeText={(v: string) => setEditFields(f => ({ ...f, value: Number(v) || 0 }))} keyboardType="numeric" />
+                <EditInputField label="Estimated Value ($)" value={String(editFields.value ?? opp.value ?? '')} onChangeText={(v: string) => setEditFields(f => ({ ...f, value: v === '' ? undefined : Number(v) }))} keyboardType="numeric" />
 
                 <Text style={st.editLabel}>Start Date *</Text>
                 <TouchableOpacity style={st.datePickerBtn} onPress={() => openDatePicker('editStartDate', editFields.tentativeStartDate || opp.tentativeStartDate)}>

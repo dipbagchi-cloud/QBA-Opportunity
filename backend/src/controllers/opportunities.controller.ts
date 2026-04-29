@@ -12,18 +12,57 @@ export async function listOpportunities(req: Request, res: Response) {
         const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 10));
         const search = (req.query.search as string || '').trim();
         const stageFilter = req.query.stage as string || '';
+        const stagesFilter = (req.query.stages as string || '').trim();
+        const clientFilter = (req.query.client as string || '').trim();
+        const ownerFilter = (req.query.owner as string || '').trim();
+        const salesRepFilter = (req.query.salesRep as string || '').trim();
+        const managerFilter = (req.query.manager as string || '').trim();
+
+        const splitCsv = (value: string) =>
+            value
+                .split(',')
+                .map((item) => item.trim())
+                .filter(Boolean);
+
+        const andFilters: any[] = [];
 
         const where: any = {};
         if (search) {
-            where.OR = [
+            andFilters.push({
+                OR: [
                 { title: { contains: search, mode: 'insensitive' } },
                 { client: { name: { contains: search, mode: 'insensitive' } } },
                 { owner: { name: { contains: search, mode: 'insensitive' } } },
                 { description: { contains: search, mode: 'insensitive' } },
-            ];
+                ],
+            });
         }
-        if (stageFilter) {
-            where.stage = { name: stageFilter };
+
+        const stageNames = splitCsv(stagesFilter || stageFilter);
+        if (stageNames.length === 1) {
+            andFilters.push({ stage: { name: stageNames[0] } });
+        } else if (stageNames.length > 1) {
+            andFilters.push({ stage: { name: { in: stageNames } } });
+        }
+
+        if (clientFilter) {
+            andFilters.push({ client: { name: { contains: clientFilter, mode: 'insensitive' } } });
+        }
+
+        if (ownerFilter) {
+            andFilters.push({ owner: { name: { contains: ownerFilter, mode: 'insensitive' } } });
+        }
+
+        if (salesRepFilter) {
+            andFilters.push({ salesRepName: { contains: salesRepFilter, mode: 'insensitive' } });
+        }
+
+        if (managerFilter) {
+            andFilters.push({ managerName: { contains: managerFilter, mode: 'insensitive' } });
+        }
+
+        if (andFilters.length > 0) {
+            where.AND = andFilters;
         }
 
         const [opportunities, total] = await Promise.all([
@@ -210,7 +249,7 @@ export async function createOpportunity(req: Request, res: Response) {
         const newOpp = await prisma.opportunity.create({
             data: {
                 title: body.title || body.name,
-                value: body.value,
+                value: body.value !== undefined && body.value !== '' ? body.value : undefined,
                 description: body.description,
                 probability: body.probability || 20,
                 priority: "Medium",
@@ -218,6 +257,7 @@ export async function createOpportunity(req: Request, res: Response) {
 
                 // New Detailed Fields
                 region: body.region,
+                country: body.country,
                 practice: body.practice,
                 technology: body.technology,
                 projectType: body.projectType,
@@ -226,7 +266,7 @@ export async function createOpportunity(req: Request, res: Response) {
                 tentativeDurationUnit: body.tentativeDurationUnit,
                 tentativeEndDate: body.tentativeEndDate ? new Date(body.tentativeEndDate) : undefined,
                 pricingModel: body.pricingModel,
-                expectedDayRate: body.expectedDayRate ? body.expectedDayRate : null,
+                expectedDayRate: body.expectedDayRate !== undefined && body.expectedDayRate !== '' ? body.expectedDayRate : null,
                 salesRepName: body.salesRepName,
 
                 // Relations
@@ -395,10 +435,11 @@ export async function updateOpportunity(req: Request, res: Response) {
             data: {
                 title: body.projectName || body.title,
                 description: body.description,
-                value: body.value,
+                value: body.value !== undefined && body.value !== '' ? body.value : undefined,
 
                 // Detailed Fields
                 region: body.region,
+                country: body.country,
                 practice: body.practice,
                 technology: body.technology,
                 projectType: body.projectType,
@@ -409,8 +450,8 @@ export async function updateOpportunity(req: Request, res: Response) {
                 tentativeDuration: body.tentativeDuration || body.duration,
                 tentativeDurationUnit: body.tentativeDurationUnit || body.durationUnit,
                 pricingModel: body.pricingModel,
-                expectedDayRate: body.expectedDayRate ? body.expectedDayRate : null,
-                adjustedEstimatedValue: body.adjustedEstimatedValue ? body.adjustedEstimatedValue : null,
+                expectedDayRate: body.expectedDayRate !== undefined && body.expectedDayRate !== '' ? body.expectedDayRate : null,
+                adjustedEstimatedValue: body.adjustedEstimatedValue !== undefined && body.adjustedEstimatedValue !== '' ? body.adjustedEstimatedValue : null,
 
                 // Complex Data
                 presalesData: body.presalesData,
@@ -601,7 +642,7 @@ export async function updateOpportunity(req: Request, res: Response) {
                 salesRepName: (updatedOpp as any).salesRepName || '',
                 managerName: (updatedOpp as any).managerName || '',
                 updatedByName: previous?.owner?.name || 'System',
-                value: updatedOpp.value ? Number(updatedOpp.value) : null,
+                value: updatedOpp.value != null ? Number(updatedOpp.value) : null,
                 probability: updatedOpp.probability,
                 region: updatedOpp.region || undefined,
                 technology: updatedOpp.technology || undefined,
@@ -612,7 +653,7 @@ export async function updateOpportunity(req: Request, res: Response) {
         evaluateDataConditionRules({
             id,
             title: updatedOpp.title,
-            value: updatedOpp.value ? Number(updatedOpp.value) : null,
+            value: updatedOpp.value != null ? Number(updatedOpp.value) : null,
             probability: updatedOpp.probability,
             currentStage: newStageName || previous?.stage?.name || previous?.currentStage,
             region: updatedOpp.region,

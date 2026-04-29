@@ -19,13 +19,40 @@ import {
     CalendarClock,
     ArrowUpDown,
     ArrowUp,
-    ArrowDown
+    ArrowDown,
+    X
 } from "lucide-react";
 import Link from "next/link";
 import { useOpportunityStore } from "@/lib/store";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import KanbanBoard from "@/components/opportunities/KanbanBoard";
 import { useCurrency } from "@/components/providers/currency-provider";
+
+const STAGE_OPTIONS = [
+    "Discovery",
+    "Qualification",
+    "Proposal",
+    "Negotiation",
+    "Closed Won",
+    "Closed Lost",
+    "Proposal Lost",
+];
+
+type OpportunityFilters = {
+    stages: string[];
+    client: string;
+    owner: string;
+    salesRep: string;
+    manager: string;
+};
+
+const EMPTY_FILTERS: OpportunityFilters = {
+    stages: [],
+    client: "",
+    owner: "",
+    salesRep: "",
+    manager: "",
+};
 
 export default function OpportunitiesPage() {
     const { opportunities, deleteOpportunity, fetchOpportunities, total, page, totalPages, isLoading } = useOpportunityStore();
@@ -39,6 +66,19 @@ export default function OpportunitiesPage() {
 
     const [sortKey, setSortKey] = useState<string | null>(null);
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+    const [showFilters, setShowFilters] = useState(false);
+    const [appliedFilters, setAppliedFilters] = useState<OpportunityFilters>(EMPTY_FILTERS);
+    const [draftFilters, setDraftFilters] = useState<OpportunityFilters>(EMPTY_FILTERS);
+
+    const activeFilterCount = useMemo(() => {
+        let count = 0;
+        if (appliedFilters.stages.length) count += 1;
+        if (appliedFilters.client.trim()) count += 1;
+        if (appliedFilters.owner.trim()) count += 1;
+        if (appliedFilters.salesRep.trim()) count += 1;
+        if (appliedFilters.manager.trim()) count += 1;
+        return count;
+    }, [appliedFilters]);
 
     const handleSort = (key: string) => {
         if (sortKey === key) {
@@ -53,6 +93,17 @@ export default function OpportunitiesPage() {
         if (sortKey !== col) return <ArrowUpDown className="w-3 h-3 opacity-40" />;
         return sortDir === 'asc' ? <ArrowUp className="w-3 h-3 text-indigo-600" /> : <ArrowDown className="w-3 h-3 text-indigo-600" />;
     };
+
+    const buildQueryParams = useCallback((pg: number, search: string, filters: OpportunityFilters, isKanban: boolean) => ({
+        page: pg,
+        limit: isKanban ? 100 : limit,
+        search,
+        stages: filters.stages,
+        client: filters.client.trim(),
+        owner: filters.owner.trim(),
+        salesRep: filters.salesRep.trim(),
+        manager: filters.manager.trim(),
+    }), [limit]);
 
     const sortedOpportunities = useMemo(() => {
         if (!sortKey) return opportunities;
@@ -84,32 +135,52 @@ export default function OpportunitiesPage() {
         });
     }, [opportunities, sortKey, sortDir]);
 
-    const loadPage = useCallback((pg: number, search?: string) => {
+    const loadPage = useCallback((pg: number, search?: string, filters?: OpportunityFilters) => {
         setCurrentPage(pg);
-        fetchOpportunities({ page: pg, limit, search: search ?? searchTerm });
-    }, [fetchOpportunities, searchTerm, limit]);
+        fetchOpportunities(buildQueryParams(pg, search ?? searchTerm, filters ?? appliedFilters, viewMode === 'kanban'));
+    }, [fetchOpportunities, searchTerm, appliedFilters, viewMode, buildQueryParams]);
 
     useEffect(() => {
-        loadPage(1, "");
+        loadPage(1, "", EMPTY_FILTERS);
     }, []);
 
     // Reload all opportunities when switching to kanban mode
     useEffect(() => {
-        if (viewMode === 'kanban') {
-            fetchOpportunities({ page: 1, limit: 100, search: searchTerm });
-        } else {
-            fetchOpportunities({ page: currentPage, limit, search: searchTerm });
-        }
+        fetchOpportunities(buildQueryParams(currentPage, searchTerm, appliedFilters, viewMode === 'kanban'));
     }, [viewMode]);
 
     // Debounced search
     useEffect(() => {
         const timer = setTimeout(() => {
             setCurrentPage(1);
-            fetchOpportunities({ page: 1, limit: viewMode === 'kanban' ? 100 : limit, search: searchTerm });
+            fetchOpportunities(buildQueryParams(1, searchTerm, appliedFilters, viewMode === 'kanban'));
         }, 400);
         return () => clearTimeout(timer);
     }, [searchTerm]);
+
+    const handleApplyFilters = () => {
+        setAppliedFilters(draftFilters);
+        setShowFilters(false);
+        setCurrentPage(1);
+        fetchOpportunities(buildQueryParams(1, searchTerm, draftFilters, viewMode === 'kanban'));
+    };
+
+    const handleClearFilters = () => {
+        setDraftFilters(EMPTY_FILTERS);
+        setAppliedFilters(EMPTY_FILTERS);
+        setShowFilters(false);
+        setCurrentPage(1);
+        fetchOpportunities(buildQueryParams(1, searchTerm, EMPTY_FILTERS, viewMode === 'kanban'));
+    };
+
+    const toggleDraftStage = (stage: string) => {
+        setDraftFilters((prev) => ({
+            ...prev,
+            stages: prev.stages.includes(stage)
+                ? prev.stages.filter((item) => item !== stage)
+                : [...prev.stages, stage],
+        }));
+    };
 
     const startRecord = total === 0 ? 0 : (currentPage - 1) * limit + 1;
     const endRecord = Math.min(currentPage * limit, total);
@@ -124,10 +195,21 @@ export default function OpportunitiesPage() {
                     </h1>
                     <p className="text-slate-500 text-sm mt-0.5">Manage your pipeline and track deal progress.</p>
                 </div>
-                <div className="flex gap-2">
-                    <button className="btn-ghost bg-white border border-slate-200 text-slate-600 flex items-center gap-1.5">
+                <div className="flex gap-2 relative">
+                    <button
+                        onClick={() => {
+                            setDraftFilters(appliedFilters);
+                            setShowFilters((prev) => !prev);
+                        }}
+                        className={`btn-ghost bg-white border text-slate-600 flex items-center gap-1.5 ${showFilters || activeFilterCount > 0 ? 'border-indigo-300 text-indigo-600' : 'border-slate-200'}`}
+                    >
                         <Filter className="w-3.5 h-3.5" />
                         Filter
+                        {activeFilterCount > 0 && (
+                            <span className="inline-flex items-center justify-center min-w-5 h-5 px-1 rounded-full bg-indigo-100 text-indigo-700 text-xs font-semibold">
+                                {activeFilterCount}
+                            </span>
+                        )}
                     </button>
                     <Link href="/dashboard/opportunities/new">
                         <button className="btn-primary flex items-center gap-1.5">
@@ -135,6 +217,108 @@ export default function OpportunitiesPage() {
                             New Opportunity
                         </button>
                     </Link>
+
+                    {showFilters && (
+                        <div className="absolute right-0 top-full mt-2 z-30 w-[420px] bg-white border border-slate-200 rounded-xl shadow-xl p-4">
+                            <div className="flex items-center justify-between mb-4">
+                                <div>
+                                    <h3 className="text-sm font-semibold text-slate-800">Filter Opportunities</h3>
+                                    <p className="text-xs text-slate-500">Filter by one or more columns.</p>
+                                </div>
+                                <button
+                                    onClick={() => setShowFilters(false)}
+                                    className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded"
+                                >
+                                    <X className="w-4 h-4" />
+                                </button>
+                            </div>
+
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-700 mb-2">Stage</label>
+                                    <div className="flex flex-wrap gap-2">
+                                        {STAGE_OPTIONS.map((stage) => {
+                                            const selected = draftFilters.stages.includes(stage);
+                                            return (
+                                                <button
+                                                    key={stage}
+                                                    type="button"
+                                                    onClick={() => toggleDraftStage(stage)}
+                                                    className={`px-2.5 py-1 rounded-full border text-xs font-medium transition-colors ${
+                                                        selected
+                                                            ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
+                                                            : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
+                                                    }`}
+                                                >
+                                                    {stage}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-700 mb-1.5">Client</label>
+                                        <input
+                                            type="text"
+                                            value={draftFilters.client}
+                                            onChange={(e) => setDraftFilters((prev) => ({ ...prev, client: e.target.value }))}
+                                            placeholder="Filter by client"
+                                            className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-700 mb-1.5">Owner</label>
+                                        <input
+                                            type="text"
+                                            value={draftFilters.owner}
+                                            onChange={(e) => setDraftFilters((prev) => ({ ...prev, owner: e.target.value }))}
+                                            placeholder="Filter by owner"
+                                            className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-700 mb-1.5">Sales Rep</label>
+                                        <input
+                                            type="text"
+                                            value={draftFilters.salesRep}
+                                            onChange={(e) => setDraftFilters((prev) => ({ ...prev, salesRep: e.target.value }))}
+                                            placeholder="Filter by sales rep"
+                                            className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-700 mb-1.5">Manager</label>
+                                        <input
+                                            type="text"
+                                            value={draftFilters.manager}
+                                            onChange={(e) => setDraftFilters((prev) => ({ ...prev, manager: e.target.value }))}
+                                            placeholder="Filter by manager"
+                                            className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="flex items-center justify-end gap-2 mt-4 pt-4 border-t border-slate-100">
+                                <button
+                                    type="button"
+                                    onClick={handleClearFilters}
+                                    className="px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg"
+                                >
+                                    Reset
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleApplyFilters}
+                                    className="px-3 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg"
+                                >
+                                    Apply Filters
+                                </button>
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
 
@@ -171,6 +355,43 @@ export default function OpportunitiesPage() {
                 />
             </div>
 
+            {activeFilterCount > 0 && (
+                <div className="flex flex-wrap gap-2">
+                    {appliedFilters.stages.length > 0 && (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs font-medium">
+                            Stage: {appliedFilters.stages.join(', ')}
+                        </span>
+                    )}
+                    {appliedFilters.client && (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-slate-50 text-slate-700 border border-slate-200 text-xs font-medium">
+                            Client: {appliedFilters.client}
+                        </span>
+                    )}
+                    {appliedFilters.owner && (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-slate-50 text-slate-700 border border-slate-200 text-xs font-medium">
+                            Owner: {appliedFilters.owner}
+                        </span>
+                    )}
+                    {appliedFilters.salesRep && (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-slate-50 text-slate-700 border border-slate-200 text-xs font-medium">
+                            Sales Rep: {appliedFilters.salesRep}
+                        </span>
+                    )}
+                    {appliedFilters.manager && (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-slate-50 text-slate-700 border border-slate-200 text-xs font-medium">
+                            Manager: {appliedFilters.manager}
+                        </span>
+                    )}
+                    <button
+                        onClick={handleClearFilters}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-red-50 text-red-700 border border-red-200 text-xs font-medium hover:bg-red-100"
+                    >
+                        <X className="w-3 h-3" />
+                        Clear all
+                    </button>
+                </div>
+            )}
+
             {/* Opportunities View */}
             {viewMode === 'list' ? (
                 <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-visible">
@@ -189,8 +410,8 @@ export default function OpportunitiesPage() {
                             <tbody className="divide-y divide-slate-100">
                                 {opportunities.length === 0 ? (
                                     <tr>
-                                        <td colSpan={8} className="py-8 text-center text-slate-400 text-sm">
-                                            No opportunities found. Click "New Opportunity" to add one.
+                                        <td colSpan={12} className="py-8 text-center text-slate-400 text-sm">
+                                            No opportunities found for the current search/filter selection.
                                         </td>
                                     </tr>
                                 ) : (

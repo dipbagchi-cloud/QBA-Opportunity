@@ -18,8 +18,14 @@ export function GomCalculatorTab({ gomApproved = false, onApproveGom, canApprove
         setTravelCosts,
         markupPercent,
         setMarkupPercent,
+        salesCommissionPercent,
+        setSalesCommissionPercent,
+        preSalesCostPercent,
+        setPreSalesCostPercent,
         totalResourceCost,
         totalTravelCost,
+        salesCommissionAmount,
+        preSalesCostAmount,
         totalCost,
         revenue,
         gomPercent,
@@ -141,25 +147,57 @@ export function GomCalculatorTab({ gomApproved = false, onApproveGom, canApprove
                     <h3 className="text-base font-bold text-slate-800 mb-4">GOM Configuration</h3>
 
                     <div className="space-y-3">
-                        {/* Markup Input */}
-                        <div>
-                            <label className="block text-xs font-medium text-slate-700 mb-1">
-                                Markup Percentage (%)
-                            </label>
-                            <input
-                                type="number"
-                                value={markupPercent}
-                                onChange={(e) => setMarkupPercent(Number(e.target.value))}
-                                disabled={readOnly}
-                                className="flex h-9 w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:bg-slate-100 disabled:cursor-not-allowed"
-                                placeholder="Enter markup %"
-                                min="0"
-                                step="0.1"
-                            />
-                            <p className="text-xs text-slate-500 mt-1">
-                                Applied on total cost to calculate revenue
-                            </p>
+                        {/* Configuration Inputs */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            <div>
+                                <label className="block text-xs font-medium text-slate-700 mb-1">
+                                    Markup (%)
+                                </label>
+                                <input
+                                    type="number"
+                                    value={markupPercent}
+                                    onChange={(e) => setMarkupPercent(Number(e.target.value))}
+                                    disabled={readOnly}
+                                    className="flex h-9 w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:bg-slate-100 disabled:cursor-not-allowed"
+                                    placeholder="Markup"
+                                    min="0"
+                                    step="0.1"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-medium text-slate-700 mb-1">
+                                    Sales Comm. (%)
+                                </label>
+                                <input
+                                    type="number"
+                                    value={salesCommissionPercent}
+                                    onChange={(e) => setSalesCommissionPercent(Number(e.target.value))}
+                                    disabled={readOnly}
+                                    className="flex h-9 w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:bg-slate-100 disabled:cursor-not-allowed"
+                                    placeholder="Commission"
+                                    min="0"
+                                    step="0.1"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-medium text-slate-700 mb-1">
+                                    Pre-Sales Cost (%)
+                                </label>
+                                <input
+                                    type="number"
+                                    value={preSalesCostPercent}
+                                    onChange={(e) => setPreSalesCostPercent(Number(e.target.value))}
+                                    disabled={readOnly}
+                                    className="flex h-9 w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:bg-slate-100 disabled:cursor-not-allowed"
+                                    placeholder="Pre-Sales"
+                                    min="0"
+                                    step="0.1"
+                                />
+                            </div>
                         </div>
+                        <p className="text-[10px] text-slate-500 mt-1">
+                            Markup applies to Base Cost. Comm & Pre-Sales apply to Sale Price.
+                        </p>
 
                         {/* Cost Breakdown */}
                         <div className="bg-slate-50 rounded-lg p-4 space-y-3 border border-slate-200">
@@ -173,6 +211,16 @@ export function GomCalculatorTab({ gomApproved = false, onApproveGom, canApprove
                             <div className="flex justify-between items-center text-sm">
                                 <span className="text-slate-600">Travel Cost:</span>
                                 <span className="font-semibold text-slate-900">{fmtCurrency(totalTravelCost)}</span>
+                            </div>
+
+                            <div className="flex justify-between items-center text-sm">
+                                <span className="text-slate-600">Sales Commission:</span>
+                                <span className="font-semibold text-slate-900">{fmtCurrency(salesCommissionAmount)}</span>
+                            </div>
+
+                            <div className="flex justify-between items-center text-sm">
+                                <span className="text-slate-600">Pre-Sales Cost:</span>
+                                <span className="font-semibold text-slate-900">{fmtCurrency(preSalesCostAmount)}</span>
                             </div>
 
                             <div className="border-t border-slate-300 pt-2 mt-2">
@@ -190,7 +238,7 @@ export function GomCalculatorTab({ gomApproved = false, onApproveGom, canApprove
                                 <span className="text-base font-bold text-blue-700">{fmtCurrency(revenue)}</span>
                             </div>
                             <p className="text-xs text-blue-600">
-                                Formula: Total Cost × (1 + {markupPercent}%)
+                                Formula: (Resource + Travel) × (1 + {markupPercent}%)
                             </p>
                         </div>
 
@@ -353,11 +401,11 @@ export function GomCalculatorTab({ gomApproved = false, onApproveGom, canApprove
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
                     <div className="bg-white p-3 rounded border border-slate-200">
                         <div className="font-semibold text-slate-700 mb-1">Total Cost</div>
-                        <div className="text-slate-600">Resource Cost + Travel Cost + Auto Overheads (Bonus, Indirect, Welfare, Training)</div>
+                        <div className="text-slate-600">Resource + Travel + Commission + Pre-Sales + Auto Overheads</div>
                     </div>
                     <div className="bg-white p-3 rounded border border-slate-200">
                         <div className="font-semibold text-slate-700 mb-1">Revenue</div>
-                        <div className="text-slate-600">Total Cost × (1 + Markup %)</div>
+                        <div className="text-slate-600">(Resource + Travel) × (1 + Markup %)</div>
                     </div>
                     <div className="bg-white p-3 rounded border border-slate-200">
                         <div className="font-semibold text-slate-700 mb-1">GOM %</div>
@@ -455,6 +503,20 @@ export function GomCalculatorTab({ gomApproved = false, onApproveGom, canApprove
                             <div className="text-right">
                                 <div className="font-semibold text-slate-900">{formatCurrency(convertCurrency(totalTravelCost))}</div>
                                 <div className="text-xs text-slate-500">{fmtCurrency(totalTravelCost)}</div>
+                            </div>
+                        </div>
+                        <div className="flex justify-between items-center py-2 border-b border-slate-100">
+                            <span className="text-slate-600">Sales Commission:</span>
+                            <div className="text-right">
+                                <div className="font-semibold text-slate-900">{formatCurrency(convertCurrency(salesCommissionAmount))}</div>
+                                <div className="text-xs text-slate-500">{fmtCurrency(salesCommissionAmount)}</div>
+                            </div>
+                        </div>
+                        <div className="flex justify-between items-center py-2 border-b border-slate-100">
+                            <span className="text-slate-600">Pre-Sales Cost:</span>
+                            <div className="text-right">
+                                <div className="font-semibold text-slate-900">{formatCurrency(convertCurrency(preSalesCostAmount))}</div>
+                                <div className="text-xs text-slate-500">{fmtCurrency(preSalesCostAmount)}</div>
                             </div>
                         </div>
                     </div>

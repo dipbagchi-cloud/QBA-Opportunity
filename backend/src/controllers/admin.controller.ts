@@ -576,6 +576,66 @@ export async function resetRoleDefaults(req: Request, res: Response) {
   }
 }
 
+// POST /api/admin/users/reset-roles — Remove all role assignments except Admin
+export async function resetAllUserRoles(req: Request, res: Response) {
+  try {
+    // Find the Admin role
+    const adminRole = await prisma.role.findUnique({ where: { name: 'Admin' } });
+    if (!adminRole) {
+      return res.status(404).json({ error: 'Admin role not found' });
+    }
+
+    // Get all users with their roles
+    const users = await prisma.user.findMany({
+      include: { roles: { select: { id: true, name: true } } },
+    });
+
+    let updatedCount = 0;
+    let skippedAdmins = 0;
+
+    for (const user of users) {
+      const hasAdmin = user.roles.some(r => r.id === adminRole.id);
+      if (hasAdmin) {
+        // Admin users: keep only Admin role, disconnect others
+        if (user.roles.length > 1) {
+          await prisma.user.update({
+            where: { id: user.id },
+            data: { roles: { set: [{ id: adminRole.id }] } },
+          });
+          updatedCount++;
+        }
+        skippedAdmins++;
+      } else if (user.roles.length > 0) {
+        // Non-admin users: disconnect all roles
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { roles: { set: [] } },
+        });
+        updatedCount++;
+      }
+    }
+
+    await prisma.auditLog.create({
+      data: {
+        entity: 'User',
+        entityId: 'system',
+        action: 'RESET_ALL_USER_ROLES',
+        userId: req.user!.userId,
+        changes: { updatedCount, skippedAdmins, totalUsers: users.length },
+      },
+    });
+
+    res.json({
+      message: `Roles cleared for ${updatedCount} users. ${skippedAdmins} admin(s) retained their Admin role.`,
+      updatedCount,
+      skippedAdmins,
+    });
+  } catch (error) {
+    console.error('Reset all user roles error:', error);
+    res.status(500).json({ error: 'Failed to reset user roles' });
+  }
+}
+
 // GET /api/admin/teams
 export async function listTeams(req: Request, res: Response) {
   try {

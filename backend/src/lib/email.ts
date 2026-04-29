@@ -1,4 +1,6 @@
 import nodemailer from 'nodemailer';
+import path from 'path';
+import fs from 'fs';
 import { prisma } from './prisma';
 
 // Microsoft Graph OAuth2 configuration
@@ -228,6 +230,22 @@ export async function sendNotificationEmail(
     let subject = renderTemplate(template.subject, allVars);
     const htmlBody = greetingHtml + renderTemplate(template.body, allVars);
 
+    // Resolve attachments from template metadata
+    const attachments: { filename: string; path: string; contentType?: string }[] = [];
+    if (metadata?.attachments && Array.isArray(metadata.attachments)) {
+      const uploadsDir = path.resolve(__dirname, '..', '..', 'uploads', 'attachments');
+      for (const att of metadata.attachments) {
+        if (att.filename && att.storedName) {
+          const filePath = path.join(uploadsDir, att.storedName);
+          if (fs.existsSync(filePath)) {
+            attachments.push({ filename: att.filename, path: filePath, ...(att.contentType && { contentType: att.contentType }) });
+          } else {
+            console.warn(`[Email] Attachment file not found: ${filePath}`);
+          }
+        }
+      }
+    }
+
     if (isOverride) {
       subject = `[TEST→${originalToLabel}${ccList.length > 0 ? ` cc:${ccList.join(',')}` : ''}] ${subject}`;
     }
@@ -261,6 +279,7 @@ export async function sendNotificationEmail(
         cc: actualCc.length > 0 ? actualCc.join(', ') : undefined,
         subject,
         html: htmlBody,
+        attachments: attachments.length > 0 ? attachments : undefined,
       });
     }
 

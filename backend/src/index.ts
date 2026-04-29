@@ -15,6 +15,9 @@ import adminRoutes from './routes/admin.routes';
 import contactsRoutes from './routes/contacts.routes';
 import chatbotRoutes from './routes/chatbot.routes';
 import notificationsRoutes from './routes/notifications.routes';
+import searchRoutes from './routes/search.routes';
+import usersRoutes from './routes/users.routes';
+// @ts-ignore
 import sowRoutes from './routes/sow.routes';
 import { getPublicStats } from './controllers/public.controller';
 import { errorHandler } from './middleware/errorHandler';
@@ -54,6 +57,8 @@ app.use('/api/master', masterDataRoutes);
 app.use('/api/contacts', contactsRoutes);
 app.use('/api/chatbot', chatbotRoutes);
 app.use('/api/notifications', notificationsRoutes);
+app.use('/api/search', searchRoutes);
+app.use('/api/users', usersRoutes);
 app.use('/api', sowRoutes);
 
 // Health check (public)

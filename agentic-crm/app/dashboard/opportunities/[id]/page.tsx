@@ -105,7 +105,7 @@ function GomPercentSync({ onGomPercentChange }: { onGomPercentChange: (pct: numb
 
 export default function OpportunityDetailsPage({ params }: { params: Promise<{ id: string }> }) {
     const router = useRouter();
-    const { format: fmtCurrency, symbol: cSym } = useCurrency();
+    const { format: fmtCurrency, symbol: cSym, setCurrency } = useCurrency();
     const { id } = use(params);
     const { updateOpportunity } = useOpportunityStore();
     const { toast } = useToast();
@@ -118,7 +118,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const [regions, setRegions] = useState<string[]>([]);
     const [technologies, setTechnologies] = useState<string[]>([]);
     const [pricingModels, setPricingModels] = useState<string[]>([]);
-    const [salespersons, setSalespersons] = useState<{ id: string; name: string }[]>([]);
+    const [salespersons, setSalespersons] = useState<{ id: string; name: string; department?: string }[]>([]);
     const [departments, setDepartments] = useState<string[]>([]);
     const [managers, setManagers] = useState<{ id: string; name: string; department: string }[]>([]);
     const [isLoadingManagers, setIsLoadingManagers] = useState(false);
@@ -129,6 +129,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     // Form State
     const [formData, setFormData] = useState({
         clientName: "",
+        country: "",
         region: "",
         projectType: "",
         projectName: "",
@@ -145,10 +146,21 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         value: 0
     });
 
+    // Country → Region + Currency mapping (fetched from API)
+    const [countryRegionMap, setCountryRegionMap] = useState<Record<string, { region: string; currency: string }>>({});
+    const countries = Object.keys(countryRegionMap).sort();
+
     // Attachments state
     const [attachments, setAttachments] = useState<{ id: string; fileName: string; fileType: string; fileSize: number; uploadedAt: string }[]>([]);
     const [isUploading, setIsUploading] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    // Add Client modal
+    const [showAddClient, setShowAddClient] = useState(false);
+    const [newClientName, setNewClientName] = useState("");
+    const [newClientContact, setNewClientContact] = useState("");
+    const [newClientAddress, setNewClientAddress] = useState("");
+    const [addingClient, setAddingClient] = useState(false);
 
     // Presales Modal State (Modal for transition)
     const [presalesForm, setPresalesForm] = useState({
@@ -328,7 +340,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         const fetchMasterData = async () => {
             const headers = getAuthHeaders();
             try {
-                const [clientsRes, regionsRes, techRes, pricingRes, salesRes, deptRes, projTypesRes, budgetRes] = await Promise.all([
+                const [clientsRes, regionsRes, techRes, pricingRes, salesRes, deptRes, projTypesRes, budgetRes, countryMapRes] = await Promise.all([
                     fetch(`${API_URL}/api/master/clients`, { headers }),
                     fetch(`${API_URL}/api/master/regions`, { headers }),
                     fetch(`${API_URL}/api/master/technologies`, { headers }),
@@ -337,6 +349,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     fetch(`${API_URL}/api/master/departments`, { headers }),
                     fetch(`${API_URL}/api/master/project-types`, { headers }),
                     fetch(`${API_URL}/api/admin/budget-assumptions`, { headers }),
+                    fetch(`${API_URL}/api/master/country-region-map`, { headers }),
                 ]);
                 if (clientsRes.ok) setClients(await clientsRes.json());
                 if (regionsRes.ok) setRegions((await regionsRes.json()).map((r: any) => r.name));
@@ -345,6 +358,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 if (salesRes.ok) setSalespersons(await salesRes.json());
                 if (deptRes.ok) setDepartments(await deptRes.json());
                 if (projTypesRes.ok) setProjectTypes((await projTypesRes.json()).map((p: any) => p.name));
+                if (countryMapRes.ok) setCountryRegionMap(await countryMapRes.json());
                 if (budgetRes.ok) {
                     const budgetData = await budgetRes.json();
                     if (budgetData.autoSaveIntervalMinutes !== undefined) {
@@ -363,6 +377,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         };
         fetchMasterData();
     }, []);
+
+
 
     // Auto-approve GOM when GOM % reaches configured threshold
     useEffect(() => {
@@ -406,6 +422,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
                 setFormData({
                     clientName: data.client?.name || "",
+                    country: data.country || "",
                     region: data.region || "",
                     projectType: data.projectType || "New Development",
                     projectName: data.title || "",
@@ -488,9 +505,58 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         if (id) fetchDetails();
     }, [id]);
 
+    // Auto-switch global currency when opportunity loads with a country
+    useEffect(() => {
+        if (formData.country && countryRegionMap[formData.country]?.currency) {
+            setCurrency(countryRegionMap[formData.country].currency);
+        }
+    }, [formData.country, countryRegionMap]);
+
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
         const { name, value } = e.target;
-        setFormData(prev => ({ ...prev, [name]: value }));
+        if (name === 'country') {
+            const countryInfo = countryRegionMap[value];
+            const autoRegion = countryInfo?.region || '';
+            setFormData(prev => ({ ...prev, country: value, region: autoRegion }));
+            // Auto-switch global currency to the selected country's currency
+            if (countryInfo?.currency) {
+                setCurrency(countryInfo.currency);
+            }
+        } else {
+            setFormData(prev => ({ ...prev, [name]: value }));
+        }
+    };
+
+    // Add Client handler
+    const handleAddClient = async () => {
+        if (!newClientName.trim()) return;
+        setAddingClient(true);
+        try {
+            const res = await fetch(`${API_URL}/api/admin/clients`, {
+                method: 'POST',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({
+                    name: newClientName.trim(),
+                    contactPerson: newClientContact.trim() || undefined,
+                    address: newClientAddress.trim() || undefined,
+                }),
+            });
+            if (res.ok) {
+                const created = await res.json();
+                setClients(prev => [...prev, created]);
+                setFormData(prev => ({ ...prev, clientName: created.name }));
+                setNewClientName("");
+                setNewClientContact("");
+                setNewClientAddress("");
+                setShowAddClient(false);
+                toast({ title: "Client Added", description: `${created.name} has been added.` });
+            }
+        } catch (err) {
+            console.error("Failed to add client", err);
+            toast({ title: "Error", description: "Failed to add client." });
+        } finally {
+            setAddingClient(false);
+        }
     };
 
     // Attachment upload handler
@@ -521,14 +587,14 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     };
 
     // Attachment download handler (uses auth headers)
-    const handleDownloadAttachment = async (attachmentId: string, fileName: string) => {
+    const handleDownloadAttachment = (attachmentId: string, fileName: string) => {
         try {
-            const res = await fetch(`${API_URL}/api/opportunities/${id}/attachments/${attachmentId}/download`, {
-                headers: getAuthHeaders(),
-            });
-            if (!res.ok) throw new Error("Download failed");
-            const blob = await res.blob();
-            const url = window.URL.createObjectURL(blob);
+            const authHeaders = getAuthHeaders() as any;
+            let token = "";
+            if (authHeaders.Authorization) {
+                token = authHeaders.Authorization.replace("Bearer ", "");
+            }
+            const url = `${API_URL}/api/opportunities/${id}/attachments/${attachmentId}/download?token=${token}`;
             window.open(url, '_blank');
         } catch {
             toast({ title: "Error", description: "Failed to open file." });
@@ -563,10 +629,10 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
             if (res.ok) {
                 // Also update store optimistic
-                await updateOpportunity(id, {
-                    name: formData.projectName,
-                    value: Number(formData.value)
-                });
+                const optimisticUpdates: any = { name: formData.projectName };
+                const rawValue: any = formData.value;
+                if (rawValue !== '' && rawValue !== undefined) optimisticUpdates.value = Number(rawValue);
+                await updateOpportunity(id, optimisticUpdates);
                 toast({ title: "Success", description: "Opportunity updated successfully!" });
             } else {
                 toast({ title: "Error", description: "Failed to save changes. Please check all fields." });
@@ -1076,16 +1142,37 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                         {/* Row 1 */}
                         <div className="space-y-1.5">
                             <label className="block text-sm font-bold text-slate-700">Client Name *</label>
+                            <div className="flex gap-2">
+                                <select
+                                    name="clientName"
+                                    required
+                                    value={formData.clientName}
+                                    disabled={!isPipelineEditable}
+                                    className={`flex-1 px-3 py-2.5 border border-slate-300 rounded-md text-sm shadow-sm ${disabledClass}`}
+                                    onChange={handleChange}
+                                >
+                                    <option value="">Select Client</option>
+                                    {clients.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                                </select>
+                                {isPipelineEditable && (
+                                    <button type="button" onClick={() => setShowAddClient(true)} className="p-2.5 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors">
+                                        <Plus className="w-5 h-5" />
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="space-y-1.5">
+                            <label className="block text-sm font-bold text-slate-700">Country</label>
                             <select
-                                name="clientName"
-                                required
-                                value={formData.clientName}
+                                name="country"
+                                value={formData.country}
                                 disabled={!isPipelineEditable}
                                 className={`w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm shadow-sm ${disabledClass}`}
                                 onChange={handleChange}
                             >
-                                <option value="">Select Client</option>
-                                {clients.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                                <option value="">Select Country</option>
+                                {countries.map(c => <option key={c} value={c}>{c}</option>)}
                             </select>
                         </div>
 
@@ -1095,15 +1182,17 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 name="region"
                                 required
                                 value={formData.region}
-                                disabled={!isPipelineEditable}
-                                className={`w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm shadow-sm ${disabledClass}`}
+                                disabled={!isPipelineEditable || !!formData.country}
+                                className={`w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm shadow-sm ${!isPipelineEditable || formData.country ? 'bg-slate-100 text-slate-500 cursor-not-allowed' : ''}`}
                                 onChange={handleChange}
                             >
                                 <option value="">Select Region</option>
                                 {regions.map(r => <option key={r} value={r}>{r}</option>)}
                             </select>
+                            {formData.country && <p className="text-xs text-slate-400 mt-0.5">Auto-set from country</p>}
                         </div>
 
+                        {/* Row 1b: Project Type */}
                         <div className="space-y-1.5">
                             <label className="block text-sm font-bold text-slate-700">Project Type *</label>
                             <select
@@ -1160,7 +1249,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 onChange={handleChange}
                             >
                                 <option value="">Find SalesPerson</option>
-                                {salespersons.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                                {salespersons.map(s => <option key={s.id} value={s.name}>{s.name}{s.department ? ` (${s.department})` : ''}</option>)}
                             </select>
                         </div>
 
@@ -1248,7 +1337,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
                         {/* Value */}
                         <div className="space-y-1.5">
-                            <label className="block text-sm font-bold text-slate-700">Estimated Value ({cSym}){formData.projectType !== 'Staffing' ? ' *' : ''}</label>
+                            <label className="block text-sm font-bold text-slate-700">Estimated Value ({cSym})</label>
                             {formData.projectType === 'Staffing' ? (
                             <>
                                 <input
@@ -1265,12 +1354,11 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 <input
                                     type="number"
                                     name="value"
-                                    required
-                                    value={formData.value || ''}
+                                    value={formData.value !== undefined ? formData.value : ''}
                                     placeholder="0.00"
                                     disabled={!isPipelineEditable}
                                     className={`w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm shadow-sm ${isPipelineEditable ? 'bg-white' : 'bg-slate-50 cursor-not-allowed opacity-70'}`}
-                                    onChange={(e) => setFormData(prev => ({ ...prev, value: Number(e.target.value) || 0 }))}
+                                    onChange={(e) => setFormData(prev => ({ ...prev, value: e.target.value === '' ? ('' as any) : Number(e.target.value) }))}
                                 />
                             )}
                         </div>
@@ -1291,7 +1379,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                         </div>
 
                         <div className="space-y-1.5">
-                            <label className="block text-sm font-bold text-slate-700">Duration/Tentative End Date</label>
+                            <label className="block text-sm font-bold text-slate-700">Duration</label>
                             <div className="flex gap-2">
                                 <input
                                     type="number"
@@ -1454,20 +1542,19 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                         <div className="font-semibold text-slate-800">{formData.clientName}</div>
                                     </div>
                                     <div>
-                                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Project Name</label>
-                                        <div className="font-semibold text-slate-800">{formData.projectName}</div>
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Type of Opportunity</label>
-                                        <div className="font-semibold text-slate-800">{formData.projectType}</div>
+                                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Country</label>
+                                        <div className="font-semibold text-slate-800">{formData.country || <span className="text-slate-400">—</span>}</div>
                                     </div>
                                     <div>
                                         <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Region</label>
                                         <div className="font-semibold text-slate-800">{formData.region}</div>
                                     </div>
-
                                     <div>
-                                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Project Type</label>
+                                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Project Name</label>
+                                        <div className="font-semibold text-slate-800">{formData.projectName}</div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Type of Opportunity</label>
                                         <div className="font-semibold text-slate-800">{formData.projectType}</div>
                                     </div>
                                     <div>
@@ -1774,7 +1861,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     </div>
 
                                     <div className="space-y-1.5">
-                                        <label className="block text-sm font-bold text-slate-700">Duration/Tentative End Date *</label>
+                                        <label className="block text-sm font-bold text-slate-700">Duration *</label>
                                         <div className="flex gap-2">
                                             <input
                                                 type="number"
@@ -2559,6 +2646,48 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     {isSaving ? 'Sending...' : 'Send for Re-estimation'}
                                 </button>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Add Client Modal */}
+            {showAddClient && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-lg font-bold text-slate-900">Add New Client</h3>
+                            <button onClick={() => setShowAddClient(false)} className="text-slate-400 hover:text-slate-600">
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+                        <div className="space-y-3">
+                            <input
+                                type="text"
+                                value={newClientName}
+                                onChange={(e) => setNewClientName(e.target.value)}
+                                placeholder="Client Name *"
+                                className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
+                                onKeyDown={(e) => e.key === 'Enter' && handleAddClient()}
+                            />
+                            <input
+                                type="text"
+                                value={newClientContact}
+                                onChange={(e) => setNewClientContact(e.target.value)}
+                                placeholder="Client Side Contact Person"
+                                className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
+                            />
+                            <input
+                                type="text"
+                                value={newClientAddress}
+                                onChange={(e) => setNewClientAddress(e.target.value)}
+                                placeholder="Client Address"
+                                className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
+                            />
+                        </div>
+                        <div className="flex justify-end gap-3 mt-4">
+                            <button type="button" onClick={() => setShowAddClient(false)} className="px-4 py-2 bg-white border border-slate-300 rounded-md text-sm font-medium hover:bg-slate-50">Cancel</button>
+                            <button type="button" onClick={handleAddClient} disabled={addingClient || !newClientName.trim()} className="px-4 py-2 bg-indigo-600 text-white rounded-md text-sm font-bold hover:bg-indigo-700 disabled:opacity-50">{addingClient ? 'Adding...' : 'Add Client'}</button>
                         </div>
                     </div>
                 </div>

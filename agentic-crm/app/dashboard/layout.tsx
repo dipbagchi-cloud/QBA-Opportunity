@@ -27,6 +27,7 @@ import { AuthProvider } from "@/components/providers/auth-provider";
 import { CurrencyProvider, useCurrency } from "@/components/providers/currency-provider";
 import { useAuthStore } from "@/lib/auth-store";
 import ChatBot from "@/components/chatbot/ChatBot";
+import GlobalSearch from "@/components/ui/GlobalSearch";
 
 interface NavItem {
     icon: any;
@@ -261,15 +262,8 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
                     </button>
 
                     <div className="flex items-center gap-4">
-                        {/* Search */}
-                        <div className="relative hidden md:block">
-                            <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
-                            <input
-                                type="text"
-                                placeholder="Search opportunities..."
-                                className="w-64 bg-slate-100/50 border border-slate-200 rounded-lg py-2 pl-10 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-slate-800 placeholder:text-slate-400"
-                            />
-                        </div>
+                        {/* Global Search Component */}
+                        <GlobalSearch />
 
                         {/* Global Currency Selector */}
                         <select
