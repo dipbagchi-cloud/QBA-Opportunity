@@ -24,14 +24,20 @@ export function GomCalculatorTab({ gomApproved = false, onApproveGom, canApprove
         setPreSalesCostPercent,
         totalResourceCost,
         totalTravelCost,
+        totalSpecCost,
         salesCommissionAmount,
         preSalesCostAmount,
         totalCost,
         revenue,
         gomPercent,
         gomStatus,
+        gomSummary,
+        saveEstimation,
+        isSaving,
         resources,
         readOnly,
+        specialCosts,
+        setSpecialCosts
     } = useOpportunityEstimation();
 
     const { format: fmtCurrency, symbol: cSym, convert: convertCurrency, currency: selectedCurrency, setCurrency: setSelectedCurrency, currencies, getRate } = useCurrency();
@@ -213,6 +219,20 @@ export function GomCalculatorTab({ gomApproved = false, onApproveGom, canApprove
                                 <span className="font-semibold text-slate-900">{fmtCurrency(totalTravelCost)}</span>
                             </div>
 
+                            {totalSpecCost > 0 && (
+                                <div className="flex justify-between items-center text-sm">
+                                    <span className="text-slate-600">Special Costs:</span>
+                                    <span className="font-semibold text-slate-900">{fmtCurrency(totalSpecCost)}</span>
+                                </div>
+                            )}
+
+                            {gomSummary?.totalCost != null && (
+                                <div className="flex justify-between items-center text-sm">
+                                    <span className="text-slate-600">Budget Assumptions:</span>
+                                    <span className="font-semibold text-slate-900">{fmtCurrency(gomSummary.totalCost - totalResourceCost - totalTravelCost - totalSpecCost)}</span>
+                                </div>
+                            )}
+
                             <div className="flex justify-between items-center text-sm">
                                 <span className="text-slate-600">Sales Commission:</span>
                                 <span className="font-semibold text-slate-900">{fmtCurrency(salesCommissionAmount)}</span>
@@ -282,13 +302,14 @@ export function GomCalculatorTab({ gomApproved = false, onApproveGom, canApprove
                                 </select>
                             </div>
                             <div>
-                                <label className="block text-xs font-medium text-slate-700 mb-1">Frequency</label>
+                                <label className="block text-xs font-medium text-slate-700 mb-1">Frequency (Multiplier)</label>
                                 <input
-                                    type="text"
+                                    type="number"
                                     value={travelCosts.frequency}
                                     onChange={(e) => setTravelCosts({ ...travelCosts, frequency: e.target.value })}
                                     disabled={readOnly}
-                                    placeholder="e.g., Monthly"
+                                    placeholder="e.g., 2"
+                                    min="1"
                                     className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                                 />
                             </div>
@@ -390,6 +411,74 @@ export function GomCalculatorTab({ gomApproved = false, onApproveGom, canApprove
                                     {fmtCurrency(totalTravelCost)}
                                 </span>
                             </div>
+                        </div>
+                    </div>
+                </div>
+                
+                {/* Special Costs Section */}
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 mt-6">
+                    <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                        <span className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                            <DollarSign className="w-4 h-4" />
+                        </span>
+                        Special Costs
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <div>
+                            <label className="block text-xs font-medium text-slate-700 mb-1">
+                                Subcontracting ({cSym})
+                            </label>
+                            <input
+                                type="number"
+                                value={specialCosts.subcontracting || ''}
+                                onChange={(e) => setSpecialCosts({ ...specialCosts, subcontracting: Number(e.target.value) })}
+                                disabled={readOnly}
+                                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
+                                placeholder="0"
+                                min="0"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-medium text-slate-700 mb-1">
+                                Miscl. Expense ({cSym})
+                            </label>
+                            <input
+                                type="number"
+                                value={specialCosts.miscExpense || ''}
+                                onChange={(e) => setSpecialCosts({ ...specialCosts, miscExpense: Number(e.target.value) })}
+                                disabled={readOnly}
+                                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
+                                placeholder="0"
+                                min="0"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-medium text-slate-700 mb-1">
+                                Special HW Cost ({cSym})
+                            </label>
+                            <input
+                                type="number"
+                                value={specialCosts.specialHwCost || ''}
+                                onChange={(e) => setSpecialCosts({ ...specialCosts, specialHwCost: Number(e.target.value) })}
+                                disabled={readOnly}
+                                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
+                                placeholder="0"
+                                min="0"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-medium text-slate-700 mb-1">
+                                Special SW Cost ({cSym})
+                            </label>
+                            <input
+                                type="number"
+                                value={specialCosts.specialSwCost || ''}
+                                onChange={(e) => setSpecialCosts({ ...specialCosts, specialSwCost: Number(e.target.value) })}
+                                disabled={readOnly}
+                                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
+                                placeholder="0"
+                                min="0"
+                            />
                         </div>
                     </div>
                 </div>

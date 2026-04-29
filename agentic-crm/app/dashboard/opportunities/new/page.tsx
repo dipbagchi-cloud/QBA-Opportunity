@@ -21,9 +21,77 @@ import {
     Trash2
 } from "lucide-react";
 import { useOpportunityStore } from "@/lib/store";
+import { useAuthStore } from "@/lib/auth-store";
 import { API_URL, getAuthHeaders } from "@/lib/api";
 
 const DURATION_UNITS = ["days", "weeks", "months"];
+
+function SearchableSelect({ name, value, options, disabled, onChange, placeholder, required, className }: any) {
+    const [open, setOpen] = useState(false);
+    const [search, setSearch] = useState("");
+    const ref = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (ref.current && !ref.current.contains(e.target as Node)) {
+                setOpen(false);
+            }
+        };
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, []);
+
+    const filtered = options.filter((o: any) => o.label.toLowerCase().includes(search.toLowerCase()));
+    const selectedOption = options.find((o: any) => o.value === value);
+
+    return (
+        <div className="relative w-full" ref={ref}>
+            <div 
+                className={`w-full min-h-[42px] px-3 py-2 border border-slate-300 rounded-md text-sm shadow-sm flex items-center justify-between ${disabled ? 'bg-slate-50 cursor-not-allowed opacity-70' : 'bg-white cursor-pointer'} ${className || ''}`}
+                onClick={() => { if (!disabled) { setOpen(!open); setSearch(""); } }}
+            >
+                <span className={selectedOption ? "text-slate-800" : "text-slate-400"}>
+                    {selectedOption ? selectedOption.label : placeholder}
+                </span>
+                <ChevronDown className="w-4 h-4 text-slate-400" />
+            </div>
+            {open && (
+                <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg">
+                    <div className="p-2 border-b border-slate-100">
+                        <div className="flex items-center gap-2 px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-md">
+                            <Search className="w-3.5 h-3.5 text-slate-400" />
+                            <input
+                                type="text"
+                                placeholder="Search..."
+                                value={search}
+                                onChange={(e) => setSearch(e.target.value)}
+                                className="flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400"
+                                autoFocus
+                            />
+                        </div>
+                    </div>
+                    <div className="max-h-48 overflow-y-auto">
+                        {filtered.map((o: any) => (
+                            <div 
+                                key={o.value} 
+                                className={`px-3 py-2 text-sm cursor-pointer hover:bg-slate-50 ${o.value === value ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-700'}`}
+                                onClick={() => {
+                                    onChange({ target: { name, value: o.value } });
+                                    setOpen(false);
+                                }}
+                            >
+                                {o.label}
+                            </div>
+                        ))}
+                        {filtered.length === 0 && <div className="px-3 py-4 text-sm text-slate-400 text-center">No results found</div>}
+                    </div>
+                </div>
+            )}
+            {/* hidden native input to trigger required validation */}
+            {required && <input type="text" name={name} value={value || ''} readOnly className="absolute bottom-0 left-0 w-full h-0 opacity-0 pointer-events-none" required />}
+        </div>
+    );
+}
 
 // Convert duration value + unit for calculations
 function durationToDays(value: number, unit: string): number {
@@ -48,6 +116,7 @@ export default function NewOpportunityPage() {
     const router = useRouter();
     const { currency, symbol: cSym, setCurrency } = useCurrency();
     const { addOpportunity } = useOpportunityStore();
+    const { user } = useAuthStore();
     const [isLoading, setIsLoading] = useState(false);
 
     // Dynamic dropdown data
@@ -330,67 +399,60 @@ export default function NewOpportunityPage() {
                         <label className="block text-sm font-bold text-slate-700">Client Name *</label>
                         <div className="flex gap-2">
                             <div className="relative flex-1">
-                                <select
+                                <SearchableSelect
                                     name="clientName"
-                                    required
+                                    required={true}
                                     value={formData.clientName}
-                                    className="w-full pl-3 pr-10 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm
-                                             focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                                     onChange={handleChange}
-                                >
-                                    <option value="">Select Client</option>
-                                    {clients.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-                                </select>
+                                    placeholder="Select Client"
+                                    options={clients.map(c => ({ label: c.name, value: c.name }))}
+                                />
                             </div>
-                            <button type="button" onClick={() => setShowAddClient(true)} className="p-2.5 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors">
-                                <Plus className="w-5 h-5" />
-                            </button>
+                            {user?.role?.name !== 'Sales' && (
+                                <button type="button" onClick={() => setShowAddClient(true)} className="p-2.5 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors">
+                                    <Plus className="w-5 h-5" />
+                                </button>
+                            )}
                         </div>
                     </div>
 
                     <div className="space-y-1.5">
                         <label className="block text-sm font-bold text-slate-700">Country *</label>
-                        <select
+                        <SearchableSelect
                             name="country"
-                            required
+                            required={true}
                             value={formData.country}
-                            className="w-full pl-3 pr-10 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
                             onChange={handleChange}
-                        >
-                            <option value="">Select Country</option>
-                            {countries.map(c => <option key={c} value={c}>{c}</option>)}
-                        </select>
+                            placeholder="Select Country"
+                            options={countries.map(c => ({ label: c, value: c }))}
+                        />
                     </div>
 
                     <div className="space-y-1.5">
                         <label className="block text-sm font-bold text-slate-700">Region {formData.country ? '' : '*'}</label>
-                        <select
+                        <SearchableSelect
                             name="region"
-                            required
+                            required={true}
                             value={formData.region}
                             disabled={!!formData.country}
-                            className={`w-full pl-3 pr-10 py-2.5 border border-slate-300 rounded-md text-sm shadow-sm ${formData.country ? 'bg-slate-100 text-slate-600' : 'bg-white'}`}
                             onChange={handleChange}
-                        >
-                            <option value="">Select Region</option>
-                            {regions.map(r => <option key={r} value={r}>{r}</option>)}
-                        </select>
+                            placeholder="Select Region"
+                            options={regions.map(r => ({ label: r, value: r }))}
+                        />
                         {formData.country && <p className="text-xs text-slate-400 mt-0.5">Auto-set from country</p>}
                     </div>
 
                     {/* Row 1b: Project Type */}
                     <div className="space-y-1.5">
                         <label className="block text-sm font-bold text-slate-700">Project Type *</label>
-                        <select
+                        <SearchableSelect
                             name="projectType"
-                            required
+                            required={true}
                             value={formData.projectType}
-                            className="w-full pl-3 pr-10 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
                             onChange={handleChange}
-                        >
-                            <option value="">Select Project Type</option>
-                            {projectTypes.map((t: string) => <option key={t} value={t}>{t}</option>)}
-                        </select>
+                            placeholder="Select Project Type"
+                            options={projectTypes.map((t: string) => ({ label: t, value: t }))}
+                        />
                     </div>
 
                     {/* Row 2 */}
@@ -408,30 +470,26 @@ export default function NewOpportunityPage() {
 
                     <div className="space-y-1.5">
                         <label className="block text-sm font-bold text-slate-700">Practice</label>
-                        <select
+                        <SearchableSelect
                             name="practice"
                             value={formData.practice}
-                            className="w-full pl-3 pr-10 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
                             onChange={handleChange}
-                        >
-                            <option value="">Find Practice</option>
-                            {departments.map(p => <option key={p} value={p}>{p}</option>)}
-                        </select>
+                            placeholder="Find Practice"
+                            options={departments.map(p => ({ label: p, value: p }))}
+                        />
                     </div>
 
                     {/* Row 3 */}
                     <div className="space-y-1.5">
                         <label className="block text-sm font-bold text-slate-700">Sales Representative *</label>
-                        <select
+                        <SearchableSelect
                             name="salesRep"
-                            required
+                            required={true}
                             value={formData.salesRep}
-                            className="w-full pl-3 pr-10 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
                             onChange={handleChange}
-                        >
-                            <option value="">Find SalesPerson</option>
-                            {salespersons.map(s => <option key={s.id} value={s.name}>{s.name}{s.department ? ` (${s.department})` : ''}</option>)}
-                        </select>
+                            placeholder="Find SalesPerson"
+                            options={salespersons.map(s => ({ label: `${s.name}${s.department ? ` (${s.department})` : ''}`, value: s.name }))}
+                        />
                     </div>
 
                     <div className="space-y-1.5">
@@ -531,15 +589,14 @@ export default function NewOpportunityPage() {
                     {/* Row 5: Pricing */}
                     <div className="space-y-1.5">
                         <label className="block text-sm font-bold text-slate-700">Pricing Model *</label>
-                        <select
+                        <SearchableSelect
                             name="pricingModel"
-                            required
-                            className="w-full pl-3 pr-10 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
+                            required={true}
+                            value={formData.pricingModel}
                             onChange={handleChange}
-                        >
-                            <option value="">Select Model</option>
-                            {pricingModels.map(m => <option key={m} value={m}>{m}</option>)}
-                        </select>
+                            placeholder="Select Model"
+                            options={pricingModels.map(m => ({ label: m, value: m }))}
+                        />
                     </div>
 
                     {formData.projectType === 'Staffing' && (

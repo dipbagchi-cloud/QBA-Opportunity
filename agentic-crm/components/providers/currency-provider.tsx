@@ -95,10 +95,10 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
     const symbol = getSymbol(currency);
 
     const convert = useCallback((amountInBase: number): number => {
-        if (currency === "INR") return amountInBase;
+        const numAmount = Number(amountInBase) || 0;
+        if (currency === "INR") return numAmount;
         const rate = getRate(currency);
-        // rateToBase is how much 1 INR = X of this currency
-        return amountInBase * rate;
+        return numAmount * rate;
     }, [currency, getRate]);
 
     const format = useCallback((amountInBase: number, opts?: { compact?: boolean; decimals?: number }): string => {
@@ -110,20 +110,21 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
             if (abs >= 100000) return `${sym}${(converted / 100000).toFixed(1)}L`;
             if (abs >= 1000) return `${sym}${(converted / 1000).toFixed(1)}K`;
         }
-        const decimals = opts?.decimals ?? 0;
+        const decimals = opts?.decimals ?? 2;
         return `${sym}${converted.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`;
     }, [convert, symbol]);
 
     const formatExact = useCallback((amount: number, opts?: { compact?: boolean; decimals?: number }): string => {
+        const numAmount = Number(amount) || 0;
         const sym = symbol;
         if (opts?.compact) {
-            const abs = Math.abs(amount);
+            const abs = Math.abs(numAmount);
             if (abs >= 10000000) return `${sym}${(amount / 10000000).toFixed(1)}Cr`;
             if (abs >= 100000) return `${sym}${(amount / 100000).toFixed(1)}L`;
-            if (abs >= 1000) return `${sym}${(amount / 1000).toFixed(1)}K`;
+            if (abs >= 1000) return `${sym}${(numAmount / 1000).toFixed(1)}K`;
         }
-        const decimals = opts?.decimals ?? 0;
-        return `${sym}${amount.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`;
+        const decimals = opts?.decimals ?? 2;
+        return `${sym}${numAmount.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`;
     }, [symbol]);
 
     return (

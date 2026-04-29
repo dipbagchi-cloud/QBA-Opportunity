@@ -16,6 +16,8 @@ interface StageChangeContext {
   probability?: number | null;
   region?: string;
   technology?: string;
+  comment?: string;
+  adjustedEstimatedValue?: string;
 }
 
 interface OpportunityCreatedContext {
@@ -205,6 +207,8 @@ export async function evaluateStageChangeRules(ctx: StageChangeContext): Promise
         probability: ctx.probability != null ? String(ctx.probability) : '',
         region: ctx.region || '',
         technology: ctx.technology || '',
+        comment: ctx.comment || '',
+        adjustedEstimatedValue: ctx.adjustedEstimatedValue || '',
         opportunityLink: `${process.env.FRONTEND_URL || 'https://qcrm.qbadvisory.com'}/dashboard/opportunities/${ctx.opportunityId}`,
       };
 

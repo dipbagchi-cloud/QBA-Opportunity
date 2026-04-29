@@ -456,6 +456,14 @@ export async function updateOpportunity(req: Request, res: Response) {
             };
         }
 
+        let newPresalesData = body.presalesData !== undefined ? body.presalesData : undefined;
+        if (newPresalesData && previous?.presalesData && typeof previous.presalesData === 'object' && typeof newPresalesData === 'object' && !Array.isArray(previous.presalesData) && !Array.isArray(newPresalesData)) {
+            newPresalesData = {
+                ...(previous.presalesData as any),
+                ...newPresalesData
+            };
+        }
+
         const updatedOpp = await prisma.opportunity.update({
             where: { id },
             data: {
@@ -481,12 +489,14 @@ export async function updateOpportunity(req: Request, res: Response) {
                 adjustedEstimatedValue: body.adjustedEstimatedValue !== undefined && body.adjustedEstimatedValue !== '' ? body.adjustedEstimatedValue : null,
 
                 // Complex Data
-                presalesData: body.presalesData,
+                presalesData: newPresalesData,
                 salesData: body.salesData,
                 ...(metadataUpdate ? { metadata: metadataUpdate } : {}),
 
                 // Relations if changed
                 clientId: clientId,
+                ...(body.detailedStatus !== undefined ? { detailedStatus: body.detailedStatus } : {}),
+                ...(body.isStalled !== undefined ? { isStalled: body.isStalled } : {}),
                 ...stageUpdate
             }
         });
@@ -606,7 +616,8 @@ export async function updateOpportunity(req: Request, res: Response) {
             salesRepName: (updatedOpp as any).salesRepName || previous?.owner?.name || '',
             managerName: (updatedOpp as any).managerName || '',
             updatedBy: previous?.owner?.name || 'System',
-            comment: body.presalesData?.comment || body.salesData?.notes || '',
+            comment: body.reEstimateComment || body.presalesData?.comments || body.salesData?.notes || '',
+            adjustedEstimatedValue: body.adjustedEstimatedValue ? String(body.adjustedEstimatedValue) : '',
             ownerName: previous?.owner?.name || '',
             ownerEmail: previous?.owner?.email || '',
             value: updatedOpp.value != null ? String(updatedOpp.value) : '',
@@ -646,6 +657,8 @@ export async function updateOpportunity(req: Request, res: Response) {
                 probability: updatedOpp.probability,
                 region: updatedOpp.region || undefined,
                 technology: updatedOpp.technology || undefined,
+                comment: body.reEstimateComment || body.presalesData?.comments || body.salesData?.notes || undefined,
+                adjustedEstimatedValue: body.adjustedEstimatedValue ? String(body.adjustedEstimatedValue) : undefined,
             });
         }
 

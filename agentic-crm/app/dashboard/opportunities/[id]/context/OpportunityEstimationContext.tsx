@@ -29,6 +29,13 @@ interface TravelCosts {
     hotelCost: number;
 }
 
+export interface SpecialCosts {
+    subcontracting: number;
+    miscExpense: number;
+    specialHwCost: number;
+    specialSwCost: number;
+}
+
 interface OpportunityEstimationContextType {
     // Assumptions
     assumptions: BudgetAssumptions;
@@ -43,6 +50,8 @@ interface OpportunityEstimationContextType {
     // Travel Costs
     travelCosts: TravelCosts;
     setTravelCosts: (costs: TravelCosts) => void;
+    specialCosts: SpecialCosts;
+    setSpecialCosts: React.Dispatch<React.SetStateAction<SpecialCosts>>;
 
     // GOM Calculation Inputs
     markupPercent: number;
@@ -59,6 +68,7 @@ interface OpportunityEstimationContextType {
     // Calculated Values
     totalResourceCost: number;
     totalTravelCost: number;
+    totalSpecCost: number;
     salesCommissionAmount: number;
     preSalesCostAmount: number;
     totalCost: number;
@@ -101,6 +111,12 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
         localConveyance: 0,
         marketingCom: 0,
         hotelCost: 0,
+    });
+    const [specialCosts, setSpecialCosts] = useState<SpecialCosts>({
+        subcontracting: 0,
+        miscExpense: 0,
+        specialHwCost: 0,
+        specialSwCost: 0,
     });
     const [markupPercent, setMarkupPercentRaw] = useState<number>(0);
     const [salesCommissionPercent, setSalesCommissionPercent] = useState<number>(0);
@@ -146,6 +162,7 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
                     // Restore estimation data (skip if it's the old modal-only format)
                     if (saved.resources) setResources(saved.resources);
                     if (saved.travelCosts) setTravelCosts(prev => ({ ...prev, ...saved.travelCosts }));
+                    if (saved.specialCosts) setSpecialCosts(prev => ({ ...prev, ...saved.specialCosts }));
                     if (saved.markupPercent != null) setMarkupPercent(saved.markupPercent);
                     if (saved.salesCommissionPercent != null) setSalesCommissionPercent(saved.salesCommissionPercent);
                     if (saved.preSalesCostPercent != null) setPreSalesCostPercent(saved.preSalesCostPercent);
@@ -170,6 +187,7 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
                 presalesData: {
                     resources,
                     travelCosts,
+                    specialCosts,
                     markupPercent,
                     salesCommissionPercent,
                     preSalesCostPercent,
@@ -186,11 +204,12 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
         } finally {
             setIsSaving(false);
         }
-    }, [opportunityId, resources, travelCosts, markupPercent, salesCommissionPercent, preSalesCostPercent, currency, effortType, selectedYear]);
+    }, [opportunityId, resources, travelCosts, specialCosts, markupPercent, salesCommissionPercent, preSalesCostPercent, currency, effortType, selectedYear]);
 
     // Calculated values
     const [totalResourceCost, setTotalResourceCost] = useState(0);
     const [totalTravelCost, setTotalTravelCost] = useState(0);
+    const [totalSpecCost, setTotalSpecCost] = useState(0);
     const [salesCommissionAmount, setSalesCommissionAmount] = useState(0);
     const [preSalesCostAmount, setPreSalesCostAmount] = useState(0);
     const [totalCost, setTotalCost] = useState(0);
@@ -220,13 +239,16 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
 
     // Calculate total travel cost
     useEffect(() => {
-        const total = travelCosts.roundTripCost +
-            travelCosts.medicalInsurance +
-            travelCosts.visaCost +
-            travelCosts.vaccineCost +
-            travelCosts.localConveyance +
-            travelCosts.marketingCom +
-            travelCosts.hotelCost;
+        const freqMultiplier = Number(travelCosts.frequency) || 1;
+        const total = (
+            (Number(travelCosts.roundTripCost) || 0) +
+            (Number(travelCosts.medicalInsurance) || 0) +
+            (Number(travelCosts.visaCost) || 0) +
+            (Number(travelCosts.vaccineCost) || 0) +
+            (Number(travelCosts.localConveyance) || 0) +
+            (Number(travelCosts.marketingCom) || 0) +
+            (Number(travelCosts.hotelCost) || 0)
+        ) * freqMultiplier;
         setTotalTravelCost(total);
     }, [travelCosts]);
 
@@ -285,15 +307,45 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
                 category: "Travel + Stay",
             });
         }
+
+        const currentTotalSpecCost = (Number(specialCosts.subcontracting) || 0) + 
+                              (Number(specialCosts.miscExpense) || 0) + 
+                              (Number(specialCosts.specialHwCost) || 0) + 
+                              (Number(specialCosts.specialSwCost) || 0);
+
+        if (currentTotalSpecCost > 0) {
+            let specMonth = months.length > 0 ? months[0] : null;
+            if (!specMonth && startDate) {
+                const d = new Date(startDate);
+                specMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+            }
+            if (!specMonth) {
+                specMonth = `${selectedYear}-01`;
+            }
+            if (Number(specialCosts.subcontracting) > 0) {
+                otherCosts.push({ id: "spec-1", description: "Subcontracting", amount: Number(specialCosts.subcontracting), month: specMonth, category: "Subcontracting" });
+            }
+            if (Number(specialCosts.miscExpense) > 0) {
+                otherCosts.push({ id: "spec-2", description: "Miscl. Expense", amount: Number(specialCosts.miscExpense), month: specMonth, category: "Miscl. Expense" });
+            }
+            if (Number(specialCosts.specialHwCost) > 0) {
+                otherCosts.push({ id: "spec-3", description: "Special HW Cost", amount: Number(specialCosts.specialHwCost), month: specMonth, category: "Special HW Cost" });
+            }
+            if (Number(specialCosts.specialSwCost) > 0) {
+                otherCosts.push({ id: "spec-4", description: "Special SW Cost", amount: Number(specialCosts.specialSwCost), month: specMonth, category: "Special SW Cost" });
+            }
+        }
+
         setOtherCosts(otherCosts);
+        setTotalSpecCost(currentTotalSpecCost);
 
         // Calculate GOM Summary
         if (resourceLines.length > 0) {
             const summary = calculateProjectGom(resourceLines, otherCosts, assumptions);
             setGomSummary(summary);
 
-            // Calculate Base Cost
-            const baseCost = resCost + totalTravelCost;
+            // Calculate Base Cost (now includes budget assumptions from calculateProjectGom)
+            const baseCost = summary.totalCost;
 
             // Use adjustedEstimatedValue as revenue if provided, otherwise use markup calculation
             // Base Cost is used for markup to determine the sale price.
@@ -318,7 +370,7 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
             setGomPercent(gom);
         } else {
             // No resources, simple calculation
-            const baseCost = totalTravelCost;
+            const baseCost = totalTravelCost + currentTotalSpecCost;
             
             const calculatedRevenue = adjustedEstimatedValue > 0
                 ? adjustedEstimatedValue
@@ -339,7 +391,7 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
             setGomPercent(gom);
             setGomSummary(null);
         }
-    }, [resources, totalTravelCost, markupPercent, salesCommissionPercent, preSalesCostPercent, assumptions, selectedYear, months, adjustedEstimatedValue, startDate]);
+    }, [resources, totalTravelCost, specialCosts, markupPercent, salesCommissionPercent, preSalesCostPercent, assumptions, selectedYear, months, adjustedEstimatedValue, startDate]);
 
     // Determine GOM status
     const getGomStatus = () => {
@@ -357,6 +409,8 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
         setSelectedYear,
         travelCosts,
         setTravelCosts,
+        specialCosts,
+        setSpecialCosts,
         markupPercent,
         setMarkupPercent,
         salesCommissionPercent,
@@ -369,6 +423,7 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
         setEffortType,
         totalResourceCost,
         totalTravelCost,
+        totalSpecCost,
         salesCommissionAmount,
         preSalesCostAmount,
         totalCost,

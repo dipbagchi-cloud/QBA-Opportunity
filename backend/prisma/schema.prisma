@@ -328,6 +328,7 @@ model Opportunity {
   // Pipeline, Presales, Sales
   currentStage      String   @default("Pipeline") 
   detailedStatus    String?
+  isStalled         Boolean  @default(false)
   reEstimateCount   Int      @default(0)    // Number of times sent back for re-estimation
   gomApproved       Boolean  @default(false) // GOM must be approved before moving to Sales
   

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authenticate, authorize } from '../middleware/auth';
+import { authenticate, authorize, authorizeAny } from '../middleware/auth';
 import { PERMISSIONS } from '../lib/permissions';
 import {
   listUsers,
@@ -159,7 +159,7 @@ router.delete('/rate-cards/:id', authorize(PERMISSIONS.COSTCARD_MANAGE), deleteR
 
 // Client management (requires metadata:manage)
 router.get('/clients', authorize(PERMISSIONS.METADATA_MANAGE), listAllClients);
-router.post('/clients', authorize(PERMISSIONS.METADATA_MANAGE), createClient);
+router.post('/clients', authorizeAny(PERMISSIONS.METADATA_MANAGE, PERMISSIONS.PIPELINE_WRITE, PERMISSIONS.PRESALES_WRITE, PERMISSIONS.SALES_WRITE), createClient);
 router.patch('/clients/:id', authorize(PERMISSIONS.METADATA_MANAGE), updateClient);
 router.delete('/clients/:id', authorize(PERMISSIONS.METADATA_MANAGE), deleteClient);
 

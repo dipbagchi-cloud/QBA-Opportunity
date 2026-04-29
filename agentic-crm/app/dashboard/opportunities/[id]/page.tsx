@@ -28,6 +28,7 @@ import {
     FileText
 } from "lucide-react";
 import { useOpportunityStore } from "@/lib/store";
+import { useAuthStore } from "@/lib/auth-store";
 import { EstimationTab } from "./components/EstimationTab";
 import { ResourceAssignmentTab } from "./components/ResourceAssignmentTab";
 import { GomCalculatorTab } from "./components/GomCalculatorTab";
@@ -60,7 +61,7 @@ function SearchableSelect({ name, value, options, disabled, onChange, placeholde
     const selectedOption = options.find((o: any) => o.value === value);
 
     return (
-        <div className="relative" ref={ref}>
+        <div className="relative w-full" ref={ref}>
             <div 
                 className={`w-full min-h-[42px] px-3 py-2 border border-slate-300 rounded-md text-sm shadow-sm flex items-center justify-between ${disabled ? 'bg-slate-50 cursor-not-allowed opacity-70' : 'bg-white cursor-pointer'} ${className || ''}`}
                 onClick={() => { if (!disabled) { setOpen(!open); setSearch(""); } }}
@@ -183,6 +184,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
     const { id } = use(params);
     const { updateOpportunity } = useOpportunityStore();
+    const { user } = useAuthStore();
     const { toast } = useToast();
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
@@ -260,6 +262,9 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         comments: "",
         managerName: ""
     });
+    
+    // Original presalesData from DB to avoid overwriting travelCosts/resources
+    const [rawPresalesData, setRawPresalesData] = useState<any>({});
 
     // Presales View State (The detailed view after transition)
     const [presalesData, setPresalesData] = useState({
@@ -292,6 +297,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const [showLostModal, setShowLostModal] = useState(false);
     const [lostRemarks, setLostRemarks] = useState("");
     const [isLost, setIsLost] = useState(false);
+    const [isStalled, setIsStalled] = useState(false);
     const [lostModalType, setLostModalType] = useState<string>('Closed Lost');
 
     // Technology multiselect state
@@ -568,6 +574,12 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                         .catch(() => {});
                 }
 
+                if (data.detailedStatus === 'On Hold' || data.isStalled) {
+                    setIsStalled(true);
+                } else {
+                    setIsStalled(false);
+                }
+                
                 // Update active step based on stage
                 const stageName = data.stage?.name || data.currentStage || '';
                 setCurrentStageName(stageName);
@@ -589,6 +601,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 // Load presales data from saved record (Project Details tab fields)
                 if (data.presalesData && typeof data.presalesData === 'object') {
                     const pd = data.presalesData as any;
+                    setRawPresalesData(pd);
                     if (pd.proposalDueDate) {
                         setPresalesForm(prev => ({ ...prev, proposalDueDate: pd.proposalDueDate }));
                     }
@@ -782,6 +795,36 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         };
     }, [autoSaveIntervalMinutes, opportunityStage, isLost, id]);
 
+    // Auto-save for presalesData (Travel & Hospitality)
+    useEffect(() => {
+        if (opportunityStage < 1 || isLost || isLoading) return;
+        const handler = setTimeout(async () => {
+            try {
+                await fetch(`${API_URL}/api/opportunities/${id}`, {
+                    method: 'PATCH',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({
+                        presalesData: {
+                            travelCosts: {
+                                modeOfTravel: presalesData.modeOfTravel,
+                                frequency: presalesData.frequency,
+                                roundTripCost: presalesData.roundTripCost,
+                                medicalInsurance: presalesData.medicalInsuranceCost,
+                                visaCost: presalesData.visaCost,
+                                vaccineCost: presalesData.vaccineCost,
+                                hotelCost: presalesData.hotelCost
+                            },
+                            markupPercent: presalesData.markup
+                        }
+                    })
+                });
+            } catch (err) {
+                console.error("Presales auto-save failed", err);
+            }
+        }, 1500);
+        return () => clearTimeout(handler);
+    }, [presalesData, id, opportunityStage, isLost, isLoading]);
+
     const handlePresalesSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         // Validate proposal due date against start date
@@ -798,7 +841,10 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 body: JSON.stringify({
                     stageName: 'Qualification', // Maps to Presales in our workflow
                     managerName: presalesForm.managerName,
-                    presalesData: presalesForm
+                    presalesData: {
+                        ...rawPresalesData,
+                        ...presalesForm
+                    }
                 })
             });
 
@@ -1026,6 +1072,30 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
     if (isLoading) return <div className="p-6">Loading Opportunity...</div>;
 
+    const handleHoldToggle = async () => {
+        const newStalled = !isStalled;
+        setIsSaving(true);
+        try {
+            const res = await fetch(`${API_URL}/api/opportunities/${id}`, {
+                method: 'PATCH',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({
+                    detailedStatus: newStalled ? 'On Hold' : '',
+                    isStalled: newStalled
+                })
+            });
+            if (res.ok) {
+                setIsStalled(newStalled);
+                setDetailedStatus(newStalled ? 'On Hold' : '');
+                toast({ title: newStalled ? "Opportunity on Hold" : "Opportunity Resumed" });
+            }
+        } catch {
+            toast({ title: "Error", description: "Failed to update hold status." });
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
     // Helper for currency symbol
     const cSym = getSymbol(opportunityCurrency);
 
@@ -1129,8 +1199,11 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                         </span>
                     )}
                     {opportunityStage < 3 && !isLost && (
-                        <button className="px-4 py-2 bg-slate-900 text-white rounded-md font-medium hover:bg-slate-800">
-                            Hold
+                        <button 
+                            onClick={handleHoldToggle}
+                            disabled={isSaving}
+                            className={`px-4 py-2 text-white rounded-md font-medium disabled:opacity-50 ${isStalled ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-slate-900 hover:bg-slate-800'}`}>
+                            {isStalled ? 'Reactivate' : 'Hold'}
                         </button>
                     )}
                 </div>
@@ -1168,7 +1241,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             {/* Stepper Navigation */}
             <div className="bg-white p-3 rounded-lg shadow-sm border border-slate-200">
                 <div className="flex w-full mt-1 h-8 bg-slate-50 rounded-full overflow-hidden border border-slate-200">
-                    {steps.filter(step => !(step === "SOW" && opportunityStage === 2 && currentStageName === 'Negotiation')).map((step) => {
+                    {steps.filter(step => !(step === "SOW" && (opportunityStage < 2 || currentStageName === 'Negotiation'))).map((step) => {
                         const idx = steps.indexOf(step);
                         // Map step idx to DB stage: 0=Pipeline, 1=Presales, 2=Sales, 3=SOW (accessible at stage 2+), 4=Project (stage 3)
                         const stageForIdx = idx <= 2 ? idx : idx === 3 ? 2 : 3;
@@ -1207,7 +1280,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
             {/* PIPELINE VIEW (Step 0) */}
             {activeStep === 0 && (() => {
-                const isPipelineEditable = opportunityStage === 0 && !isLost;
+                const isPipelineEditable = opportunityStage < 3 && !isLost && !isStalled;
                 const disabledClass = !isPipelineEditable ? "bg-slate-50 cursor-not-allowed opacity-70" : "bg-white";
                 return (
                 <form onSubmit={handleSubmit} className="bg-white rounded-lg shadow-sm border border-slate-200 p-5">
@@ -1605,7 +1678,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
             {/* PRESALES VIEW (Step 1) */}
             {activeStep === 1 && (
-                <OpportunityEstimationProvider opportunityId={id} readOnly={opportunityStage >= 2} startDate={formData.tentativeStartDate} endDate={formData.tentativeEndDate} adjustedEstimatedValue={Number(adjustedEstimatedValue) || 0}>
+                <OpportunityEstimationProvider opportunityId={id} readOnly={opportunityStage >= 2 || isStalled || isLost} startDate={formData.tentativeStartDate} endDate={formData.tentativeEndDate} adjustedEstimatedValue={Number(adjustedEstimatedValue) || 0}>
                     <GomPercentSync onGomPercentChange={setContextGomPercent} />
                     {opportunityStage < 2 && <PresalesSaveButton />}
                     <div className="bg-white rounded-lg shadow-sm border border-slate-200">
@@ -1689,15 +1762,23 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                         <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Pricing Model</label>
                                         <div className="font-semibold text-slate-800">{formData.pricingModel}</div>
                                     </div>
+                                    {formData.expectedDayRate && (
                                     <div>
                                         <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Expected Day Rate</label>
                                         <div className="font-semibold text-slate-800">{formData.expectedDayRate}</div>
                                     </div>
+                                    )}
                                     {Number(formData.value) > 0 && (
                                     <div>
                                         <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Estimated Value</label>
                                         <div className="font-semibold text-slate-800">
                                             {getSymbol(globalCurrency)}{Number(formData.value).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                            {originalData && originalData.currency !== globalCurrency && originalData.value > 0 && (
+                                                <div className="text-xs text-slate-500 font-medium mt-0.5">
+                                                    <span className="text-slate-400 font-normal">Original: </span>
+                                                    {getSymbol(originalData.currency)}{originalData.value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                     )}

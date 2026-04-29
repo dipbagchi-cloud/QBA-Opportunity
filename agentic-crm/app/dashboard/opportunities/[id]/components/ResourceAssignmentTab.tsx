@@ -120,14 +120,58 @@ export function ResourceAssignmentTab() {
         setResources(resources.map(r => r.id === id ? { ...r, [field]: value } : r));
     };
 
+    const maxDaysPerMonth = useMemo(() => {
+        const getMaxDaysForMonth = (monthStr: string, year: number): number => {
+            if (!startDate) return 31;
+            const monthIndex = ALL_MONTHS.indexOf(monthStr);
+            if (monthIndex === -1) return 31;
+
+            const firstDayOfMonth = new Date(year, monthIndex, 1);
+            const lastDayOfMonth = new Date(year, monthIndex + 1, 0);
+
+            const sDate = new Date(startDate);
+            const eDate = endDate ? new Date(endDate) : new Date(8640000000000000);
+            
+            sDate.setHours(0,0,0,0);
+            eDate.setHours(23,59,59,999);
+
+            const calcStart = sDate > firstDayOfMonth ? sDate : firstDayOfMonth;
+            const calcEnd = eDate < lastDayOfMonth ? eDate : lastDayOfMonth;
+
+            if (calcStart > calcEnd) return 0;
+
+            let workingDays = 0;
+            let current = new Date(calcStart);
+            current.setHours(0,0,0,0);
+            
+            while (current <= calcEnd) {
+                const dayOfWeek = current.getDay();
+                // 0 = Sunday, 6 = Saturday. Exclude weekends.
+                if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+                    workingDays++;
+                }
+                current.setDate(current.getDate() + 1);
+            }
+            return workingDays;
+        };
+
+        const maxDays: Record<string, number> = {};
+        ALL_MONTHS.forEach(month => {
+            maxDays[month] = getMaxDaysForMonth(month, selectedYear);
+        });
+        return maxDays;
+    }, [startDate, endDate, selectedYear]);
+
     const updateMonthlyEffort = (id: string, month: string, value: number) => {
+        const maxVal = maxDaysPerMonth[month] || 31;
+        const boundedValue = Math.max(0, Math.min(value, maxVal));
         setResources(resources.map(r => {
             if (r.id === id) {
                 return {
                     ...r,
                     monthlyEfforts: {
                         ...r.monthlyEfforts,
-                        [month]: value
+                        [month]: boundedValue
                     }
                 };
             }
@@ -306,15 +350,19 @@ export function ResourceAssignmentTab() {
                                             {readOnly ? (
                                                 <div className="w-full text-center text-xs p-1 text-slate-700">{row.monthlyEfforts[month] || 0}</div>
                                             ) : (
-                                                <input
-                                                    type="number"
-                                                    min="0"
-                                                    max="31"
-                                                    placeholder="0"
-                                                    value={row.monthlyEfforts[month] || ""}
-                                                    onChange={(e) => updateMonthlyEffort(row.id, month, Number(e.target.value) || 0)}
-                                                    className="w-full text-center bg-transparent border-none text-xs focus:bg-blue-50 focus:outline-none p-1"
-                                                />
+                                                <div className="relative group">
+                                                    <input
+                                                        type="number"
+                                                        min="0"
+                                                        max={maxDaysPerMonth[month] || 31}
+                                                        placeholder="0"
+                                                        value={row.monthlyEfforts[month] === undefined ? "" : row.monthlyEfforts[month]}
+                                                        onChange={(e) => updateMonthlyEffort(row.id, month, Number(e.target.value) || 0)}
+                                                        className={`w-full text-center border-none text-xs focus:outline-none p-1 ${maxDaysPerMonth[month] === 0 ? 'bg-slate-100 cursor-not-allowed text-slate-400' : 'bg-transparent focus:bg-blue-50 text-slate-900'}`}
+                                                        disabled={maxDaysPerMonth[month] === 0}
+                                                        title={`Max working days: ${maxDaysPerMonth[month]}`}
+                                                    />
+                                                </div>
                                             )}
                                         </td>
                                     ))}
