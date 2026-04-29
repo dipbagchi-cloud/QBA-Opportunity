@@ -41,6 +41,73 @@ import { SowStudio } from "./components/SowStudio";
 const DURATION_UNITS = ["days", "weeks", "months"];
 const ARCHITECTS = ["David Chen", "Sarah Jones", "Rahul Gupta", "Emily White"];
 
+function SearchableSelect({ name, value, options, disabled, onChange, placeholder, required, className }: any) {
+    const [open, setOpen] = useState(false);
+    const [search, setSearch] = useState("");
+    const ref = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (ref.current && !ref.current.contains(e.target as Node)) {
+                setOpen(false);
+            }
+        };
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, []);
+
+    const filtered = options.filter((o: any) => o.label.toLowerCase().includes(search.toLowerCase()));
+    const selectedOption = options.find((o: any) => o.value === value);
+
+    return (
+        <div className="relative" ref={ref}>
+            <div 
+                className={`w-full min-h-[42px] px-3 py-2 border border-slate-300 rounded-md text-sm shadow-sm flex items-center justify-between ${disabled ? 'bg-slate-50 cursor-not-allowed opacity-70' : 'bg-white cursor-pointer'} ${className || ''}`}
+                onClick={() => { if (!disabled) { setOpen(!open); setSearch(""); } }}
+            >
+                <span className={selectedOption ? "text-slate-800" : "text-slate-400"}>
+                    {selectedOption ? selectedOption.label : placeholder}
+                </span>
+                <ChevronDown className="w-4 h-4 text-slate-400" />
+            </div>
+            {open && (
+                <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg">
+                    <div className="p-2 border-b border-slate-100">
+                        <div className="flex items-center gap-2 px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-md">
+                            <Search className="w-3.5 h-3.5 text-slate-400" />
+                            <input
+                                type="text"
+                                placeholder="Search..."
+                                value={search}
+                                onChange={(e) => setSearch(e.target.value)}
+                                className="flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400"
+                                autoFocus
+                            />
+                        </div>
+                    </div>
+                    <div className="max-h-48 overflow-y-auto">
+                        {filtered.map((o: any) => (
+                            <div 
+                                key={o.value} 
+                                className={`px-3 py-2 text-sm cursor-pointer hover:bg-slate-50 ${o.value === value ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-700'}`}
+                                onClick={() => {
+                                    onChange({ target: { name, value: o.value } });
+                                    setOpen(false);
+                                }}
+                            >
+                                {o.label}
+                            </div>
+                        ))}
+                        {filtered.length === 0 && <div className="px-3 py-4 text-sm text-slate-400 text-center">No results found</div>}
+                    </div>
+                </div>
+            )}
+            {/* hidden native input to trigger required validation */}
+            {required && <input type="text" name={name} value={value || ''} readOnly className="absolute bottom-0 left-0 w-full h-0 opacity-0 pointer-events-none" required />}
+        </div>
+    );
+}
+
 // Convert duration value + unit to total months (for end date / value calcs)
 function durationToDays(value: number, unit: string): number {
     switch (unit) {
@@ -522,6 +589,9 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 // Load presales data from saved record (Project Details tab fields)
                 if (data.presalesData && typeof data.presalesData === 'object') {
                     const pd = data.presalesData as any;
+                    if (pd.proposalDueDate) {
+                        setPresalesForm(prev => ({ ...prev, proposalDueDate: pd.proposalDueDate }));
+                    }
                     if (pd.travelCosts) {
                         setPresalesData(prev => ({
                             ...prev,
@@ -1098,7 +1168,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             {/* Stepper Navigation */}
             <div className="bg-white p-3 rounded-lg shadow-sm border border-slate-200">
                 <div className="flex w-full mt-1 h-8 bg-slate-50 rounded-full overflow-hidden border border-slate-200">
-                    {steps.map((step, idx) => {
+                    {steps.filter(step => !(step === "SOW" && opportunityStage === 2 && currentStageName === 'Negotiation')).map((step) => {
+                        const idx = steps.indexOf(step);
                         // Map step idx to DB stage: 0=Pipeline, 1=Presales, 2=Sales, 3=SOW (accessible at stage 2+), 4=Project (stage 3)
                         const stageForIdx = idx <= 2 ? idx : idx === 3 ? 2 : 3;
                         const isCompleted = idx <= 2 ? idx < opportunityStage : idx === 3 ? opportunityStage >= 3 : opportunityStage === 3;
@@ -1185,17 +1256,15 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                         <div className="space-y-1.5">
                             <label className="block text-sm font-bold text-slate-700">Client Name *</label>
                             <div className="flex gap-2">
-                                <select
+                                <SearchableSelect
                                     name="clientName"
-                                    required
                                     value={formData.clientName}
-                                    disabled={!isPipelineEditable}
-                                    className={`flex-1 px-3 py-2.5 border border-slate-300 rounded-md text-sm shadow-sm ${disabledClass}`}
+                                    options={clients.map(c => ({ value: c.name, label: c.name }))}
                                     onChange={handleChange}
-                                >
-                                    <option value="">Select Client</option>
-                                    {clients.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-                                </select>
+                                    placeholder="Select Client"
+                                    disabled={!isPipelineEditable}
+                                    required={true}
+                                />
                                 {isPipelineEditable && (
                                     <button type="button" onClick={() => setShowAddClient(true)} className="p-2.5 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors">
                                         <Plus className="w-5 h-5" />
@@ -1206,48 +1275,43 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
                         <div className="space-y-1.5">
                             <label className="block text-sm font-bold text-slate-700">Country</label>
-                            <select
+                            <SearchableSelect
                                 name="country"
                                 value={formData.country}
-                                disabled={!isPipelineEditable}
-                                className={`w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm shadow-sm ${disabledClass}`}
+                                options={countries.map(c => ({ value: c, label: c }))}
                                 onChange={handleChange}
-                            >
-                                <option value="">Select Country</option>
-                                {countries.map(c => <option key={c} value={c}>{c}</option>)}
-                            </select>
+                                placeholder="Select Country"
+                                disabled={!isPipelineEditable}
+                                required={false}
+                            />
                         </div>
 
                         <div className="space-y-1.5">
                             <label className="block text-sm font-bold text-slate-700">Region *</label>
-                            <select
+                            <SearchableSelect
                                 name="region"
-                                required
                                 value={formData.region}
-                                disabled={!isPipelineEditable || !!formData.country}
-                                className={`w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm shadow-sm ${!isPipelineEditable || formData.country ? 'bg-slate-100 text-slate-500 cursor-not-allowed' : ''}`}
+                                options={regions.map(r => ({ value: r, label: r }))}
                                 onChange={handleChange}
-                            >
-                                <option value="">Select Region</option>
-                                {regions.map(r => <option key={r} value={r}>{r}</option>)}
-                            </select>
+                                placeholder="Select Region"
+                                disabled={!isPipelineEditable || !!formData.country}
+                                required={true}
+                            />
                             {formData.country && <p className="text-xs text-slate-400 mt-0.5">Auto-set from country</p>}
                         </div>
 
                         {/* Row 1b: Project Type */}
                         <div className="space-y-1.5">
                             <label className="block text-sm font-bold text-slate-700">Project Type *</label>
-                            <select
+                            <SearchableSelect
                                 name="projectType"
-                                required
                                 value={formData.projectType}
-                                disabled={!isPipelineEditable}
-                                className={`w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm shadow-sm ${disabledClass}`}
+                                options={projectTypes.map((t: string) => ({ value: t, label: t }))}
                                 onChange={handleChange}
-                            >
-                                <option value="">Select Project Type</option>
-                                {projectTypes.map((t: string) => <option key={t} value={t}>{t}</option>)}
-                            </select>
+                                placeholder="Select Project Type"
+                                disabled={!isPipelineEditable}
+                                required={true}
+                            />
                         </div>
 
                         {/* Row 2 */}
@@ -1267,32 +1331,29 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
                         <div className="space-y-1.5">
                             <label className="block text-sm font-bold text-slate-700">Practice</label>
-                            <select
+                            <SearchableSelect
                                 name="practice"
                                 value={formData.practice}
-                                disabled={!isPipelineEditable}
-                                className={`w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm shadow-sm ${disabledClass}`}
+                                options={departments.map(p => ({ value: p, label: p }))}
                                 onChange={handleChange}
-                            >
-                                <option value="">Find Practice</option>
-                                {departments.map(p => <option key={p} value={p}>{p}</option>)}
-                            </select>
+                                placeholder="Find Practice"
+                                disabled={!isPipelineEditable}
+                                required={false}
+                            />
                         </div>
 
                         {/* Row 3 */}
                         <div className="space-y-1.5">
                             <label className="block text-sm font-bold text-slate-700">Sales Representative *</label>
-                            <select
+                            <SearchableSelect
                                 name="salesRep"
-                                required
                                 value={formData.salesRep}
-                                disabled={!isPipelineEditable}
-                                className={`w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm shadow-sm ${disabledClass}`}
+                                options={salespersons.map(s => ({ value: s.name, label: `${s.name}${s.department ? ` (${s.department})` : ''}` }))}
                                 onChange={handleChange}
-                            >
-                                <option value="">Find SalesPerson</option>
-                                {salespersons.map(s => <option key={s.id} value={s.name}>{s.name}{s.department ? ` (${s.department})` : ''}</option>)}
-                            </select>
+                                placeholder="Find SalesPerson"
+                                disabled={!isPipelineEditable}
+                                required={true}
+                            />
                         </div>
 
                         <div className="space-y-1.5">
@@ -1612,8 +1673,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     <div>
                                         <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Proposal Due Date</label>
                                         <div className="font-semibold text-slate-800 flex items-center gap-2">
-                                            {new Date().toLocaleDateString()}
-                                            <button className="text-xs text-indigo-600 underline uppercase tracking-wider font-bold">Change</button>
+                                            {presalesForm.proposalDueDate || <span className="text-slate-400">—</span>}
                                         </div>
                                     </div>
                                     <div>
@@ -1633,6 +1693,14 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                         <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Expected Day Rate</label>
                                         <div className="font-semibold text-slate-800">{formData.expectedDayRate}</div>
                                     </div>
+                                    {Number(formData.value) > 0 && (
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Estimated Value</label>
+                                        <div className="font-semibold text-slate-800">
+                                            {getSymbol(globalCurrency)}{Number(formData.value).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                        </div>
+                                    </div>
+                                    )}
                                     {Number(adjustedEstimatedValue) > 0 && (
                                     <div>
                                         <label className="block text-xs font-semibold text-amber-600 uppercase mb-1">Adjusted Estimated Value</label>
@@ -1655,46 +1723,6 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 {/* Divider */}
                                 <hr className="border-slate-100" />
 
-                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                                    {/* Left: Resource & Cost */}
-                                    <div className="space-y-4">
-                                        <h3 className="font-bold text-slate-900 border-b border-slate-200 pb-2 mb-4">Resource & Cost</h3>
-
-                                        <div className="grid grid-cols-2 gap-4 items-center">
-                                            <label className="text-sm font-medium text-slate-600">GOM (%)</label>
-                                            <div className="text-sm font-bold text-slate-800">: 0.0</div>
-
-                                            <label className="text-sm font-medium text-slate-600">GOM Approve/Reject</label>
-                                            <div className="text-sm font-bold text-amber-600">: Approval Needed</div>
-
-                                            <label className="text-sm font-medium text-slate-600">Revenue ({cSym})</label>
-                                            <div className="text-sm font-bold text-slate-800">: 0.0</div>
-
-                                            <label className="text-sm font-medium text-slate-600">Final Cost ({cSym})</label>
-                                            <div className="text-sm font-bold text-slate-800">: 0.0</div>
-                                        </div>
-                                    </div>
-
-                                    {/* Right: Inputs */}
-                                    <div className="space-y-4 pt-10">
-                                        <div className="grid grid-cols-3 gap-4 items-center">
-                                            <label className="text-sm font-medium text-slate-600">Resource Cost ({cSym})</label>
-                                            <input disabled type="text" className="col-span-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-sm" />
-                                        </div>
-                                        <div className="grid grid-cols-3 gap-4 items-center">
-                                            <label className="text-sm font-medium text-slate-600">Markup (%)</label>
-                                            <input
-                                                type="number"
-                                                name="markup"
-                                                value={presalesData.markup}
-                                                onChange={handlePresalesDataChange}
-                                                disabled={opportunityStage >= 2}
-                                                className="col-span-2 px-3 py-2 bg-white border border-slate-300 rounded-md text-sm disabled:bg-slate-100 disabled:cursor-not-allowed"
-                                            />
-                                        </div>
-                                    </div>
-                                </div>
-
                                 {/* Travel & Hospitality */}
                                 <div className="space-y-4">
                                     <h3 className="font-bold text-slate-900 border-b border-slate-200 pb-2 mb-4">Travel & Hospitality</h3>
@@ -1707,7 +1735,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                                 name="modeOfTravel"
                                                 value={presalesData.modeOfTravel}
                                                 onChange={handlePresalesDataChange}
-                                                disabled={opportunityStage >= 2}
+                                                disabled={isLost}
                                                 className="col-span-2 px-3 py-2 bg-white border border-slate-300 rounded-md text-sm disabled:bg-slate-100 disabled:cursor-not-allowed"
                                             >
                                                 <option>Flight</option>
@@ -1721,7 +1749,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                                 name="frequency"
                                                 value={presalesData.frequency}
                                                 onChange={handlePresalesDataChange}
-                                                disabled={opportunityStage >= 2}
+                                                disabled={isLost}
                                                 className="col-span-2 px-3 py-2 bg-white border border-slate-300 rounded-md text-sm disabled:bg-slate-100 disabled:cursor-not-allowed"
                                             />
                                         </div>
@@ -1733,7 +1761,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                                 name="roundTripCost"
                                                 value={presalesData.roundTripCost}
                                                 onChange={handlePresalesDataChange}
-                                                disabled={opportunityStage >= 2}
+                                                disabled={isLost}
                                                 className="col-span-2 px-3 py-2 bg-white border border-slate-300 rounded-md text-sm disabled:bg-slate-100 disabled:cursor-not-allowed"
                                             />
                                         </div>
@@ -1744,7 +1772,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                                 name="medicalInsuranceCost"
                                                 value={presalesData.medicalInsuranceCost}
                                                 onChange={handlePresalesDataChange}
-                                                disabled={opportunityStage >= 2}
+                                                disabled={isLost}
                                                 className="col-span-2 px-3 py-2 bg-white border border-slate-300 rounded-md text-sm disabled:bg-slate-100 disabled:cursor-not-allowed"
                                             />
                                         </div>
@@ -1756,7 +1784,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                                 name="visaCost"
                                                 value={presalesData.visaCost}
                                                 onChange={handlePresalesDataChange}
-                                                disabled={opportunityStage >= 2}
+                                                disabled={isLost}
                                                 className="col-span-2 px-3 py-2 bg-white border border-slate-300 rounded-md text-sm disabled:bg-slate-100 disabled:cursor-not-allowed"
                                             />
                                         </div>
@@ -1767,7 +1795,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                                 name="vaccineCost"
                                                 value={presalesData.vaccineCost}
                                                 onChange={handlePresalesDataChange}
-                                                disabled={opportunityStage >= 2}
+                                                disabled={isLost}
                                                 className="col-span-2 px-3 py-2 bg-white border border-slate-300 rounded-md text-sm disabled:bg-slate-100 disabled:cursor-not-allowed"
                                             />
                                         </div>
@@ -1779,40 +1807,9 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                                 name="hotelCost"
                                                 value={presalesData.hotelCost}
                                                 onChange={handlePresalesDataChange}
-                                                disabled={opportunityStage >= 2}
+                                                disabled={isLost}
                                                 className="col-span-2 px-3 py-2 bg-white border border-slate-300 rounded-md text-sm disabled:bg-slate-100 disabled:cursor-not-allowed"
                                             />
-                                        </div>
-                                        <div className="grid grid-cols-3 gap-4 items-center">
-                                            <div className="col-span-3 flex justify-end gap-3 items-center">
-                                                {gomApproved && (
-                                                    <span className="flex items-center gap-1.5 text-sm text-green-700 font-semibold">
-                                                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
-                                                        GOM Approved
-                                                    </span>
-                                                )}
-                                                {opportunityStage < 2 && !gomApproved && gomPendingApproval && (
-                                                    <span className="flex items-center gap-1.5 text-sm text-amber-600 font-semibold">
-                                                        <svg className="w-4 h-4 animate-pulse" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.828a1 1 0 101.415-1.414L11 9.586V6z" clipRule="evenodd" /></svg>
-                                                        Pending Approval{gomPendingApproval.reviewer ? ` from ${gomPendingApproval.reviewer}` : ''}
-                                                    </span>
-                                                )}
-                                                {opportunityStage < 2 && !gomApproved && gomPendingApproval && (
-                                                    <div className="flex gap-1">
-                                                        <button onClick={() => handleReviewGomApproval(true)} className="px-3 py-1.5 bg-green-600 text-white font-bold rounded-md hover:bg-green-700 text-xs">
-                                                            Approve
-                                                        </button>
-                                                        <button onClick={() => handleReviewGomApproval(false, 'Rejected')} className="px-3 py-1.5 bg-red-500 text-white font-bold rounded-md hover:bg-red-600 text-xs">
-                                                            Reject
-                                                        </button>
-                                                    </div>
-                                                )}
-                                                {opportunityStage < 2 && !gomApproved && !gomPendingApproval && (
-                                                    <button onClick={() => handleApproveGom(true)} className="px-4 py-2 bg-blue-600 text-white font-bold rounded-md hover:bg-blue-700 text-sm">
-                                                        {gomAutoApprovePercent > 0 && contextGomPercent < gomAutoApprovePercent ? 'Request GOM Approval' : 'Approve GOM'}
-                                                    </button>
-                                                )}
-                                            </div>
                                         </div>
                                     </div>
                                 </div>

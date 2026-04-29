@@ -53,6 +53,8 @@ interface OpportunityEstimationContextType {
     setPreSalesCostPercent: (val: number) => void;
     currency: string;
     setCurrency: (currency: string) => void;
+    effortType: string;
+    setEffortType: (type: string) => void;
 
     // Calculated Values
     totalResourceCost: number;
@@ -104,6 +106,7 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
     const [salesCommissionPercent, setSalesCommissionPercent] = useState<number>(0);
     const [preSalesCostPercent, setPreSalesCostPercent] = useState<number>(0);
     const [currency, setCurrency] = useState<string>("INR");
+    const [effortType, setEffortType] = useState<string>("QBA");
     const [isSaving, setIsSaving] = useState(false);
     const [isLoaded, setIsLoaded] = useState(false);
 
@@ -147,6 +150,7 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
                     if (saved.salesCommissionPercent != null) setSalesCommissionPercent(saved.salesCommissionPercent);
                     if (saved.preSalesCostPercent != null) setPreSalesCostPercent(saved.preSalesCostPercent);
                     if (saved.currency) setCurrency(saved.currency);
+                    if (saved.effortType) setEffortType(saved.effortType);
                     if (saved.selectedYear) setSelectedYear(saved.selectedYear);
                 }
             } catch {
@@ -170,6 +174,7 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
                     salesCommissionPercent,
                     preSalesCostPercent,
                     currency,
+                    effortType,
                     selectedYear,
                 },
             };
@@ -181,7 +186,7 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
         } finally {
             setIsSaving(false);
         }
-    }, [opportunityId, resources, travelCosts, markupPercent, salesCommissionPercent, preSalesCostPercent, currency, selectedYear]);
+    }, [opportunityId, resources, travelCosts, markupPercent, salesCommissionPercent, preSalesCostPercent, currency, effortType, selectedYear]);
 
     // Calculated values
     const [totalResourceCost, setTotalResourceCost] = useState(0);
@@ -360,6 +365,8 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
         setPreSalesCostPercent,
         currency,
         setCurrency,
+        effortType,
+        setEffortType,
         totalResourceCost,
         totalTravelCost,
         salesCommissionAmount,

@@ -20,6 +20,8 @@ export function ResourceAssignmentTab() {
         readOnly,
         startDate,
         endDate,
+        effortType,
+        setEffortType,
     } = useOpportunityEstimation();
 
     const { format: fmtCurrency } = useCurrency();
@@ -35,7 +37,6 @@ export function ResourceAssignmentTab() {
     const currentYear = new Date().getFullYear();
     const [isAdding, setIsAdding] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
-    const [effortType, setEffortType] = useState<"QBA" | "3rd Party" | "QBA + 3rd Party">("QBA");
     const [rateCards, setRateCards] = useState<any[]>([]);
 
     useEffect(() => {
