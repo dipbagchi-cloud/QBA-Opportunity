@@ -37,7 +37,7 @@ interface NavItem {
 }
 
 const allSidebarItems: NavItem[] = [
-    { icon: LayoutDashboard, label: "Dashboard", href: "/dashboard", permission: "dashboard:view" },
+    { icon: LayoutDashboard, label: "Dashboard", href: "/dashboard" },
     { icon: Briefcase, label: "Opportunities", href: "/dashboard/opportunities", permission: "pipeline:view" },
     { icon: Users, label: "Contacts", href: "/dashboard/contacts", permission: "contacts:view" },
     { icon: BarChart3, label: "Analytics", href: "/dashboard/analytics", permission: "analytics:view" },

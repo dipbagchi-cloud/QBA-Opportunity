@@ -15,6 +15,8 @@ interface ResourceRow {
     dailyCost: number;
     dailyRate: number;
     monthlyEfforts: Record<string, number>; // month -> days
+    experienceBand?: string;
+    skill?: string;
 }
 
 interface TravelCosts {
@@ -151,6 +153,13 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
         })();
     }, []);
 
+    // Sync currency with global currency if not read-only
+    useEffect(() => {
+        if (!readOnly && initialCurrency) {
+            setCurrency(initialCurrency);
+        }
+    }, [initialCurrency, readOnly]);
+
     // Load saved estimation data from the opportunity record
     useEffect(() => {
         if (!opportunityId) { setIsLoaded(true); return; }
@@ -168,7 +177,7 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
                     if (saved.markupPercent != null) setMarkupPercent(saved.markupPercent);
                     if (saved.salesCommissionPercent != null) setSalesCommissionPercent(saved.salesCommissionPercent);
                     if (saved.preSalesCostPercent != null) setPreSalesCostPercent(saved.preSalesCostPercent);
-                    if (saved.currency) setCurrency(saved.currency);
+                    if (readOnly && saved.currency) setCurrency(saved.currency);
                     if (saved.effortType) setEffortType(saved.effortType);
                     if (saved.selectedYear) setSelectedYear(saved.selectedYear);
                 }
@@ -182,6 +191,20 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
             }
         })();
     }, [opportunityId]);
+
+
+    // Calculated values
+    const [totalResourceCost, setTotalResourceCost] = useState(0);
+    const [totalTravelCost, setTotalTravelCost] = useState(0);
+    const [totalSpecCost, setTotalSpecCost] = useState(0);
+    const [salesCommissionAmount, setSalesCommissionAmount] = useState(0);
+    const [preSalesCostAmount, setPreSalesCostAmount] = useState(0);
+    const [totalCost, setTotalCost] = useState(0);
+    const [revenue, setRevenue] = useState(0);
+    const [gomPercent, setGomPercent] = useState(0);
+    const [gomSummary, setGomSummary] = useState<GomResult | null>(null);
+    const [months, setMonths] = useState<string[]>([]);
+    const [otherCosts, setOtherCosts] = useState<OtherCost[]>([]);
 
     // Save estimation data to the opportunity record
     const saveEstimation = useCallback(async () => {
@@ -199,6 +222,7 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
                     currency,
                     effortType,
                     selectedYear,
+                    gomSummary,
                 },
             };
             await fetch(`${API_URL}/api/opportunities/${opportunityId}`, {
@@ -209,20 +233,7 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
         } finally {
             setIsSaving(false);
         }
-    }, [opportunityId, resources, travelCosts, specialCosts, markupPercent, salesCommissionPercent, preSalesCostPercent, currency, effortType, selectedYear]);
-
-    // Calculated values
-    const [totalResourceCost, setTotalResourceCost] = useState(0);
-    const [totalTravelCost, setTotalTravelCost] = useState(0);
-    const [totalSpecCost, setTotalSpecCost] = useState(0);
-    const [salesCommissionAmount, setSalesCommissionAmount] = useState(0);
-    const [preSalesCostAmount, setPreSalesCostAmount] = useState(0);
-    const [totalCost, setTotalCost] = useState(0);
-    const [revenue, setRevenue] = useState(0);
-    const [gomPercent, setGomPercent] = useState(0);
-    const [gomSummary, setGomSummary] = useState<GomResult | null>(null);
-    const [months, setMonths] = useState<string[]>([]);
-    const [otherCosts, setOtherCosts] = useState<OtherCost[]>([]);
+    }, [opportunityId, resources, travelCosts, specialCosts, markupPercent, salesCommissionPercent, preSalesCostPercent, currency, effortType, selectedYear, gomSummary]);
 
     // Calculate months from resources
     useEffect(() => {
@@ -280,6 +291,8 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
                 dailyRate: resource.dailyRate,
                 dailyCost: resource.dailyCost,
                 months: monthsData,
+                experienceBand: resource.experienceBand,
+                skill: resource.skill,
             };
         });
 

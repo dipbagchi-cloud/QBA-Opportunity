@@ -267,23 +267,6 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const [rawPresalesData, setRawPresalesData] = useState<any>({});
 
     // Presales View State (The detailed view after transition)
-    const [presalesData, setPresalesData] = useState({
-        markup: 25,
-        modeOfTravel: "Flight",
-        frequency: "",
-        roundTripCost: 0,
-        medicalInsuranceCost: 0,
-        visaCost: 0,
-        vaccineCost: 0,
-        hotelCost: 0,
-        gomSummary: null as any
-    });
-
-    const handlePresalesDataChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-        const { name, value } = e.target;
-        setPresalesData(prev => ({ ...prev, [name]: value }));
-    };
-
     const [activeTab, setActiveTab] = useState("Project Details");
     const [activeStep, setActiveStep] = useState(0); // 0: Pipeline, 1: Presales
     const [opportunityStage, setOpportunityStage] = useState(0); // actual DB stage (0-3), stays fixed when navigating steps
@@ -378,7 +361,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     // GOM Calculations
     useEffect(() => {
         // Sync markup from presalesData into gomInputs
-        const effectiveMarkup = presalesData.markup ?? gomInputs.markupPercent;
+        const effectiveMarkup = (rawPresalesData?.markupPercent || 0) ?? gomInputs.markupPercent;
 
         // Constants (Hardcoded for now as per GOM page)
         const perDiemUSD = 50;
@@ -432,7 +415,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             onsiteProfit: onFin.profit
         });
 
-    }, [gomInputs, presalesData.markup]);
+    }, [gomInputs, (rawPresalesData?.markupPercent || 0)]);
 
     // Fetch master data for dropdowns
     useEffect(() => {
@@ -606,20 +589,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     if (pd.proposalDueDate) {
                         setPresalesForm(prev => ({ ...prev, proposalDueDate: pd.proposalDueDate }));
                     }
-                    if (pd.travelCosts) {
-                        setPresalesData(prev => ({
-                            ...prev,
-                            markup: pd.markupPercent ?? prev.markup,
-                            modeOfTravel: pd.travelCosts.modeOfTravel || prev.modeOfTravel,
-                            frequency: pd.travelCosts.frequency || prev.frequency,
-                            roundTripCost: pd.travelCosts.roundTripCost ?? prev.roundTripCost,
-                            medicalInsuranceCost: pd.travelCosts.medicalInsurance ?? prev.medicalInsuranceCost,
-                            visaCost: pd.travelCosts.visaCost ?? prev.visaCost,
-                            vaccineCost: pd.travelCosts.vaccineCost ?? prev.vaccineCost,
-                            hotelCost: pd.travelCosts.hotelCost ?? prev.hotelCost,
-                        }));
-                    }
-                }
+                                    }
 
             } catch (error) {
                 console.error("Load error:", error);
@@ -671,6 +641,9 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 setNewClientAddress("");
                 setShowAddClient(false);
                 toast({ title: "Client Added", description: `${created.name} has been added.` });
+            } else {
+                const errorData = await res.json().catch(() => ({}));
+                toast({ title: "Error", description: errorData.error || "Failed to add client. It may already exist." });
             }
         } catch (err) {
             console.error("Failed to add client", err);
@@ -795,36 +768,6 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             if (autoSaveRef.current) clearInterval(autoSaveRef.current);
         };
     }, [autoSaveIntervalMinutes, opportunityStage, isLost, id]);
-
-    // Auto-save for presalesData (Travel & Hospitality)
-    useEffect(() => {
-        if (opportunityStage < 1 || isLost || isLoading) return;
-        const handler = setTimeout(async () => {
-            try {
-                await fetch(`${API_URL}/api/opportunities/${id}`, {
-                    method: 'PATCH',
-                    headers: getAuthHeaders(),
-                    body: JSON.stringify({
-                        presalesData: {
-                            travelCosts: {
-                                modeOfTravel: presalesData.modeOfTravel,
-                                frequency: presalesData.frequency,
-                                roundTripCost: presalesData.roundTripCost,
-                                medicalInsurance: presalesData.medicalInsuranceCost,
-                                visaCost: presalesData.visaCost,
-                                vaccineCost: presalesData.vaccineCost,
-                                hotelCost: presalesData.hotelCost
-                            },
-                            markupPercent: presalesData.markup
-                        }
-                    })
-                });
-            } catch (err) {
-                console.error("Presales auto-save failed", err);
-            }
-        }, 1500);
-        return () => clearTimeout(handler);
-    }, [presalesData, id, opportunityStage, isLost, isLoading]);
 
     const handlePresalesSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -980,7 +923,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         }
         setIsSaving(true);
         try {
-            const payload: any = { stageName: 'Qualification', detailedStatus: 'Re-estimation', reEstimateComment: reEstimateComment.trim() };
+            const payload: any = { stageName: 'Qualification', detailedStatus: 'Re-estimation', status: 're-estimation', reEstimateComment: reEstimateComment.trim() };
             if (adjustedEstimatedValue && Number(adjustedEstimatedValue) > 0) {
                 payload.adjustedEstimatedValue = Number(adjustedEstimatedValue);
             }
@@ -997,6 +940,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 setGomApproved(false);
                 setShowReestimateModal(false);
                 setReEstimateComment("");
+                setDetailedStatus('Re-estimation');
                 toast({ title: "Success", description: "Sent back for re-estimation." });
                 // Sync Zustand store in background (non-blocking)
                 updateOpportunity(id, { stage: 'Qualification' }).catch(() => {});
@@ -1082,7 +1026,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 headers: getAuthHeaders(),
                 body: JSON.stringify({
                     detailedStatus: newStalled ? 'On Hold' : '',
-                    isStalled: newStalled
+                    isStalled: newStalled,
+                    status: newStalled ? 'stalled' : 'healthy'
                 })
             });
             if (res.ok) {
@@ -1097,8 +1042,46 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         }
     };
 
+
+    const getBadgeText = () => {
+        if (isStalled) return 'On Hold';
+        if (isLost) return currentStageName === 'Proposal Lost' ? 'Proposal Lost' : 'Closed Lost';
+        if (detailedStatus === 'Sent for Re-estimate') return 'Sent for Re-estimate';
+        if (detailedStatus === 'Estimation Submitted') return 'Estimation Submitted';
+        if (opportunityStage === 3) return 'SOW Approved';
+        if (opportunityStage >= 2) return currentStageName === 'Negotiation' ? 'Under Negotiation' : 'Proposal Submitted';
+        return 'Estimation in Progress';
+    };
+
+    const getBadgeClass = () => {
+        if (isStalled) return 'bg-amber-100 text-amber-800 border-amber-300';
+        if (isLost) return 'bg-red-50 text-red-700 border-red-200';
+        if (detailedStatus === 'Sent for Re-estimate') return 'bg-rose-50 text-rose-700 border-rose-200';
+        if (detailedStatus === 'Estimation Submitted') return 'bg-blue-50 text-blue-700 border-blue-200';
+        if (opportunityStage === 3) return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+        if (opportunityStage >= 2) return 'bg-amber-50 text-amber-700 border-amber-200';
+        return 'bg-cyan-50 text-cyan-700 border-cyan-200';
+    };
+    
     // Helper for currency symbol
+
+    
     const cSym = getSymbol(opportunityCurrency);
+    
+    // Convert presales data saved in potentially different currency to current opportunity currency
+    const getPresalesConverted = (val: number) => {
+        if (!val) return 0;
+        const presalesCurr = rawPresalesData?.currency || opportunityCurrency;
+        if (presalesCurr === opportunityCurrency) return val;
+        
+        const ratesSnapshot = opportunityMetadata?.exchangeRatesSnapshot as Record<string, number>;
+        const rateToOpp = ratesSnapshot ? ratesSnapshot[opportunityCurrency] : getRate(opportunityCurrency);
+        const rateFromPre = ratesSnapshot ? ratesSnapshot[presalesCurr] : getRate(presalesCurr);
+        
+        if (!rateToOpp || !rateFromPre) return val;
+        return (val * rateToOpp) / rateFromPre;
+    };
+
 
     return (
         <div className="max-w-[1400px] mx-auto space-y-4 relative">
@@ -1242,7 +1225,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             {/* Stepper Navigation */}
             <div className="bg-white p-3 rounded-lg shadow-sm border border-slate-200">
                 <div className="flex w-full mt-1 h-8 bg-slate-50 rounded-full overflow-hidden border border-slate-200">
-                    {steps.filter(step => !(step === "SOW" && (opportunityStage < 2 || currentStageName === 'Negotiation'))).map((step) => {
+                    {steps.filter(step => step !== "SOW").map((step) => {
                         const idx = steps.indexOf(step);
                         // Map step idx to DB stage: 0=Pipeline, 1=Presales, 2=Sales, 3=SOW (accessible at stage 2+), 4=Project (stage 3)
                         const stageForIdx = idx <= 2 ? idx : idx === 3 ? 2 : 3;
@@ -1304,9 +1287,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             </span>
                         )}
                         {!isLost && opportunityStage === 1 && (
-                            <span className="px-3 py-1 rounded-full bg-blue-100 text-blue-600 text-xs font-semibold border border-blue-200">
-                                Estimation in Progress
-                            </span>
+                            <span className={`px-3 py-1 rounded-full text-xs font-bold border ${getBadgeClass()}`}>{getBadgeText()}</span>
                         )}
                         {!isLost && opportunityStage === 2 && currentStageName === 'Proposal' && (
                             <span className="px-3 py-1 rounded-full bg-amber-100 text-amber-600 text-xs font-semibold border border-amber-200">
@@ -1339,11 +1320,9 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     disabled={!isPipelineEditable}
                                     required={true}
                                 />
-                                {isPipelineEditable && (
-                                    <button type="button" onClick={() => setShowAddClient(true)} className="p-2.5 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors">
-                                        <Plus className="w-5 h-5" />
-                                    </button>
-                                )}
+                                <button type="button" onClick={() => setShowAddClient(true)} className="p-2.5 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors">
+                                    <Plus className="w-5 h-5" />
+                                </button>
                             </div>
                         </div>
 
@@ -1713,8 +1692,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 {/* Status Badge */}
                                 <div className="mb-3">
                                     <h2 className="text-base font-bold text-slate-900 inline-block mr-3">Project Details</h2>
-                                    <span className={`px-3 py-1 rounded-full text-xs font-bold border ${isLost ? 'bg-red-50 text-red-700 border-red-200' : opportunityStage === 3 ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : opportunityStage >= 2 ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-cyan-50 text-cyan-600 border-cyan-100'}`}>
-                                        {isLost ? (currentStageName === 'Proposal Lost' ? 'Proposal Lost' : 'Closed Lost') : opportunityStage === 3 ? 'SOW Approved' : opportunityStage >= 2 ? (currentStageName === 'Negotiation' ? 'Under Negotiation' : 'Proposal Submitted') : 'Estimation in Progress'}
+                                    <span className={`px-3 py-1 rounded-full text-xs font-bold border ${getBadgeClass()}`}>
+                                        {getBadgeText()}
                                     </span>
                                 </div>
 
@@ -1805,97 +1784,6 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 {/* Divider */}
                                 <hr className="border-slate-100" />
 
-                                {/* Travel & Hospitality */}
-                                <div className="space-y-4">
-                                    <h3 className="font-bold text-slate-900 border-b border-slate-200 pb-2 mb-4">Travel & Hospitality</h3>
-
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
-                                        {/* Left Col */}
-                                        <div className="grid grid-cols-3 gap-4 items-center">
-                                            <label className="text-sm font-medium text-slate-600">Mode of Travel</label>
-                                            <select
-                                                name="modeOfTravel"
-                                                value={presalesData.modeOfTravel}
-                                                onChange={handlePresalesDataChange}
-                                                disabled={isLost}
-                                                className="col-span-2 px-3 py-2 bg-white border border-slate-300 rounded-md text-sm disabled:bg-slate-100 disabled:cursor-not-allowed"
-                                            >
-                                                <option>Flight</option>
-                                                <option>Train</option>
-                                            </select>
-                                        </div>
-                                        <div className="grid grid-cols-3 gap-4 items-center">
-                                            <label className="text-sm font-medium text-slate-600">Frequency</label>
-                                            <input
-                                                type="text"
-                                                name="frequency"
-                                                value={presalesData.frequency}
-                                                onChange={handlePresalesDataChange}
-                                                disabled={isLost}
-                                                className="col-span-2 px-3 py-2 bg-white border border-slate-300 rounded-md text-sm disabled:bg-slate-100 disabled:cursor-not-allowed"
-                                            />
-                                        </div>
-
-                                        <div className="grid grid-cols-3 gap-4 items-center">
-                                            <label className="text-sm font-medium text-slate-600">Round Trip Cost ({cSym})</label>
-                                            <input
-                                                type="number"
-                                                name="roundTripCost"
-                                                value={presalesData.roundTripCost}
-                                                onChange={handlePresalesDataChange}
-                                                disabled={isLost}
-                                                className="col-span-2 px-3 py-2 bg-white border border-slate-300 rounded-md text-sm disabled:bg-slate-100 disabled:cursor-not-allowed"
-                                            />
-                                        </div>
-                                        <div className="grid grid-cols-3 gap-4 items-center">
-                                            <label className="text-sm font-medium text-slate-600">Medical Insurance Cost ({cSym})</label>
-                                            <input
-                                                type="number"
-                                                name="medicalInsuranceCost"
-                                                value={presalesData.medicalInsuranceCost}
-                                                onChange={handlePresalesDataChange}
-                                                disabled={isLost}
-                                                className="col-span-2 px-3 py-2 bg-white border border-slate-300 rounded-md text-sm disabled:bg-slate-100 disabled:cursor-not-allowed"
-                                            />
-                                        </div>
-
-                                        <div className="grid grid-cols-3 gap-4 items-center">
-                                            <label className="text-sm font-medium text-slate-600">Visa Cost ({cSym})</label>
-                                            <input
-                                                type="number"
-                                                name="visaCost"
-                                                value={presalesData.visaCost}
-                                                onChange={handlePresalesDataChange}
-                                                disabled={isLost}
-                                                className="col-span-2 px-3 py-2 bg-white border border-slate-300 rounded-md text-sm disabled:bg-slate-100 disabled:cursor-not-allowed"
-                                            />
-                                        </div>
-                                        <div className="grid grid-cols-3 gap-4 items-center">
-                                            <label className="text-sm font-medium text-slate-600">Vaccine Cost ({cSym})</label>
-                                            <input
-                                                type="number"
-                                                name="vaccineCost"
-                                                value={presalesData.vaccineCost}
-                                                onChange={handlePresalesDataChange}
-                                                disabled={isLost}
-                                                className="col-span-2 px-3 py-2 bg-white border border-slate-300 rounded-md text-sm disabled:bg-slate-100 disabled:cursor-not-allowed"
-                                            />
-                                        </div>
-
-                                        <div className="grid grid-cols-3 gap-4 items-center">
-                                            <label className="text-sm font-medium text-slate-600">Hotel Cost ({cSym})</label>
-                                            <input
-                                                type="number"
-                                                name="hotelCost"
-                                                value={presalesData.hotelCost}
-                                                onChange={handlePresalesDataChange}
-                                                disabled={isLost}
-                                                className="col-span-2 px-3 py-2 bg-white border border-slate-300 rounded-md text-sm disabled:bg-slate-100 disabled:cursor-not-allowed"
-                                            />
-                                        </div>
-                                    </div>
-                                </div>
-
                                 {/* Attachments */}
                                 <div className="space-y-4">
                                     <div className="flex items-center justify-between border-b border-slate-200 pb-2 mb-4">
@@ -1953,8 +1841,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 <div className="flex items-center justify-between mb-3">
                                     <div className="flex items-center gap-3">
                                         <h2 className="text-base font-bold text-slate-900">Schedule Details</h2>
-                                        <span className={`px-3 py-1 rounded-full text-xs font-bold border ${isLost ? 'bg-red-50 text-red-700 border-red-200' : opportunityStage >= 2 ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-cyan-50 text-cyan-600 border-cyan-100'}`}>
-                                            {isLost ? (currentStageName === 'Proposal Lost' ? 'Proposal Lost' : 'Closed Lost') : opportunityStage >= 2 ? (currentStageName || 'Sales') : 'Estimation in Progress'}
+                                        <span className={`px-3 py-1 rounded-full text-xs font-bold border ${getBadgeClass()}`}>
+                                            {getBadgeText()}
                                         </span>
                                     </div>
                                     {opportunityStage < 2 && (
@@ -2049,9 +1937,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 <div className="flex items-center justify-between mb-3">
                                     <div className="flex items-center gap-3">
                                         <h2 className="text-base font-bold text-slate-900">Resource Assignment</h2>
-                                        <span className="px-3 py-1 rounded-full bg-cyan-50 text-cyan-600 text-xs font-bold border border-cyan-100">
-                                            Estimation in Progress
-                                        </span>
+                                        <span className={`px-3 py-1 rounded-full text-xs font-bold border ${getBadgeClass()}`}>{getBadgeText()}</span>
                                     </div>
                                 </div>
 
@@ -2478,70 +2364,40 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-y-3 gap-x-6 text-sm mb-4">
                                     <div>
                                         <span className="text-xs text-slate-500 uppercase tracking-wide">Markup %</span>
-                                        <p className="font-medium text-slate-800 mt-1">{presalesData.markup}%</p>
+                                        <p className="font-medium text-slate-800 mt-1">{(rawPresalesData?.markupPercent || 0)}%</p>
                                     </div>
                                     <div>
                                         <span className="text-xs text-slate-500 uppercase tracking-wide">Mode of Travel</span>
-                                        <p className="font-medium text-slate-800 mt-1">{presalesData.modeOfTravel || "N/A"}</p>
+                                        <p className="font-medium text-slate-800 mt-1">{(rawPresalesData?.travelCosts?.modeOfTravel || "N/A") || "N/A"}</p>
                                     </div>
                                     <div>
                                         <span className="text-xs text-slate-500 uppercase tracking-wide">Travel Frequency</span>
-                                        <p className="font-medium text-slate-800 mt-1">{presalesData.frequency || "N/A"}</p>
+                                        <p className="font-medium text-slate-800 mt-1">{(rawPresalesData?.travelCosts?.frequency || "N/A") || "N/A"}</p>
                                     </div>
                                     <div>
                                         <span className="text-xs text-slate-500 uppercase tracking-wide">Round Trip Cost</span>
                                         <p className="font-medium text-slate-800 mt-1">
-                                            {cSym}{Number(presalesData.roundTripCost).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
-                                            {opportunityCurrency && globalCurrency && opportunityCurrency !== globalCurrency && (
-                                                <span className="text-xs text-slate-500 ml-1">
-                                                    ({getSymbol(globalCurrency)}{(Number(presalesData.roundTripCost) * getRate(globalCurrency) / getRate(opportunityCurrency)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
-                                                </span>
-                                            )}
-                                        </p>
+                                            {cSym}{getPresalesConverted(rawPresalesData?.travelCosts?.roundTripCost || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</p>
                                     </div>
                                     <div>
                                         <span className="text-xs text-slate-500 uppercase tracking-wide">Medical Insurance</span>
                                         <p className="font-medium text-slate-800 mt-1">
-                                            {cSym}{Number(presalesData.medicalInsuranceCost).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
-                                            {opportunityCurrency && globalCurrency && opportunityCurrency !== globalCurrency && (
-                                                <span className="text-xs text-slate-500 ml-1">
-                                                    ({getSymbol(globalCurrency)}{(Number(presalesData.medicalInsuranceCost) * getRate(globalCurrency) / getRate(opportunityCurrency)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
-                                                </span>
-                                            )}
-                                        </p>
+                                            {cSym}{getPresalesConverted(rawPresalesData?.travelCosts?.medicalInsurance || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</p>
                                     </div>
                                     <div>
                                         <span className="text-xs text-slate-500 uppercase tracking-wide">Visa Cost</span>
                                         <p className="font-medium text-slate-800 mt-1">
-                                            {cSym}{Number(presalesData.visaCost).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
-                                            {opportunityCurrency && globalCurrency && opportunityCurrency !== globalCurrency && (
-                                                <span className="text-xs text-slate-500 ml-1">
-                                                    ({getSymbol(globalCurrency)}{(Number(presalesData.visaCost) * getRate(globalCurrency) / getRate(opportunityCurrency)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
-                                                </span>
-                                            )}
-                                        </p>
+                                            {cSym}{getPresalesConverted(rawPresalesData?.travelCosts?.visaCost || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</p>
                                     </div>
                                     <div>
                                         <span className="text-xs text-slate-500 uppercase tracking-wide">Vaccine Cost</span>
                                         <p className="font-medium text-slate-800 mt-1">
-                                            {cSym}{Number(presalesData.vaccineCost).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
-                                            {opportunityCurrency && globalCurrency && opportunityCurrency !== globalCurrency && (
-                                                <span className="text-xs text-slate-500 ml-1">
-                                                    ({getSymbol(globalCurrency)}{(Number(presalesData.vaccineCost) * getRate(globalCurrency) / getRate(opportunityCurrency)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
-                                                </span>
-                                            )}
-                                        </p>
+                                            {cSym}{getPresalesConverted(rawPresalesData?.travelCosts?.vaccineCost || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</p>
                                     </div>
                                     <div>
                                         <span className="text-xs text-slate-500 uppercase tracking-wide">Hotel Cost</span>
                                         <p className="font-medium text-slate-800 mt-1">
-                                            {cSym}{Number(presalesData.hotelCost).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
-                                            {opportunityCurrency && globalCurrency && opportunityCurrency !== globalCurrency && (
-                                                <span className="text-xs text-slate-500 ml-1">
-                                                    ({getSymbol(globalCurrency)}{(Number(presalesData.hotelCost) * getRate(globalCurrency) / getRate(opportunityCurrency)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
-                                                </span>
-                                            )}
-                                        </p>
+                                            {cSym}{getPresalesConverted(rawPresalesData?.travelCosts?.hotelCost || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</p>
                                     </div>
                                 </div>
 
@@ -2551,39 +2407,21 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     <div className="bg-blue-50 rounded-lg p-3 border border-blue-200">
                                         <p className="text-xs text-blue-600 mb-1">Revenue</p>
                                         <p className="text-sm font-bold text-blue-700">
-                                            {cSym}{Number(presalesData?.gomSummary?.totalRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
-                                            {opportunityCurrency && globalCurrency && opportunityCurrency !== globalCurrency && (
-                                                <span className="text-xs text-slate-500 ml-1">
-                                                    ({getSymbol(globalCurrency)}{(Number(presalesData?.gomSummary?.totalRevenue || 0) * getRate(globalCurrency) / getRate(opportunityCurrency)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
-                                                </span>
-                                            )}
-                                        </p>
+                                            {cSym}{getPresalesConverted(rawPresalesData?.gomSummary?.totalRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</p>
                                     </div>
                                     <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
                                         <p className="text-xs text-slate-500 mb-1">Total Cost</p>
                                         <p className="text-sm font-bold text-slate-700">
-                                            {cSym}{Number(presalesData?.gomSummary?.totalCost || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
-                                            {opportunityCurrency && globalCurrency && opportunityCurrency !== globalCurrency && (
-                                                <span className="text-xs text-slate-500 ml-1">
-                                                    ({getSymbol(globalCurrency)}{(Number(presalesData?.gomSummary?.totalCost || 0) * getRate(globalCurrency) / getRate(opportunityCurrency)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
-                                                </span>
-                                            )}
-                                        </p>
+                                            {cSym}{getPresalesConverted(rawPresalesData?.gomSummary?.totalCost || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</p>
                                     </div>
-                                    <div className={`rounded-lg p-3 border ${(presalesData?.gomSummary?.gomPercent || 0) >= 20 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                                    <div className={`rounded-lg p-3 border ${(rawPresalesData?.gomSummary?.gomPercent || 0) >= 20 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
                                         <p className="text-xs text-slate-500 mb-1">GOM %</p>
-                                        <p className={`text-sm font-bold ${(presalesData?.gomSummary?.gomPercent || 0) >= 20 ? 'text-green-700' : 'text-red-700'}`}>{(presalesData?.gomSummary?.gomPercent || 0).toFixed(1)}%</p>
+                                        <p className={`text-sm font-bold ${(rawPresalesData?.gomSummary?.gomPercent || 0) >= 20 ? 'text-green-700' : 'text-red-700'}`}>{(rawPresalesData?.gomSummary?.gomPercent || 0).toFixed(1)}%</p>
                                     </div>
                                     <div className="bg-purple-50 rounded-lg p-3 border border-purple-200">
                                         <p className="text-xs text-purple-600 mb-1">Profit</p>
                                         <p className="text-sm font-bold text-purple-700">
-                                            {cSym}{Number(presalesData?.gomSummary?.profit || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
-                                            {opportunityCurrency && globalCurrency && opportunityCurrency !== globalCurrency && (
-                                                <span className="text-xs text-slate-500 ml-1">
-                                                    ({getSymbol(globalCurrency)}{(Number(presalesData?.gomSummary?.profit || 0) * getRate(globalCurrency) / getRate(opportunityCurrency)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
-                                                </span>
-                                            )}
-                                        </p>
+                                            {cSym}{getPresalesConverted(rawPresalesData?.gomSummary?.profit || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</p>
                                     </div>
                                 </div>
                             </div>

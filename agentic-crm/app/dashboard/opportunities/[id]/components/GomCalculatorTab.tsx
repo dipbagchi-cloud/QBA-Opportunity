@@ -40,7 +40,7 @@ export function GomCalculatorTab({ gomApproved = false, onApproveGom, canApprove
         setSpecialCosts
     } = useOpportunityEstimation();
 
-    const { format: fmtCurrency, symbol: cSym, convert: convertCurrency, currency: selectedCurrency, setCurrency: setSelectedCurrency, currencies, getRate } = useCurrency();
+    const { format: fmtCurrency, symbol: cSym, convert: convertCurrency, currency: selectedCurrency, setCurrency: setSelectedCurrency, currencies, getRate, getSymbol } = useCurrency();
 
     // Get status icon
     const getStatusIcon = () => {
@@ -516,17 +516,9 @@ export function GomCalculatorTab({ gomApproved = false, onApproveGom, canApprove
                         </div>
                     </div>
 
-                    <select
-                        value={selectedCurrency}
-                        onChange={(e) => setSelectedCurrency(e.target.value)}
-                        className="px-3 py-1.5 bg-white border-2 border-indigo-300 rounded-lg text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent shadow-sm"
-                    >
-                        {currencies.map((c: any) => (
-                            <option key={c.code} value={c.code}>
-                                {c.symbol} {c.code}
-                            </option>
-                        ))}
-                    </select>
+                    <div className="px-3 py-1.5 bg-white border-2 border-indigo-300 rounded-lg text-sm font-semibold text-slate-700 shadow-sm">
+                        {getSymbol(selectedCurrency)} {selectedCurrency}
+                    </div>
                 </div>
 
                 {/* Converted Values Grid */}

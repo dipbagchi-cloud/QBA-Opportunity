@@ -98,7 +98,9 @@ export function ResourceAssignmentTab() {
 
         const newRow: ResourceRow = {
             id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : (Date.now() + '-' + Math.random().toString(36).slice(2)),
-            role: `${roleItem.skill || roleItem.role} | ${roleItem.experienceBand || '-'} | CTC: ₹${(roleItem.annualCtc / 100000).toFixed(1)}L`,
+            role: roleItem.role,
+            skill: roleItem.skill,
+            experienceBand: roleItem.experienceBand,
             baseLocation: "India",
             deliveryFrom: "Hyderabad",
             type: "Offshore",
@@ -317,8 +319,8 @@ export function ResourceAssignmentTab() {
                                 <tr key={row.id} className="hover:bg-slate-50 transition-colors">
                                     <td className="p-2 px-3 font-medium text-slate-900 border-r sticky left-0 bg-white z-10">
                                         <div className="flex flex-col">
-                                            <span className="text-sm">{row.role}</span>
-                                            <span className="text-xs text-slate-500">{fmtINR(row.annualCTC, { compact: true })} CTC</span>
+                                            <span className="text-sm font-semibold">{row.skill || row.role}</span>
+                                            <span className="text-xs text-slate-500 mt-0.5">{row.experienceBand || '-'} | {fmtINR(row.annualCTC, { compact: true })} CTC</span>
                                         </div>
                                     </td>
                                     <td className="p-2 border-r">

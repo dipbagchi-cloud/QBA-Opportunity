@@ -19,7 +19,8 @@ export interface Opportunity {
     tentativeStartDate?: string;
     tentativeEndDate?: string;
     createdAt?: string;
-    status: 'healthy' | 'at-risk' | 'critical';
+    status: 'healthy' | 'at-risk' | 'critical' | 'stalled';
+    detailedStatus?: string;
     description?: string;
     // Epic 3 Intelligence Fields
     healthScore?: number;

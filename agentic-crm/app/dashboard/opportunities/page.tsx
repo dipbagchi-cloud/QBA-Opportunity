@@ -436,16 +436,23 @@ export default function OpportunitiesPage() {
                                                 </div>
                                             </td>
                                             <td className="py-2.5 px-4">
-                                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border
-                                            ${opp.stage === 'Negotiation' ? 'bg-purple-50 text-purple-700 border-purple-200' :
-                                                        opp.stage === 'Closed Won' || opp.stage === 'Commit' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
-                                                        opp.stage === 'Closed Lost' ? 'bg-red-50 text-red-700 border-red-200' :
-                                                        opp.stage === 'Proposal Lost' ? 'bg-rose-50 text-rose-700 border-rose-200' :
-                                                        opp.stage === 'Proposal' ? 'bg-pink-50 text-pink-700 border-pink-200' :
-                                                            'bg-slate-100 text-slate-700 border-slate-200'}
-                                         `}>
-                                                    {opp.stage}
-                                                </span>
+                                                <div className="flex flex-col gap-1 items-start">
+                                                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border
+                                                ${opp.stage === 'Negotiation' ? 'bg-purple-50 text-purple-700 border-purple-200' :
+                                                            opp.stage === 'Closed Won' || opp.stage === 'Commit' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                                                            opp.stage === 'Closed Lost' ? 'bg-red-50 text-red-700 border-red-200' :
+                                                            opp.stage === 'Proposal Lost' ? 'bg-rose-50 text-rose-700 border-rose-200' :
+                                                            opp.stage === 'Proposal' ? 'bg-pink-50 text-pink-700 border-pink-200' :
+                                                                'bg-slate-100 text-slate-700 border-slate-200'}
+                                             `}>
+                                                        {opp.stage}
+                                                    </span>
+                                                    {opp.detailedStatus && !['Lost', 'Won', 'Open'].includes(opp.detailedStatus) && (
+                                                        <span className="text-[10px] text-slate-500 font-medium px-1 bg-slate-100 rounded border border-slate-200">
+                                                            {opp.detailedStatus}
+                                                        </span>
+                                                    )}
+                                                </div>
                                             </td>
                                             <td className="py-2.5 px-4">
                                                 <span className="font-medium text-xs text-slate-700">

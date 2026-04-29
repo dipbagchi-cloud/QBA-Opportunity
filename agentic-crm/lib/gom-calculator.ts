@@ -68,6 +68,8 @@ export type ResourceLine = {
     dailyRate: number; // Revenue
     dailyCost: number; // Cost
     months: ResourceMonth[];
+    experienceBand?: string;
+    skill?: string;
 };
 
 export type OtherCost = {

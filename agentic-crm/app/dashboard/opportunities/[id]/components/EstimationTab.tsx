@@ -58,6 +58,8 @@ export function EstimationTab() {
             });
             return {
                 role: resource.role,
+                skill: resource.skill,
+                experienceBand: resource.experienceBand,
                 fte: monthlyFtes
             };
         });
@@ -78,6 +80,8 @@ export function EstimationTab() {
             });
             return {
                 role: resource.role,
+                skill: resource.skill,
+                experienceBand: resource.experienceBand,
                 costs: monthlyCost
             };
         });
@@ -177,17 +181,7 @@ export function EstimationTab() {
                 </div>
 
                 <div className="flex items-center gap-4 bg-white/10 p-2 rounded-lg backdrop-blur-sm">
-                    <span className="text-sm font-medium px-2">Display Currency:</span>
-                    <select
-                        className="bg-transparent border border-white/20 rounded px-3 py-1 text-sm focus:outline-none focus:bg-slate-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                        value={currency}
-                        onChange={(e) => setCurrency(e.target.value)}
-                        disabled={readOnly}
-                    >
-                        {currencies.map(c => (
-                            <option key={c.code} value={c.code}>{c.code} ({c.symbol})</option>
-                        ))}
-                    </select>
+                    <span className="text-sm font-medium px-2 text-white/80">Currency: <span className="font-bold text-white">{currency} ({getSymbol(currency)})</span></span>
                 </div>
             </div>
 
@@ -212,7 +206,12 @@ export function EstimationTab() {
                         <tbody className="divide-y divide-slate-100">
                             {resourceRows.map((row, idx) => (
                                 <tr key={idx} className="hover:bg-amber-50/30 transition-colors">
-                                    <td className="p-1 px-2 font-medium border-r truncate max-w-xs sticky left-0 bg-white z-10 shadow-[1px_0_0_0_rgba(0,0,0,0.05)]" title={row.role}>{row.role}</td>
+                                    <td className="p-1 px-2 font-medium border-r max-w-[200px] sticky left-0 bg-white z-10 shadow-[1px_0_0_0_rgba(0,0,0,0.05)]">
+                                        <div className="truncate" title={row.role}>{row.role}</div>
+                                        <div className="text-[10px] text-slate-500 font-normal truncate mt-0.5">
+                                            {row.skill || '-'} | {row.experienceBand || '-'} Exp
+                                        </div>
+                                    </td>
                                     {months.map(m => (
                                         <td key={m} className="p-1 px-2 text-center border-r text-slate-600 font-mono text-[11px]">
                                             {row.fte[m] ? row.fte[m].toFixed(2) : '-'}
@@ -245,7 +244,12 @@ export function EstimationTab() {
                                 if (rowTotal === 0) return null;
                                 return (
                                     <tr key={idx} className="hover:bg-cyan-50/30 transition-colors">
-                                        <td className="p-1 px-2 font-medium border-r truncate max-w-xs sticky left-0 bg-white z-10 shadow-[1px_0_0_0_rgba(0,0,0,0.05)]">{row.role}</td>
+                                        <td className="p-1 px-2 font-medium border-r max-w-[200px] sticky left-0 bg-white z-10 shadow-[1px_0_0_0_rgba(0,0,0,0.05)]">
+                                            <div className="truncate" title={row.role}>{row.role}</div>
+                                            <div className="text-[10px] text-slate-500 font-normal truncate mt-0.5">
+                                                {row.skill || '-'} | {row.experienceBand || '-'} Exp
+                                            </div>
+                                        </td>
                                         {months.map(m => (
                                             <td key={m} className="p-1 px-2 text-right border-r text-slate-600 font-mono text-[11px]">
                                                 {row.costs[m] ? Math.round(convert(row.costs[m])).toLocaleString() : '-'}

@@ -269,13 +269,16 @@ export default function NewOpportunityPage() {
                 const created = await res.json();
                 setClients(prev => [...prev, created]);
                 setFormData(prev => ({ ...prev, clientName: created.name }));
-                setNewClientName("");
                 setNewClientContact("");
                 setNewClientAddress("");
                 setShowAddClient(false);
+            } else {
+                const errorData = await res.json().catch(() => ({}));
+                alert(`Error: ${errorData.error || "Failed to add client. It may already exist."}`);
             }
         } catch (err) {
             console.error("Failed to add client", err);
+            alert("Network error while adding client.");
         } finally {
             setAddingClient(false);
         }
