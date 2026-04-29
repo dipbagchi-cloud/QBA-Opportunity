@@ -275,7 +275,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         medicalInsuranceCost: 0,
         visaCost: 0,
         vaccineCost: 0,
-        hotelCost: 0
+        hotelCost: 0,
+        gomSummary: null as any
     });
 
     const handlePresalesDataChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
