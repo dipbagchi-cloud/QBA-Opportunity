@@ -137,6 +137,7 @@ export default function NewOpportunityPage() {
 
     // Tech dropdown state
     const [techDropdownOpen, setTechDropdownOpen] = useState(false);
+    const [techSearch, setTechSearch] = useState("");
     const techDropdownRef = useRef<HTMLDivElement>(null);
 
     // Form State
@@ -496,6 +497,7 @@ export default function NewOpportunityPage() {
                     <div className="space-y-1.5">
                         <label className="block text-sm font-bold text-slate-700">Technology *</label>
                         <div className="relative" ref={techDropdownRef}>
+                            <input type="text" name="technology" value={formData.technology || ''} readOnly className="absolute bottom-0 left-0 w-full h-0 opacity-0 pointer-events-none" required tabIndex={-1} />
                             <div
                                 className="w-full min-h-[42px] px-3 py-2 bg-white border border-slate-300 rounded-md text-sm shadow-sm flex flex-wrap gap-1 cursor-pointer"
                                 onClick={() => setTechDropdownOpen(!techDropdownOpen)}
@@ -514,27 +516,60 @@ export default function NewOpportunityPage() {
                                 )) : <span className="text-slate-400">Select Technologies</span>}
                             </div>
                             {techDropdownOpen && (
-                            <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                                {technologies.map(t => {
-                                    const selected = formData.technology.split(',').filter(Boolean).includes(t);
-                                    return (
-                                        <label key={t} className={`flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-slate-50 ${selected ? 'bg-indigo-50 text-indigo-700' : 'text-slate-700'}`}>
-                                            <input
-                                                type="checkbox"
-                                                className="w-3.5 h-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                                                checked={selected}
-                                                onChange={() => {
-                                                    const current = formData.technology.split(',').filter(Boolean);
-                                                    const newTech = selected
-                                                        ? current.filter(x => x !== t).join(',')
-                                                        : [...current, t].join(',');
-                                                    setFormData(prev => ({ ...prev, technology: newTech }));
-                                                }}
-                                            />
-                                            {t}
-                                        </label>
-                                    );
-                                })}
+                            <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg">
+                                <div className="p-2 border-b border-slate-100">
+                                    <div className="flex items-center gap-2 px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-md">
+                                        <Search className="w-3.5 h-3.5 text-slate-400" />
+                                        <input
+                                            type="text"
+                                            placeholder="Search technologies..."
+                                            value={techSearch}
+                                            onChange={(e) => setTechSearch(e.target.value)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter') {
+                                                    e.preventDefault();
+                                                    const filtered = technologies.filter(t => t.toLowerCase().includes(techSearch.toLowerCase()));
+                                                    if (filtered.length > 0) {
+                                                        const t = filtered[0];
+                                                        const current = formData.technology.split(',').filter(Boolean);
+                                                        const selected = current.includes(t);
+                                                        const newTech = selected
+                                                            ? current.filter(x => x !== t).join(',')
+                                                            : [...current, t].join(',');
+                                                        setFormData(prev => ({ ...prev, technology: newTech }));
+                                                    }
+                                                }
+                                            }}
+                                            className="flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400"
+                                            autoFocus
+                                        />
+                                    </div>
+                                </div>
+                                <div className="max-h-48 overflow-y-auto">
+                                    {technologies.filter(t => t.toLowerCase().includes(techSearch.toLowerCase())).map(t => {
+                                        const selected = formData.technology.split(',').filter(Boolean).includes(t);
+                                        return (
+                                            <label key={t} className={`flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-slate-50 ${selected ? 'bg-indigo-50 text-indigo-700' : 'text-slate-700'}`}>
+                                                <input
+                                                    type="checkbox"
+                                                    className="w-3.5 h-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                                    checked={selected}
+                                                    onChange={() => {
+                                                        const current = formData.technology.split(',').filter(Boolean);
+                                                        const newTech = selected
+                                                            ? current.filter(x => x !== t).join(',')
+                                                            : [...current, t].join(',');
+                                                        setFormData(prev => ({ ...prev, technology: newTech }));
+                                                    }}
+                                                />
+                                                {t}
+                                            </label>
+                                        );
+                                    })}
+                                    {technologies.filter(t => t.toLowerCase().includes(techSearch.toLowerCase())).length === 0 && (
+                                        <div className="px-3 py-4 text-sm text-slate-400 text-center">No technologies found</div>
+                                    )}
+                                </div>
                             </div>
                             )}
                         </div>

@@ -773,9 +773,15 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
     const handlePresalesSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        
+        if (!formData.technology) {
+            toast({ title: "Validation Error", description: "Technology must be selected before moving to Presales.", variant: "destructive" });
+            return;
+        }
+
         // Validate proposal due date against start date
         if (presalesForm.proposalDueDate && formData.tentativeStartDate && presalesForm.proposalDueDate > formData.tentativeStartDate) {
-            toast({ title: "Validation Error", description: "Proposal due date cannot be beyond the estimated start date." });
+            toast({ title: "Validation Error", description: "Proposal due date cannot be beyond the estimated start date.", variant: "destructive" });
             return;
         }
         setIsSaving(true);
@@ -1420,6 +1426,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                         <div className="space-y-1.5">
                             <label className="block text-sm font-bold text-slate-700">Technology *</label>
                             <div className="relative" ref={techDropdownRef}>
+                                <input type="text" name="technology" value={formData.technology || ''} readOnly className="absolute bottom-0 left-0 w-full h-0 opacity-0 pointer-events-none" required tabIndex={-1} />
                                 <div
                                     className={`w-full min-h-[42px] px-3 py-2 border border-slate-300 rounded-md text-sm shadow-sm flex flex-wrap gap-1 ${isPipelineEditable ? 'bg-white cursor-pointer' : 'bg-slate-50 cursor-not-allowed opacity-70'}`}
                                     onClick={() => { if (isPipelineEditable) setTechDropdownOpen(!techDropdownOpen); }}
@@ -1447,6 +1454,21 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                                     placeholder="Search technologies..."
                                                     value={techSearch}
                                                     onChange={(e) => setTechSearch(e.target.value)}
+                                                    onKeyDown={(e) => {
+                                                        if (e.key === 'Enter') {
+                                                            e.preventDefault();
+                                                            const filtered = technologies.filter(t => t.toLowerCase().includes(techSearch.toLowerCase()));
+                                                            if (filtered.length > 0) {
+                                                                const t = filtered[0];
+                                                                const current = formData.technology.split(',').filter(Boolean);
+                                                                const selected = current.includes(t);
+                                                                const newTech = selected
+                                                                    ? current.filter(x => x !== t).join(',')
+                                                                    : [...current, t].join(',');
+                                                                setFormData(prev => ({ ...prev, technology: newTech }));
+                                                            }
+                                                        }
+                                                    }}
                                                     className="flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400"
                                                     autoFocus
                                                 />

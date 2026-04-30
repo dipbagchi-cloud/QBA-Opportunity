@@ -27,6 +27,7 @@ import { useOpportunityStore } from "@/lib/store";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import KanbanBoard from "@/components/opportunities/KanbanBoard";
 import { useCurrency } from "@/components/providers/currency-provider";
+import { ByOwnerBoard } from "./components/ByOwnerBoard";
 
 const STAGE_OPTIONS = [
     "Discovery",
@@ -61,7 +62,7 @@ export default function OpportunitiesPage() {
     const [currentPage, setCurrentPage] = useState(1);
     const limit = 10;
 
-    const [viewMode, setViewMode] = useState<'list' | 'kanban'>('list');
+    const [viewMode, setViewMode] = useState<'list' | 'kanban' | 'by_owner'>('list');
     const { currency: globalCurrency, getSymbol, getRate } = useCurrency();
 
     const [sortKey, setSortKey] = useState<string | null>(null);
@@ -94,9 +95,9 @@ export default function OpportunitiesPage() {
         return sortDir === 'asc' ? <ArrowUp className="w-3 h-3 text-indigo-600" /> : <ArrowDown className="w-3 h-3 text-indigo-600" />;
     };
 
-    const buildQueryParams = useCallback((pg: number, search: string, filters: OpportunityFilters, isKanban: boolean) => ({
+    const buildQueryParams = useCallback((pg: number, search: string, filters: OpportunityFilters, fetchMax: boolean) => ({
         page: pg,
-        limit: isKanban ? 100 : limit,
+        limit: fetchMax ? 500 : limit,
         search,
         stages: filters.stages,
         client: filters.client.trim(),
@@ -137,7 +138,7 @@ export default function OpportunitiesPage() {
 
     const loadPage = useCallback((pg: number, search?: string, filters?: OpportunityFilters) => {
         setCurrentPage(pg);
-        fetchOpportunities(buildQueryParams(pg, search ?? searchTerm, filters ?? appliedFilters, viewMode === 'kanban'));
+        fetchOpportunities(buildQueryParams(pg, search ?? searchTerm, filters ?? appliedFilters, viewMode === 'kanban' || viewMode === 'by_owner'));
     }, [fetchOpportunities, searchTerm, appliedFilters, viewMode, buildQueryParams]);
 
     useEffect(() => {
@@ -146,14 +147,14 @@ export default function OpportunitiesPage() {
 
     // Reload all opportunities when switching to kanban mode
     useEffect(() => {
-        fetchOpportunities(buildQueryParams(currentPage, searchTerm, appliedFilters, viewMode === 'kanban'));
+        fetchOpportunities(buildQueryParams(currentPage, searchTerm, appliedFilters, viewMode === 'kanban' || viewMode === 'by_owner'));
     }, [viewMode]);
 
     // Debounced search
     useEffect(() => {
         const timer = setTimeout(() => {
             setCurrentPage(1);
-            fetchOpportunities(buildQueryParams(1, searchTerm, appliedFilters, viewMode === 'kanban'));
+            fetchOpportunities(buildQueryParams(1, searchTerm, appliedFilters, viewMode === 'kanban' || viewMode === 'by_owner'));
         }, 400);
         return () => clearTimeout(timer);
     }, [searchTerm]);
@@ -162,7 +163,7 @@ export default function OpportunitiesPage() {
         setAppliedFilters(draftFilters);
         setShowFilters(false);
         setCurrentPage(1);
-        fetchOpportunities(buildQueryParams(1, searchTerm, draftFilters, viewMode === 'kanban'));
+        fetchOpportunities(buildQueryParams(1, searchTerm, draftFilters, viewMode === 'kanban' || viewMode === 'by_owner'));
     };
 
     const handleClearFilters = () => {
@@ -170,7 +171,7 @@ export default function OpportunitiesPage() {
         setAppliedFilters(EMPTY_FILTERS);
         setShowFilters(false);
         setCurrentPage(1);
-        fetchOpportunities(buildQueryParams(1, searchTerm, EMPTY_FILTERS, viewMode === 'kanban'));
+        fetchOpportunities(buildQueryParams(1, searchTerm, EMPTY_FILTERS, viewMode === 'kanban' || viewMode === 'by_owner'));
     };
 
     const toggleDraftStage = (stage: string) => {
@@ -341,7 +342,14 @@ export default function OpportunitiesPage() {
                 >
                     Kanban Board
                 </button>
-                <button className="px-3 py-1.5 text-sm text-slate-500 hover:text-indigo-600 font-medium transition-colors border-b-2 border-transparent">By Owner</button>
+                <button
+                    onClick={() => setViewMode('by_owner')}
+                    className={`px-3 py-1.5 text-sm font-medium border-b-2 transition-colors ${viewMode === 'by_owner'
+                        ? 'text-indigo-600 border-indigo-600'
+                        : 'text-slate-500 border-transparent hover:text-indigo-600'}`}
+                >
+                    By Owner
+                </button>
             </div>
 
             {/* Search Bar */}
@@ -630,8 +638,10 @@ export default function OpportunitiesPage() {
                         )}
                     </div>
                 </div>
-            ) : (
+            ) : viewMode === 'kanban' ? (
                 <KanbanBoard />
+            ) : (
+                <ByOwnerBoard opportunities={sortedOpportunities} globalCurrency={globalCurrency} />
             )}
         </div>
     );

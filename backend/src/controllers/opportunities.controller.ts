@@ -471,7 +471,7 @@ export async function updateOpportunity(req: Request, res: Response) {
                 title: body.projectName || body.title,
                 description: body.description,
                 value: body.value !== undefined && body.value !== '' ? body.value : undefined,
-                currency: body.currency || "USD",
+                currency: body.currency !== undefined ? body.currency : undefined,
 
                 // Detailed Fields
                 region: body.region,
