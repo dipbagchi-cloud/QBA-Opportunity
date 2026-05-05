@@ -94,7 +94,7 @@ export function EstimationTab() {
             "Salary": {},
             "Subcontracting": {},
             "Travel + Stay": {},
-            "Misc. Expense": {},
+            "Miscl. Expense": {},
             "Special HW Cost": {},
             "Special SW Cost": {},
             "Other Indirect Cost": {}
@@ -318,7 +318,7 @@ export function EstimationTab() {
                             {[
                                 { label: "Subcontracting", key: "Subcontracting" },
                                 { label: "Travel + Stay Cost", key: "Travel + Stay" },
-                                { label: "Miscl. Expense", key: "Misc. Expense" },
+                                { label: "Miscl. Expense", key: "Miscl. Expense" },
                                 { label: "Special HW Cost", key: "Special HW Cost" },
                                 { label: "Special SW Cost", key: "Special SW Cost" },
                                 { label: "Other Indirect Cost", key: "Other Indirect Cost" },
@@ -376,7 +376,7 @@ export function EstimationTab() {
                                     let totalCost = expenseRows["Salary"]?.[m] || 0;
 
                                     // Add manual items
-                                    ["Subcontracting", "Travel + Stay", "Misc. Expense", "Special HW Cost", "Special SW Cost", "Other Indirect Cost"].forEach(key => {
+                                    ["Subcontracting", "Travel + Stay", "Miscl. Expense", "Special HW Cost", "Special SW Cost", "Other Indirect Cost"].forEach(key => {
                                         totalCost += expenseRows[key]?.[m] || 0;
                                     });
 
@@ -407,7 +407,7 @@ export function EstimationTab() {
                                     const rev = revenueRow[m] || 0;
                                     let totalCost = expenseRows["Salary"]?.[m] || 0;
 
-                                    ["Subcontracting", "Travel + Stay", "Misc. Expense", "Special HW Cost", "Special SW Cost", "Other Indirect Cost"].forEach(key => {
+                                    ["Subcontracting", "Travel + Stay", "Miscl. Expense", "Special HW Cost", "Special SW Cost", "Other Indirect Cost"].forEach(key => {
                                         totalCost += expenseRows[key]?.[m] || 0;
                                     });
 
@@ -427,7 +427,12 @@ export function EstimationTab() {
                                     );
                                 })}
                                 <td className="p-2 text-right">
-                                    {gomPercent.toFixed(1)}%
+                                    {(() => {
+                                        const revTotal = Object.values(revenueRow).reduce((a, b) => a + b, 0);
+                                        const gomTotal = gomSummary ? gomSummary.gomFull : 0;
+                                        const pct = revTotal > 0 ? (gomTotal / revTotal) * 100 : 0;
+                                        return pct.toFixed(1) + '%';
+                                    })()}
                                 </td>
                             </tr>
                         </tfoot>
