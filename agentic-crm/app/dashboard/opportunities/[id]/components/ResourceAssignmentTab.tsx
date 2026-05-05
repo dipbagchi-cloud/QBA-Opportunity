@@ -412,15 +412,15 @@ export function ResourceAssignmentTab() {
             <div className="bg-white p-4 rounded-lg border border-slate-200">
                 <h4 className="text-sm font-semibold text-slate-700 mb-3">Cost Details</h4>
                 <div className="grid grid-cols-3 gap-4 text-sm">
-                    <div className="flex justify-between items-center">
+                    <div className="flex items-center gap-2">
                         <span className="text-slate-600">Currency:</span>
                         <span className="font-semibold text-slate-900">INR</span>
                     </div>
-                    <div className="flex justify-between items-center">
+                    <div className="flex items-center gap-2">
                         <span className="text-slate-600">Total Resources:</span>
                         <span className="font-semibold text-slate-900">{resources.length}</span>
                     </div>
-                    <div className="flex justify-between items-center">
+                    <div className="flex items-center gap-2">
                         <span className="text-slate-600">Effort Type:</span>
                         <span className="font-semibold text-slate-900">{effortType}</span>
                     </div>
