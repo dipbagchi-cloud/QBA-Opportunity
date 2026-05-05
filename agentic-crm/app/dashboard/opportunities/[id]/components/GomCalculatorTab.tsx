@@ -72,7 +72,7 @@ export function GomCalculatorTab({ gomApproved = false, onApproveGom, canApprove
                         </span>
                     </div>
                     <div className="text-xl font-bold">{fmtCurrency(totalCost)}</div>
-                    <div className="text-[10px] opacity-75 mt-0.5">Resource + Travel</div>
+                    <div className="text-[10px] opacity-75 mt-0.5">Total Estimated Expenses</div>
                 </div>
 
                 <div className={`bg-gradient-to-br rounded-lg p-3 text-white shadow-lg ${gomPercent >= 20 ? 'from-green-500 to-green-600' : 'from-red-500 to-red-600'}`}>
@@ -258,7 +258,7 @@ export function GomCalculatorTab({ gomApproved = false, onApproveGom, canApprove
                                 <span className="text-base font-bold text-blue-700">{fmtCurrency(revenue)}</span>
                             </div>
                             <p className="text-xs text-blue-600">
-                                Formula: (Resource + Travel) × (1 + {markupPercent}%)
+                                Formula: Resource Cost + Travel & Hospitality Costs + Special Cost + Budget Cost
                             </p>
                         </div>
 
@@ -490,11 +490,11 @@ export function GomCalculatorTab({ gomApproved = false, onApproveGom, canApprove
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
                     <div className="bg-white p-3 rounded border border-slate-200">
                         <div className="font-semibold text-slate-700 mb-1">Total Cost</div>
-                        <div className="text-slate-600">Resource + Travel + Commission + Pre-Sales + Auto Overheads</div>
+                        <div className="text-slate-600">Resource Cost + Travel & Hospitality Costs + Special Cost + Budget Cost + Pre Sales Commission + Sales Commission</div>
                     </div>
                     <div className="bg-white p-3 rounded border border-slate-200">
                         <div className="font-semibold text-slate-700 mb-1">Revenue</div>
-                        <div className="text-slate-600">(Resource + Travel) × (1 + Markup %)</div>
+                        <div className="text-slate-600">Resource Cost + Travel & Hospitality Costs + Special Cost + Budget Cost</div>
                     </div>
                     <div className="bg-white p-3 rounded border border-slate-200">
                         <div className="font-semibold text-slate-700 mb-1">GOM %</div>
