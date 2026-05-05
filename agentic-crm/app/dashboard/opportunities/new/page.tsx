@@ -399,6 +399,14 @@ export default function NewOpportunityPage() {
                 </div>
             </div>
 
+            {/* Project Title Header */}
+            <div className="mt-4 mb-2 flex items-center justify-between">
+                <h1 className="text-2xl font-extrabold text-slate-900 flex items-center gap-2">
+                    <Briefcase className="w-6 h-6 text-indigo-600" />
+                    {formData.projectName || "New Opportunity"}
+                </h1>
+            </div>
+
             {/* Basic Information Form */}
             <form onSubmit={handleSubmit} className="bg-white rounded-lg shadow-sm border border-slate-200 p-5">
                 <div className="mb-4">

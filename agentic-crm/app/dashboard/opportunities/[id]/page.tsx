@@ -191,6 +191,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
     const [showPresalesModal, setShowPresalesModal] = useState(false);
+    const [opportunityOwnerId, setOpportunityOwnerId] = useState<string>('');
 
     // Dynamic dropdown data
     const [clients, setClients] = useState<{ id: string; name: string }[]>([]);
@@ -539,6 +540,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 setOriginalData({ value: data.value || 0, currency: data.currency || 'USD' });
                 setOpportunityCurrency(globalCurrency);
                 setOpportunityMetadata(data.metadata || null);
+                setOpportunityOwnerId(data.ownerId || data.owner?.id || '');
 
                 // Load attachments
                 if (data.attachments && Array.isArray(data.attachments)) {
@@ -1097,6 +1099,11 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     };
 
 
+    // Access Control Logic
+    const isSalesOrPresales = user?.department === 'Sales' || user?.department === 'Presales' || user?.role?.name?.includes('Sales') || user?.role?.name?.includes('Presales');
+    const isOwnerOrAssigned = user?.id === opportunityOwnerId || user?.name === formData.salesRep || user?.name === opportunityManagerName;
+    const hasEditAccess = !isSalesOrPresales || isOwnerOrAssigned;
+
     return (
         <div className="max-w-[1400px] mx-auto space-y-4 relative">
             {/* Header with Actions */}
@@ -1114,7 +1121,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     >
                         <ArrowLeft className="w-4 h-4" /> Back
                     </button>
-                    {opportunityStage === 0 && !isLost && (
+                    {hasEditAccess && opportunityStage === 0 && !isLost && (
                         <button
                             onClick={() => setShowPresalesModal(true)}
                             disabled={isStalled}
@@ -1123,7 +1130,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             Move to Presales
                         </button>
                     )}
-                    {opportunityStage === 1 && !isLost && (
+                    {hasEditAccess && opportunityStage === 1 && !isLost && (
                         <>
                             <button
                                 onClick={() => { setLostModalType('Proposal Lost'); setShowLostModal(true); }}
@@ -1142,7 +1149,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             </button>
                         </>
                     )}
-                    {opportunityStage === 2 && !isLost && currentStageName === 'Proposal' && (
+                    {hasEditAccess && opportunityStage === 2 && !isLost && currentStageName === 'Proposal' && (
                         <>
                             <button
                                 onClick={() => { setLostModalType('Proposal Lost'); setShowLostModal(true); }}
@@ -1154,20 +1161,20 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             <button
                                 onClick={handleSendBackForReestimate}
                                 disabled={isSaving || isStalled}
-                                className="px-4 py-2 bg-white border border-amber-300 text-amber-700 rounded-md font-medium hover:bg-amber-50 disabled:opacity-50"
+                                className="px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-md font-medium hover:bg-slate-50 disabled:opacity-50"
                             >
-                                {isSaving ? 'Sending...' : 'Send Back for Re-estimate'}
+                                <span className="flex items-center gap-1.5"><RefreshCw className="w-4 h-4" /> Send for Re-estimate</span>
                             </button>
                             <button
                                 onClick={handleProposalSent}
                                 disabled={isSaving || isStalled}
-                                className="px-4 py-2 bg-orange-600 text-white rounded-md font-medium hover:bg-orange-700 disabled:opacity-50"
+                                className="px-4 py-2 bg-blue-600 text-white rounded-md font-medium hover:bg-blue-700 disabled:opacity-50 disabled:bg-slate-400"
                             >
-                                {isSaving ? 'Sending...' : 'Proposal Sent'}
+                                {isSaving ? 'Sending...' : 'Mark Proposal Sent'}
                             </button>
                         </>
                     )}
-                    {opportunityStage === 2 && !isLost && currentStageName === 'Negotiation' && (
+                    {hasEditAccess && opportunityStage === 2 && !isLost && currentStageName === 'Negotiation' && (
                         <>
                             <button
                                 onClick={() => { setLostModalType('Closed Lost'); setShowLostModal(true); }}
@@ -1197,7 +1204,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             <XCircle className="w-4 h-4" /> {currentStageName || 'Closed Lost'}
                         </span>
                     )}
-                    {opportunityStage < 3 && !isLost && (
+                    {hasEditAccess && opportunityStage < 3 && !isLost && (
                         <button 
                             onClick={handleHoldToggle}
                             disabled={isSaving}
@@ -1277,11 +1284,20 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 </div>
             </div>
 
+            {/* Project Title Header */}
+            <div className="mt-4 mb-2 flex items-center justify-between">
+                <h1 className="text-2xl font-extrabold text-slate-900 flex items-center gap-2">
+                    <Briefcase className="w-6 h-6 text-indigo-600" />
+                    {formData.projectName || "New Opportunity"}
+                </h1>
+            </div>
+
             {/* PIPELINE VIEW (Step 0) */}
             {activeStep === 0 && (() => {
-                const isPipelineEditable = opportunityStage < 3 && !isLost && !isStalled;
+                const isPipelineEditable = hasEditAccess && opportunityStage < 3 && !isLost && !isStalled;
                 const disabledClass = !isPipelineEditable ? "bg-slate-50 cursor-not-allowed opacity-70" : "bg-white";
                 return (
+                <div className="space-y-4 mt-4">
                 <form onSubmit={handleSubmit} className="bg-white rounded-lg shadow-sm border border-slate-200 p-5">
                     {/* ... Existing Pipeline Form Code ... */}
                     <div className="mb-4 flex items-center gap-3">
@@ -1689,12 +1705,13 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     </div>
                     )}
                 </form>
+                </div>
                 );
             })()}
 
             {/* PRESALES VIEW (Step 1) */}
             {activeStep === 1 && (
-                <OpportunityEstimationProvider opportunityId={id} readOnly={opportunityStage >= 2 || isStalled || isLost} startDate={formData.tentativeStartDate} endDate={formData.tentativeEndDate} adjustedEstimatedValue={Number(adjustedEstimatedValue) || 0} initialCurrency={globalCurrency}>
+                <OpportunityEstimationProvider opportunityId={id} readOnly={!hasEditAccess || opportunityStage >= 2 || isStalled || isLost} startDate={formData.tentativeStartDate} endDate={formData.tentativeEndDate} adjustedEstimatedValue={Number(adjustedEstimatedValue) || 0} initialCurrency={globalCurrency}>
                     <GomPercentSync onGomPercentChange={setContextGomPercent} />
                     {opportunityStage < 2 && <PresalesSaveButton />}
                     <div className="bg-white rounded-lg shadow-sm border border-slate-200">
@@ -2217,7 +2234,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                         {/* TAB CONTENT: GOM Calculator */}
                         {activeTab === "GOM Calculator" && (
                             <div className="p-5">
-                                <GomCalculatorTab gomApproved={gomApproved} onApproveGom={handleApproveGom} canApprove={opportunityStage === 1 && !isLost} />
+                                <GomCalculatorTab gomApproved={gomApproved} onApproveGom={handleApproveGom} canApprove={hasEditAccess && opportunityStage === 1 && !isLost} />
                             </div>
                         )}
                     </div>
