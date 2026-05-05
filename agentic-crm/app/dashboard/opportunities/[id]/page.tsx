@@ -605,6 +605,20 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         if (id) fetchDetails();
     }, [id]);
 
+    // Refetch presales data when entering Sales tab to ensure we have the latest GOM calculator saves
+    useEffect(() => {
+        if (activeStep === 2 && id) {
+            fetch(`${API_URL}/api/opportunities/${id}`, { headers: getAuthHeaders() })
+                .then(r => r.ok ? r.json() : null)
+                .then(data => {
+                    if (data?.presalesData && typeof data.presalesData === 'object') {
+                        setRawPresalesData(data.presalesData);
+                    }
+                })
+                .catch(err => console.error("Failed to refresh presales data for Sales tab", err));
+        }
+    }, [activeStep, id]);
+
 
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
