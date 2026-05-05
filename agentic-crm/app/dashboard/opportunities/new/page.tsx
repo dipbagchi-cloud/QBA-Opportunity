@@ -23,6 +23,7 @@ import {
 import { useOpportunityStore } from "@/lib/store";
 import { useAuthStore } from "@/lib/auth-store";
 import { API_URL, getAuthHeaders } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
 
 const DURATION_UNITS = ["days", "weeks", "months"];
 
@@ -114,6 +115,7 @@ function durationToMonths(value: number, unit: string): number {
 
 export default function NewOpportunityPage() {
     const router = useRouter();
+    const { toast } = useToast();
     const { currency, symbol: cSym, setCurrency } = useCurrency();
     const { addOpportunity } = useOpportunityStore();
     const { user } = useAuthStore();
@@ -273,13 +275,14 @@ export default function NewOpportunityPage() {
                 setNewClientContact("");
                 setNewClientAddress("");
                 setShowAddClient(false);
+                toast({ title: "Client Added", description: `${created.name} has been added.` });
             } else {
                 const errorData = await res.json().catch(() => ({}));
-                alert(`Error: ${errorData.error || "Failed to add client. It may already exist."}`);
+                toast({ title: "Error", description: errorData.error || "Failed to add client. It may already exist." });
             }
         } catch (err) {
             console.error("Failed to add client", err);
-            alert("Network error while adding client.");
+            toast({ title: "Network Error", description: "Network error while adding client." });
         } finally {
             setAddingClient(false);
         }
@@ -300,6 +303,12 @@ export default function NewOpportunityPage() {
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+
+        if (!formData.technology || formData.technology.trim() === "") {
+            toast({ title: "Validation Error", description: "Technology is required." });
+            return;
+        }
+
         setIsLoading(true);
 
         try {

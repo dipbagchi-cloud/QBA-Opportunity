@@ -714,6 +714,12 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+
+        if (!formData.technology || formData.technology.trim() === "") {
+            toast({ title: "Validation Error", description: "Technology is required." });
+            return;
+        }
+
         toast({ title: "Saving", description: "Saving opportunity..." });
         setIsSaving(true);
         try {
@@ -774,14 +780,14 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const handlePresalesSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         
-        if (!formData.technology) {
-            toast({ title: "Validation Error", description: "Technology must be selected before moving to Presales.", variant: "destructive" });
+        if (!formData.technology || formData.technology.trim() === "") {
+            toast({ title: "Validation Error", description: "Technology must be selected before moving to Presales." });
             return;
         }
 
         // Validate proposal due date against start date
         if (presalesForm.proposalDueDate && formData.tentativeStartDate && presalesForm.proposalDueDate > formData.tentativeStartDate) {
-            toast({ title: "Validation Error", description: "Proposal due date cannot be beyond the estimated start date.", variant: "destructive" });
+            toast({ title: "Validation Error", description: "Proposal due date cannot be beyond the estimated start date." });
             return;
         }
         setIsSaving(true);
