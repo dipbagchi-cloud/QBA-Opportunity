@@ -731,6 +731,11 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
 
+        if (!hasEditAccess) {
+            toast({ title: "View Only", description: "You do not have permission to edit this opportunity." });
+            return;
+        }
+
         if (!formData.technology || formData.technology.trim() === "") {
             toast({ title: "Validation Error", description: "Technology is required." });
             return;
@@ -771,7 +776,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     formDataRef.current = formData;
 
     useEffect(() => {
-        if (autoSaveIntervalMinutes <= 0 || opportunityStage !== 0 || isLost) return;
+        if (autoSaveIntervalMinutes <= 0 || opportunityStage !== 0 || isLost || !hasEditAccess) return;
 
         autoSaveRef.current = setInterval(async () => {
             try {
@@ -796,6 +801,11 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const handlePresalesSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         
+        if (!hasEditAccess) {
+            toast({ title: "View Only", description: "You do not have permission to edit this opportunity." });
+            return;
+        }
+
         if (!formData.technology || formData.technology.trim() === "") {
             toast({ title: "Validation Error", description: "Technology must be selected before moving to Presales." });
             return;

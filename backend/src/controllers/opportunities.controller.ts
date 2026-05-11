@@ -381,6 +381,23 @@ export async function updateOpportunity(req: Request, res: Response) {
             include: { client: true, stage: true, owner: true },
         });
 
+        if (!previous) {
+            return res.status(404).json({ error: 'Opportunity not found' });
+        }
+
+        // Authorization Check
+        const currentUser = await prisma.user.findUnique({ where: { id: req.user!.userId } });
+        if (currentUser) {
+            const role = req.user!.roleName.toLowerCase();
+            if (role === 'sales' || role === 'presales') {
+                const isOwner = previous.ownerId === currentUser.id;
+                const isAssigned = previous.salesRepName === currentUser.name || previous.managerName === currentUser.name;
+                if (!isOwner && !isAssigned) {
+                    return res.status(403).json({ error: 'You do not have permission to update this opportunity. View-only access.' });
+                }
+            }
+        }
+
         // Handle Client update if name changed
         let clientId = body.clientId;
         if (body.clientName) {

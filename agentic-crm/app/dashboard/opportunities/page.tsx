@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useOpportunityStore } from "@/lib/store";
+import { useAuthStore } from "@/lib/auth-store";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import KanbanBoard from "@/components/opportunities/KanbanBoard";
 import { useCurrency } from "@/components/providers/currency-provider";
@@ -57,10 +58,22 @@ const EMPTY_FILTERS: OpportunityFilters = {
 
 export default function OpportunitiesPage() {
     const { opportunities, deleteOpportunity, fetchOpportunities, total, page, totalPages, isLoading } = useOpportunityStore();
+    const { user } = useAuthStore();
     const [activeMenu, setActiveMenu] = useState<string | null>(null);
     const [searchTerm, setSearchTerm] = useState("");
     const [currentPage, setCurrentPage] = useState(1);
     const limit = 10;
+
+    const isViewOnly = useCallback((opp: any) => {
+        if (!user) return true;
+        const role = user.role.name.toLowerCase();
+        if (role === 'sales' || role === 'presales') {
+            const isOwner = opp.owner === user.name;
+            const isAssigned = opp.salesRepName === user.name || opp.managerName === user.name;
+            return !isOwner && !isAssigned;
+        }
+        return false;
+    }, [user]);
 
     const [viewMode, setViewMode] = useState<'list' | 'kanban' | 'by_owner'>('list');
     const { currency: globalCurrency, getSymbol, getRate } = useCurrency();
@@ -586,19 +599,21 @@ export default function OpportunitiesPage() {
                                                         />
                                                         <div className="absolute right-8 top-8 z-20 w-48 bg-white rounded-xl shadow-xl border border-slate-100 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
                                                             <Link href={`/dashboard/opportunities/${opp.id}`} className="w-full text-left px-4 py-2.5 text-sm text-slate-600 hover:bg-slate-50 flex items-center gap-2">
-                                                                <Edit className="w-4 h-4" />
-                                                                Edit Details
+                                                                {isViewOnly(opp) ? <Info className="w-4 h-4" /> : <Edit className="w-4 h-4" />}
+                                                                {isViewOnly(opp) ? "View Details" : "Edit Details"}
                                                             </Link>
-                                                            <button
-                                                                onClick={() => {
-                                                                    deleteOpportunity(opp.id);
-                                                                    setActiveMenu(null);
-                                                                }}
-                                                                className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
-                                                            >
-                                                                <Trash2 className="w-4 h-4" />
-                                                                Delete Opportunity
-                                                            </button>
+                                                            {!isViewOnly(opp) && (
+                                                                <button
+                                                                    onClick={() => {
+                                                                        deleteOpportunity(opp.id);
+                                                                        setActiveMenu(null);
+                                                                    }}
+                                                                    className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
+                                                                >
+                                                                    <Trash2 className="w-4 h-4" />
+                                                                    Delete Opportunity
+                                                                </button>
+                                                            )}
                                                         </div>
                                                     </>
                                                 )}

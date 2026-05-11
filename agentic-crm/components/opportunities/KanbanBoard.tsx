@@ -3,6 +3,7 @@
 import React, { useMemo } from 'react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { useOpportunityStore, Opportunity } from '@/lib/store';
+import { useAuthStore } from '@/lib/auth-store';
 import { MoreHorizontal, User, AlertCircle, Clock, Calendar, CalendarCheck, CalendarClock } from 'lucide-react';
 import Link from 'next/link';
 import { useCurrency } from '@/components/providers/currency-provider';
@@ -19,7 +20,19 @@ const STAGES = [
 
 export default function KanbanBoard() {
     const { opportunities, updateOpportunity } = useOpportunityStore();
+    const { user } = useAuthStore();
     const { currency: globalCurrency, getSymbol, getRate } = useCurrency();
+
+    const isViewOnly = (opp: any) => {
+        if (!user) return true;
+        const role = user.role.name.toLowerCase();
+        if (role === 'sales' || role === 'presales') {
+            const isOwner = opp.owner === user.name;
+            const isAssigned = opp.salesRepName === user.name || opp.managerName === user.name;
+            return !isOwner && !isAssigned;
+        }
+        return false;
+    };
 
     // Group opportunities by stage
     const columns = useMemo(() => {
@@ -82,7 +95,7 @@ export default function KanbanBoard() {
                                             }`}
                                     >
                                         {columns[stage.id]?.map((opp, index) => (
-                                            <Draggable key={opp.id} draggableId={opp.id} index={index}>
+                                            <Draggable key={opp.id} draggableId={opp.id} index={index} isDragDisabled={isViewOnly(opp)}>
                                                 {(provided, snapshot) => (
                                                     <div
                                                         ref={provided.innerRef}
