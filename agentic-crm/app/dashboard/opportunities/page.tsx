@@ -69,10 +69,10 @@ export default function OpportunitiesPage() {
     const limit = 10;
 
     const isViewOnly = useCallback((opp: any) => {
-        if (!user) return true;
+        if (!user || !user.role || !user.role.name) return true;
         const role = user.role.name.toLowerCase();
         if (role === 'sales' || role === 'presales') {
-            const isOwner = opp.owner === user.name;
+            const isOwner = opp.ownerId === user.id || opp.owner?.id === user.id || opp.owner === user.name;
             const isAssigned = opp.salesRepName === user.name || opp.managerName === user.name;
             return !isOwner && !isAssigned;
         }
