@@ -225,6 +225,12 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         description: "",
         value: 0
     });
+
+    // Access Control Logic
+    const isSalesOrPresales = user?.department === 'Sales' || user?.department === 'Presales' || user?.role?.name?.includes('Sales') || user?.role?.name?.includes('Presales');
+    const isOwnerOrAssigned = user?.id === opportunityOwnerId || user?.name === formData.salesRep || user?.name === opportunityManagerName;
+    const hasEditAccess = !isSalesOrPresales || isOwnerOrAssigned;
+
     useEffect(() => {
         if (prevCurrencyRef.current && prevCurrencyRef.current !== globalCurrency) {
             if (formData.value && !isNaN(Number(formData.value))) {
@@ -1123,10 +1129,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     };
 
 
-    // Access Control Logic
-    const isSalesOrPresales = user?.department === 'Sales' || user?.department === 'Presales' || user?.role?.name?.includes('Sales') || user?.role?.name?.includes('Presales');
-    const isOwnerOrAssigned = user?.id === opportunityOwnerId || user?.name === formData.salesRep || user?.name === opportunityManagerName;
-    const hasEditAccess = !isSalesOrPresales || isOwnerOrAssigned;
+    // Access Control Logic already handled above
 
     return (
         <div className="max-w-[1400px] mx-auto space-y-4 relative">
