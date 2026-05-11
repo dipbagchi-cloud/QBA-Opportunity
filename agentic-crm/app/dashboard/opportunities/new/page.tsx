@@ -107,9 +107,9 @@ function durationToDays(value: number, unit: string): number {
 function durationToWorkingDays(value: number, unit: string): number {
     switch (unit) {
         case 'days': return value;
-        case 'weeks': return value * 5;
-        case 'months': return value * 20; // standard working days per month
-        default: return value * 20;
+        case 'weeks': return value * 7;
+        case 'months': return value * 30; // 30 days per month
+        default: return value * 30;
     }
 }
 
