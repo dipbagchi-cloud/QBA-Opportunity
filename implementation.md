@@ -1,6 +1,6 @@
 # Q-CRM — Detailed Functional Implementation Reference
 
-> **Last Updated:** April 24, 2026  
+> **Last Updated:** May 11, 2026  
 > **Production:** https://qcrm.qbadvisory.com  
 > **Stack:** Next.js 15 (frontend) · Express.js + TypeScript (backend) · PostgreSQL + Prisma (database)
 
@@ -28,6 +28,7 @@
 18. [Attachments & File Management](#18-attachments--file-management)
 19. [Currency Management](#19-currency-management)
 20. [Frontend Architecture](#20-frontend-architecture)
+21. [May 2026 Feature Updates](#21-may-2026-feature-updates)
 
 ---
 
@@ -1396,3 +1397,178 @@ All pages follow the same pattern:
 | `notification_rules.recipientRoles` | `string[]` e.g., `["Admin", "Manager"]` |
 | `notification_rules.channels` | `string[]` e.g., `["in_app", "email"]` |
 | `system_config.value` | Varies by key (JSON object) |
+
+---
+
+## 21. May 2026 Feature Updates
+
+This section documents all enhancements and bug fixes implemented in May 2026.
+
+---
+
+### 21.1 Q-People Holiday Calendar Integration
+
+**Objective:** Ensure the "Tentative End Date" calculation for opportunities excludes both weekends and official company holidays sourced from the Q-People HRMS system.
+
+#### Backend — `listHolidays` Endpoint
+
+**File:** `backend/src/controllers/master-data.controller.ts`  
+**Route:** `GET /api/master/holidays`
+
+**Implementation:**
+1. Authenticates with Q-People HRMS via `QPEOPLE_API_TOKEN` environment variable.
+2. Fetches all Holiday List records from `https://hr.qbadvisory.com/api/resource/Holiday List?limit_page_length=100`.
+3. For each Holiday List, fetches individual list details and collects all entries where `weekly_off === 0` (i.e., non-weekend official holidays).
+4. Deduplicates dates using a `Set<string>` and returns a sorted `string[]` of ISO date strings (`YYYY-MM-DD`).
+5. **Caching**: Stores result in a module-level variable with a 1-hour TTL (`holidaysCacheTime`). Subsequent calls within the hour return cached data without hitting the external API.
+
+**Route registration:** `master-data.routes.ts` — `GET /holidays` → `listHolidays` (authenticated).
+
+#### Frontend — `addWorkingDays` Helper
+
+**Files:**
+- `agentic-crm/app/dashboard/opportunities/new/page.tsx`
+- `agentic-crm/app/dashboard/opportunities/[id]/page.tsx`
+
+**Signature:**
+```typescript
+function addWorkingDays(startDateStr: string, workingDays: number, holidays: string[] = []): Date
+```
+
+**Logic:** Iterates day by day from `startDateStr`, skipping:
+- Saturdays (`date.getDay() === 6`)
+- Sundays (`date.getDay() === 0`)
+- Any date present in the `holidays` array (`holidays.includes(dateStr)`)
+
+Counts only qualifying working days until `workingDays` are accumulated.
+
+#### Frontend — `durationToWorkingDays` Helper
+
+Converts the user-entered duration value + unit to a raw day count passed to `addWorkingDays`:
+
+| Unit | Conversion |
+|------|-----------|
+| `days` | value × 1 |
+| `weeks` | value × 7 |
+| `months` | value × 30 |
+
+> **Note:** Using calendar days (7/30) rather than working days (5/20) ensures that weekend/holiday exclusion logic in `addWorkingDays` accounts for weekends within weeks and months, producing a correct end date for all units.
+
+#### Frontend — Holiday State & Auto-Calculation
+
+Both `new/page.tsx` and `[id]/page.tsx`:
+- Maintain a `holidays: string[]` state variable.
+- Fetch holidays from `/api/master/holidays` inside `fetchMasterData()` on component mount.
+- A `useEffect` watches `[formData.tentativeStartDate, formData.duration, formData.durationUnit, holidays]` and recalculates `tentativeEndDate` whenever any of these change.
+
+---
+
+### 21.2 Opportunity Edit — Stage-Based Lock
+
+**Objective:** Prevent editing of basic opportunity information once the opportunity has been moved to **Proposal** or **Negotiation** stage, preserving data integrity during the sales process.
+
+**File:** `agentic-crm/app/dashboard/opportunities/[id]/page.tsx`
+
+**Logic:** The `isPipelineEditable` constant inside the Pipeline view IIFE was updated to include stage name checks:
+
+```typescript
+const isPipelineEditable =
+    hasEditAccess &&
+    opportunityStage < 3 &&
+    !isLost &&
+    !isStalled &&
+    currentStageName !== 'Proposal' &&
+    currentStageName !== 'Negotiation';
+```
+
+When `isPipelineEditable` is `false`, all form inputs render with `disabled` prop and the Save button is hidden. A "Read Only" badge appears next to the section title.
+
+---
+
+### 21.3 Mark as Lost — Pipeline Stage
+
+**Objective:** Allow Sales users to mark a pipeline opportunity (still in Discovery / not yet moved to Presales) as Closed Lost directly from the Pipeline tab, without needing to move it through Presales first.
+
+**File:** `agentic-crm/app/dashboard/opportunities/[id]/page.tsx`
+
+**Implementation:**
+- A "Mark as Lost" button (red outlined, `XCircle` icon) is rendered in the footer action bar of the Pipeline view.
+- Visibility condition: `hasEditAccess && opportunityStage === 0 && !isLost && !isStalled`.
+- The button is **outside** the `isPipelineEditable` guard so it remains visible even when basic fields are locked (e.g., Proposal/Negotiation read-only state does not apply at stage 0).
+- Clicking the button sets `lostModalType = 'Closed Lost'` and opens the existing lost confirmation modal (`showLostModal`).
+- The existing modal captures a loss reason and triggers the standard `Closed Lost` stage transition via `PATCH /api/opportunities/:id`.
+
+---
+
+### 21.4 Pricing Model Field in Edit View
+
+**Objective:** Restore the missing Pricing Model dropdown in the opportunity edit form.
+
+**File:** `agentic-crm/app/dashboard/opportunities/[id]/page.tsx`
+
+**Fix:** Added a `SearchableSelect` input for `pricingModel` in the form grid, positioned after the Technology multi-select and before the Day Rate field. Uses `pricingModels` state array (already fetched in `fetchMasterData`). Respects `isPipelineEditable` for disabled state.
+
+---
+
+### 21.5 Audit Log Improvements
+
+**Objective:** Improve the Audit Log panel to show colour-coded action labels and clearly display stage transition arrows (from → to).
+
+**File:** `agentic-crm/app/dashboard/opportunities/[id]/components/AuditLogPane.tsx`
+
+#### Colour-Coded Action Badges
+
+Each audit entry now renders a colour-coded pill badge:
+
+| Action | Label | Colour |
+|--------|-------|--------|
+| `CREATE` | Created | Emerald |
+| `UPDATE` | Updated | Blue |
+| `STAGE_CHANGE` | Stage Changed | Indigo |
+| `SEND_BACK_REESTIMATE` | Sent for Re-estimate | Amber |
+| `ESTIMATION_SUBMITTED` | Estimation Submitted | Cyan |
+| `MARK_LOST` | Marked as Lost | Red |
+| `GOM_APPROVED` | GOM Approved | Green |
+| `GOM_REVOKED` | GOM Approval Revoked | Orange |
+| `GOM_APPROVAL_REQUESTED` | GOM Approval Requested | Yellow |
+| `GOM_REJECTED` | GOM Rejected | Red |
+| `CONVERT_TO_PROJECT` | Converted to Project | Violet |
+| `COMMENT_ADDED` | Comment Added | Slate |
+
+#### Stage Transition Display
+
+For `STAGE_CHANGE` entries, the changes string is parsed using:
+```typescript
+function parseStageChange(changes: string): { from: string; to: string } | null {
+    const match = changes.match(/Stage changed from '(.+?)' to '(.+?)'/);
+    ...
+}
+```
+
+The inline display renders:  
+`[Discovery] → [Qualification]`  
+with styled pills — the "from" stage in a grey chip and the "to" stage in an indigo chip.
+
+---
+
+### 21.6 Resource Allocation Duration Fix
+
+**Context (from prior session):** The Presales Estimation tab was displaying resource allocation duration as a percentage (e.g., `0.50`) instead of the actual days value (e.g., `10 days`). This was caused by the value being divided by 100 before display. The fix was applied to `EstimationTab.tsx` to display the raw `duration` field directly in the resource assignment grid.
+
+---
+
+### 21.7 "Assigned To" Column in Opportunity Detail
+
+**Context (from prior session):** A third column "Assigned To" was added to the bottom of the opportunity detail page alongside Comments and Audit Log. It displays:
+- **Sales Person** — the `salesRepName` from the opportunity record.
+- **Offshore Manager** — the `managerName` set when the opportunity is moved to Presales.
+- **Presales Persons** — the assigned presales team members (multi-select, Manager role only).
+
+**Files:**
+- `agentic-crm/app/dashboard/opportunities/[id]/components/AssignmentPane.tsx` — Display component.
+- `agentic-crm/app/dashboard/opportunities/[id]/components/AssignPresalesModal.tsx` — Modal for manager to assign presales persons.
+
+**Business Rules:**
+- Presales assignees are **read-only** for all non-manager roles.
+- When a manager opens an opportunity they have been assigned to for the first time without presales persons set, they are prompted via the modal.
+- Multiple presales persons can be assigned to a single opportunity.
