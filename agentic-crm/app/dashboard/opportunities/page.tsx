@@ -20,7 +20,11 @@ import {
     ArrowUpDown,
     ArrowUp,
     ArrowDown,
-    X
+    X,
+    Users,
+    DollarSign,
+    Target,
+    Info,
 } from "lucide-react";
 import Link from "next/link";
 import { useOpportunityStore } from "@/lib/store";
