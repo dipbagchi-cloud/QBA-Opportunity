@@ -113,6 +113,10 @@ export async function createUser(req: Request, res: Response) {
     const authConfig = await getAuthMode();
     const ssoUser = authConfig.mode !== 'local' && isSSOUser(email);
 
+    if (authConfig.mode === 'sso' && !ssoUser) {
+      return res.status(400).json({ error: `External users are not allowed in 'SSO Only' mode. Switch to 'Hybrid' mode in Settings to add non-SSO users.` });
+    }
+
     if (!email || !name || resolvedRoleIds.length === 0) {
       return res.status(400).json({ error: 'email, name, and at least one role are required' });
     }
