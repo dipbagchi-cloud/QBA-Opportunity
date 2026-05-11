@@ -1591,6 +1591,20 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             </div>
                         </div>
 
+                        {/* Pricing Model */}
+                        <div className="space-y-1.5">
+                            <label className="block text-sm font-bold text-slate-700">Pricing Model</label>
+                            <SearchableSelect
+                                name="pricingModel"
+                                value={formData.pricingModel}
+                                options={pricingModels.map(m => ({ value: m, label: m }))}
+                                onChange={handleChange}
+                                placeholder="Select Model"
+                                disabled={!isPipelineEditable}
+                                required={false}
+                            />
+                        </div>
+
                         {/* Day Rate (only for Staffing) */}
                         {formData.projectType === 'Staffing' && (
                         <div className="space-y-1.5">
@@ -1758,9 +1772,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     </div>
 
                     {/* Footer Actions */}
-                    {isPipelineEditable && (
                     <div className="mt-8 flex justify-end gap-3 pt-4 border-t border-slate-100">
-                        {opportunityStage === 0 && !isLost && (
+                        {hasEditAccess && opportunityStage === 0 && !isLost && !isStalled && (
                             <button
                                 type="button"
                                 onClick={() => { setLostModalType('Closed Lost'); setShowLostModal(true); }}
@@ -1769,15 +1782,16 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 <XCircle className="w-4 h-4" /> Mark as Lost
                             </button>
                         )}
-                        <button
-                            type="submit"
-                            disabled={isSaving}
-                            className="px-6 py-2 bg-blue-600 border border-transparent rounded-md text-white font-bold hover:bg-blue-700 transition-all disabled:opacity-70"
-                        >
-                            {isSaving ? 'Saving...' : 'Save'}
-                        </button>
+                        {isPipelineEditable && (
+                            <button
+                                type="submit"
+                                disabled={isSaving}
+                                className="px-6 py-2 bg-blue-600 border border-transparent rounded-md text-white font-bold hover:bg-blue-700 transition-all disabled:opacity-70"
+                            >
+                                {isSaving ? 'Saving...' : 'Save'}
+                            </button>
+                        )}
                     </div>
-                    )}
                 </form>
                 </div>
                 );
