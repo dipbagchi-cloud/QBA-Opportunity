@@ -310,6 +310,7 @@ model Opportunity {
   geolocation       String?
   salesRepName      String?
   managerName       String?
+  presalesAssigneeName String?
   
   // Detailed Fields from UI
   country           String?

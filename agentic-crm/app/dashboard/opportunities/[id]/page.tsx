@@ -36,6 +36,7 @@ import { OpportunityEstimationProvider, useOpportunityEstimation } from "./conte
 import { useCurrency } from "@/components/providers/currency-provider";
 import { CommentsPanel } from "./components/CommentsPanel";
 import { AuditLogPane } from "./components/AuditLogPane";
+import { AssignmentPane } from "./components/AssignmentPane";
 import { SowStudio } from "./components/SowStudio";
 
 // Static dropdowns (not master-data driven)
@@ -218,6 +219,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         technology: "",
         tentativeStartDate: "",
         tentativeEndDate: "",
+        presalesAssignee: "",
         duration: "",
         durationUnit: "months",
         pricingModel: "",
@@ -527,6 +529,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     pricingModel: data.pricingModel || "",
                     expectedDayRate: data.expectedDayRate || "",
                     description: data.description || "",
+                    presalesAssignee: data.presalesAssigneeName || "",
                     value: (() => {
                         let loadedValue = data.value || 0;
                         const dataCurr = data.currency || 'USD';
@@ -1940,6 +1943,11 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                                         tentativeStartDate: formData.tentativeStartDate,
                                                         tentativeEndDate: formData.tentativeEndDate,
                                                         duration: formData.duration,
+                                                        technology: formData.technology,
+                                                        projectType: formData.projectType,
+                                                        salesRepName: formData.salesRep,
+                                                        managerName: opportunityManagerName,
+                                                        presalesAssigneeName: formData.presalesAssignee,
                                                     })
                                                 });
                                                 if (res.ok) toast({ title: "Success", description: "Schedule updated." });
@@ -2584,7 +2592,18 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             )}
 
             {/* Comments & Audit Log — visible on all stages */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <AssignmentPane 
+                    opportunityId={id} 
+                    salesRepName={formData.salesRep} 
+                    managerName={opportunityManagerName} 
+                    presalesAssigneeName={formData.presalesAssignee}
+                    setFormData={setFormData}
+                    setOpportunityManagerName={setOpportunityManagerName}
+                    hasEditAccess={hasEditAccess}
+                    userRole={user?.role?.name || ''}
+                    userName={user?.name || ''}
+                />
                 <CommentsPanel opportunityId={id} currentStage={steps[activeStep]} />
                 <AuditLogPane opportunityId={id} />
             </div>

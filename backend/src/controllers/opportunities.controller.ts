@@ -176,6 +176,7 @@ export async function listOpportunities(req: Request, res: Response) {
                 owner: opp.owner.name,
                 salesRepName: opp.salesRepName || '',
                 managerName: (opp as any).managerName || '',
+                presalesAssigneeName: (opp as any).presalesAssigneeName || '',
                 status: opp.isStalled ? 'stalled' : (finalHealth > 70 ? 'healthy' : (finalHealth > 40 ? 'at-risk' : 'critical')),
                 detailedStatus: opp.detailedStatus,
                 description: opp.description,
@@ -280,6 +281,8 @@ export async function createOpportunity(req: Request, res: Response) {
                 pricingModel: body.pricingModel,
                 expectedDayRate: body.expectedDayRate !== undefined && body.expectedDayRate !== '' ? body.expectedDayRate : null,
                 salesRepName: body.salesRepName,
+                managerName: body.managerName,
+                presalesAssigneeName: body.presalesAssigneeName,
 
                 // Relations
                 clientId: clientId,
@@ -391,7 +394,7 @@ export async function updateOpportunity(req: Request, res: Response) {
             const role = req.user!.roleName.toLowerCase();
             if (role === 'sales' || role === 'presales') {
                 const isOwner = previous.ownerId === currentUser.id;
-                const isAssigned = previous.salesRepName === currentUser.name || previous.managerName === currentUser.name;
+                const isAssigned = previous.salesRepName === currentUser.name || previous.managerName === currentUser.name || previous.presalesAssigneeName === currentUser.name;
                 if (!isOwner && !isAssigned) {
                     return res.status(403).json({ error: 'You do not have permission to update this opportunity. View-only access.' });
                 }
@@ -498,6 +501,7 @@ export async function updateOpportunity(req: Request, res: Response) {
                 projectType: body.projectType,
                 salesRepName: body.salesRepName || body.salesRep,
                 managerName: body.managerName,
+                presalesAssigneeName: body.presalesAssigneeName,
                 tentativeStartDate: body.tentativeStartDate ? new Date(body.tentativeStartDate) : undefined,
                 tentativeEndDate: body.tentativeEndDate ? new Date(body.tentativeEndDate) : undefined,
                 tentativeDuration: body.tentativeDuration || body.duration,
@@ -699,6 +703,7 @@ export async function updateOpportunity(req: Request, res: Response) {
             owner: previous?.owner ? { id: previous.owner.id, name: previous.owner.name, email: previous.owner.email } : null,
             salesRepName: (updatedOpp as any).salesRepName,
             managerName: (updatedOpp as any).managerName,
+            presalesAssigneeName: (updatedOpp as any).presalesAssigneeName,
         });
 
         res.json(updatedOpp);

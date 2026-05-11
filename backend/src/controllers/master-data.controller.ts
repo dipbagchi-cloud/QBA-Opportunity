@@ -650,3 +650,21 @@ export async function listManagersByDepartment(req: Request, res: Response) {
         res.status(500).json({ error: 'Failed to fetch managers.' });
     }
 }
+
+// ─ Presales Team (CRM users with Presales role) ─
+export async function listPresalesTeam(req: Request, res: Response) {
+    try {
+        const users = await prisma.user.findMany({
+            where: {
+                isActive: true,
+                roles: { some: { name: 'Presales' } },
+            },
+            orderBy: { name: 'asc' },
+            select: { id: true, name: true, email: true, department: true },
+        });
+        res.json(users);
+    } catch (error) {
+        console.error('List presales team error:', error);
+        res.status(500).json({ error: 'Failed to fetch presales team.' });
+    }
+}

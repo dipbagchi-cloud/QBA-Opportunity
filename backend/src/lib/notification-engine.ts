@@ -297,6 +297,7 @@ export async function evaluateDataConditionRules(opportunity: {
   owner?: { id: string; name: string; email: string } | null;
   salesRepName?: string | null;
   managerName?: string | null;
+  presalesAssigneeName?: string | null;
 }): Promise<void> {
   try {
     const rules = await prisma.notificationRule.findMany({
