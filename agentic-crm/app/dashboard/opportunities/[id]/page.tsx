@@ -1359,7 +1359,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
             {/* PIPELINE VIEW (Step 0) */}
             {activeStep === 0 && (() => {
-                const isPipelineEditable = hasEditAccess && opportunityStage < 3 && !isLost && !isStalled;
+                const isPipelineEditable = hasEditAccess && opportunityStage < 3 && !isLost && !isStalled && currentStageName !== 'Proposal' && currentStageName !== 'Negotiation';
                 const disabledClass = !isPipelineEditable ? "bg-slate-50 cursor-not-allowed opacity-70" : "bg-white";
                 return (
                 <div className="space-y-4 mt-4">
