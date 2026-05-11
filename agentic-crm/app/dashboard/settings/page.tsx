@@ -786,7 +786,7 @@ function UsersTab() {
             {showCreateUser && (
                 <div className="bg-white p-4 rounded-xl border border-green-200 shadow-sm space-y-4">
                     <h4 className="font-semibold text-sm text-slate-800">Create New User</h4>
-                    <p className="text-xs text-slate-500">User will be assigned a default password and must change it on first login.</p>
+                    <p className="text-xs text-slate-500">User will be assigned the default password <code className="bg-slate-100 px-1 rounded">Welcome@CRM1</code> and must change it on first login.</p>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         <div>
                             <label className="block text-xs font-medium text-slate-700 mb-1">Name *</label>
@@ -3652,7 +3652,7 @@ function AuthConfigTab() {
                             <Info className="w-4 h-4 text-blue-500 mt-0.5 shrink-0" />
                             <div className="text-sm text-blue-800">
                                 <strong>Hybrid Mode:</strong> Users with <strong>{ssoDomain}</strong> emails use SSO. External users (any other domain)
-                                use password-based login. When adding external users, a default password is auto-assigned and they must change it on first login.
+                                use password-based login. When adding external users, the default password <code className="bg-blue-100 px-1 rounded">Welcome@CRM1</code> is auto-assigned and they must change it on first login.
                             </div>
                         </div>
                     </div>
