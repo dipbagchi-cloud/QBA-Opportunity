@@ -104,6 +104,29 @@ function durationToDays(value: number, unit: string): number {
     }
 }
 
+function durationToWorkingDays(value: number, unit: string): number {
+    switch (unit) {
+        case 'days': return value;
+        case 'weeks': return value * 5;
+        case 'months': return value * 20; // standard working days per month
+        default: return value * 20;
+    }
+}
+
+function addWorkingDays(startDateStr: string, workingDays: number, holidays: string[] = []): Date {
+    const date = new Date(startDateStr);
+    let addedDays = 0;
+    while (addedDays < workingDays) {
+        date.setDate(date.getDate() + 1);
+        const dateStr = date.toISOString().split('T')[0];
+        // 0 is Sunday, 6 is Saturday
+        if (date.getDay() !== 0 && date.getDay() !== 6 && !holidays.includes(dateStr)) {
+            addedDays++;
+        }
+    }
+    return date;
+}
+
 function durationToMonths(value: number, unit: string): number {
     switch (unit) {
         case 'days': return value / 30;
@@ -166,6 +189,8 @@ export default function NewOpportunityPage() {
     const [countryRegionMap, setCountryRegionMap] = useState<Record<string, { region: string; currency: string }>>({});
     const countries = Object.keys(countryRegionMap).sort();
 
+    const [holidays, setHolidays] = useState<string[]>([]);
+
     // Attachments State
     const [pendingFiles, setPendingFiles] = useState<File[]>([]);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -179,7 +204,7 @@ export default function NewOpportunityPage() {
         const fetchMasterData = async () => {
             const headers = getAuthHeaders();
             try {
-                const [clientsRes, regionsRes, techRes, pricingRes, salesRes, deptRes, projTypesRes, countryMapRes] = await Promise.all([
+                const [clientsRes, regionsRes, techRes, pricingRes, salesRes, deptRes, projTypesRes, countryMapRes, holRes] = await Promise.all([
                     fetch(`${API_URL}/api/master/clients`, { headers }),
                     fetch(`${API_URL}/api/master/regions`, { headers }),
                     fetch(`${API_URL}/api/master/technologies`, { headers }),
@@ -188,6 +213,7 @@ export default function NewOpportunityPage() {
                     fetch(`${API_URL}/api/master/departments`, { headers }),
                     fetch(`${API_URL}/api/master/project-types`, { headers }),
                     fetch(`${API_URL}/api/master/country-region-map`, { headers }),
+                    fetch(`${API_URL}/api/master/holidays`, { headers }),
                 ]);
                 if (clientsRes.ok) setClients(await clientsRes.json());
                 if (regionsRes.ok) setRegions((await regionsRes.json()).map((r: any) => r.name));
@@ -197,6 +223,10 @@ export default function NewOpportunityPage() {
                 if (deptRes.ok) setDepartments(await deptRes.json());
                 if (projTypesRes.ok) setProjectTypes((await projTypesRes.json()).map((p: any) => p.name));
                 if (countryMapRes.ok) setCountryRegionMap(await countryMapRes.json());
+                if (holRes.ok) {
+                    const hData = await holRes.json();
+                    if (Array.isArray(hData)) setHolidays(hData);
+                }
             } catch (err) {
                 console.error("Failed to load master data", err);
             }
@@ -210,13 +240,11 @@ export default function NewOpportunityPage() {
     useEffect(() => {
         const dur = Number(formData.duration);
         if (formData.tentativeStartDate && dur > 0 && formData.durationUnit) {
-            const start = new Date(formData.tentativeStartDate);
-            const days = durationToDays(dur, formData.durationUnit);
-            const end = new Date(start);
-            end.setDate(end.getDate() + days);
+            const workingDays = durationToWorkingDays(dur, formData.durationUnit);
+            const end = addWorkingDays(formData.tentativeStartDate, workingDays, holidays);
             setFormData(prev => ({ ...prev, tentativeEndDate: end.toISOString().split('T')[0] }));
         }
-    }, [formData.tentativeStartDate, formData.duration, formData.durationUnit]);
+    }, [formData.tentativeStartDate, formData.duration, formData.durationUnit, holidays]);
 
     // Auto-calculate estimated value = Expected Day Rate × 20 working days × Duration months (only for Staffing)
     useEffect(() => {

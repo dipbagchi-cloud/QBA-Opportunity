@@ -668,3 +668,52 @@ export async function listPresalesTeam(req: Request, res: Response) {
         res.status(500).json({ error: 'Failed to fetch presales team.' });
     }
 }
+
+let holidaysCache: string[] | null = null;
+let holidaysCacheTime = 0;
+
+export async function listHolidays(req: Request, res: Response) {
+    try {
+        if (holidaysCache && Date.now() - holidaysCacheTime < 3600000) {
+            return res.json(holidaysCache);
+        }
+
+        const qpeopleToken = process.env.QPEOPLE_API_TOKEN;
+        if (!qpeopleToken) {
+            return res.status(500).json({ error: 'QPEOPLE_API_TOKEN not configured' });
+        }
+
+        const listsRes = await fetch('https://hr.qbadvisory.com/api/resource/Holiday List?limit_page_length=100', {
+            headers: { 'Authorization': `token ${qpeopleToken}` }
+        });
+        const listsJson: any = await listsRes.json();
+        const lists = listsJson.data || [];
+
+        const allHolidays = new Set<string>();
+
+        await Promise.all(lists.map(async (l: any) => {
+            try {
+                const listRes = await fetch(`https://hr.qbadvisory.com/api/resource/Holiday List/${encodeURIComponent(l.name)}`, {
+                    headers: { 'Authorization': `token ${qpeopleToken}` }
+                });
+                const listJson: any = await listRes.json();
+                const holidays = listJson.data?.holidays || [];
+                holidays.forEach((h: any) => {
+                    if (h.weekly_off === 0 && h.holiday_date) {
+                        allHolidays.add(h.holiday_date);
+                    }
+                });
+            } catch (err) {
+                console.error(`Failed to fetch holiday list ${l.name}`, err);
+            }
+        }));
+
+        holidaysCache = Array.from(allHolidays).sort();
+        holidaysCacheTime = Date.now();
+        res.json(holidaysCache);
+    } catch (error) {
+        console.error('QPeople Holiday API error:', error);
+        res.status(502).json({ error: 'Failed to fetch holidays from HRMS.' });
+    }
+}
+

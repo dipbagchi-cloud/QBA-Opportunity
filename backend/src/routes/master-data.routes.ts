@@ -13,6 +13,7 @@ import {
     listDepartments,
     listManagersByDepartment,
     listPresalesTeam,
+    listHolidays,
 } from '../controllers/master-data.controller';
 
 const router = Router();
@@ -32,5 +33,6 @@ router.get('/salespersons', listSalespersons);
 router.get('/departments', listDepartments);
 router.get('/managers', listManagersByDepartment);
 router.get('/presales-team', listPresalesTeam);
+router.get('/holidays', listHolidays);
 
 export default router;
