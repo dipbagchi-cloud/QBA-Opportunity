@@ -5,6 +5,7 @@ on:
     branches:
       - Opportunity_MVC
       - uat
+      - qa
 
 jobs:
   deploy-production:
@@ -105,3 +106,54 @@ jobs:
             pm2 status --no-color | head -10
 
             echo "=== UAT deployment complete ==="
+
+  deploy-qa:
+    if: github.ref == 'refs/heads/qa'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Deploy QA
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          script_stop: true
+          command_timeout: 15m
+          script: |
+            set -e
+            cd /home/azureuser/qa
+
+            echo "=== Pulling latest QA code ==="
+            git fetch origin qa
+            git checkout qa
+            git reset --hard origin/qa
+
+            echo "=== Installing backend dependencies ==="
+            cd /home/azureuser/qa/backend
+            npm ci --omit=dev 2>&1 | tail -5
+
+            echo "=== Compiling backend ==="
+            npx tsc 2>&1 | tail -5
+
+            echo "=== Restarting QA backend ==="
+            pm2 restart qcrm-qa-backend --update-env
+            sleep 3
+            pm2 status qcrm-qa-backend --no-color | head -10
+
+            echo "=== Installing frontend dependencies ==="
+            cd /home/azureuser/qa/agentic-crm
+            npm ci 2>&1 | tail -5
+
+            echo "=== Building QA frontend ==="
+            pm2 stop qcrm-qa-frontend || true
+            sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'
+            NODE_OPTIONS='--max-old-space-size=3072' npm run build 2>&1 | tail -20
+
+            echo "=== Starting QA frontend ==="
+            pm2 start qcrm-qa-frontend --update-env
+            sleep 3
+            pm2 status --no-color | head -10
+
+            echo "=== QA deployment complete ==="
