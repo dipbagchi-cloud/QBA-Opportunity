@@ -4,14 +4,16 @@ on:
   push:
     branches:
       - Opportunity_MVC
+      - uat
 
 jobs:
-  deploy:
+  deploy-production:
+    if: github.ref == 'refs/heads/Opportunity_MVC'
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
     steps:
-      - name: Deploy to VM via SSH
+      - name: Deploy Production
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.VM_HOST }}
@@ -51,4 +53,55 @@ jobs:
             sleep 3
             pm2 status --no-color | head -10
 
-            echo "=== Deployment complete ==="
+            echo "=== Production deployment complete ==="
+
+  deploy-uat:
+    if: github.ref == 'refs/heads/uat'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Deploy UAT
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          script_stop: true
+          command_timeout: 15m
+          script: |
+            set -e
+            cd /home/azureuser/uat
+
+            echo "=== Pulling latest UAT code ==="
+            git fetch origin uat
+            git checkout uat
+            git reset --hard origin/uat
+
+            echo "=== Installing backend dependencies ==="
+            cd /home/azureuser/uat/backend
+            npm ci --omit=dev 2>&1 | tail -5
+
+            echo "=== Compiling backend ==="
+            npx tsc 2>&1 | tail -5
+
+            echo "=== Restarting UAT backend ==="
+            pm2 restart qcrm-uat-backend --update-env
+            sleep 3
+            pm2 status qcrm-uat-backend --no-color | head -10
+
+            echo "=== Installing frontend dependencies ==="
+            cd /home/azureuser/uat/agentic-crm
+            npm ci 2>&1 | tail -5
+
+            echo "=== Building UAT frontend ==="
+            pm2 stop qcrm-uat-frontend || true
+            sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'
+            NODE_OPTIONS='--max-old-space-size=3072' npm run build 2>&1 | tail -20
+
+            echo "=== Starting UAT frontend ==="
+            pm2 start qcrm-uat-frontend --update-env
+            sleep 3
+            pm2 status --no-color | head -10
+
+            echo "=== UAT deployment complete ==="
