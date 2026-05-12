@@ -1,0 +1,54 @@
+name: Deploy to Azure VM
+
+on:
+  push:
+    branches:
+      - Opportunity_MVC
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Deploy to VM via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          script_stop: true
+          command_timeout: 15m
+          script: |
+            set -e
+            cd /home/azureuser/app
+
+            echo "=== Pulling latest code ==="
+            git fetch origin Opportunity_MVC
+            git checkout Opportunity_MVC
+            git reset --hard origin/Opportunity_MVC
+
+            echo "=== Installing backend dependencies ==="
+            cd /home/azureuser/app/backend
+            npm ci --omit=dev 2>&1 | tail -5
+
+            echo "=== Restarting backend ==="
+            pm2 restart qcrm-backend --update-env
+            sleep 3
+            pm2 status qcrm-backend --no-color | head -10
+
+            echo "=== Installing frontend dependencies ==="
+            cd /home/azureuser/app/agentic-crm
+            npm ci 2>&1 | tail -5
+
+            echo "=== Building frontend ==="
+            pm2 stop qcrm-frontend || true
+            sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'
+            NODE_OPTIONS='--max-old-space-size=3072' npm run build 2>&1 | tail -20
+
+            echo "=== Starting frontend ==="
+            pm2 start qcrm-frontend --update-env
+            sleep 3
+            pm2 status --no-color | head -10
+
+            echo "=== Deployment complete ==="
