@@ -123,25 +123,76 @@ function durationToDays(value: number, unit: string): number {
 
 function durationToWorkingDays(value: number, unit: string): number {
     switch (unit) {
-        case 'days': return value;
-        case 'weeks': return value * 7;
-        case 'months': return value * 30; // 30 days per month
-        default: return value * 30;
+        case 'days': return value; // Already in working days
+        case 'weeks': return value * 5; // 5 working days per week
+        case 'months': return value * 20; // ~20 working days per month
+        default: return value * 20;
     }
 }
 
-function addWorkingDays(startDateStr: string, workingDays: number, holidays: string[] = []): Date {
-    const date = new Date(startDateStr);
-    let addedDays = 0;
-    while (addedDays < workingDays) {
+/**
+ * Calculate tentative end date from start date + duration.
+ * - Days: Start date is day 1 (inclusive). End date = the Nth working day counting from start.
+ * - Weeks: End Date = Start Date + (N × 7) − 1 calendar day
+ * - Months: End Date = Start Date + N months − 1 calendar day
+ */
+function calculateEndDate(startDateStr: string, duration: number, unit: string, holidays: string[] = []): Date {
+    const start = new Date(startDateStr);
+    if (unit === 'months') {
+        // End Date = Start + N months - 1 day
+        const end = new Date(start);
+        end.setMonth(end.getMonth() + duration);
+        end.setDate(end.getDate() - 1);
+        return end;
+    }
+    if (unit === 'weeks') {
+        // End Date = Start + N*7 - 1 calendar day
+        const end = new Date(start);
+        end.setDate(end.getDate() + duration * 7 - 1);
+        return end;
+    }
+    // Days: working days with start date as day 1
+    // Find the Nth working day starting from (and including) startDate
+    const date = new Date(start);
+    let counted = 0;
+    // First check if start date itself is a working day
+    const startDay = date.getDay();
+    const startStr = date.toISOString().split('T')[0];
+    if (startDay !== 0 && startDay !== 6 && !holidays.includes(startStr)) {
+        counted = 1;
+    }
+    if (counted >= duration) return date;
+    // Continue counting from next day
+    while (counted < duration) {
         date.setDate(date.getDate() + 1);
         const dateStr = date.toISOString().split('T')[0];
-        // 0 is Sunday, 6 is Saturday
         if (date.getDay() !== 0 && date.getDay() !== 6 && !holidays.includes(dateStr)) {
-            addedDays++;
+            counted++;
         }
     }
     return date;
+}
+
+/** Count working days in a calendar period (inclusive of start, up to but not including end boundary).
+ *  For months: period = [startDate, startDate + N months - 1 day] inclusive.
+ */
+function countWorkingDaysInPeriod(startDateStr: string, months: number, holidays: string[] = []): number {
+    if (!startDateStr || months <= 0) return 0;
+    const start = new Date(startDateStr);
+    const end = new Date(startDateStr);
+    end.setMonth(end.getMonth() + months);
+    // end is exclusive boundary (one day past the last day of the period)
+    let count = 0;
+    const current = new Date(start);
+    while (current < end) {
+        const day = current.getDay();
+        const dateStr = current.toISOString().split('T')[0];
+        if (day !== 0 && day !== 6 && !holidays.includes(dateStr)) {
+            count++;
+        }
+        current.setDate(current.getDate() + 1);
+    }
+    return count;
 }
 
 function durationToMonths(value: number, unit: string): number {
@@ -396,6 +447,16 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         onsiteProfit: 0
     });
 
+    // Auto-calculate working days from start date + duration months (excluding weekends & holidays)
+    useEffect(() => {
+        if (formData.tentativeStartDate && gomInputs.durationMonths > 0) {
+            const days = countWorkingDaysInPeriod(formData.tentativeStartDate, gomInputs.durationMonths, holidays);
+            if (days > 0) {
+                setGomInputs(prev => ({ ...prev, workingDays: days }));
+            }
+        }
+    }, [formData.tentativeStartDate, gomInputs.durationMonths, holidays]);
+
     // GOM Calculations
     useEffect(() => {
         // Sync markup from presalesData into gomInputs
@@ -512,12 +573,21 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         }
     }, [contextGomPercent, gomAutoApprovePercent]);
 
-    // Auto-calculate tentative end date
+    // Auto-revoke GOM approval when GOM % drops below 20% (Rejected threshold)
+    useEffect(() => {
+        if (gomApproved && contextGomPercent < 20 && id) {
+            handleApproveGom(false);
+        }
+    }, [contextGomPercent, gomApproved]);
+
+    // Auto-calculate tentative end date using standard formulas:
+    // - Days: Start date = day 1, end = Nth working day (skip weekends/holidays)
+    // - Weeks: End = Start + N×7 − 1 day (calendar)
+    // - Months: End = Start + N months − 1 day (calendar)
     useEffect(() => {
         const dur = Number(formData.duration);
         if (formData.tentativeStartDate && dur > 0 && formData.durationUnit) {
-            const workingDays = durationToWorkingDays(dur, formData.durationUnit);
-            const end = addWorkingDays(formData.tentativeStartDate, workingDays, holidays);
+            const end = calculateEndDate(formData.tentativeStartDate, dur, formData.durationUnit, holidays);
             setFormData(prev => ({ ...prev, tentativeEndDate: end.toISOString().split('T')[0] }));
         }
     }, [formData.tentativeStartDate, formData.duration, formData.durationUnit, holidays]);
@@ -532,6 +602,17 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             setFormData(prev => ({ ...prev, value: Math.round(rate * 20 * months) }));
         }
     }, [formData.expectedDayRate, formData.duration, formData.durationUnit, formData.projectType]);
+
+    // Sync GOM durationMonths from opportunity duration field
+    useEffect(() => {
+        const dur = Number(formData.duration) || 0;
+        if (dur > 0) {
+            const months = Math.round(durationToMonths(dur, formData.durationUnit));
+            if (months > 0 && months !== gomInputs.durationMonths) {
+                setGomInputs(prev => ({ ...prev, durationMonths: months }));
+            }
+        }
+    }, [formData.duration, formData.durationUnit]);
 
     // Fetch Data on Load
     useEffect(() => {
@@ -795,12 +876,16 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             });
 
             if (res.ok) {
-                // Also update store optimistic
+                // Update local store only (no second PATCH to avoid duplicate notifications)
                 const optimisticUpdates: any = { name: formData.projectName };
                 const rawValue: any = formData.value;
                 if (rawValue !== '' && rawValue !== undefined) optimisticUpdates.value = Number(rawValue);
                 optimisticUpdates.currency = globalCurrency;
-                await updateOpportunity(id, optimisticUpdates);
+                useOpportunityStore.setState((state) => ({
+                    opportunities: state.opportunities.map((opp) =>
+                        opp.id === id ? { ...opp, ...optimisticUpdates } : opp
+                    ),
+                }));
                 setOpportunityCurrency(globalCurrency);
                 toast({ title: "Success", description: "Opportunity updated successfully!" });
             } else {
@@ -877,7 +962,12 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             });
 
             if (res.ok) {
-                await updateOpportunity(id, { stage: 'Qualification' });
+                // Update local store only (no second PATCH to avoid duplicate notifications)
+                useOpportunityStore.setState((state) => ({
+                    opportunities: state.opportunities.map((opp) =>
+                        opp.id === id ? { ...opp, stage: 'Qualification' } : opp
+                    ),
+                }));
                 setCurrentStageName('Qualification');
                 setActiveStep(1);
                 setOpportunityStage(1);
@@ -957,7 +1047,12 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 body: JSON.stringify({ stageName: 'Proposal' })
             });
             if (res.ok) {
-                await updateOpportunity(id, { stage: 'Proposal' });
+                // Update local store only (no second PATCH to avoid duplicate notifications)
+                useOpportunityStore.setState((state) => ({
+                    opportunities: state.opportunities.map((opp) =>
+                        opp.id === id ? { ...opp, stage: 'Proposal' } : opp
+                    ),
+                }));
                 setCurrentStageName('Proposal');
                 setActiveStep(2);
                 setOpportunityStage(2);
@@ -983,7 +1078,12 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 body: JSON.stringify({ stageName: 'Negotiation' })
             });
             if (res.ok) {
-                await updateOpportunity(id, { stage: 'Negotiation' });
+                // Update local store only (no second PATCH to avoid duplicate notifications)
+                useOpportunityStore.setState((state) => ({
+                    opportunities: state.opportunities.map((opp) =>
+                        opp.id === id ? { ...opp, stage: 'Negotiation' } : opp
+                    ),
+                }));
                 setCurrentStageName('Negotiation');
                 toast({ title: "Success", description: "Proposal sent. Opportunity moved to Negotiation." });
             } else {
@@ -1026,8 +1126,12 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 setReEstimateComment("");
                 setDetailedStatus('Re-estimation');
                 toast({ title: "Success", description: "Sent back for re-estimation." });
-                // Sync Zustand store in background (non-blocking)
-                updateOpportunity(id, { stage: 'Qualification' }).catch(() => {});
+                // Update local store only (no second PATCH to avoid duplicate notifications)
+                useOpportunityStore.setState((state) => ({
+                    opportunities: state.opportunities.map((opp) =>
+                        opp.id === id ? { ...opp, stage: 'Qualification' } : opp
+                    ),
+                }));
             } else {
                 toast({ title: "Error", description: "Failed to send back for re-estimation." });
             }
@@ -1187,13 +1291,23 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                         <ArrowLeft className="w-4 h-4" /> Back
                     </button>
                     {hasEditAccess && opportunityStage === 0 && !isLost && (
-                        <button
-                            onClick={() => setShowPresalesModal(true)}
-                            disabled={isStalled}
-                            className={`px-4 py-2 text-white rounded-md font-medium ${isStalled ? 'bg-slate-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
-                        >
-                            Move to Presales
-                        </button>
+                        <>
+                            <button
+                                onClick={() => setShowPresalesModal(true)}
+                                disabled={isStalled}
+                                className={`px-4 py-2 text-white rounded-md font-medium ${isStalled ? 'bg-slate-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
+                            >
+                                Move to Presales
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => { setLostModalType('Closed Lost'); setShowLostModal(true); }}
+                                disabled={isStalled}
+                                className="px-4 py-2 bg-white border border-red-300 text-red-600 rounded-md font-medium hover:bg-red-50 disabled:opacity-50 flex items-center gap-1.5"
+                            >
+                                <XCircle className="w-4 h-4" /> Mark as Lost
+                            </button>
+                        </>
                     )}
                     {hasEditAccess && opportunityStage === 1 && !isLost && (
                         <>
@@ -1799,7 +1913,19 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
             {/* PRESALES VIEW (Step 1) */}
             {activeStep === 1 && (
-                <OpportunityEstimationProvider opportunityId={id} readOnly={!hasEditAccess || opportunityStage >= 2 || isStalled || isLost} startDate={formData.tentativeStartDate} endDate={formData.tentativeEndDate} adjustedEstimatedValue={Number(adjustedEstimatedValue) || 0} initialCurrency={globalCurrency}>
+                <OpportunityEstimationProvider 
+                    opportunityId={id} 
+                    readOnly={!hasEditAccess || opportunityStage >= 2 || isStalled || isLost} 
+                    startDate={formData.tentativeStartDate} 
+                    endDate={formData.tentativeEndDate} 
+                    durationInDays={
+                        formData.durationUnit === 'months' && formData.tentativeStartDate
+                            ? countWorkingDaysInPeriod(formData.tentativeStartDate, Number(formData.duration) || 0, holidays)
+                            : durationToWorkingDays(Number(formData.duration) || 0, formData.durationUnit)
+                    }
+                    adjustedEstimatedValue={Number(adjustedEstimatedValue) || 0} 
+                    initialCurrency={globalCurrency}
+                >
                     <GomPercentSync onGomPercentChange={setContextGomPercent} />
                     {opportunityStage < 2 && <PresalesSaveButton />}
                     <div className="bg-white rounded-lg shadow-sm border border-slate-200">
@@ -1990,7 +2116,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                             {getBadgeText()}
                                         </span>
                                     </div>
-                                    {opportunityStage < 2 && (
+                                    {hasEditAccess && opportunityStage < 2 && (
                                         <button onClick={async () => {
                                             setIsSaving(true);
                                             try {
@@ -2027,7 +2153,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                             name="tentativeStartDate"
                                             value={formData.tentativeStartDate}
                                             onChange={handleChange}
-                                            disabled={opportunityStage >= 2}
+                                            disabled={!hasEditAccess || opportunityStage >= 2}
                                             className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm disabled:bg-slate-100 disabled:cursor-not-allowed cursor-pointer"
                                             onClick={(e) => !(e.target as HTMLInputElement).disabled && (e.target as HTMLInputElement).showPicker?.()}
                                         />
@@ -2042,7 +2168,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                                 min="1"
                                                 value={formData.duration}
                                                 onChange={handleChange}
-                                                disabled={opportunityStage >= 2}
+                                                disabled={!hasEditAccess || opportunityStage >= 2}
                                                 placeholder="Enter duration"
                                                 className="flex-1 px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm disabled:bg-slate-100 disabled:cursor-not-allowed"
                                             />
@@ -2050,7 +2176,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                                 name="durationUnit"
                                                 value={formData.durationUnit}
                                                 onChange={handleChange}
-                                                disabled={opportunityStage >= 2}
+                                                disabled={!hasEditAccess || opportunityStage >= 2}
                                                 className="w-28 px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm disabled:bg-slate-100 disabled:cursor-not-allowed"
                                             >
                                                 {DURATION_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
@@ -2921,6 +3047,22 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     </div>
                 </div>
             )}
+
+            {/* Assign Presales Modal */}
+            <AssignPresalesModal
+                opportunityId={id}
+                isOpen={showAssignPresalesModal}
+                onAssign={(selectedNames) => {
+                    setFormData(prev => ({ ...prev, presalesAssignee: selectedNames }));
+                    setShowAssignPresalesModal(false);
+                    toast({
+                        title: "Presales Assigned",
+                        description: `${selectedNames} assigned to this opportunity.`,
+                    });
+                }}
+                onClose={() => setShowAssignPresalesModal(false)}
+                managerDepartment={user?.department}
+            />
         </div>
     );
 }

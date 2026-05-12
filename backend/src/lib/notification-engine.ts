@@ -1,6 +1,99 @@
 import { prisma } from './prisma';
 import { sendNotificationEmail } from './email';
 
+// Roles that are "global" - all users with these roles get notified regardless of assignment
+const GLOBAL_ROLES = ['Admin'];
+
+/**
+ * Resolve the set of user IDs assigned to an opportunity, keyed by role.
+ * Only users assigned to the opportunity in a matching role will be notified.
+ * Admin roles are exempt and always receive notifications.
+ */
+async function resolveAssignedRecipients(
+  opportunityId: string,
+  recipientRoles: string[],
+  recipientUsers: Record<string, string[]> | null
+): Promise<{ id: string; email: string; name: string; muteNotification: boolean; roles: { name: string }[] }[]> {
+  // Fetch the opportunity with owner info
+  const opp = await prisma.opportunity.findUnique({
+    where: { id: opportunityId },
+    select: {
+      ownerId: true,
+      owner: { select: { id: true, email: true, name: true, muteNotification: true, roles: { select: { name: true } } } },
+      salesRepName: true,
+      managerName: true,
+      presalesAssigneeName: true,
+    },
+  });
+  if (!opp) return [];
+
+  // Collect assigned user IDs per role from the opportunity
+  const assignedUserIds = new Set<string>();
+  const assignedNames: string[] = [];
+
+  // Owner is always the Sales person
+  if (opp.owner) {
+    assignedUserIds.add(opp.owner.id);
+  }
+
+  // Collect names of assigned people for lookup
+  if (opp.salesRepName) assignedNames.push(opp.salesRepName);
+  if (opp.managerName) assignedNames.push(opp.managerName);
+  if (opp.presalesAssigneeName) assignedNames.push(opp.presalesAssigneeName);
+
+  // Look up user IDs by name for non-owner assigned users
+  if (assignedNames.length > 0) {
+    const namedUsers = await prisma.user.findMany({
+      where: { name: { in: assignedNames }, isActive: true },
+      select: { id: true },
+    });
+    namedUsers.forEach(u => assignedUserIds.add(u.id));
+  }
+
+  // Split roles into global (Admin) and opportunity-scoped
+  const globalRoles = recipientRoles.filter(r => GLOBAL_ROLES.includes(r));
+  const scopedRoles = recipientRoles.filter(r => !GLOBAL_ROLES.includes(r));
+
+  // Fetch global role users (all users with Admin role etc.)
+  let allRecipients: { id: string; email: string; name: string; muteNotification: boolean; roles: { name: string }[] }[] = [];
+  if (globalRoles.length > 0) {
+    const globalUsers = await prisma.user.findMany({
+      where: { isActive: true, roles: { some: { name: { in: globalRoles } } } },
+      select: { id: true, email: true, name: true, muteNotification: true, roles: { select: { name: true } } },
+    });
+    allRecipients.push(...globalUsers);
+  }
+
+  // Fetch scoped role users - only those assigned to this opportunity
+  if (scopedRoles.length > 0 && assignedUserIds.size > 0) {
+    const scopedUsers = await prisma.user.findMany({
+      where: {
+        isActive: true,
+        id: { in: Array.from(assignedUserIds) },
+        roles: { some: { name: { in: scopedRoles } } },
+      },
+      select: { id: true, email: true, name: true, muteNotification: true, roles: { select: { name: true } } },
+    });
+    scopedUsers.forEach(u => {
+      if (!allRecipients.find(r => r.id === u.id)) {
+        allRecipients.push(u);
+      }
+    });
+  }
+
+  // Apply per-user filtering from rule if present
+  if (recipientUsers) {
+    allRecipients = allRecipients.filter(u => u.roles.some((r: any) => {
+      if (!recipientRoles.includes(r.name)) return false;
+      const specific = recipientUsers[r.name];
+      if (!specific || specific.length === 0) return true;
+      return specific.includes(u.id);
+    }));
+  }
+
+  return allRecipients;
+}
+
 interface StageChangeContext {
   opportunityId: string;
   opportunityTitle: string;
@@ -13,11 +106,13 @@ interface StageChangeContext {
   managerName: string;
   updatedByName: string;
   value?: number | null;
+  currency?: string;
   probability?: number | null;
   region?: string;
   technology?: string;
   comment?: string;
   adjustedEstimatedValue?: string;
+  reEstimateCount?: number;
 }
 
 interface OpportunityCreatedContext {
@@ -30,6 +125,7 @@ interface OpportunityCreatedContext {
   salesRepName: string;
   createdByName: string;
   value?: number | null;
+  currency?: string;
   probability?: number | null;
   region?: string;
   technology?: string;
@@ -61,44 +157,16 @@ export async function evaluateOpportunityCreatedRules(ctx: OpportunityCreatedCon
 
       if (recipientRoles.length === 0 || channels.length === 0) continue;
 
-      let toUsers = await prisma.user.findMany({
-        where: {
-          isActive: true,
-          roles: { some: { name: { in: recipientRoles } } },
-        },
-        select: { id: true, email: true, name: true, muteNotification: true, roles: { select: { name: true } } },
-      });
-
       const recipientUsers = rule.recipientUsers as Record<string, string[]> | null;
-      if (recipientUsers) {
-        toUsers = toUsers.filter(u => u.roles.some((r: any) => {
-          if (!recipientRoles.includes(r.name)) return false;
-          const specific = recipientUsers[r.name];
-          if (!specific || specific.length === 0) return true;
-          return specific.includes(u.id);
-        }));
-      }
+
+      // Only notify assigned users per role (Admin gets all)
+      let toUsers = await resolveAssignedRecipients(ctx.opportunityId, recipientRoles, recipientUsers);
 
       let ccUsers = recipientRolesCc.length > 0
-        ? await prisma.user.findMany({
-            where: {
-              isActive: true,
-              roles: { some: { name: { in: recipientRolesCc } } },
-              // Exclude users already in To list
-              NOT: { id: { in: toUsers.map(u => u.id) } },
-            },
-            select: { id: true, email: true, name: true, muteNotification: true, roles: { select: { name: true } } },
-          })
+        ? await resolveAssignedRecipients(ctx.opportunityId, recipientRolesCc, recipientUsers)
         : [];
-
-      if (recipientUsers && ccUsers.length > 0) {
-        ccUsers = ccUsers.filter(u => u.roles.some((r: any) => {
-          if (!recipientRolesCc.includes(r.name)) return false;
-          const specific = recipientUsers[r.name];
-          if (!specific || specific.length === 0) return true;
-          return specific.includes(u.id);
-        }));
-      }
+      // Exclude users already in To list from CC
+      ccUsers = ccUsers.filter(u => !toUsers.find(t => t.id === u.id));
 
       const variables: Record<string, string> = {
         dealName: ctx.opportunityTitle,
@@ -116,6 +184,8 @@ export async function evaluateOpportunityCreatedRules(ctx: OpportunityCreatedCon
         createdBy: ctx.createdByName,
         updatedBy: ctx.createdByName,
         value: ctx.value != null ? String(ctx.value) : '',
+        currency: ctx.currency || 'INR',
+        'opportunity.currency': ctx.currency || 'INR',
         probability: ctx.probability != null ? String(ctx.probability) : '',
         region: ctx.region || '',
         technology: ctx.technology || '',
@@ -185,10 +255,31 @@ export async function evaluateStageChangeRules(ctx: StageChangeContext): Promise
       },
     });
 
-    for (const rule of rules) {
+    // Sort rules: specific rules (with fromStage) first, then generic (fromStage=null)
+    // This way we can track which toStage values already had a specific match
+    const sortedRules = [...rules].sort((a, b) => {
+      if (a.fromStage && !b.fromStage) return -1;
+      if (!a.fromStage && b.fromStage) return 1;
+      return 0;
+    });
+
+    const matchedToStages = new Set<string>();
+
+    for (const rule of sortedRules) {
       // Check if stage transition matches
       if (rule.fromStage && rule.fromStage !== ctx.previousStage) continue;
       if (rule.toStage && rule.toStage !== ctx.newStage) continue;
+
+      // Skip generic rule if a specific rule already matched this toStage
+      if (!rule.fromStage && rule.toStage && matchedToStages.has(rule.toStage)) {
+        console.log(`[NotificationEngine] Skipping generic rule "${rule.name}" — specific rule already matched for toStage="${rule.toStage}"`);
+        continue;
+      }
+
+      // Track that this toStage has been matched by a specific rule
+      if (rule.fromStage && rule.toStage) {
+        matchedToStages.add(rule.toStage);
+      }
 
       // Get recipient users based on roles
       const recipientRoles = (rule.recipientRoles as string[]) || [];
@@ -196,23 +287,10 @@ export async function evaluateStageChangeRules(ctx: StageChangeContext): Promise
 
       if (recipientRoles.length === 0 || channels.length === 0) continue;
 
-      let recipients = await prisma.user.findMany({
-        where: {
-          isActive: true,
-          roles: { some: { name: { in: recipientRoles } } },
-        },
-        select: { id: true, email: true, name: true, muteNotification: true, roles: { select: { name: true } } },
-      });
-
       const recipientUsers = rule.recipientUsers as Record<string, string[]> | null;
-      if (recipientUsers) {
-        recipients = recipients.filter(u => u.roles.some((r: any) => {
-          if (!recipientRoles.includes(r.name)) return false;
-          const specific = recipientUsers[r.name];
-          if (!specific || specific.length === 0) return true;
-          return specific.includes(u.id);
-        }));
-      }
+
+      // Only notify assigned users per role (Admin gets all)
+      const recipients = await resolveAssignedRecipients(ctx.opportunityId, recipientRoles, recipientUsers);
 
       // Template variables for message rendering
       const variables: Record<string, string> = {
@@ -233,11 +311,14 @@ export async function evaluateStageChangeRules(ctx: StageChangeContext): Promise
         userName: ctx.updatedByName,
         updatedBy: ctx.updatedByName,
         value: ctx.value != null ? String(ctx.value) : '',
+        currency: ctx.currency || 'INR',
+        'opportunity.currency': ctx.currency || 'INR',
         probability: ctx.probability != null ? String(ctx.probability) : '',
         region: ctx.region || '',
         technology: ctx.technology || '',
         comment: ctx.comment || '',
         adjustedEstimatedValue: ctx.adjustedEstimatedValue || '',
+        reEstimateCount: ctx.reEstimateCount != null ? String(ctx.reEstimateCount) : '0',
         opportunityLink: `${process.env.FRONTEND_URL || 'https://qcrm.qbadvisory.com'}/dashboard/opportunities/${ctx.opportunityId}`,
       };
 
@@ -322,23 +403,10 @@ export async function evaluateDataConditionRules(opportunity: {
       const recipientRoles = (rule.recipientRoles as string[]) || [];
       const channels = (rule.channels as string[]) || [];
 
-      let recipients = await prisma.user.findMany({
-        where: {
-          isActive: true,
-          roles: { some: { name: { in: recipientRoles } } },
-        },
-        select: { id: true, email: true, name: true, muteNotification: true, roles: { select: { name: true } } },
-      });
-
       const recipientUsers = rule.recipientUsers as Record<string, string[]> | null;
-      if (recipientUsers) {
-        recipients = recipients.filter(u => u.roles.some((r: any) => {
-          if (!recipientRoles.includes(r.name)) return false;
-          const specific = recipientUsers[r.name];
-          if (!specific || specific.length === 0) return true;
-          return specific.includes(u.id);
-        }));
-      }
+
+      // Only notify assigned users per role (Admin gets all)
+      const recipients = await resolveAssignedRecipients(opportunity.id, recipientRoles, recipientUsers);
 
       const variables: Record<string, string> = {
         dealName: opportunity.title,

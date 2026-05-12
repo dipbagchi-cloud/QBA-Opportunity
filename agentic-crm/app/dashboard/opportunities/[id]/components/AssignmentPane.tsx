@@ -137,17 +137,9 @@ export function AssignmentPane({
                                 <Briefcase className="w-3 h-3 text-emerald-500" />
                                 Sales Person
                             </label>
-                            <select
-                                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 disabled:bg-slate-100 disabled:text-slate-500 transition-colors"
-                                value={salesRepName || ""}
-                                onChange={(e) => updateAssignment('salesRep', e.target.value)}
-                                disabled={!canEditSalesRep}
-                            >
-                                <option value="">Select Sales Person...</option>
-                                {salesReps.map((rep, idx) => (
-                                    <option key={idx} value={rep}>{rep}</option>
-                                ))}
-                            </select>
+                            <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-sm text-slate-800 font-medium">
+                                {salesRepName || <span className="text-slate-400 font-normal italic">Unassigned</span>}
+                            </div>
                         </div>
 
                         {/* Offshore Manager */}
@@ -156,17 +148,9 @@ export function AssignmentPane({
                                 <UserCircle className="w-3 h-3 text-blue-500" />
                                 Offshore Manager
                             </label>
-                            <select
-                                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 disabled:bg-slate-100 disabled:text-slate-500 transition-colors"
-                                value={managerName || ""}
-                                onChange={(e) => updateAssignment('managerName', e.target.value)}
-                                disabled={!canEditManager}
-                            >
-                                <option value="">Select Manager...</option>
-                                {managers.map((mgr) => (
-                                    <option key={mgr.id} value={mgr.name}>{mgr.name}</option>
-                                ))}
-                            </select>
+                            <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-sm text-slate-800 font-medium">
+                                {managerName || <span className="text-slate-400 font-normal italic">Unassigned</span>}
+                            </div>
                         </div>
 
                         {/* Presales Person */}
@@ -175,20 +159,9 @@ export function AssignmentPane({
                                 <Code className="w-3 h-3 text-amber-500" />
                                 Presales Person
                             </label>
-                            <select
-                                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 disabled:bg-slate-100 disabled:text-slate-500 transition-colors"
-                                value={presalesAssigneeName || ""}
-                                onChange={(e) => updateAssignment('presalesAssigneeName', e.target.value)}
-                                disabled={!canEditPresales}
-                            >
-                                <option value="">Select Presales...</option>
-                                {presalesTeam.map((ps) => (
-                                    <option key={ps.id} value={ps.name}>{ps.name}</option>
-                                ))}
-                            </select>
-                            {!canEditPresales && hasEditAccess && managerName && userName !== managerName && (
-                                <p className="text-[10px] text-slate-400 mt-1">Only the assigned manager ({managerName}) can select the presales assignee.</p>
-                            )}
+                            <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-sm text-slate-800 font-medium">
+                                {presalesAssigneeName || <span className="text-slate-400 font-normal italic">Unassigned</span>}
+                            </div>
                         </div>
                     </>
                 )}

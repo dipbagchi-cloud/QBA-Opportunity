@@ -1,10 +1,10 @@
 "use client";
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { useOpportunityStore, Opportunity } from '@/lib/store';
 import { useAuthStore } from '@/lib/auth-store';
-import { MoreHorizontal, User, AlertCircle, Clock, Calendar, CalendarCheck, CalendarClock } from 'lucide-react';
+import { MoreHorizontal, User, AlertCircle, Clock, Calendar, CalendarCheck, CalendarClock, X } from 'lucide-react';
 import Link from 'next/link';
 import { useCurrency } from '@/components/providers/currency-provider';
 
@@ -45,28 +45,108 @@ export default function KanbanBoard() {
         return cols;
     }, [opportunities]);
 
+    const [dragError, setDragError] = useState<string | null>(null);
+
+    // Valid forward transitions (stage order index)
+    const STAGE_ORDER: Record<string, number> = {
+        'Discovery': 0, 'Qualification': 1, 'Proposal': 2, 'Negotiation': 3, 'Closed Won': 4,
+        'Proposal Lost': -1, 'Closed Lost': -1
+    };
+
     const onDragEnd = (result: DropResult) => {
         const { destination, source, draggableId } = result;
 
-        if (!destination) {
+        if (!destination) return;
+        if (destination.droppableId === source.droppableId && destination.index === source.index) return;
+
+        const fromStage = source.droppableId;
+        const toStage = destination.droppableId;
+        const opp = opportunities.find(o => o.id === draggableId);
+        if (!opp) return;
+
+        // Allow reordering within same column
+        if (fromStage === toStage) return;
+
+        // Block backward moves (except to Lost stages)
+        const fromIdx = STAGE_ORDER[fromStage] ?? 0;
+        const toIdx = STAGE_ORDER[toStage] ?? 0;
+        if (toStage !== 'Closed Lost' && toStage !== 'Proposal Lost' && toIdx < fromIdx) {
+            setDragError(`Cannot move backward from ${fromStage} to ${toStage}. Use the detail page to send back for re-estimation.`);
             return;
         }
 
-        if (
-            destination.droppableId === source.droppableId &&
-            destination.index === source.index
-        ) {
+        // Block skipping stages (must go one step at a time)
+        if (toStage !== 'Closed Lost' && toStage !== 'Proposal Lost' && toIdx > fromIdx + 1) {
+            setDragError(`Cannot skip stages. Move one step at a time (${fromStage} must go to ${STAGES.find(s => STAGE_ORDER[s.id] === fromIdx + 1)?.title || 'next stage'}).`);
             return;
         }
 
-        const newStage = destination.droppableId;
+        // Discovery -> Qualification: requires technology
+        if (fromStage === 'Discovery' && toStage === 'Qualification') {
+            if (!opp.technology || (typeof opp.technology === 'string' && opp.technology.trim() === '')) {
+                setDragError(`Cannot move to Qualification: Technology must be filled. Please open the opportunity detail page to complete required fields and use "Move to Presales".`);
+                return;
+            }
+            // Presales data (manager name, proposal due date) is needed
+            setDragError(`Moving to Qualification requires presales data (Manager, Proposal Due Date). Please open the opportunity detail page and use "Move to Presales" button.`);
+            return;
+        }
 
-        // Update the opportunity's stage
-        updateOpportunity(draggableId, { stage: newStage });
+        // Qualification -> Proposal: requires GOM approval
+        if (fromStage === 'Qualification' && toStage === 'Proposal') {
+            if (!opp.gomApproved) {
+                setDragError(`Cannot move to Sales: GOM must be approved first. Please open the opportunity detail page, complete the estimation, and use "Move to Sales" button.`);
+                return;
+            }
+            // GOM approved - allow the move
+            updateOpportunity(draggableId, { stage: toStage });
+            return;
+        }
+
+        // Proposal -> Negotiation: allowed (proposal sent)
+        if (fromStage === 'Proposal' && toStage === 'Negotiation') {
+            updateOpportunity(draggableId, { stage: toStage });
+            return;
+        }
+
+        // Negotiation -> Closed Won: allowed
+        if (fromStage === 'Negotiation' && toStage === 'Closed Won') {
+            updateOpportunity(draggableId, { stage: toStage });
+            return;
+        }
+
+        // Moving to Lost stages: allowed but requires remarks via detail page
+        if (toStage === 'Closed Lost' || toStage === 'Proposal Lost') {
+            setDragError(`To mark as lost, please open the opportunity detail page and use "Mark as Lost" button to provide required remarks.`);
+            return;
+        }
+
+        // Default: block unrecognized transitions
+        setDragError(`This transition (${fromStage} to ${toStage}) is not allowed from the Kanban board. Please use the opportunity detail page.`);
     };
 
     return (
-        <div className="h-[calc(100vh-200px)] overflow-x-auto pb-2">
+        <div className="h-[calc(100vh-200px)] overflow-x-auto pb-2 relative">
+            {/* Drag Error Alert */}
+            {dragError && (
+                <div className="fixed inset-0 bg-black/30 z-[100] flex items-center justify-center p-4" onClick={() => setDragError(null)}>
+                    <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-5 animate-in fade-in zoom-in-95" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-start gap-3">
+                            <AlertCircle className="w-6 h-6 text-amber-500 flex-shrink-0 mt-0.5" />
+                            <div className="flex-1">
+                                <h3 className="font-bold text-slate-800 text-sm mb-1">Stage Transition Blocked</h3>
+                                <p className="text-sm text-slate-600">{dragError}</p>
+                            </div>
+                            <button onClick={() => setDragError(null)} className="text-slate-400 hover:text-slate-600 p-1">
+                                <X className="w-4 h-4" />
+                            </button>
+                        </div>
+                        <div className="mt-4 flex justify-end">
+                            <button onClick={() => setDragError(null)} className="px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-md hover:bg-slate-800">OK</button>
+                        </div>
+                    </div>
+                </div>
+            )}
             <DragDropContext onDragEnd={onDragEnd}>
                 <div className="flex gap-3 h-full min-w-max px-2">
                     {STAGES.map((stage) => (

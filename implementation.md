@@ -1,6 +1,6 @@
 # Q-CRM — Detailed Functional Implementation Reference
 
-> **Last Updated:** May 11, 2026  
+> **Last Updated:** May 12, 2026  
 > **Production:** https://qcrm.qbadvisory.com  
 > **Stack:** Next.js 15 (frontend) · Express.js + TypeScript (backend) · PostgreSQL + Prisma (database)
 
@@ -1572,3 +1572,55 @@ with styled pills — the "from" stage in a grey chip and the "to" stage in an i
 - Presales assignees are **read-only** for all non-manager roles.
 - When a manager opens an opportunity they have been assigned to for the first time without presales persons set, they are prompted via the modal.
 - Multiple presales persons can be assigned to a single opportunity.
+
+---
+
+### 21.8 Presales Assignment Modal — Auth Token Fix
+
+**Problem:** The "Assign Presales Team" modal opened correctly for managers but displayed "No presales team members found" despite users with the Presales role existing in the database. All API calls returned HTTP 401 "Invalid or expired token".
+
+**Root Cause:** The modal component (`AssignPresalesModal.tsx`) was reading `localStorage.getItem("token")` but the auth store saves the JWT as `localStorage.setItem('auth_token', ...)`. Key name mismatch caused `null` token to be sent.
+
+**Fix:** Changed `localStorage.getItem("token")` → `localStorage.getItem("auth_token")` in `AssignPresalesModal.tsx`.
+
+**File:** `agentic-crm/app/dashboard/opportunities/[id]/components/AssignPresalesModal.tsx`
+
+---
+
+### 21.9 GOM Calculator — Working Days Consistency Fix
+
+**Problem:** The Presales Resource Assignment tab calculated cost as ₹230,208.33 for a .NET Developer (15+ years, 10 days), while the Admin GOM Calculator showed ₹251,140 for the same scenario. Costs did not match.
+
+**Root Cause:** Two different "Annual Working Days" values were used:
+- Admin GOM Calculator: **220** (hardcoded in `settings/page.tsx` line 2735: `ctcInQuot / 220`)
+- Presales Resource Assignment: **240** (from `DEFAULT_ASSUMPTIONS.workingDaysPerYear` and database `budget_assumptions`)
+
+Both use the same loading formula: `CTC × (1 + (Mgmt + Bench) / 100)` = 5,525,000 INR. But dividing by different working days produced different daily rates: 5,525,000 ÷ 240 = ₹23,020.83 vs 5,525,000 ÷ 220 = ₹25,114.
+
+**Fixes:**
+1. **Database:** Updated `workingDaysPerYear` from 240 → 220 in `system_config.budget_assumptions`.
+2. **Default fallback:** Changed `DEFAULT_ASSUMPTIONS.workingDaysPerYear` from 240 → 220 in `AssumptionsView.tsx`.
+3. **Admin GOM Calculator:** Replaced hardcoded `220` with dynamic `workingDaysPerYear` loaded from budget assumptions API, ensuring both screens always stay in sync.
+4. **UI descriptions:** Updated help text to say "e.g. 220" instead of "e.g. 240".
+
+**Files:**
+- `agentic-crm/app/dashboard/opportunities/[id]/components/AssumptionsView.tsx`
+- `agentic-crm/app/dashboard/settings/page.tsx`
+- Database: `system_config` table, key `budget_assumptions`
+
+---
+
+### 21.10 Email Template — Currency Variable Fix
+
+**Problem:** Notification emails for new opportunities showed plain "500000" without the currency symbol. The email template used `{{opportunity.currency}}` but this merge variable was never populated by the notification engine.
+
+**Root Cause:** The `variables` object built in `notification-engine.ts` for both `evaluateOpportunityCreatedRules` and `evaluateStageChangeRules` included `value`, `region`, `practice`, etc. but omitted `currency` and `opportunity.currency`.
+
+**Fixes:**
+1. Added `currency` field to `OpportunityCreatedContext` and `StageChangeContext` interfaces.
+2. Added `currency` and `opportunity.currency` keys to the variables objects in both functions.
+3. Passed `newOpp.currency` from `opportunities.controller.ts` when calling `evaluateOpportunityCreatedRules` and `evaluateStageChangeRules`.
+
+**Files:**
+- `backend/src/lib/notification-engine.ts` — Added currency to interfaces and variable maps
+- `backend/src/controllers/opportunities.controller.ts` — Passed currency in notification context

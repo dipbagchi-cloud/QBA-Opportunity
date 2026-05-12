@@ -26,6 +26,7 @@ export interface Opportunity {
     healthScore?: number;
     isStalled?: boolean;
     daysInStage?: number;
+    gomApproved?: boolean;
 }
 
 export interface PaginationParams {

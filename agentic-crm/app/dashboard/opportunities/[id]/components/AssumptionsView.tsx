@@ -18,7 +18,7 @@ export interface BudgetAssumptions {
 
 export const DEFAULT_ASSUMPTIONS: BudgetAssumptions = {
     marginPercent: 35,
-    workingDaysPerYear: 240,
+    workingDaysPerYear: 220,
     deliveryMgmtPercent: 5,
     benchPercent: 10,
     leaveEligibilityPercent: 0,
@@ -65,7 +65,7 @@ export function AssumptionsView({ data, onChange }: Props) {
                 <div className="space-y-4">
                     <h3 className="font-semibold text-lg border-b pb-2 text-slate-800">Core Rates</h3>
                     <InputGroup label="Margin %" name="marginPercent" desc="Target profit margin percentage." />
-                    <InputGroup label="Working Days / Year" name="workingDaysPerYear" desc="Standard working days (e.g. 240)." />
+                    <InputGroup label="Working Days / Year" name="workingDaysPerYear" desc="Standard working days (e.g. 220)." />
                 </div>
 
                 <div className="space-y-4">

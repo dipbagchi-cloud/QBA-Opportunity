@@ -320,6 +320,7 @@ export async function createOpportunity(req: Request, res: Response) {
                 salesRepName: (newOpp as any).salesRepName || creator?.name || '',
                 createdByName: creator?.name || '',
                 value: newOpp.value != null ? Number(newOpp.value) : null,
+                currency: newOpp.currency || 'INR',
                 probability: newOpp.probability,
                 region: (newOpp as any).region || undefined,
                 technology: (newOpp as any).technology || undefined,
@@ -682,11 +683,13 @@ export async function updateOpportunity(req: Request, res: Response) {
                 managerName: (updatedOpp as any).managerName || '',
                 updatedByName: previous?.owner?.name || 'System',
                 value: updatedOpp.value != null ? Number(updatedOpp.value) : null,
+                currency: updatedOpp.currency || 'INR',
                 probability: updatedOpp.probability,
                 region: updatedOpp.region || undefined,
                 technology: updatedOpp.technology || undefined,
                 comment: body.reEstimateComment || body.presalesData?.comments || body.salesData?.notes || undefined,
                 adjustedEstimatedValue: body.adjustedEstimatedValue ? String(body.adjustedEstimatedValue) : undefined,
+                reEstimateCount: (updatedOpp as any).reEstimateCount || 0,
             });
         }
 

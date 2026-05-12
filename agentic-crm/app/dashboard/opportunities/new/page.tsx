@@ -106,22 +106,46 @@ function durationToDays(value: number, unit: string): number {
 
 function durationToWorkingDays(value: number, unit: string): number {
     switch (unit) {
-        case 'days': return value;
-        case 'weeks': return value * 7;
-        case 'months': return value * 30; // 30 days per month
-        default: return value * 30;
+        case 'days': return value; // Already in working days
+        case 'weeks': return value * 5; // 5 working days per week
+        case 'months': return value * 20; // ~20 working days per month
+        default: return value * 20;
     }
 }
 
-function addWorkingDays(startDateStr: string, workingDays: number, holidays: string[] = []): Date {
-    const date = new Date(startDateStr);
-    let addedDays = 0;
-    while (addedDays < workingDays) {
+/**
+ * Calculate tentative end date from start date + duration.
+ * - Days: Start date is day 1 (inclusive). End date = the Nth working day counting from start.
+ * - Weeks: End Date = Start Date + (N × 7) − 1 calendar day
+ * - Months: End Date = Start Date + N months − 1 calendar day
+ */
+function calculateEndDate(startDateStr: string, duration: number, unit: string, holidays: string[] = []): Date {
+    const start = new Date(startDateStr);
+    if (unit === 'months') {
+        const end = new Date(start);
+        end.setMonth(end.getMonth() + duration);
+        end.setDate(end.getDate() - 1);
+        return end;
+    }
+    if (unit === 'weeks') {
+        const end = new Date(start);
+        end.setDate(end.getDate() + duration * 7 - 1);
+        return end;
+    }
+    // Days: working days with start date as day 1
+    const date = new Date(start);
+    let counted = 0;
+    const startDay = date.getDay();
+    const startStr = date.toISOString().split('T')[0];
+    if (startDay !== 0 && startDay !== 6 && !holidays.includes(startStr)) {
+        counted = 1;
+    }
+    if (counted >= duration) return date;
+    while (counted < duration) {
         date.setDate(date.getDate() + 1);
         const dateStr = date.toISOString().split('T')[0];
-        // 0 is Sunday, 6 is Saturday
         if (date.getDay() !== 0 && date.getDay() !== 6 && !holidays.includes(dateStr)) {
-            addedDays++;
+            counted++;
         }
     }
     return date;
@@ -236,12 +260,14 @@ export default function NewOpportunityPage() {
 
 
 
-    // Auto-calculate tentative end date from start date + duration
+    // Auto-calculate tentative end date using standard formulas:
+    // - Days: Start date = day 1, end = Nth working day (skip weekends/holidays)
+    // - Weeks: End = Start + N×7 − 1 day (calendar)
+    // - Months: End = Start + N months − 1 day (calendar)
     useEffect(() => {
         const dur = Number(formData.duration);
         if (formData.tentativeStartDate && dur > 0 && formData.durationUnit) {
-            const workingDays = durationToWorkingDays(dur, formData.durationUnit);
-            const end = addWorkingDays(formData.tentativeStartDate, workingDays, holidays);
+            const end = calculateEndDate(formData.tentativeStartDate, dur, formData.durationUnit, holidays);
             setFormData(prev => ({ ...prev, tentativeEndDate: end.toISOString().split('T')[0] }));
         }
     }, [formData.tentativeStartDate, formData.duration, formData.durationUnit, holidays]);

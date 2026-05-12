@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
-import { Plus, Trash2, Search, Edit2, X } from "lucide-react";
+import { Plus, Trash2, Search, Edit2, X, AlertCircle } from "lucide-react";
 import { fetchRateCards } from "@/lib/rate-cards";
 import { useOpportunityEstimation, ResourceRow } from "../context/OpportunityEstimationContext";
 import { calculateRateCard } from "@/lib/gom-calculator";
@@ -22,9 +22,10 @@ export function ResourceAssignmentTab() {
         endDate,
         effortType,
         setEffortType,
+        durationInDays, // Expected working days from duration field
     } = useOpportunityEstimation();
 
-    const { format: fmtCurrency } = useCurrency();
+    const { format: fmtCurrency, convert: convertCurrency, symbol: cSym, currency: globalCurrencyCode } = useCurrency();
 
     // Rate card CTC values are always in INR — format without currency conversion
     const fmtINR = (val: number, opts?: { compact?: boolean }) => {
@@ -191,6 +192,11 @@ export function ResourceAssignmentTab() {
         return totals;
     }, [resources, visibleMonths]);
 
+    // Calculate total allocated days
+    const totalAllocatedDays = useMemo(() => {
+        return Object.values(monthlyTotals).reduce((sum, val) => sum + val, 0);
+    }, [monthlyTotals]);
+
     return (
         <div className="space-y-4">
             {/* Header with Year Selector and Effort Type */}
@@ -305,13 +311,14 @@ export function ResourceAssignmentTab() {
                                 {visibleMonths.map(month => (
                                     <th key={month} className="p-3 text-center border-r min-w-[80px]">{month}</th>
                                 ))}
+                                <th className="p-3 text-center border-r min-w-[100px]">Cost</th>
                                 {!readOnly && <th className="p-3 text-center min-w-[60px]">Action</th>}
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {resources.length === 0 && (
                                 <tr>
-                                    <td colSpan={visibleMonths.length + 3} className="p-6 text-center text-slate-400 italic">
+                                    <td colSpan={visibleMonths.length + 4} className="p-6 text-center text-slate-400 italic">
                                         No resources assigned. Click "Add Resource" to begin.
                                     </td>
                                 </tr>
@@ -369,6 +376,27 @@ export function ResourceAssignmentTab() {
                                             )}
                                         </td>
                                     ))}
+                                    <td className="p-2 text-center border-r font-mono text-xs text-slate-700">
+                                        {(() => {
+                                            const totalDays = visibleMonths.reduce((sum, m) => sum + (row.monthlyEfforts[m] || 0), 0);
+                                            const cost = totalDays * row.dailyCost;
+                                            const showConverted = globalCurrencyCode !== 'INR';
+                                            const monthBreakup = visibleMonths
+                                                .filter(m => (row.monthlyEfforts[m] || 0) > 0)
+                                                .map(m => {
+                                                    const mCost = row.monthlyEfforts[m] * row.dailyCost;
+                                                    let line = `${m}: ${row.monthlyEfforts[m]}d x INR ${row.dailyCost.toLocaleString()} = INR ${mCost.toLocaleString()}`;
+                                                    if (showConverted) line += ` (${cSym}${convertCurrency(mCost).toLocaleString(undefined, {maximumFractionDigits: 2})})`;
+                                                    return line;
+                                                })
+                                                .join('\n');
+                                            let tooltip = `${row.skill || row.role}\nDaily Cost: INR ${row.dailyCost.toLocaleString()}`;
+                                            if (showConverted) tooltip += ` (${cSym}${convertCurrency(row.dailyCost).toLocaleString(undefined, {maximumFractionDigits: 2})})`;
+                                            tooltip += `\n\n${monthBreakup || '(no days allocated)'}\n\nTotal: ${totalDays}d x INR ${row.dailyCost.toLocaleString()} = INR ${cost.toLocaleString()}`;
+                                            if (showConverted) tooltip += ` (${cSym}${convertCurrency(cost).toLocaleString(undefined, {maximumFractionDigits: 2})})`;
+                                            return <span title={tooltip} className="cursor-help underline decoration-dotted decoration-slate-400">{fmtCurrency(cost)}</span>;
+                                        })()}
+                                    </td>
                                     {!readOnly && (
                                         <td className="p-2 text-center flex items-center justify-center gap-2">
                                             <button
@@ -400,6 +428,12 @@ export function ResourceAssignmentTab() {
                                             {monthlyTotals[month] || '-'}
                                         </td>
                                     ))}
+                                    <td className="p-2 text-center border-r font-mono text-sm text-slate-900">
+                                        {fmtCurrency(resources.reduce((sum, row) => {
+                                            const days = visibleMonths.reduce((s, m) => s + (row.monthlyEfforts[m] || 0), 0);
+                                            return sum + days * row.dailyCost;
+                                        }, 0))}
+                                    </td>
                                     {!readOnly && <td className="p-2"></td>}
                                 </tr>
                             )}
@@ -407,6 +441,49 @@ export function ResourceAssignmentTab() {
                     </table>
                 </div>
             </div>
+
+            {/* Allocation Summary */}
+            {durationInDays > 0 && (
+                <div className={`p-4 rounded-lg border-2 ${
+                    totalAllocatedDays > durationInDays 
+                        ? 'bg-red-50 border-red-300' 
+                        : totalAllocatedDays === durationInDays
+                        ? 'bg-emerald-50 border-emerald-300'
+                        : 'bg-amber-50 border-amber-300'
+                }`}>
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <h4 className="text-sm font-semibold text-slate-700 mb-1">Working Days Allocation</h4>
+                            <div className="flex items-center gap-4 text-sm">
+                                <div>
+                                    <span className="text-slate-600">Expected: </span>
+                                    <span className="font-bold text-slate-900">{durationInDays} days</span>
+                                </div>
+                                <div>
+                                    <span className="text-slate-600">Allocated: </span>
+                                    <span className={`font-bold ${
+                                        totalAllocatedDays > durationInDays ? 'text-red-600' :
+                                        totalAllocatedDays === durationInDays ? 'text-emerald-600' :
+                                        'text-amber-600'
+                                    }`}>{totalAllocatedDays} days</span>
+                                </div>
+                                <div>
+                                    <span className="text-slate-600">Remaining: </span>
+                                    <span className={`font-bold ${
+                                        durationInDays - totalAllocatedDays < 0 ? 'text-red-600' : 'text-slate-900'
+                                    }`}>{durationInDays - totalAllocatedDays} days</span>
+                                </div>
+                            </div>
+                        </div>
+                        {totalAllocatedDays > durationInDays && (
+                            <div className="flex items-center gap-2 text-red-600 text-sm font-semibold">
+                                <AlertCircle className="w-5 h-5" />
+                                Over-allocated by {totalAllocatedDays - durationInDays} days!
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
 
             {/* Cost Details Section */}
             <div className="bg-white p-4 rounded-lg border border-slate-200">

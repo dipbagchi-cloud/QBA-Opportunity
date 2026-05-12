@@ -97,34 +97,53 @@ export function GomCalculatorTab({ gomApproved = false, onApproveGom, canApprove
             </div>
 
             {/* GOM Approval */}
-            <div className={`rounded-lg border-2 p-4 flex items-center justify-between ${gomApproved ? 'bg-green-50 border-green-300' : 'bg-amber-50 border-amber-300'}`}>
-                <div className="flex items-center gap-3">
-                    {gomApproved
-                        ? <ShieldCheck className="w-6 h-6 text-green-600" />
-                        : <ShieldOff className="w-6 h-6 text-amber-600" />
-                    }
-                    <div>
-                        <div className={`text-sm font-bold ${gomApproved ? 'text-green-800' : 'text-amber-800'}`}>
-                            {gomApproved ? 'GOM Approved' : 'GOM Not Approved'}
+            {(() => {
+                const gomRejected = gomStatus.text === 'Rejected';
+                const showConflict = gomApproved && gomRejected;
+                const bgClass = showConflict
+                    ? 'bg-red-50 border-red-300'
+                    : gomApproved ? 'bg-green-50 border-green-300' : 'bg-amber-50 border-amber-300';
+                const iconClass = showConflict
+                    ? 'text-red-600'
+                    : gomApproved ? 'text-green-600' : 'text-amber-600';
+                const titleClass = showConflict
+                    ? 'text-red-800'
+                    : gomApproved ? 'text-green-800' : 'text-amber-800';
+                const title = showConflict
+                    ? 'GOM Approved but Currently Rejected'
+                    : gomApproved ? 'GOM Approved' : 'GOM Not Approved';
+                const subtitle = showConflict
+                    ? `GOM is ${gomPercent.toFixed(1)}% (below threshold). Estimation has changed since approval. Consider revoking.`
+                    : gomApproved
+                    ? 'This opportunity can be moved to Sales.'
+                    : 'GOM must be approved before this opportunity can move to Sales.';
+                return (
+                    <div className={`rounded-lg border-2 p-4 flex items-center justify-between ${bgClass}`}>
+                        <div className="flex items-center gap-3">
+                            {showConflict
+                                ? <AlertCircle className="w-6 h-6 text-red-600" />
+                                : gomApproved
+                                ? <ShieldCheck className={`w-6 h-6 ${iconClass}`} />
+                                : <ShieldOff className={`w-6 h-6 ${iconClass}`} />
+                            }
+                            <div>
+                                <div className={`text-sm font-bold ${titleClass}`}>{title}</div>
+                                <div className="text-xs text-slate-600">{subtitle}</div>
+                            </div>
                         </div>
-                        <div className="text-xs text-slate-600">
-                            {gomApproved
-                                ? 'This opportunity can be moved to Sales.'
-                                : 'GOM must be approved before this opportunity can move to Sales.'}
-                        </div>
+                        {canApprove && onApproveGom && (
+                            <button
+                                onClick={() => onApproveGom(!gomApproved)}
+                                className={`px-4 py-2 rounded-md text-sm font-bold transition-colors ${gomApproved
+                                    ? 'bg-white border border-red-300 text-red-600 hover:bg-red-50'
+                                    : 'bg-green-600 text-white hover:bg-green-700 shadow-sm'}`}
+                            >
+                                {gomApproved ? 'Revoke Approval' : 'Approve GOM'}
+                            </button>
+                        )}
                     </div>
-                </div>
-                {canApprove && onApproveGom && (
-                    <button
-                        onClick={() => onApproveGom(!gomApproved)}
-                        className={`px-4 py-2 rounded-md text-sm font-bold transition-colors ${gomApproved
-                            ? 'bg-white border border-red-300 text-red-600 hover:bg-red-50'
-                            : 'bg-green-600 text-white hover:bg-green-700 shadow-sm'}`}
-                    >
-                        {gomApproved ? 'Revoke Approval' : 'Approve GOM'}
-                    </button>
-                )}
-            </div>
+                );
+            })()}
 
             {/* Budget Assumptions (Read-Only from Admin Settings) */}
             <div>
@@ -282,126 +301,83 @@ export function GomCalculatorTab({ gomApproved = false, onApproveGom, canApprove
 
                 {/* Travel & Hospitality Costs */}
                 <div className="bg-white rounded-lg border border-slate-200 shadow-sm p-4">
-                    <h3 className="text-base font-bold text-slate-800 mb-4">Travel & Hospitality Costs</h3>
+                    <div className="flex justify-between items-center mb-4">
+                        <h3 className="text-base font-bold text-slate-800">Travel & Hospitality Costs</h3>
+                        {!readOnly && (
+                            <button
+                                type="button"
+                                onClick={() => setTravelCosts([...travelCosts, { id: crypto.randomUUID(), category: '', description: '', amount: 0 }])}
+                                className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
+                            >
+                                + Add Entry
+                            </button>
+                        )}
+                    </div>
 
-                    <div className="space-y-3">
-                        {/* Travel Details */}
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-xs font-medium text-slate-700 mb-1">Mode of Travel</label>
-                                <select
-                                    value={travelCosts.modeOfTravel}
-                                    onChange={(e) => setTravelCosts({ ...travelCosts, modeOfTravel: e.target.value })}
-                                    disabled={readOnly}
-                                    className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
-                                >
-                                    <option value="">Select Mode</option>
-                                    <option value="Flight">Flight</option>
-                                    <option value="Train">Train</option>
-                                    <option value="Car">Car</option>
-                                </select>
+                    <div className="space-y-2">
+                        {travelCosts.length === 0 && (
+                            <p className="text-xs text-slate-400 italic py-4 text-center">No travel costs added yet. Click &quot;+ Add Entry&quot; to add flight, hotel, train, etc.</p>
+                        )}
+                        {travelCosts.map((entry, idx) => (
+                            <div key={entry.id} className="grid grid-cols-[1fr_1.5fr_auto_auto] gap-2 items-end">
+                                <div>
+                                    {idx === 0 && <label className="block text-xs font-medium text-slate-700 mb-1">Category</label>}
+                                    <select
+                                        value={entry.category}
+                                        onChange={(e) => { const updated = [...travelCosts]; updated[idx] = { ...entry, category: e.target.value }; setTravelCosts(updated); }}
+                                        disabled={readOnly}
+                                        className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
+                                    >
+                                        <option value="">Select</option>
+                                        <option value="Flight">Flight</option>
+                                        <option value="Train">Train</option>
+                                        <option value="Hotel">Hotel</option>
+                                        <option value="Local Conveyance">Local Conveyance</option>
+                                        <option value="Visa">Visa</option>
+                                        <option value="Medical Insurance">Medical Insurance</option>
+                                        <option value="Vaccine">Vaccine</option>
+                                        <option value="Marketing/Communication">Marketing/Comm.</option>
+                                        <option value="Other">Other</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    {idx === 0 && <label className="block text-xs font-medium text-slate-700 mb-1">Description</label>}
+                                    <input
+                                        type="text"
+                                        value={entry.description}
+                                        onChange={(e) => { const updated = [...travelCosts]; updated[idx] = { ...entry, description: e.target.value }; setTravelCosts(updated); }}
+                                        disabled={readOnly}
+                                        placeholder="e.g., Delhi-London return"
+                                        className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
+                                    />
+                                </div>
+                                <div>
+                                    {idx === 0 && <label className="block text-xs font-medium text-slate-700 mb-1">Amount ({cSym})</label>}
+                                    <input
+                                        type="number"
+                                        value={entry.amount}
+                                        onChange={(e) => { const updated = [...travelCosts]; updated[idx] = { ...entry, amount: Number(e.target.value) }; setTravelCosts(updated); }}
+                                        disabled={readOnly}
+                                        placeholder="0"
+                                        min="0"
+                                        className="flex h-8 w-28 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
+                                    />
+                                </div>
+                                <div>
+                                    {idx === 0 && <label className="block text-xs font-medium text-slate-700 mb-1">&nbsp;</label>}
+                                    {!readOnly && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setTravelCosts(travelCosts.filter((_, i) => i !== idx))}
+                                            className="h-8 w-8 flex items-center justify-center text-red-500 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors"
+                                            title="Remove"
+                                        >
+                                            <XCircle className="w-4 h-4" />
+                                        </button>
+                                    )}
+                                </div>
                             </div>
-                            <div>
-                                <label className="block text-xs font-medium text-slate-700 mb-1">Frequency (Multiplier)</label>
-                                <input
-                                    type="number"
-                                    value={travelCosts.frequency}
-                                    onChange={(e) => setTravelCosts({ ...travelCosts, frequency: e.target.value })}
-                                    disabled={readOnly}
-                                    placeholder="e.g., 2"
-                                    min="1"
-                                    className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
-                                />
-                            </div>
-                        </div>
-
-                        {/* Cost Fields */}
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-xs font-medium text-slate-700 mb-1">Round Trip Cost ({cSym})</label>
-                                <input
-                                    type="number"
-                                    value={travelCosts.roundTripCost}
-                                    onChange={(e) => setTravelCosts({ ...travelCosts, roundTripCost: Number(e.target.value) })}
-                                    disabled={readOnly}
-                                    placeholder="0"
-                                    className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-xs font-medium text-slate-700 mb-1">Medical Insurance ({cSym})</label>
-                                <input
-                                    type="number"
-                                    value={travelCosts.medicalInsurance}
-                                    onChange={(e) => setTravelCosts({ ...travelCosts, medicalInsurance: Number(e.target.value) })}
-                                    disabled={readOnly}
-                                    placeholder="0"
-                                    className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
-                                />
-                            </div>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-xs font-medium text-slate-700 mb-1">Visa Cost ({cSym})</label>
-                                <input
-                                    type="number"
-                                    value={travelCosts.visaCost}
-                                    onChange={(e) => setTravelCosts({ ...travelCosts, visaCost: Number(e.target.value) })}
-                                    disabled={readOnly}
-                                    placeholder="0"
-                                    className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-xs font-medium text-slate-700 mb-1">Vaccine Cost ({cSym})</label>
-                                <input
-                                    type="number"
-                                    value={travelCosts.vaccineCost}
-                                    onChange={(e) => setTravelCosts({ ...travelCosts, vaccineCost: Number(e.target.value) })}
-                                    disabled={readOnly}
-                                    placeholder="0"
-                                    className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
-                                />
-                            </div>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-xs font-medium text-slate-700 mb-1">Local Conveyance ({cSym})</label>
-                                <input
-                                    type="number"
-                                    value={travelCosts.localConveyance}
-                                    onChange={(e) => setTravelCosts({ ...travelCosts, localConveyance: Number(e.target.value) })}
-                                    disabled={readOnly}
-                                    placeholder="0"
-                                    className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-xs font-medium text-slate-700 mb-1">Marketing/Communication ({cSym})</label>
-                                <input
-                                    type="number"
-                                    value={travelCosts.marketingCom}
-                                    onChange={(e) => setTravelCosts({ ...travelCosts, marketingCom: Number(e.target.value) })}
-                                    disabled={readOnly}
-                                    placeholder="0"
-                                    className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
-                                />
-                            </div>
-                        </div>
-
-                        <div>
-                            <label className="block text-xs font-medium text-slate-700 mb-1">Hotel Cost ({cSym})</label>
-                            <input
-                                type="number"
-                                value={travelCosts.hotelCost}
-                                onChange={(e) => setTravelCosts({ ...travelCosts, hotelCost: Number(e.target.value) })}
-                                disabled={readOnly}
-                                placeholder="0"
-                                className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
-                            />
-                        </div>
+                        ))}
 
                         {/* Total Travel Cost Summary */}
                         <div className="bg-blue-50 p-3 rounded-md border border-blue-200 mt-3">

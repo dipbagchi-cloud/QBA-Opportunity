@@ -654,17 +654,60 @@ export async function listManagersByDepartment(req: Request, res: Response) {
 // ─ Presales Team (CRM users with Presales role) ─
 export async function listPresalesTeam(req: Request, res: Response) {
     try {
-        const users = await prisma.user.findMany({
-            where: {
-                isActive: true,
-                roles: { some: { name: 'Presales' } },
-            },
-            orderBy: { name: 'asc' },
-            select: { id: true, name: true, email: true, department: true },
-        });
+        const { department } = req.query;
+        
+        console.log(`[PRESALES TEAM] Request received. Department: ${department || 'none'}`);
+        
+        let users: Array<{ id: string; name: string; email: string | null; department: string | null }> = [];
+        
+        // First, try to get presales users from the specified department
+        if (department && typeof department === 'string') {
+            users = await prisma.user.findMany({
+                where: {
+                    isActive: true,
+                    roles: { some: { name: 'Presales' } },
+                    department: department,
+                },
+                orderBy: { name: 'asc' },
+                select: { id: true, name: true, email: true, department: true },
+            });
+            
+            console.log(`[PRESALES TEAM] Found ${users.length} presales users in department: ${department}`);
+            if (users.length > 0) {
+                console.log(`[PRESALES TEAM] Users found:`, users.map(u => `${u.name} (${u.department})`).join(', '));
+            }
+        }
+        
+        // If no users found with department filter, return all presales users as fallback
+        if (users.length === 0) {
+            console.log(`[PRESALES TEAM] No users found in specific department, trying fallback...`);
+            
+            users = await prisma.user.findMany({
+                where: {
+                    isActive: true,
+                    roles: { some: { name: 'Presales' } },
+                },
+                orderBy: { name: 'asc' },
+                select: { id: true, name: true, email: true, department: true },
+            });
+            
+            console.log(`[PRESALES TEAM] Fallback: Found ${users.length} total presales users (all departments)`);
+            if (users.length > 0) {
+                console.log(`[PRESALES TEAM] Fallback users:`, users.map(u => `${u.name} (${u.department || 'no dept'})`).join(', '));
+            } else {
+                // Debug: check if there are ANY users with roles
+                const allUsersWithRoles = await prisma.user.findMany({
+                    where: { isActive: true },
+                    select: { id: true, name: true, department: true, roles: { select: { name: true } } },
+                    take: 10,
+                });
+                console.log(`[PRESALES TEAM] DEBUG: Sample of active users with roles:`, allUsersWithRoles.map(u => `${u.name} - roles: [${u.roles.map(r => r.name).join(', ')}]`).join(' | '));
+            }
+        }
+        
         res.json(users);
     } catch (error) {
-        console.error('List presales team error:', error);
+        console.error('[PRESALES TEAM] Error:', error);
         res.status(500).json({ error: 'Failed to fetch presales team.' });
     }
 }
@@ -674,7 +717,9 @@ let holidaysCacheTime = 0;
 
 export async function listHolidays(req: Request, res: Response) {
     try {
-        if (holidaysCache && Date.now() - holidaysCacheTime < 3600000) {
+        const forceRefresh = req.query.refresh === 'true';
+        
+        if (!forceRefresh && holidaysCache && Date.now() - holidaysCacheTime < 3600000) {
             return res.json(holidaysCache);
         }
 

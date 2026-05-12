@@ -44,16 +44,16 @@ export function EstimationTab() {
 
     const workingDaysPerMonth = assumptions.workingDaysPerYear / 12 || 20;
 
-    // 1. Grid 1: Billed Resources (FTE count per month)
+    // 1. Grid 1: Billed Resources (Allocated Days)
     const resourceRows = useMemo(() => {
         return resources.map(resource => {
-            const monthlyFtes: Record<string, number> = {};
+            const monthlyDays: Record<string, number> = {};
             Object.entries(resource.monthlyEfforts).forEach(([monthName, days]) => {
                 if (days > 0) {
                     const monthIndex = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].indexOf(monthName);
                     if (monthIndex !== -1) {
                         const monthStr = `${new Date().getFullYear()}-${String(monthIndex + 1).padStart(2, '0')}`;
-                        monthlyFtes[monthStr] = days / workingDaysPerMonth;
+                        monthlyDays[monthStr] = days;
                     }
                 }
             });
@@ -61,10 +61,10 @@ export function EstimationTab() {
                 role: resource.role,
                 skill: resource.skill,
                 experienceBand: resource.experienceBand,
-                fte: monthlyFtes
+                allocatedDays: monthlyDays
             };
         });
-    }, [resources, workingDaysPerMonth]);
+    }, [resources]);
 
     // 2. Grid 2: Salary Cost (Direct Cost)
     const salaryRows = useMemo(() => {
@@ -186,13 +186,13 @@ export function EstimationTab() {
                 </div>
             </div>
 
-            {/* Grid 1: Billed Resources (FTE) */}
+            {/* Grid 1: Billed Resources (Allocated Days) */}
             <div className="border rounded-lg bg-white shadow-sm overflow-hidden flex flex-col max-h-[500px]">
                 <div className="bg-slate-50 p-3 border-b flex justify-between items-center sticky top-0 z-20">
                     <div>
-                        <h3 className="font-semibold text-slate-800 text-sm">1. Input # of resources against each month (FTE)</h3>
+                        <h3 className="font-semibold text-slate-800 text-sm">1. Resource Allocation (Days)</h3>
                         <p className="text-[10px] text-slate-500">
-                            FTE = Alloc / {workingDaysPerMonth.toFixed(1)} days.
+                            Shows the exact number of working days allocated per month.
                         </p>
                     </div>
                 </div>
@@ -215,7 +215,7 @@ export function EstimationTab() {
                                     </td>
                                     {months.map(m => (
                                         <td key={m} className="p-1 px-2 text-center border-r text-slate-600 font-mono text-[11px]">
-                                            {row.fte[m] ? row.fte[m].toFixed(2) : '-'}
+                                            {row.allocatedDays[m] ? row.allocatedDays[m].toString() : '-'}
                                         </td>
                                     ))}
                                 </tr>

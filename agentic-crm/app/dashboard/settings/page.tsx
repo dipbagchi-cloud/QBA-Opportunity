@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { User, Lock, Users, Shield, Plus, X, Check, AlertCircle, RotateCcw, Pencil, ToggleLeft, ToggleRight, DollarSign, Trash2, Globe, Cpu, Tag, Building2, Download, Settings2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, Search, Eye, EyeOff, FileText, Mail, Send, Briefcase, ShieldCheck, RefreshCw, Coins, UserPlus, UserMinus, Calculator, Percent, Info, Clock, Bell, Filter, Zap, ArrowRight } from "lucide-react";
+import { User, Lock, Users, Shield, Plus, X, Check, AlertCircle, RotateCcw, Pencil, ToggleLeft, ToggleRight, DollarSign, Trash2, Globe, Cpu, Tag, Building2, Download, Settings2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, Search, Eye, EyeOff, FileText, Mail, Send, Briefcase, ShieldCheck, RefreshCw, Coins, UserPlus, UserMinus, Calculator, Percent, Info, Clock, Bell, Filter, Zap, ArrowRight, Calendar } from "lucide-react";
 import { useAuthStore } from "@/lib/auth-store";
 import { apiClient } from "@/lib/api";
 import { useCurrency } from "@/components/providers/currency-provider";
@@ -125,7 +125,7 @@ interface TeamOption {
     name: string;
 }
 
-type Tab = "profile" | "security" | "users" | "roles" | "qpeoplemapping" | "authconfig" | "ratecards" | "budgetassumptions" | "currencyrates" | "gomcalculator" | "clients" | "regions" | "technologies" | "pricingmodels" | "projecttypes" | "auditlog" | "emailtemplates" | "notificationrules" | "sowadmin";
+type Tab = "profile" | "security" | "users" | "roles" | "qpeoplemapping" | "authconfig" | "ratecards" | "budgetassumptions" | "currencyrates" | "gomcalculator" | "clients" | "regions" | "technologies" | "pricingmodels" | "projecttypes" | "auditlog" | "emailtemplates" | "notificationrules" | "sowadmin" | "holidays";
 
 export default function SettingsPage() {
     const { user, hasPermission } = useAuthStore();
@@ -172,6 +172,7 @@ export default function SettingsPage() {
                 { key: "technologies", label: "Technologies", icon: Cpu, adminOnly: true },
                 { key: "pricingmodels", label: "Pricing Models", icon: Tag, adminOnly: true },
                 { key: "projecttypes", label: "Project Types", icon: Briefcase, adminOnly: true },
+                { key: "holidays", label: "Holidays", icon: Calendar, adminOnly: true },
             ],
         },
         {
@@ -207,7 +208,7 @@ export default function SettingsPage() {
     };
 
     return (
-        <div className="max-w-6xl space-y-4 animate-in fade-in duration-500">
+        <div className="w-full space-y-4 animate-in fade-in duration-500">
             <div>
                 <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 to-purple-600">
                     Settings
@@ -293,6 +294,7 @@ export default function SettingsPage() {
                     {activeTab === "auditlog" && canViewAuditLogs && <AuditLogTab />}
                     {activeTab === "emailtemplates" && isAdmin && <EmailTemplatesTab />}
                     {activeTab === "notificationrules" && isAdmin && <NotificationRulesTab />}
+                    {activeTab === "holidays" && isAdmin && <HolidaysTab />}
                 </div>
             </div>
         </div>
@@ -863,9 +865,9 @@ function UsersTab() {
             )}
 
             {/* Users table */}
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm">
-                <div className="overflow-x-auto overflow-y-visible">
-                    <table className="w-full text-xs">
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm w-full">
+                <div className="overflow-x-auto overflow-y-visible w-full">
+                    <table className="w-full text-xs table-auto">
                         <thead className="bg-slate-50 border-b border-slate-200">
                             <tr>
                                 <SortableHeader label="Name" sortKey="name" currentSort={userSortKey} currentDir={userSortDir} onSort={handleUserSort} className="text-left px-3 text-slate-600" />
@@ -1889,7 +1891,7 @@ interface BudgetAssumptionsData {
 
 const DEFAULT_ASSUMPTIONS: BudgetAssumptionsData = {
     marginPercent: 35,
-    workingDaysPerYear: 240,
+    workingDaysPerYear: 220,
     deliveryMgmtPercent: 5,
     benchPercent: 10,
     leaveEligibilityPercent: 0,
@@ -1990,7 +1992,7 @@ function BudgetAssumptionsTab() {
                     <div className="space-y-3">
                         <h3 className="font-semibold text-sm border-b pb-2 text-slate-800">Core Rates</h3>
                         <InputField label="Margin %" name="marginPercent" desc="Target profit margin percentage." />
-                        <InputField label="Working Days / Year" name="workingDaysPerYear" desc="Standard working days (e.g. 240)." />
+                        <InputField label="Working Days / Year" name="workingDaysPerYear" desc="Standard working days (e.g. 220)." />
                     </div>
 
                     <div className="space-y-3">
@@ -2721,20 +2723,29 @@ function GomCalculatorTab() {
     const [onsiteDayRate, setOnsiteDayRate] = useState<number>(0);
     const [durationMonths, setDurationMonths] = useState<number>(3);
     const [workingDays, setWorkingDays] = useState<number>(55);
+    const [workingDaysPerYear, setWorkingDaysPerYear] = useState<number>(220);
 
     const perDiemUSD = 50;
     const perDiemRate = 85;
+
+    // Load workingDaysPerYear from budget assumptions
+    useEffect(() => {
+        fetch('/api/admin/budget-assumptions', { headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` } })
+            .then(r => r.ok ? r.json() : null)
+            .then(data => { if (data?.workingDaysPerYear) setWorkingDaysPerYear(data.workingDaysPerYear); })
+            .catch(() => {});
+    }, []);
 
     useEffect(() => {
         const loadingFactor = (deliveryMgmt + benchCost) / 100;
         const adjCost = annualCTC * (1 + loadingFactor);
         setAdjustedCost(adjCost);
         const ctcInQuot = adjCost / exchangeRate;
-        const offDay = Math.ceil(ctcInQuot / 220);
+        const offDay = Math.ceil(ctcInQuot / workingDaysPerYear);
         setOffshoreDayRate(offDay);
         const perDiemTotal = perDiemUSD * perDiemRate;
         setOnsiteDayRate(offDay + perDiemTotal + onsiteAllowance);
-    }, [annualCTC, deliveryMgmt, benchCost, exchangeRate, onsiteAllowance]);
+    }, [annualCTC, deliveryMgmt, benchCost, exchangeRate, onsiteAllowance, workingDaysPerYear]);
 
     const calculateMargin = (cost: number) => {
         let rev = 0, gom = 0, profit = 0;
@@ -2884,7 +2895,7 @@ function GomCalculatorTab() {
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
                                     <tr><td className="py-2 px-3 text-slate-800">Adjusted Cost</td><td className="py-2 px-3 font-mono">{adjustedCost.toLocaleString()}</td><td className="py-2 px-3 text-slate-400 text-xs">CTC * (1 + (Mgmt+Bench)/100)</td></tr>
-                                    <tr><td className="py-2 px-3 text-slate-800">Annual Working Days</td><td className="py-2 px-3 font-mono">220</td><td className="py-2 px-3 text-slate-400 text-xs">Fixed Standard</td></tr>
+                                    <tr><td className="py-2 px-3 text-slate-800">Annual Working Days</td><td className="py-2 px-3 font-mono">{workingDaysPerYear}</td><td className="py-2 px-3 text-slate-400 text-xs">From Budget Assumptions</td></tr>
                                     <tr><td className="py-2 px-3 text-slate-800">Actual Profit Margin</td><td className="py-2 px-3 font-mono font-bold text-indigo-600">{offshoreFinancials.profit.toLocaleString()}%</td><td className="py-2 px-3 text-slate-400 text-xs">(Markup / (1 + Markup%)) * 100</td></tr>
                                 </tbody>
                             </table>
@@ -3986,7 +3997,7 @@ const TRIGGER_TYPES = [
     { value: "health_drop", label: "Health Score Drop", description: "When deal health score drops" },
 ];
 
-const STAGES = ["Discovery", "Qualification", "Proposal", "Negotiation", "Closed Won", "Closed Lost", "Proposal Lost"];
+const STAGES = ["Discovery", "Qualification", "Re-estimation", "Proposal", "Negotiation", "Closed Won", "Closed Lost", "Proposal Lost"];
 
 const CONDITION_FIELDS = [
     { value: "value", label: "Deal Value", type: "number" },
@@ -4392,27 +4403,29 @@ function NotificationRulesTab() {
                                 <label className="block text-xs font-medium text-slate-700 mb-1.5">Rule Type *</label>
                                 <div className="flex gap-3">
                                     {[
-                                        { value: 'event_driven', label: 'Event Driven' },
-                                        { value: 'time_driven', label: 'Time Driven' },
-                                        { value: 'time_driven_mis', label: 'Time Driven MIS' },
+                                        { value: 'event_driven', label: 'Event Driven', desc: 'Triggered by user actions (stage moves, create, update)' },
+                                        { value: 'time_driven', label: 'Time Driven', desc: 'Scheduled checks (stalled deals, SLA breaches)' },
+                                        { value: 'time_driven_mis', label: 'Time Driven MIS', desc: 'Periodic reporting & dashboard summaries' },
                                     ].map(rt => (
                                         <button
                                             key={rt.value}
                                             type="button"
-                                            onClick={() => setFormRuleType(rt.value)}
-                                            className={`px-4 py-2 rounded-lg text-xs font-medium border transition-colors ${
+                                            onClick={() => { setFormRuleType(rt.value); }}
+                                            className={`flex-1 text-left px-4 py-2.5 rounded-lg text-xs font-medium border transition-all ${
                                                 formRuleType === rt.value
-                                                    ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
+                                                    ? 'bg-indigo-50 border-indigo-300 text-indigo-700 ring-2 ring-indigo-200'
                                                     : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
                                             }`}
                                         >
-                                            {rt.label}
+                                            <div className="font-semibold">{rt.label}</div>
+                                            <div className="text-[10px] mt-0.5 opacity-70 font-normal">{rt.desc}</div>
                                         </button>
                                     ))}
                                 </div>
                             </div>
 
-                            {/* Trigger Type */}
+                            {/* Trigger Type — only for event-driven */}
+                            {formRuleType === 'event_driven' && (
                             <div>
                                 <label className="block text-xs font-medium text-slate-700 mb-1.5">Trigger Type *</label>
                                 <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
@@ -4433,6 +4446,42 @@ function NotificationRulesTab() {
                                     ))}
                                 </div>
                             </div>
+                            )}
+
+                            {/* Time-driven placeholder */}
+                            {formRuleType !== 'event_driven' && (
+                                <div className="p-4 bg-slate-50 rounded-lg border border-slate-200">
+                                    <p className="text-xs font-medium text-slate-700 mb-1">
+                                        {formRuleType === 'time_driven' ? 'Time-Driven Rule' : 'Time-Driven MIS Rule'}
+                                    </p>
+                                    <p className="text-[11px] text-slate-500">
+                                        {formRuleType === 'time_driven' 
+                                            ? 'This rule will be evaluated on a schedule. Configure the trigger type below for stalled deals, SLA breaches, or periodic health checks.'
+                                            : 'This rule sends periodic MIS reports/summaries to the selected recipients on a configured schedule.'
+                                        }
+                                    </p>
+                                    <div className="mt-3">
+                                        <label className="block text-xs font-medium text-slate-700 mb-1.5">Trigger Type</label>
+                                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                                            {TRIGGER_TYPES.filter(t => ['stalled_deal', 'health_drop', 'data_condition'].includes(t.value)).map(t => (
+                                                <button
+                                                    key={t.value}
+                                                    type="button"
+                                                    onClick={() => setFormTriggerType(t.value)}
+                                                    className={`text-left p-2.5 rounded-lg border text-xs transition-colors ${
+                                                        formTriggerType === t.value
+                                                            ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
+                                                            : 'border-slate-200 hover:border-slate-300 text-slate-600'
+                                                    }`}
+                                                >
+                                                    <div className="font-medium">{t.label}</div>
+                                                    <div className="text-[10px] mt-0.5 opacity-70">{t.description}</div>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
 
                             {/* Stage Change fields */}
                             {formTriggerType === 'stage_change' && (
@@ -4494,7 +4543,15 @@ function NotificationRulesTab() {
 
                             {/* Recipient Roles — To */}
                             <div>
-                                <label className="block text-xs font-medium text-slate-700 mb-1.5">Recipient Roles — To *</label>
+                                <label className="block text-xs font-medium text-slate-700 mb-1.5">
+                                    {formRuleType === 'event_driven' ? 'Notify Assigned Roles *' : 'Recipient Roles — To *'}
+                                </label>
+                                {formRuleType === 'event_driven' && (
+                                    <div className="mb-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg">
+                                        <p className="text-[11px] text-blue-700 font-medium">Event-driven notifications are sent only to users <strong>assigned to the opportunity</strong> who match the selected roles.</p>
+                                        <p className="text-[10px] text-blue-600 mt-0.5">e.g. Selecting "Sales" + "Manager" will notify only the opportunity&apos;s Sales Rep and assigned Manager — not all Sales/Manager users. Admin role always receives all notifications.</p>
+                                    </div>
+                                )}
                                 <div className="space-y-3">
                                     <div className="flex flex-wrap gap-2">
                                         {roles.map(role => (
@@ -4510,12 +4567,15 @@ function NotificationRulesTab() {
                                             >
                                                 {formRecipientRoles.includes(role.name) && <Check className="w-3 h-3 inline mr-1" />}
                                                 {role.name}
+                                                {formRuleType === 'event_driven' && role.name === 'Admin' && (
+                                                    <span className="ml-1 text-[9px] opacity-60">(all)</span>
+                                                )}
                                             </button>
                                         ))}
                                     </div>
 
-                                    {/* Specific User Selection for Selected Roles */}
-                                    {formRecipientRoles.length > 0 && (
+                                    {/* Specific User Selection — only for time-driven rules */}
+                                    {formRuleType !== 'event_driven' && formRecipientRoles.length > 0 && (
                                         <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-3">
                                             <p className="text-[11px] font-medium text-slate-600">Select specific users (or keep "All" to send to everyone in the role):</p>
                                             {formRecipientRoles.map(roleName => {
@@ -4558,6 +4618,16 @@ function NotificationRulesTab() {
                                             })}
                                         </div>
                                     )}
+
+                                    {/* Summary for event-driven */}
+                                    {formRuleType === 'event_driven' && formRecipientRoles.length > 0 && (
+                                        <div className="bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+                                            <p className="text-[11px] text-green-700">
+                                                <strong>Will notify:</strong>{' '}
+                                                {formRecipientRoles.map(r => r === 'Admin' ? 'All Admins' : `Assigned ${r}`).join(', ')}
+                                            </p>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
 
@@ -4582,7 +4652,12 @@ function NotificationRulesTab() {
                                             </button>
                                         ))}
                                     </div>
-                                    <p className="text-[10px] text-slate-400 mt-1">CC applies to email only. Users are automatically removed from CC if they are already in To.</p>
+                                    <p className="text-[10px] text-slate-400 mt-1">
+                                        {formRuleType === 'event_driven' 
+                                            ? 'CC applies to email only. Only assigned users matching CC roles will be notified.'
+                                            : 'CC applies to email only. Users are automatically removed from CC if they are already in To.'
+                                        }
+                                    </p>
                                 </div>
                             )}
 
@@ -4651,6 +4726,188 @@ function NotificationRulesTab() {
                             </button>
                         </div>
                     </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
+/* ─────────────── Holidays Tab ─────────────── */
+function HolidaysTab() {
+    const [holidays, setHolidays] = useState<string[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [searchTerm, setSearchTerm] = useState("");
+    const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
+
+    const loadHolidays = useCallback(async (forceRefresh = false) => {
+        try {
+            setError(null);
+            if (forceRefresh) {
+                setRefreshing(true);
+            } else {
+                setLoading(true);
+            }
+
+            // Fetch holidays from the backend API
+            const data = await apiClient<string[]>("/api/master/holidays" + (forceRefresh ? "?refresh=true" : ""));
+            
+            if (Array.isArray(data)) {
+                setHolidays(data);
+            } else {
+                setError("Invalid data format received");
+            }
+        } catch (e: any) {
+            console.error("Failed to load holidays:", e);
+            setError(e.message || "Failed to load holidays");
+        } finally {
+            setLoading(false);
+            setRefreshing(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        loadHolidays();
+    }, [loadHolidays]);
+
+    // Parse holiday string to get date and day of week
+    const parseHoliday = (dateStr: string) => {
+        const date = new Date(dateStr + "T00:00:00");
+        const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+        return {
+            dateStr,
+            date,
+            dayName: dayNames[date.getDay()],
+            year: date.getFullYear(),
+            month: date.toLocaleString("default", { month: "long" }),
+            day: date.getDate(),
+        };
+    };
+
+    // Filter and sort holidays
+    const filteredHolidays = holidays
+        .filter(h => h.toLowerCase().includes(searchTerm.toLowerCase()))
+        .map(parseHoliday)
+        .sort((a, b) => {
+            const comparison = a.date.getTime() - b.date.getTime();
+            return sortOrder === "asc" ? comparison : -comparison;
+        });
+
+    // Group by year
+    const groupedByYear = filteredHolidays.reduce((acc, h) => {
+        if (!acc[h.year]) acc[h.year] = [];
+        acc[h.year].push(h);
+        return acc;
+    }, {} as Record<number, typeof filteredHolidays>);
+
+    if (loading) {
+        return (
+            <div className="bg-white p-8 rounded-xl border border-slate-200 shadow-sm flex items-center justify-center">
+                <div className="text-center">
+                    <RefreshCw className="w-8 h-8 text-indigo-600 animate-spin mx-auto mb-3" />
+                    <p className="text-sm text-slate-600">Loading holidays from Q-People HRMS...</p>
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+            {/* Header */}
+            <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-200">
+                <div>
+                    <h3 className="text-base font-bold text-slate-900 mb-0.5 flex items-center gap-2">
+                        <Calendar className="w-4 h-4 text-indigo-600" />
+                        Company Holidays (Q-People HRMS)
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                        Official holidays used for working days calculation. Data cached for 1 hour.
+                    </p>
+                </div>
+                <button
+                    onClick={() => loadHolidays(true)}
+                    disabled={refreshing}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                    <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
+                    {refreshing ? "Refreshing..." : "Refresh"}
+                </button>
+            </div>
+
+            {/* Error Message */}
+            {error && (
+                <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 text-red-600 mt-0.5 flex-shrink-0" />
+                    <div className="text-xs text-red-800">
+                        <strong className="font-semibold">Error:</strong> {error}
+                    </div>
+                </div>
+            )}
+
+            {/* Search and Stats */}
+            <div className="flex items-center gap-3 mb-4">
+                <div className="flex-1">
+                    <input
+                        type="text"
+                        placeholder="Search by date (e.g., 2026-08-15)..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                    />
+                </div>
+                <button
+                    onClick={() => setSortOrder(sortOrder === "asc" ? "desc" : "asc")}
+                    className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+                >
+                    {sortOrder === "asc" ? "↑ Oldest First" : "↓ Newest First"}
+                </button>
+                <div className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-50 border border-slate-200 rounded-lg">
+                    {filteredHolidays.length} {filteredHolidays.length === 1 ? "Holiday" : "Holidays"}
+                </div>
+            </div>
+
+            {/* Holidays List */}
+            {filteredHolidays.length === 0 ? (
+                <div className="text-center py-12 text-slate-500">
+                    <Calendar className="w-12 h-12 mx-auto mb-3 text-slate-300" />
+                    <p className="text-sm font-medium">No holidays found</p>
+                    <p className="text-xs mt-1">
+                        {searchTerm ? "Try adjusting your search" : "No holidays data available"}
+                    </p>
+                </div>
+            ) : (
+                <div className="space-y-6">
+                    {Object.entries(groupedByYear)
+                        .sort(([yearA], [yearB]) => sortOrder === "asc" ? Number(yearA) - Number(yearB) : Number(yearB) - Number(yearA))
+                        .map(([year, yearHolidays]) => (
+                            <div key={year} className="space-y-2">
+                                <h4 className="text-sm font-bold text-slate-700 flex items-center gap-2 px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg">
+                                    <Calendar className="w-3.5 h-3.5 text-slate-600" />
+                                    {year}
+                                    <span className="ml-auto text-xs font-medium text-slate-500">
+                                        {yearHolidays.length} {yearHolidays.length === 1 ? "holiday" : "holidays"}
+                                    </span>
+                                </h4>
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                                    {yearHolidays.map((h) => (
+                                        <div
+                                            key={h.dateStr}
+                                            className="flex items-center gap-3 p-3 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+                                        >
+                                            <div className="flex-shrink-0 w-12 h-12 bg-indigo-100 rounded-lg flex flex-col items-center justify-center">
+                                                <div className="text-xs font-medium text-indigo-800 uppercase">{h.month.slice(0, 3)}</div>
+                                                <div className="text-lg font-bold text-indigo-900">{h.day}</div>
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="text-sm font-semibold text-slate-900">{h.dayName}</div>
+                                                <div className="text-xs text-slate-500 truncate">{h.dateStr}</div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        ))}
                 </div>
             )}
         </div>

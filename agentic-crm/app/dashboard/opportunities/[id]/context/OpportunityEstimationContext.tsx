@@ -4,6 +4,7 @@ import { createContext, useContext, useState, useEffect, useCallback, ReactNode 
 import { BudgetAssumptions, ResourceLine, OtherCost, GomResult, calculateProjectGom } from "@/lib/gom-calculator";
 import { DEFAULT_ASSUMPTIONS } from "../components/AssumptionsView";
 import { apiClient, API_URL, getAuthHeaders } from "@/lib/api";
+import { useCurrency } from "@/components/providers/currency-provider";
 
 interface ResourceRow {
     id: string;
@@ -19,17 +20,14 @@ interface ResourceRow {
     skill?: string;
 }
 
-interface TravelCosts {
-    modeOfTravel: string;
-    frequency: string;
-    roundTripCost: number;
-    medicalInsurance: number;
-    visaCost: number;
-    vaccineCost: number;
-    localConveyance: number;
-    marketingCom: number;
-    hotelCost: number;
+interface TravelCostEntry {
+    id: string;
+    category: string;
+    description: string;
+    amount: number;
 }
+
+type TravelCosts = TravelCostEntry[];
 
 export interface SpecialCosts {
     subcontracting: number;
@@ -94,27 +92,18 @@ interface OpportunityEstimationContextType {
     // Date range for calendar columns
     startDate: string;
     endDate: string;
+    durationInDays: number; // Duration in working days from the form
     exchangeRatesSnapshot?: Record<string, number>;
 }
 
 const OpportunityEstimationContext = createContext<OpportunityEstimationContextType | undefined>(undefined);
 
-export function OpportunityEstimationProvider({ children, opportunityId, readOnly = false, startDate = '', endDate = '', adjustedEstimatedValue = 0, initialCurrency = "INR" }: { children: ReactNode; opportunityId?: string; readOnly?: boolean; startDate?: string; endDate?: string; adjustedEstimatedValue?: number; initialCurrency?: string }) {
+export function OpportunityEstimationProvider({ children, opportunityId, readOnly = false, startDate = '', endDate = '', durationInDays = 0, adjustedEstimatedValue = 0, initialCurrency = "INR" }: { children: ReactNode; opportunityId?: string; readOnly?: boolean; startDate?: string; endDate?: string; durationInDays?: number; adjustedEstimatedValue?: number; initialCurrency?: string }) {
     // State
     const [assumptions, setAssumptions] = useState<BudgetAssumptions>(DEFAULT_ASSUMPTIONS);
     const [resources, setResources] = useState<ResourceRow[]>([]);
     const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
-    const [travelCosts, setTravelCosts] = useState<TravelCosts>({
-        modeOfTravel: "",
-        frequency: "",
-        roundTripCost: 0,
-        medicalInsurance: 0,
-        visaCost: 0,
-        vaccineCost: 0,
-        localConveyance: 0,
-        marketingCom: 0,
-        hotelCost: 0,
-    });
+    const [travelCosts, setTravelCosts] = useState<TravelCosts>([]);
     const [specialCosts, setSpecialCosts] = useState<SpecialCosts>({
         subcontracting: 0,
         miscExpense: 0,
@@ -129,6 +118,7 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
     const [isSaving, setIsSaving] = useState(false);
     const [isLoaded, setIsLoaded] = useState(false);
     const [exchangeRatesSnapshot, setExchangeRatesSnapshot] = useState<Record<string, number> | undefined>();
+    const { getRate, currency: globalCurrency } = useCurrency();
 
     // Wrap setMarkupPercent to also recalculate all resources' dailyRate
     const setMarkupPercent = useCallback((newMarkup: number) => {
@@ -172,7 +162,33 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
                 if (saved && typeof saved === "object" && !Array.isArray(saved)) {
                     // Restore estimation data (skip if it's the old modal-only format)
                     if (saved.resources) setResources(saved.resources);
-                    if (saved.travelCosts) setTravelCosts(prev => ({ ...prev, ...saved.travelCosts }));
+                    if (saved.travelCosts) {
+                        // Backward compat: migrate old single-object format to array
+                        if (Array.isArray(saved.travelCosts)) {
+                            setTravelCosts(saved.travelCosts);
+                        } else {
+                            // Old format: convert non-zero cost fields to entries
+                            const migrated: TravelCostEntry[] = [];
+                            const old = saved.travelCosts as Record<string, unknown>;
+                            const fieldMap: Record<string, string> = {
+                                roundTripCost: 'Round Trip',
+                                medicalInsurance: 'Medical Insurance',
+                                visaCost: 'Visa',
+                                vaccineCost: 'Vaccine',
+                                localConveyance: 'Local Conveyance',
+                                marketingCom: 'Marketing/Communication',
+                                hotelCost: 'Hotel',
+                            };
+                            const freq = Number(old.frequency) || 1;
+                            Object.entries(fieldMap).forEach(([key, label]) => {
+                                const val = Number(old[key]) || 0;
+                                if (val > 0) {
+                                    migrated.push({ id: crypto.randomUUID(), category: label, description: (old.modeOfTravel as string) || '', amount: val * freq });
+                                }
+                            });
+                            setTravelCosts(migrated);
+                        }
+                    }
                     if (saved.specialCosts) setSpecialCosts(prev => ({ ...prev, ...saved.specialCosts }));
                     if (saved.markupPercent != null) setMarkupPercent(saved.markupPercent);
                     if (saved.salesCommissionPercent != null) setSalesCommissionPercent(saved.salesCommissionPercent);
@@ -191,6 +207,35 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
             }
         })();
     }, [opportunityId]);
+
+    // Track initial load values to detect changes in duration parameters
+    const [initialLoadState, setInitialLoadState] = useState<{ startDate: string; endDate: string; durationInDays: number } | null>(null);
+    
+    // When resources are first loaded, capture the current duration parameters
+    useEffect(() => {
+        if (isLoaded && !initialLoadState && resources.length > 0) {
+            setInitialLoadState({ startDate, endDate, durationInDays });
+        }
+    }, [isLoaded, resources.length, initialLoadState, startDate, endDate, durationInDays]);
+
+    // Clear resource allocations when duration parameters change significantly
+    useEffect(() => {
+        if (!isLoaded || !initialLoadState || readOnly) return;
+        
+        // Check if duration parameters have changed
+        const datesChanged = initialLoadState.startDate !== startDate || initialLoadState.endDate !== endDate;
+        const durationChanged = Math.abs(initialLoadState.durationInDays - durationInDays) > Math.max(1, initialLoadState.durationInDays * 0.1); // >10% change or >1 day
+        
+        if (datesChanged || durationChanged) {
+            // Clear all monthlyEfforts allocations to force re-allocation
+            setResources(prev => prev.map(r => ({
+                ...r,
+                monthlyEfforts: {}
+            })));
+            // Update the tracked state to prevent re-triggering
+            setInitialLoadState({ startDate, endDate, durationInDays });
+        }
+    }, [startDate, endDate, durationInDays, isLoaded, initialLoadState, readOnly]);
 
 
     // Calculated values
@@ -257,20 +302,13 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
         setMonths(Array.from(allMonths).sort());
     }, [resources, selectedYear]);
 
-    // Calculate total travel cost
+    // Calculate total travel cost (convert from global display currency to INR base)
     useEffect(() => {
-        const freqMultiplier = Number(travelCosts.frequency) || 1;
-        const total = (
-            (Number(travelCosts.roundTripCost) || 0) +
-            (Number(travelCosts.medicalInsurance) || 0) +
-            (Number(travelCosts.visaCost) || 0) +
-            (Number(travelCosts.vaccineCost) || 0) +
-            (Number(travelCosts.localConveyance) || 0) +
-            (Number(travelCosts.marketingCom) || 0) +
-            (Number(travelCosts.hotelCost) || 0)
-        ) * freqMultiplier;
-        setTotalTravelCost(total);
-    }, [travelCosts]);
+        const rawTotal = travelCosts.reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
+        const rate = getRate(globalCurrency);
+        const totalInBase = rate && rate !== 0 ? rawTotal / rate : rawTotal;
+        setTotalTravelCost(totalInBase);
+    }, [travelCosts, getRate, globalCurrency]);
 
     // Calculate resource cost and GOM
     useEffect(() => {
@@ -461,6 +499,7 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
         readOnly,
         startDate,
         endDate,
+        durationInDays,
         exchangeRatesSnapshot,
     };
 
@@ -479,4 +518,4 @@ export function useOpportunityEstimation() {
     return context;
 }
 
-export type { ResourceRow, TravelCosts };
+export type { ResourceRow, TravelCosts, TravelCostEntry };
