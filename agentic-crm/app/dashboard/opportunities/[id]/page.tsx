@@ -581,6 +581,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
     // Auto-approve GOM when GOM % reaches configured threshold
     useEffect(() => {
+        if (skipDerivedEffects.current) return;
         if (gomAutoApprovePercent > 0 && contextGomPercent >= gomAutoApprovePercent && !gomApproved && id) {
             handleApproveGom(true);
         }
@@ -588,6 +589,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
     // Auto-revoke GOM approval when GOM % drops below 20% (Rejected threshold)
     useEffect(() => {
+        if (skipDerivedEffects.current) return;
         if (gomApproved && contextGomPercent < 20 && id) {
             handleApproveGom(false);
         }
