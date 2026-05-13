@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { UserCircle, Briefcase, Code, Loader2 } from "lucide-react";
+import { API_URL, getAuthHeaders } from "@/lib/api";
 
 interface AssignmentPaneProps {
     opportunityId: string;
@@ -40,13 +41,9 @@ export function AssignmentPane({
 
         setSaving(true);
         try {
-            const token = localStorage.getItem("token");
-            const response = await fetch(`/api/opportunities/${opportunityId}`, {
+            const response = await fetch(`${API_URL}/api/opportunities/${opportunityId}`, {
                 method: "PUT",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${token}`
-                },
+                headers: getAuthHeaders(),
                 body: JSON.stringify({
                     [field]: value
                 })

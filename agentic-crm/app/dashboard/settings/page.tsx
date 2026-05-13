@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { User, Lock, Users, Shield, Plus, X, Check, AlertCircle, RotateCcw, Pencil, ToggleLeft, ToggleRight, DollarSign, Trash2, Globe, Cpu, Tag, Building2, Download, Settings2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, Search, Eye, EyeOff, FileText, Mail, Send, Briefcase, ShieldCheck, RefreshCw, Coins, UserPlus, UserMinus, Calculator, Percent, Info, Clock, Bell, Filter, Zap, ArrowRight, Calendar } from "lucide-react";
 import { useAuthStore } from "@/lib/auth-store";
-import { apiClient } from "@/lib/api";
+import { apiClient, API_URL, getAuthHeaders } from "@/lib/api";
 import { useCurrency } from "@/components/providers/currency-provider";
 import { SowAdminTab } from "./components/SowAdminTab";
 import EmailTemplateBuilder, { CustomCalcField } from "@/components/email-templates/EmailTemplateBuilder";
@@ -2730,7 +2730,7 @@ function GomCalculatorTab() {
 
     // Load workingDaysPerYear from budget assumptions
     useEffect(() => {
-        fetch('/api/admin/budget-assumptions', { headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` } })
+        fetch('/api/admin/budget-assumptions', { headers: getAuthHeaders() })
             .then(r => r.ok ? r.json() : null)
             .then(data => { if (data?.workingDaysPerYear) setWorkingDaysPerYear(data.workingDaysPerYear); })
             .catch(() => {});
@@ -3048,7 +3048,7 @@ function EmailTemplatesTab() {
             formData.append("file", file);
             const res = await fetch(`${(window as any).__NEXT_DATA__?.runtimeConfig?.apiUrl || ""}/api/admin/email-templates/${editingId}/attachments`, {
                 method: "POST",
-                headers: { Authorization: `Bearer ${localStorage.getItem("auth_token")}` },
+                headers: { Authorization: `Bearer ${sessionStorage.getItem("auth_token") || localStorage.getItem("auth_token")}` },
                 body: formData,
             });
             if (!res.ok) throw new Error((await res.json()).error || "Upload failed");

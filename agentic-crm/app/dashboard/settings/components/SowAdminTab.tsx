@@ -207,7 +207,7 @@ function TemplatesPanel() {
             const formData = new FormData();
             formData.append("templateFile", selectedFile);
             Object.entries(uploadForm).forEach(([k, v]) => formData.append(k, String(v)));
-            const token = localStorage.getItem("auth_token");
+            const token = sessionStorage.getItem("auth_token") || localStorage.getItem("auth_token");
             const res = await fetch(`${API_URL}/api/admin/sow/templates`, {
                 method: "POST",
                 headers: token ? { Authorization: `Bearer ${token}` } : {},

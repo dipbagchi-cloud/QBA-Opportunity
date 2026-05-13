@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Loader2, Users, X } from "lucide-react";
+import { API_URL, getAuthHeaders } from "@/lib/api";
 
 interface AssignPresalesModalProps {
     opportunityId: string;
@@ -23,13 +24,12 @@ export function AssignPresalesModal({ opportunityId, isOpen, onAssign, onClose, 
         const fetchTeamData = async () => {
             setIsLoading(true);
             try {
-                const token = localStorage.getItem("auth_token");
-                const headers = { "Authorization": `Bearer ${token}` };
+                const headers = getAuthHeaders();
 
                 // Build URL with department filter if provided
                 const url = managerDepartment 
-                    ? `/api/master/presales-team?department=${encodeURIComponent(managerDepartment)}`
-                    : '/api/master/presales-team';
+                    ? `${API_URL}/api/master/presales-team?department=${encodeURIComponent(managerDepartment)}`
+                    : `${API_URL}/api/master/presales-team`;
                 
                 console.log('[AssignPresalesModal] Fetching from:', url);
                 console.log('[AssignPresalesModal] Department:', managerDepartment);
@@ -67,13 +67,9 @@ export function AssignPresalesModal({ opportunityId, isOpen, onAssign, onClose, 
         setSaving(true);
         try {
             const joinedNames = selectedPresales.join(", ");
-            const token = localStorage.getItem("token");
-            const response = await fetch(`/api/opportunities/${opportunityId}`, {
+            const response = await fetch(`${API_URL}/api/opportunities/${opportunityId}`, {
                 method: "PUT",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${token}`
-                },
+                headers: getAuthHeaders(),
                 body: JSON.stringify({
                     presalesAssigneeName: joinedNames
                 })
