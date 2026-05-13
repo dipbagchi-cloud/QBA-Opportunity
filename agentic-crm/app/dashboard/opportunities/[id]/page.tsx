@@ -308,7 +308,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
     // Access Control Logic
     const isSalesOrPresales = user?.department === 'Sales' || user?.department === 'Presales' || user?.role?.name?.includes('Sales') || user?.role?.name?.includes('Presales');
-    const isOwnerOrAssigned = user?.id === opportunityOwnerId || user?.name === formData.salesRep || user?.name === opportunityManagerName;
+    const isAssignedPresales = formData.presalesAssignee ? formData.presalesAssignee.split(',').map((n: string) => n.trim()).includes(user?.name || '') : false;
+    const isOwnerOrAssigned = user?.id === opportunityOwnerId || user?.name === formData.salesRep || user?.name === opportunityManagerName || isAssignedPresales;
     const hasEditAccess = !isSalesOrPresales || isOwnerOrAssigned;
 
     useEffect(() => {
