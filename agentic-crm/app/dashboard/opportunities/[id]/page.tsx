@@ -734,8 +734,9 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     }
                                     }
 
-                // If user is manager and no presales assignee, show modal
-                if (data.managerName === user?.name && !data.presalesAssigneeName && data.stage?.name !== "Pipeline" && data.stage?.name !== "Discovery") {
+                // If user is manager (by role) and no presales assignee, show modal
+                const isManagerRole = user?.role?.name?.toLowerCase().includes('manager') || user?.role?.name?.toLowerCase().includes('admin');
+                if (isManagerRole && data.managerName === user?.name && !data.presalesAssigneeName && data.stage?.name !== "Pipeline" && data.stage?.name !== "Discovery") {
                     setShowAssignPresalesModal(true);
                 }
 

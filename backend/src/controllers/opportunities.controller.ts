@@ -395,7 +395,8 @@ export async function updateOpportunity(req: Request, res: Response) {
             const role = req.user!.roleName.toLowerCase();
             if (role === 'sales' || role === 'presales') {
                 const isOwner = previous.ownerId === currentUser.id;
-                const isAssigned = previous.salesRepName === currentUser.name || previous.managerName === currentUser.name || previous.presalesAssigneeName === currentUser.name;
+                const presalesNames = (previous.presalesAssigneeName || '').split(',').map((n: string) => n.trim());
+                const isAssigned = previous.salesRepName === currentUser.name || previous.managerName === currentUser.name || presalesNames.includes(currentUser.name);
                 if (!isOwner && !isAssigned) {
                     return res.status(403).json({ error: 'You do not have permission to update this opportunity. View-only access.' });
                 }
