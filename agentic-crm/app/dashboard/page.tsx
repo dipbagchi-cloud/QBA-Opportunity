@@ -151,7 +151,7 @@ export default function DashboardPage() {
             }
         };
         fetchData();
-    }, []);
+    }, [user?.role?.id]);
 
     if (loading) {
         return (

@@ -103,8 +103,15 @@ function OpportunityDetail({ data }: { data: any }) {
     ['Probability', opp.probability != null ? `${opp.probability}%` : null],
     ['GOM Approved', opp.gomApproved != null ? (opp.gomApproved ? 'Yes' : 'No') : null],
     ['Pricing Model', opp.pricingModel],
-    ['Day Rate', opp.projectType === 'Staffing' && opp.expectedDayRate ? `$${Number(opp.expectedDayRate).toLocaleString()}` : null],
+    ['Sales Rep', opp.salesRepName],
+    ['Manager', opp.managerName],
+    ['Day Rate', opp.expectedDayRate ? `$${Number(opp.expectedDayRate).toLocaleString()}` : null],
+    ['Start Date', opp.tentativeStartDate ? new Date(opp.tentativeStartDate).toLocaleDateString() : null],
+    ['Duration', opp.tentativeDuration ? `${opp.tentativeDuration} ${opp.tentativeDurationUnit || ''}` : null],
+    ['Close Date', opp.expectedCloseDate ? new Date(opp.expectedCloseDate).toLocaleDateString() : null],
     ['Re-estimates', opp.reEstimateCount > 0 ? String(opp.reEstimateCount) : null],
+    ['Status', opp.detailedStatus],
+    ['Description', opp.description],
   ].filter(([, v]) => v && v !== '—' && v !== 'null');
 
   return (
@@ -115,6 +122,16 @@ function OpportunityDetail({ data }: { data: any }) {
           <Text style={styles.detailValue}>{value}</Text>
         </View>
       ))}
+      {opp.recentComments?.length > 0 && (
+        <View style={{ marginTop: 6 }}>
+          <Text style={[styles.detailLabel, { marginBottom: 2 }]}>Recent Comments:</Text>
+          {opp.recentComments.slice(0, 3).map((c: any, i: number) => (
+            <Text key={i} style={[styles.detailValue, { marginLeft: 8, fontSize: 10 }]}>
+              {c.author}: {c.content}
+            </Text>
+          ))}
+        </View>
+      )}
     </View>
   );
 }
@@ -329,12 +346,23 @@ export default function ChatbotScreen() {
 
       {/* Input */}
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        {/* Cancel/Skip controls during data entry */}
+        {messages.length > 0 && messages[messages.length - 1]?.pendingFields?.length && !loading && (
+          <View style={styles.dataEntryControls}>
+            <TouchableOpacity onPress={() => sendMessage('cancel')} style={styles.cancelBtn}>
+              <Text style={styles.cancelBtnText}>✕ Cancel data entry</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => sendMessage('skip')} style={styles.skipBtn}>
+              <Text style={styles.skipBtnText}>Skip this field</Text>
+            </TouchableOpacity>
+          </View>
+        )}
         <View style={styles.inputRow}>
           <TextInput
             style={styles.input}
             value={input}
             onChangeText={setInput}
-            placeholder="Type your message..."
+            placeholder={messages.length > 0 && messages[messages.length - 1]?.pendingFields?.length ? "Type your answer or 'skip'..." : 'Type your message...'}
             placeholderTextColor={colors.text.secondary}
             returnKeyType="send"
             onSubmitEditing={() => sendMessage(input)}
@@ -733,5 +761,28 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     marginBottom: 2,
     fontSize: 10,
+  },
+  dataEntryControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+  },
+  cancelBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  cancelBtnText: {
+    fontSize: 11,
+    color: '#ef4444',
+  },
+  skipBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  skipBtnText: {
+    fontSize: 11,
+    color: colors.text.secondary,
   },
 });

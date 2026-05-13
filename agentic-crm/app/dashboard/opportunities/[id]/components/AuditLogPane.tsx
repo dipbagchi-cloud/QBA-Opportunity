@@ -78,7 +78,7 @@ export function AuditLogPane({ opportunityId }: AuditLogPaneProps) {
     };
 
     return (
-        <div className="bg-white rounded-lg shadow-sm border border-slate-200">
+        <div className="bg-white rounded-lg shadow-sm border border-slate-200 min-h-[300px] flex flex-col">
             <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                     <History className="w-4 h-4 text-slate-500" />

@@ -135,13 +135,6 @@ function LoginContent() {
         }
     };
 
-    // Show blank screen until we know if this is an SSO callback or a normal visit
-    if (!pageReady && !ssoProcessing) {
-        return (
-            <div className="min-h-screen bg-gradient-to-br from-neutral-950 via-neutral-900 to-neutral-950" />
-        );
-    }
-
     // Show processing screen while handling SSO callback
     if (ssoProcessing) {
         return (
@@ -247,10 +240,7 @@ function LoginContent() {
                 <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-secondary-900/20 rounded-full blur-3xl animate-pulse-glow animation-delay-200" />
             </div>
 
-            <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5 }}
+            <div
                 className="w-full max-w-md relative z-10"
             >
                 <div className="glass-card-dark p-6 md:p-8 border border-white/10 shadow-2xl backdrop-blur-xl rounded-xl">
@@ -378,7 +368,7 @@ function LoginContent() {
                     <Link href="#" className="hover:text-neutral-300 transition-colors">Terms of Service</Link>
                     <Link href="#" className="hover:text-neutral-300 transition-colors">Contact Support</Link>
                 </div>
-            </motion.div>
+            </div>
         </div>
     );
 }

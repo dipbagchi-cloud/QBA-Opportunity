@@ -45,7 +45,7 @@ interface AuthState {
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
-  token: typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null,
+  token: typeof window !== 'undefined' ? (sessionStorage.getItem('auth_token') || localStorage.getItem('auth_token')) : null,
   isAuthenticated: false,
   isLoading: false,
   error: null,
@@ -67,7 +67,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
 
       const data = await res.json();
-      localStorage.setItem('auth_token', data.token);
+      sessionStorage.setItem('auth_token', data.token);
+      localStorage.removeItem('auth_token');
       set({
         user: data.user,
         token: data.token,
@@ -122,7 +123,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
 
       const data = await res.json();
-      localStorage.setItem('auth_token', data.token);
+      sessionStorage.setItem('auth_token', data.token);
+      localStorage.removeItem('auth_token');
       set({
         user: data.user,
         token: data.token,
@@ -139,12 +141,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout: () => {
+    sessionStorage.removeItem('auth_token');
     localStorage.removeItem('auth_token');
     set({ user: null, token: null, isAuthenticated: false, error: null });
   },
 
   checkAuth: async () => {
-    const token = get().token || localStorage.getItem('auth_token');
+    const token = get().token || sessionStorage.getItem('auth_token') || localStorage.getItem('auth_token');
     if (!token) {
       set({ isAuthenticated: false, user: null });
       return false;
@@ -156,6 +159,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       });
 
       if (!res.ok) {
+        sessionStorage.removeItem('auth_token');
         localStorage.removeItem('auth_token');
         set({ isAuthenticated: false, user: null, token: null });
         return false;
@@ -187,7 +191,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       if (!res.ok) return false;
 
       const data = await res.json();
-      localStorage.setItem('auth_token', data.token);
+      sessionStorage.setItem('auth_token', data.token);
+      localStorage.removeItem('auth_token');
       set({
         user: data.user,
         token: data.token,

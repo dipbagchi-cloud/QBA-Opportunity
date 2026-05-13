@@ -2,7 +2,7 @@ export const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001
 
 function getAuthToken(): string | null {
   if (typeof window === 'undefined') return null;
-  return localStorage.getItem('auth_token');
+  return sessionStorage.getItem('auth_token') || localStorage.getItem('auth_token');
 }
 
 export function getAuthHeaders(): Record<string, string> {
@@ -27,6 +27,7 @@ export async function apiClient<T = any>(
 
   if (res.status === 401) {
     // Token expired or invalid — clear and redirect to login
+    sessionStorage.removeItem('auth_token');
     localStorage.removeItem('auth_token');
     if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
       window.location.href = '/login';

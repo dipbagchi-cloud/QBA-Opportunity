@@ -23,14 +23,16 @@ export function EstimationTab() {
         otherCosts,
         readOnly,
         exchangeRatesSnapshot,
+        selectedYear,
     } = useOpportunityEstimation();
 
     const { currencies, getRate, getSymbol, currency: globalCurrency } = useCurrency();
 
     const convert = (valInInr: number) => {
         const targetCurrency = exchangeRatesSnapshot ? currency : globalCurrency;
+        if (targetCurrency === "INR") return valInInr;
         const rate = exchangeRatesSnapshot ? exchangeRatesSnapshot[targetCurrency] : getRate(targetCurrency);
-        return rate > 0 ? valInInr / rate : valInInr;
+        return rate > 0 ? valInInr * rate : valInInr;
     };
 
     const format = (val: number, isCurrency = true) => {
@@ -52,7 +54,7 @@ export function EstimationTab() {
                 if (days > 0) {
                     const monthIndex = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].indexOf(monthName);
                     if (monthIndex !== -1) {
-                        const monthStr = `${new Date().getFullYear()}-${String(monthIndex + 1).padStart(2, '0')}`;
+                        const monthStr = `${selectedYear}-${String(monthIndex + 1).padStart(2, '0')}`;
                         monthlyDays[monthStr] = days;
                     }
                 }
@@ -64,7 +66,7 @@ export function EstimationTab() {
                 allocatedDays: monthlyDays
             };
         });
-    }, [resources]);
+    }, [resources, selectedYear]);
 
     // 2. Grid 2: Salary Cost (Direct Cost)
     const salaryRows = useMemo(() => {
@@ -74,7 +76,7 @@ export function EstimationTab() {
                 if (days > 0) {
                     const monthIndex = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].indexOf(monthName);
                     if (monthIndex !== -1) {
-                        const monthStr = `${new Date().getFullYear()}-${String(monthIndex + 1).padStart(2, '0')}`;
+                        const monthStr = `${selectedYear}-${String(monthIndex + 1).padStart(2, '0')}`;
                         monthlyCost[monthStr] = days * resource.dailyCost;
                     }
                 }
@@ -86,7 +88,7 @@ export function EstimationTab() {
                 costs: monthlyCost
             };
         });
-    }, [resources]);
+    }, [resources, selectedYear]);
 
     // 3. Grid 3: GOM Summary Structure
     const expenseRows = useMemo(() => {
@@ -113,7 +115,7 @@ export function EstimationTab() {
                 Object.entries(resource.monthlyEfforts).forEach(([monthName, days]) => {
                     const monthIndex = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].indexOf(monthName);
                     if (monthIndex !== -1) {
-                        const monthStr = `${new Date().getFullYear()}-${String(monthIndex + 1).padStart(2, '0')}`;
+                        const monthStr = `${selectedYear}-${String(monthIndex + 1).padStart(2, '0')}`;
                         if (monthStr === m && days > 0) {
                             rows["Salary"][m] += days * resource.dailyCost;
                         }
@@ -130,18 +132,19 @@ export function EstimationTab() {
         });
 
         return rows;
-    }, [months, resources, otherCosts]);
+    }, [months, resources, otherCosts, selectedYear]);
 
     // Totals for GOM Table
     const revenueRow = useMemo(() => {
-        const row: Record<string, number> = {};
+        // First calculate raw billing per month (days × dailyRate)
+        const rawRow: Record<string, number> = {};
         months.forEach(m => {
-            row[m] = resources.reduce((sum, resource) => {
+            rawRow[m] = resources.reduce((sum, resource) => {
                 let monthTotal = 0;
                 Object.entries(resource.monthlyEfforts).forEach(([monthName, days]) => {
                     const monthIndex = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].indexOf(monthName);
                     if (monthIndex !== -1) {
-                        const monthStr = `${new Date().getFullYear()}-${String(monthIndex + 1).padStart(2, '0')}`;
+                        const monthStr = `${selectedYear}-${String(monthIndex + 1).padStart(2, '0')}`;
                         if (monthStr === m && days > 0) {
                             monthTotal += days * resource.dailyRate;
                         }
@@ -150,8 +153,18 @@ export function EstimationTab() {
                 return sum + monthTotal;
             }, 0);
         });
+
+        // Scale proportionally so monthly values sum to the actual revenue (which includes markup)
+        const rawTotal = Object.values(rawRow).reduce((a, b) => a + b, 0);
+        const row: Record<string, number> = {};
+        if (rawTotal > 0 && revenue > 0) {
+            const scale = revenue / rawTotal;
+            months.forEach(m => { row[m] = rawRow[m] * scale; });
+        } else {
+            months.forEach(m => { row[m] = rawRow[m]; });
+        }
         return row;
-    }, [months, resources]);
+    }, [months, resources, revenue, selectedYear]);
 
     // Show message if no data
     if (resources.length === 0) {

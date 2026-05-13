@@ -7,6 +7,8 @@ import {MainNavigator} from './MainNavigator';
 import {useAuthStore} from '../lib/auth-store';
 import {Spinner} from '../components/ui/Spinner';
 import {setUnauthorizedHandler} from '../lib/api';
+import NotificationsScreen from '../screens/notifications/NotificationsScreen';
+import SearchScreen from '../screens/search/SearchScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -33,7 +35,11 @@ export function AppNavigator() {
     <NavigationContainer>
       <Stack.Navigator screenOptions={{headerShown: false}}>
         {isAuthenticated ? (
-          <Stack.Screen name="Main" component={MainNavigator} />
+          <>
+            <Stack.Screen name="Main" component={MainNavigator} />
+            <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="Search" component={SearchScreen} options={{ animation: 'slide_from_right' }} />
+          </>
         ) : (
           <Stack.Screen name="Auth" component={AuthNavigator} />
         )}

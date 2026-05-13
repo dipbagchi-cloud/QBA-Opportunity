@@ -1,10 +1,11 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TextInput, TouchableOpacity,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { api } from '../../lib/api';
 
-const CURRENCIES = [
+const FALLBACK_CURRENCIES = [
   { code: 'USD', symbol: '$', rate: 1 },
   { code: 'EUR', symbol: '€', rate: 0.92 },
   { code: 'GBP', symbol: '£', rate: 0.79 },
@@ -26,8 +27,23 @@ export default function GomCalculatorScreen() {
   const [markupPercent, setMarkupPercent] = useState('0');
   const [durationMonths, setDurationMonths] = useState('3');
   const [workingDays, setWorkingDays] = useState('55');
+  const [currencies, setCurrencies] = useState(FALLBACK_CURRENCIES);
 
-  const currency = CURRENCIES.find(c => c.code === currencyCode) || CURRENCIES[0];
+  // Fetch live currency rates from API
+  useEffect(() => {
+    api.get('/api/admin/currency-rates')
+      .then((data: any) => {
+        if (Array.isArray(data) && data.length > 0) {
+          const mapped = data
+            .filter((r: any) => r.isActive)
+            .map((r: any) => ({ code: r.code, symbol: r.symbol, rate: r.rateToBase || 1 }));
+          if (mapped.length > 0) setCurrencies(mapped);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const currency = currencies.find((c: any) => c.code === currencyCode) || currencies[0];
   const exchangeRate = currency.rate;
 
   // Core calculations matching web exactly
@@ -109,7 +125,7 @@ export default function GomCalculatorScreen() {
 
           <Text style={st.label}>Currency</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
-            {CURRENCIES.map(c => (
+            {currencies.map((c: any) => (
               <TouchableOpacity key={c.code} style={[st.chip, currencyCode === c.code && st.chipActive]}
                 onPress={() => setCurrencyCode(c.code)}>
                 <Text style={[st.chipText, currencyCode === c.code && st.chipTextActive]}>

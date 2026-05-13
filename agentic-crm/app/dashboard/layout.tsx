@@ -89,6 +89,7 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
         if (success) {
             setShowRoleSwitcher(false);
             router.push('/dashboard');
+            router.refresh();
         }
     };
 

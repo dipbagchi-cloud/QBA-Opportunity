@@ -55,6 +55,8 @@ export type MainTabParamList = {
 export type RootStackParamList = {
   Auth: undefined;
   Main: undefined;
+  Notifications: undefined;
+  Search: undefined;
 };
 
 // ─── Screen prop helpers ─────────────────────────────────────────────────────

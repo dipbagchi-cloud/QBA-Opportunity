@@ -33,6 +33,12 @@ export default function DashboardScreen() {
     queryKey: ['recent-opps'],
     queryFn: () => api.get('/api/opportunities?limit=8'),
   });
+  const { data: unreadData } = useQuery({
+    queryKey: ['unread-count'],
+    queryFn: () => api.get('/api/notifications/unread-count'),
+    refetchInterval: 30000,
+  });
+  const unreadCount = unreadData?.count || 0;
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -75,13 +81,26 @@ export default function DashboardScreen() {
       <ScrollView refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#6366f1" />} showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={st.header}>
-          <View>
+          <View style={{ flex: 1 }}>
             <Text style={st.greeting}>{greeting},</Text>
             <Text style={st.userName}>{user?.name || 'User'}</Text>
           </View>
-          <TouchableOpacity style={st.newBtn} onPress={() => nav.navigate('Opportunities', { screen: 'NewOpportunity' })}>
-            <Text style={st.newBtnText}>+ New Deal</Text>
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <TouchableOpacity style={st.iconBtn} onPress={() => nav.navigate('Search' as never)}>
+              <Text style={{ fontSize: 20 }}>🔍</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={st.iconBtn} onPress={() => nav.navigate('Notifications' as never)}>
+              <Text style={{ fontSize: 20 }}>🔔</Text>
+              {unreadCount > 0 && (
+                <View style={st.notifBadge}>
+                  <Text style={st.notifBadgeText}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity style={st.newBtn} onPress={() => nav.navigate('Opportunities', { screen: 'NewOpportunity' })}>
+              <Text style={st.newBtnText}>+ New Deal</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* KPI Cards */}
@@ -256,6 +275,9 @@ const st = StyleSheet.create({
   userName: { fontSize: 22, fontWeight: '700', color: '#0f172a' },
   newBtn: { backgroundColor: '#6366f1', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10 },
   newBtnText: { color: '#fff', fontWeight: '600', fontSize: 14 },
+  iconBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#f1f5f9', alignItems: 'center', justifyContent: 'center' },
+  notifBadge: { position: 'absolute', top: -2, right: -2, backgroundColor: '#ef4444', borderRadius: 9, minWidth: 18, height: 18, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
+  notifBadgeText: { color: '#fff', fontSize: 10, fontWeight: '700' },
   kpiGrid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 12 },
   kpiCard: { width: (width - 40) / 2, backgroundColor: '#fff', borderRadius: 12, padding: 14, margin: 4, borderLeftWidth: 4, shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 4, elevation: 1 },
   kpiValue: { fontSize: 20, fontWeight: '700' },

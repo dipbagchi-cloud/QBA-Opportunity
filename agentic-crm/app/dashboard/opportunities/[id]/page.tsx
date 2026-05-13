@@ -265,6 +265,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const { user } = useAuthStore();
     const { toast } = useToast();
     const [isLoading, setIsLoading] = useState(true);
+    // Guard: skip derived-value effects during initial data load to prevent cascading re-renders ("dancing")
+    const skipDerivedEffects = useRef(true);
     const [isSaving, setIsSaving] = useState(false);
     const [showPresalesModal, setShowPresalesModal] = useState(false);
     const [showAssignPresalesModal, setShowAssignPresalesModal] = useState(false);
@@ -310,21 +312,21 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const hasEditAccess = !isSalesOrPresales || isOwnerOrAssigned;
 
     useEffect(() => {
+        if (skipDerivedEffects.current) return;
         if (prevCurrencyRef.current && prevCurrencyRef.current !== globalCurrency) {
-            if (formData.value && !isNaN(Number(formData.value))) {
-                const oldRate = getRate(prevCurrencyRef.current);
-                const newRate = getRate(globalCurrency);
-                const converted = (Number(formData.value) * newRate) / oldRate;
+            const oldRate = getRate(prevCurrencyRef.current);
+            const newRate = getRate(globalCurrency);
+            if (oldRate && newRate) {
                 setFormData(prev => ({
                     ...prev,
-                    value: Math.round(converted * 100) / 100,
-                    expectedDayRate: formData.expectedDayRate ? String(Math.round(((Number(formData.expectedDayRate) * newRate) / oldRate) * 100) / 100) : ""
+                    value: prev.value && !isNaN(Number(prev.value)) ? Math.round((Number(prev.value) * newRate / oldRate) * 100) / 100 : prev.value,
+                    expectedDayRate: prev.expectedDayRate ? String(Math.round((Number(prev.expectedDayRate) * newRate / oldRate) * 100) / 100) : ""
                 }));
             }
             prevCurrencyRef.current = globalCurrency;
             setOpportunityCurrency(globalCurrency);
         }
-    }, [globalCurrency, getRate, formData.value, formData.expectedDayRate]);
+    }, [globalCurrency]);
 
 
     // Country → Region + Currency mapping (fetched from API)
@@ -449,6 +451,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
     // Auto-calculate working days from start date + duration months (excluding weekends & holidays)
     useEffect(() => {
+        if (skipDerivedEffects.current) return;
         if (formData.tentativeStartDate && gomInputs.durationMonths > 0) {
             const days = countWorkingDaysInPeriod(formData.tentativeStartDate, gomInputs.durationMonths, holidays);
             if (days > 0) {
@@ -533,20 +536,30 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     fetch(`${API_URL}/api/master/country-region-map`, { headers }),
                     fetch(`${API_URL}/api/master/holidays`, { headers }),
                 ]);
-                if (clientsRes.ok) setClients(await clientsRes.json());
-                if (regionsRes.ok) setRegions((await regionsRes.json()).map((r: any) => r.name));
-                if (techRes.ok) setTechnologies((await techRes.json()).map((t: any) => t.name));
-                if (pricingRes.ok) setPricingModels((await pricingRes.json()).map((p: any) => p.name));
-                if (salesRes.ok) setSalespersons(await salesRes.json());
-                if (deptRes.ok) setDepartments(await deptRes.json());
-                if (projTypesRes.ok) setProjectTypes((await projTypesRes.json()).map((p: any) => p.name));
-                if (countryMapRes.ok) setCountryRegionMap(await countryMapRes.json());
-                if (holRes.ok) {
-                    const hData = await holRes.json();
-                    if (Array.isArray(hData)) setHolidays(hData);
-                }
-                if (budgetRes.ok) {
-                    const budgetData = await budgetRes.json();
+                // Parse all JSON in parallel first, then batch state updates
+                const [clientsData, regionsData, techData, pricingData, salesData, deptData, projTypesData, budgetData, countryMapData, holData] = await Promise.all([
+                    clientsRes.ok ? clientsRes.json() : null,
+                    regionsRes.ok ? regionsRes.json() : null,
+                    techRes.ok ? techRes.json() : null,
+                    pricingRes.ok ? pricingRes.json() : null,
+                    salesRes.ok ? salesRes.json() : null,
+                    deptRes.ok ? deptRes.json() : null,
+                    projTypesRes.ok ? projTypesRes.json() : null,
+                    budgetRes.ok ? budgetRes.json() : null,
+                    countryMapRes.ok ? countryMapRes.json() : null,
+                    holRes.ok ? holRes.json() : null,
+                ]);
+                // Batch all state updates synchronously so React 18 batches them in one render
+                if (clientsData) setClients(clientsData);
+                if (regionsData) setRegions(regionsData.map((r: any) => r.name));
+                if (techData) setTechnologies(techData.map((t: any) => t.name));
+                if (pricingData) setPricingModels(pricingData.map((p: any) => p.name));
+                if (salesData) setSalespersons(salesData);
+                if (deptData) setDepartments(deptData);
+                if (projTypesData) setProjectTypes(projTypesData.map((p: any) => p.name));
+                if (countryMapData) setCountryRegionMap(countryMapData);
+                if (holData && Array.isArray(holData)) setHolidays(holData);
+                if (budgetData) {
                     if (budgetData.autoSaveIntervalMinutes !== undefined) {
                         setAutoSaveIntervalMinutes(budgetData.autoSaveIntervalMinutes);
                     }
@@ -585,6 +598,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     // - Weeks: End = Start + N×7 − 1 day (calendar)
     // - Months: End = Start + N months − 1 day (calendar)
     useEffect(() => {
+        if (skipDerivedEffects.current) return;
         const dur = Number(formData.duration);
         if (formData.tentativeStartDate && dur > 0 && formData.durationUnit) {
             const end = calculateEndDate(formData.tentativeStartDate, dur, formData.durationUnit, holidays);
@@ -594,6 +608,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
     // Auto-calculate estimated value = Expected Day Rate × 20 working days × Duration months (only for Staffing)
     useEffect(() => {
+        if (skipDerivedEffects.current) return;
         if (formData.projectType !== 'Staffing') return;
         const rate = Number(formData.expectedDayRate) || 0;
         const dur = Number(formData.duration) || 0;
@@ -605,6 +620,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
     // Sync GOM durationMonths from opportunity duration field
     useEffect(() => {
+        if (skipDerivedEffects.current) return;
         const dur = Number(formData.duration) || 0;
         if (dur > 0) {
             const months = Math.round(durationToMonths(dur, formData.durationUnit));
@@ -729,6 +745,14 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
         if (id) fetchDetails();
     }, [id]);
+
+    // Enable derived-value effects after the initial data render has painted
+    useEffect(() => {
+        if (!isLoading && skipDerivedEffects.current) {
+            const raf = requestAnimationFrame(() => { skipDerivedEffects.current = false; });
+            return () => cancelAnimationFrame(raf);
+        }
+    }, [isLoading]);
 
     // Refetch presales data when entering Sales tab to ensure we have the latest GOM calculator saves
     useEffect(() => {
@@ -1203,7 +1227,47 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         }
     };
 
-    if (isLoading) return <div className="p-6">Loading Opportunity...</div>;
+    if (isLoading) return (
+        <div className="max-w-[1400px] mx-auto space-y-4 animate-pulse">
+            {/* Header skeleton */}
+            <div className="flex items-center justify-between">
+                <div className="h-6 w-64 bg-slate-200 rounded" />
+                <div className="flex gap-2">
+                    <div className="h-10 w-24 bg-slate-200 rounded-md" />
+                    <div className="h-10 w-32 bg-slate-200 rounded-md" />
+                </div>
+            </div>
+            {/* Stepper skeleton */}
+            <div className="flex items-center gap-2 py-3 px-4 bg-white rounded-lg border border-slate-200">
+                {[1,2,3,4,5].map(i => (
+                    <React.Fragment key={i}>
+                        <div className="h-8 w-24 bg-slate-200 rounded-full" />
+                        {i < 5 && <div className="h-0.5 flex-1 bg-slate-200" />}
+                    </React.Fragment>
+                ))}
+            </div>
+            {/* Content skeleton */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <div className="lg:col-span-2 space-y-4">
+                    <div className="bg-white rounded-lg border border-slate-200 p-6 space-y-4">
+                        {[1,2,3,4,5,6].map(i => (
+                            <div key={i} className="flex gap-4">
+                                <div className="h-4 w-28 bg-slate-200 rounded" />
+                                <div className="h-10 flex-1 bg-slate-100 rounded-md" />
+                            </div>
+                        ))}
+                    </div>
+                </div>
+                <div className="space-y-4">
+                    <div className="bg-white rounded-lg border border-slate-200 p-4 space-y-3">
+                        <div className="h-5 w-32 bg-slate-200 rounded" />
+                        <div className="h-20 bg-slate-100 rounded" />
+                        <div className="h-20 bg-slate-100 rounded" />
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
 
     const handleHoldToggle = async () => {
         const newStalled = !isStalled;
@@ -2777,7 +2841,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             )}
 
             {/* Comments & Audit Log — visible on all stages */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 min-h-[300px]">
                 <AssignmentPane 
                     opportunityId={id} 
                     salesRepName={formData.salesRep} 

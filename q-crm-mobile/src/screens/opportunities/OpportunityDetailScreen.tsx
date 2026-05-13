@@ -42,7 +42,45 @@ function calculateDailyCost(annualCtc: number, assumptions: any): number {
   const growth = annualCtc * ((assumptions.annualGrowthBufferPercent || 0) / 100);
   const increment = annualCtc * ((assumptions.averageIncrementPercent || 0) / 100);
   const total = annualCtc + dm + bench + leave + growth + increment;
-  return total / (assumptions.workingDaysPerYear || 240);
+  return total / (assumptions.workingDaysPerYear || 220);
+}
+
+/**
+ * Calculate tentative end date from start date + duration (holiday-aware).
+ * - Days: working days (skip weekends + holidays), start date is day 1
+ * - Weeks: Start + N*7 - 1 calendar day
+ * - Months: Start + N months - 1 calendar day
+ */
+function calculateEndDateHolidayAware(startDateStr: string, duration: number, unit: string, holidays: string[] = []): Date {
+  const start = new Date(startDateStr);
+  if (unit === 'months') {
+    const end = new Date(start);
+    end.setMonth(end.getMonth() + duration);
+    end.setDate(end.getDate() - 1);
+    return end;
+  }
+  if (unit === 'weeks') {
+    const end = new Date(start);
+    end.setDate(end.getDate() + duration * 7 - 1);
+    return end;
+  }
+  // Days: count working days, skipping weekends and holidays
+  const date = new Date(start);
+  let counted = 0;
+  const startDay = date.getDay();
+  const startStr = date.toISOString().split('T')[0];
+  if (startDay !== 0 && startDay !== 6 && !holidays.includes(startStr)) {
+    counted = 1;
+  }
+  if (counted >= duration) return date;
+  while (counted < duration) {
+    date.setDate(date.getDate() + 1);
+    const dateStr = date.toISOString().split('T')[0];
+    if (date.getDay() !== 0 && date.getDay() !== 6 && !holidays.includes(dateStr)) {
+      counted++;
+    }
+  }
+  return date;
 }
 
 function getVisibleMonths(startDate: string | undefined, endDate: string | undefined, year: number): string[] {
@@ -147,6 +185,19 @@ export default function OpportunityDetailScreen() {
   const { data: salespersons } = useQuery({ queryKey: ['salespersons'], queryFn: () => api.get('/api/master/salespersons') });
   const { data: departments } = useQuery({ queryKey: ['departments'], queryFn: () => api.get('/api/master/departments') });
   const { data: rateCards } = useQuery({ queryKey: ['rateCards'], queryFn: () => api.get('/api/rate-cards'), enabled: activeStep === 1 });
+  const { data: holidays } = useQuery({
+    queryKey: ['holidays'],
+    queryFn: async () => {
+      const res = await api.get('/api/master/holidays');
+      const arr = Array.isArray(res) ? res : res?.data || [];
+      return arr.map((h: any) => h.date?.split('T')[0]).filter(Boolean);
+    },
+  });
+  const { data: countryRegionMap } = useQuery({
+    queryKey: ['countryRegionMap'],
+    queryFn: () => api.get('/api/master/country-region-map'),
+    enabled: editMode,
+  });
   const { data: budgetAssumptions } = useQuery({
     queryKey: ['budgetAssumptions'],
     queryFn: () => api.get('/api/admin/budget-assumptions'),
@@ -245,16 +296,12 @@ export default function OpportunityDetailScreen() {
   const calcEndDate = useMemo(() => {
     if (!schedStartDate || !schedDuration) return '';
     try {
-      const start = new Date(schedStartDate);
       const dur = parseInt(schedDuration);
       if (isNaN(dur)) return '';
-      const end = new Date(start);
-      if (schedDurationUnit === 'months') end.setMonth(end.getMonth() + dur);
-      else if (schedDurationUnit === 'weeks') end.setDate(end.getDate() + dur * 7);
-      else end.setDate(end.getDate() + dur);
+      const end = calculateEndDateHolidayAware(schedStartDate, dur, schedDurationUnit, holidays || []);
       return toISODate(end);
     } catch { return ''; }
-  }, [schedStartDate, schedDuration, schedDurationUnit]);
+  }, [schedStartDate, schedDuration, schedDurationUnit, holidays]);
 
   const visibleMonths = useMemo(() =>
     getVisibleMonths(opp?.tentativeStartDate, opp?.tentativeEndDate, selectedYear),
@@ -892,7 +939,7 @@ export default function OpportunityDetailScreen() {
                             <Text style={{ width: 120, fontSize: 11, color: '#0f172a' }} numberOfLines={1}>{r.role}</Text>
                             {visibleMonths.map(m => {
                               const days = r.monthlyEfforts?.[m] || 0;
-                              const fte = days / ((budgetAssumptions?.workingDaysPerYear || 240) / 12);
+                              const fte = days / ((budgetAssumptions?.workingDaysPerYear || 220) / 12);
                               return <Text key={m} style={{ width: 50, fontSize: 11, textAlign: 'center', color: '#334155' }}>{fte > 0 ? fte.toFixed(2) : '-'}</Text>;
                             })}
                           </View>

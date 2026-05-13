@@ -234,7 +234,7 @@ export function GomCalculatorTab({ gomApproved = false, onApproveGom, canApprove
                             </div>
 
                             <div className="flex justify-between items-center text-sm">
-                                <span className="text-slate-600">Travel Cost:</span>
+                                <span className="text-slate-600">Travel & Hospitality Cost:</span>
                                 <span className="font-semibold text-slate-900">{fmtCurrency(totalTravelCost)}</span>
                             </div>
 
@@ -277,7 +277,7 @@ export function GomCalculatorTab({ gomApproved = false, onApproveGom, canApprove
                                 <span className="text-base font-bold text-blue-700">{fmtCurrency(revenue)}</span>
                             </div>
                             <p className="text-xs text-blue-600">
-                                Formula: Resource Cost + Travel & Hospitality Costs + Special Cost + Budget Cost
+                                Formula: (Resource Cost + Travel & Hospitality Costs + Special Cost + Budget Cost) * (1 + Markup %)
                             </p>
                         </div>
 
@@ -382,7 +382,7 @@ export function GomCalculatorTab({ gomApproved = false, onApproveGom, canApprove
                         {/* Total Travel Cost Summary */}
                         <div className="bg-blue-50 p-3 rounded-md border border-blue-200 mt-3">
                             <div className="flex justify-between items-center">
-                                <span className="text-xs font-medium text-blue-900">Total Travel Cost:</span>
+                                <span className="text-xs font-medium text-blue-900">Total Travel & Hospitality Cost:</span>
                                 <span className="text-base font-bold text-blue-700">
                                     {fmtCurrency(totalTravelCost)}
                                 </span>
@@ -470,11 +470,11 @@ export function GomCalculatorTab({ gomApproved = false, onApproveGom, canApprove
                     </div>
                     <div className="bg-white p-3 rounded border border-slate-200">
                         <div className="font-semibold text-slate-700 mb-1">Revenue</div>
-                        <div className="text-slate-600">Resource Cost + Travel & Hospitality Costs + Special Cost + Budget Cost</div>
+                        <div className="text-slate-600">(Resource Cost + Travel & Hospitality Costs + Special Cost + Budget Cost) * (1 + Markup %)</div>
                     </div>
                     <div className="bg-white p-3 rounded border border-slate-200">
                         <div className="font-semibold text-slate-700 mb-1">GOM %</div>
-                        <div className="text-slate-600">(Revenue - Total Cost) / Revenue × 100</div>
+                        <div className="text-slate-600">(Revenue - Total Cost) / Revenue * 100</div>
                     </div>
                 </div>
             </div>
@@ -556,7 +556,7 @@ export function GomCalculatorTab({ gomApproved = false, onApproveGom, canApprove
                             </div>
                         </div>
                         <div className="flex justify-between items-center py-2 border-b border-slate-100">
-                            <span className="text-slate-600">Travel Cost:</span>
+                            <span className="text-slate-600">Travel & Hospitality Cost:</span>
                             <div className="text-right">
                                 <div className="font-semibold text-slate-900">{formatCurrency(convertCurrency(totalTravelCost))}</div>
                                 <div className="text-xs text-slate-500">{fmtCurrency(totalTravelCost)}</div>
