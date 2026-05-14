@@ -3043,7 +3043,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             </p>
 
                             <div className="space-y-1.5">
-                                <label className="block text-sm font-bold text-slate-700">Comment *</label>
+                                <label className="block text-sm font-bold text-slate-700">Reason for Re-estimation *</label>
                                 <textarea
                                     rows={3}
                                     required
@@ -3055,7 +3055,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             </div>
 
                             <div className="space-y-1.5">
-                                <label className="block text-sm font-bold text-slate-700">Adjusted Estimated Value ({cSym})</label>
+                                <label className="block text-sm font-bold text-slate-700">Suggested Re-estimate Value ({cSym})</label>
                                 <input
                                     type="number"
                                     placeholder="0.00"

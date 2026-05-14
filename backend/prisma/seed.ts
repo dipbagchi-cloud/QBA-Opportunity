@@ -533,6 +533,8 @@ async function main() {
 <p>Hi {{recipientName}},</p>
 <p>The opportunity <strong>{{opportunityTitle}}</strong> for <strong>{{clientName}}</strong> has been sent back for re-estimation.</p>
 <p><strong>Reason:</strong> {{reason}}</p>
+<p><strong>Current Value:</strong> {{currency}} {{value}}</p>
+<p><strong>Suggested Re-estimate Value:</strong> {{adjustedEstimatedValue}}</p>
 <p><strong>Re-estimate Count:</strong> {{reEstimateCount}}</p>
 <p><strong>Sent by:</strong> {{updatedBy}}</p>
 <p>Please review the estimation and make necessary adjustments.</p>
