@@ -2,6 +2,39 @@ import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { PERMISSIONS } from '../lib/permissions';
 
+// GET /api/users/search?q=<name>&permission=presales:write
+// Returns active users matching the query who hold the requested permission.
+export const searchUsers = async (req: Request, res: Response) => {
+    try {
+        const q = ((req.query.q as string) || '').trim();
+        const permission = ((req.query.permission as string) || '').trim();
+
+        const users = await prisma.user.findMany({
+            where: {
+                isActive: true,
+                ...(q ? { name: { contains: q, mode: 'insensitive' } } : {}),
+            },
+            select: { id: true, name: true, email: true, roles: { select: { permissions: true } } },
+            orderBy: { name: 'asc' },
+            take: 30,
+        });
+
+        const filtered = permission
+            ? users.filter((u) =>
+                  u.roles.some((r) => {
+                      const perms = r.permissions as string[];
+                      return perms.includes('*') || perms.includes(permission);
+                  })
+              )
+            : users;
+
+        res.json(filtered.map(({ id, name, email }) => ({ id, name, email })));
+    } catch (error) {
+        console.error('Error searching users:', error);
+        res.status(500).json({ message: 'Internal server error' });
+    }
+};
+
 export const getUserDetails = async (req: Request, res: Response) => {
     try {
         const userId = req.params.id;

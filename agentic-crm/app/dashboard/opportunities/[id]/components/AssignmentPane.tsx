@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { UserCircle, Briefcase, Code, Loader2, Plus, X } from "lucide-react";
 import { API_URL, getAuthHeaders } from "@/lib/api";
 
@@ -12,6 +12,12 @@ interface AssignmentPaneProps {
     isAdmin: boolean;
 }
 
+interface UserSuggestion {
+    id: string;
+    name: string;
+    email: string;
+}
+
 export function AssignmentPane({
     opportunityId,
     salesRepName,
@@ -23,15 +29,57 @@ export function AssignmentPane({
 }: AssignmentPaneProps) {
     const [saving, setSaving] = useState(false);
     const [addingPresales, setAddingPresales] = useState(false);
-    const [newPresalesName, setNewPresalesName] = useState("");
+    const [query, setQuery] = useState("");
+    const [suggestions, setSuggestions] = useState<UserSuggestion[]>([]);
+    const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+    const [highlightedIndex, setHighlightedIndex] = useState(-1);
+    const dropdownRef = useRef<HTMLDivElement>(null);
+    const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    // Parse comma-separated presales names into an array
     const presalesNames = presalesAssigneeName
         ? presalesAssigneeName.split(",").map((n) => n.trim()).filter(Boolean)
         : [];
 
-    // Only the assigned manager or admin can edit presales assignments
     const canEditPresales = isAdmin || isAssignedManager;
+
+    const fetchSuggestions = useCallback(async (q: string) => {
+        setLoadingSuggestions(true);
+        try {
+            const res = await fetch(
+                `${API_URL}/api/users/search?q=${encodeURIComponent(q)}&permission=presales%3Awrite`,
+                { headers: getAuthHeaders() }
+            );
+            if (!res.ok) throw new Error("Failed to fetch users");
+            const data: UserSuggestion[] = await res.json();
+            // exclude already-added names
+            const lowerAdded = presalesNames.map((n) => n.toLowerCase());
+            setSuggestions(data.filter((u) => !lowerAdded.includes(u.name.toLowerCase())));
+        } catch {
+            setSuggestions([]);
+        } finally {
+            setLoadingSuggestions(false);
+        }
+    }, [presalesNames]);
+
+    useEffect(() => {
+        if (!addingPresales) return;
+        if (debounceRef.current) clearTimeout(debounceRef.current);
+        debounceRef.current = setTimeout(() => fetchSuggestions(query), 200);
+        return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+    }, [query, addingPresales, fetchSuggestions]);
+
+    // Close dropdown on outside click
+    useEffect(() => {
+        const handler = (e: MouseEvent) => {
+            if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+                setAddingPresales(false);
+                setQuery("");
+                setSuggestions([]);
+            }
+        };
+        if (addingPresales) document.addEventListener("mousedown", handler);
+        return () => document.removeEventListener("mousedown", handler);
+    }, [addingPresales]);
 
     const patchAssignment = async (field: string, value: string) => {
         setSaving(true);
@@ -49,17 +97,11 @@ export function AssignmentPane({
         }
     };
 
-    const handleAddPresales = async () => {
-        const name = newPresalesName.trim();
-        if (!name) return;
-        if (presalesNames.map((n) => n.toLowerCase()).includes(name.toLowerCase())) {
-            setNewPresalesName("");
-            setAddingPresales(false);
-            return;
-        }
-        const updated = [...presalesNames, name].join(", ");
+    const handleSelectUser = async (user: UserSuggestion) => {
+        const updated = [...presalesNames, user.name].join(", ");
         setFormData((prev: any) => ({ ...prev, presalesAssignee: updated }));
-        setNewPresalesName("");
+        setQuery("");
+        setSuggestions([]);
         setAddingPresales(false);
         await patchAssignment("presalesAssigneeName", updated);
     };
@@ -68,6 +110,26 @@ export function AssignmentPane({
         const updated = presalesNames.filter((n) => n !== name).join(", ");
         setFormData((prev: any) => ({ ...prev, presalesAssignee: updated }));
         await patchAssignment("presalesAssigneeName", updated);
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === "ArrowDown") {
+            e.preventDefault();
+            setHighlightedIndex((i) => Math.min(i + 1, suggestions.length - 1));
+        } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            setHighlightedIndex((i) => Math.max(i - 1, 0));
+        } else if (e.key === "Enter") {
+            e.preventDefault();
+            if (highlightedIndex >= 0 && suggestions[highlightedIndex]) {
+                handleSelectUser(suggestions[highlightedIndex]);
+            }
+        } else if (e.key === "Escape") {
+            setAddingPresales(false);
+            setQuery("");
+            setSuggestions([]);
+        }
+        setHighlightedIndex(-1);
     };
 
     return (
@@ -113,7 +175,7 @@ export function AssignmentPane({
                         {canEditPresales && !addingPresales && (
                             <button
                                 type="button"
-                                onClick={() => setAddingPresales(true)}
+                                onClick={() => { setAddingPresales(true); setHighlightedIndex(-1); }}
                                 className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 font-medium"
                             >
                                 <Plus className="w-3 h-3" />
@@ -147,36 +209,57 @@ export function AssignmentPane({
                         ))}
                     </div>
 
-                    {/* Add presales input */}
+                    {/* Search dropdown */}
                     {addingPresales && (
-                        <div className="mt-2 flex gap-2">
-                            <input
-                                autoFocus
-                                type="text"
-                                value={newPresalesName}
-                                onChange={(e) => setNewPresalesName(e.target.value)}
-                                onKeyDown={(e) => {
-                                    if (e.key === "Enter") handleAddPresales();
-                                    if (e.key === "Escape") { setAddingPresales(false); setNewPresalesName(""); }
-                                }}
-                                placeholder="Full name..."
-                                className="flex-1 px-2.5 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                            />
-                            <button
-                                type="button"
-                                onClick={handleAddPresales}
-                                disabled={!newPresalesName.trim()}
-                                className="px-2.5 py-1.5 bg-indigo-600 text-white text-xs font-semibold rounded-md hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed"
-                            >
-                                Add
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => { setAddingPresales(false); setNewPresalesName(""); }}
-                                className="px-2.5 py-1.5 bg-white border border-slate-300 text-xs text-slate-600 rounded-md hover:bg-slate-50"
-                            >
-                                Cancel
-                            </button>
+                        <div ref={dropdownRef} className="mt-2 relative">
+                            <div className="flex items-center border border-slate-300 rounded-md overflow-hidden focus-within:ring-2 focus-within:ring-indigo-400">
+                                <input
+                                    autoFocus
+                                    type="text"
+                                    value={query}
+                                    onChange={(e) => { setQuery(e.target.value); setHighlightedIndex(-1); }}
+                                    onKeyDown={handleKeyDown}
+                                    placeholder="Search presales users..."
+                                    className="flex-1 px-2.5 py-1.5 text-sm focus:outline-none"
+                                />
+                                {loadingSuggestions && (
+                                    <Loader2 className="w-3.5 h-3.5 text-slate-400 animate-spin mr-2 shrink-0" />
+                                )}
+                                <button
+                                    type="button"
+                                    onClick={() => { setAddingPresales(false); setQuery(""); setSuggestions([]); }}
+                                    className="px-2 py-1.5 text-slate-400 hover:text-slate-600"
+                                    title="Cancel"
+                                >
+                                    <X className="w-3.5 h-3.5" />
+                                </button>
+                            </div>
+
+                            {suggestions.length > 0 && (
+                                <ul className="absolute z-50 mt-1 w-full bg-white border border-slate-200 rounded-md shadow-lg max-h-48 overflow-y-auto">
+                                    {suggestions.map((user, idx) => (
+                                        <li
+                                            key={user.id}
+                                            onMouseDown={(e) => { e.preventDefault(); handleSelectUser(user); }}
+                                            onMouseEnter={() => setHighlightedIndex(idx)}
+                                            className={`px-3 py-2 cursor-pointer text-sm ${
+                                                idx === highlightedIndex
+                                                    ? "bg-indigo-50 text-indigo-800"
+                                                    : "text-slate-700 hover:bg-slate-50"
+                                            }`}
+                                        >
+                                            <span className="font-medium">{user.name}</span>
+                                            <span className="ml-2 text-xs text-slate-400">{user.email}</span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+
+                            {!loadingSuggestions && suggestions.length === 0 && query.length > 0 && (
+                                <p className="mt-1 px-3 py-2 text-xs text-slate-400 bg-white border border-slate-200 rounded-md">
+                                    No matching presales users found.
+                                </p>
+                            )}
                         </div>
                     )}
                 </div>
