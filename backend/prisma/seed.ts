@@ -504,7 +504,7 @@ async function main() {
 <h2 style="color:#4f46e5">Moved to Sales</h2>
 <p>Hi {{recipientName}},</p>
 <p>The opportunity <strong>{{opportunityTitle}}</strong> for <strong>{{clientName}}</strong> has been moved to the <strong>Sales</strong> stage.</p>
-<p><strong>Value:</strong> {{value}}</p>
+<p><strong>Value:</strong> {{currency}} {{value}}</p>
 <p><strong>Sales Rep:</strong> {{salesRepName}}</p>
 <p><strong>Manager:</strong> {{managerName}}</p>
 <p>Please review and proceed with the sales process.</p>
@@ -519,7 +519,7 @@ async function main() {
 <h2 style="color:#4f46e5">Proposal Sent to Client</h2>
 <p>Hi {{recipientName}},</p>
 <p>The proposal for opportunity <strong>{{opportunityTitle}}</strong> has been sent to the client <strong>{{clientName}}</strong>.</p>
-<p><strong>Proposed Value:</strong> {{value}}</p>
+<p><strong>Proposed Value:</strong> {{currency}} {{value}}</p>
 <p><strong>Sales Rep:</strong> {{salesRepName}}</p>
 <p style="color:#64748b;font-size:12px;margin-top:24px">This is an automated notification from Q-CRM.</p>
 </div>`,
@@ -547,7 +547,7 @@ async function main() {
 <h2 style="color:#e11d48">Proposal Lost</h2>
 <p>Hi {{recipientName}},</p>
 <p>Unfortunately, the opportunity <strong>{{opportunityTitle}}</strong> for <strong>{{clientName}}</strong> has been marked as <strong>Proposal Lost</strong>.</p>
-<p><strong>Value:</strong> {{value}}</p>
+<p><strong>Value:</strong> {{currency}} {{value}}</p>
 <p><strong>Loss Reason:</strong> {{lossReason}}</p>
 <p><strong>Updated by:</strong> {{updatedBy}}</p>
 <p style="color:#64748b;font-size:12px;margin-top:24px">This is an automated notification from Q-CRM.</p>
@@ -561,7 +561,7 @@ async function main() {
 <h2 style="color:#16a34a">🎉 Deal Won!</h2>
 <p>Hi {{recipientName}},</p>
 <p>Great news! The opportunity <strong>{{opportunityTitle}}</strong> for <strong>{{clientName}}</strong> has been marked as <strong>Closed Won</strong>!</p>
-<p><strong>Deal Value:</strong> {{value}}</p>
+<p><strong>Deal Value:</strong> {{currency}} {{value}}</p>
 <p><strong>Sales Rep:</strong> {{salesRepName}}</p>
 <p><strong>Manager:</strong> {{managerName}}</p>
 <p>Congratulations to the team!</p>
@@ -580,7 +580,7 @@ async function main() {
 <tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;width:40%"><strong>Title</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">{{opportunityTitle}}</td></tr>
 <tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Client</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">{{clientName}}</td></tr>
 <tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Stage</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">{{stageName}}</td></tr>
-<tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Value</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">{{value}}</td></tr>
+<tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Value</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">{{currency}} {{value}}</td></tr>
 <tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Probability</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">{{probability}}%</td></tr>
 <tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Region</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">{{region}}</td></tr>
 <tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Practice</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">{{practice}}</td></tr>
@@ -603,7 +603,7 @@ async function main() {
     for (const tmpl of emailTemplates) {
         await prisma.emailTemplate.upsert({
             where: { eventKey: tmpl.eventKey },
-            update: {},
+            update: { subject: tmpl.subject, body: tmpl.body },
             create: tmpl,
         });
     }
