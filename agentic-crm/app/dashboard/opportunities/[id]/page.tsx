@@ -210,8 +210,8 @@ function formatDuration(value: string, unit: string): string {
 }
 
 // Save button that uses the estimation context (must be inside the provider)
-function PresalesSaveButton() {
-    const { saveEstimation, isSaving, readOnly } = useOpportunityEstimation();
+function PresalesSaveButton({ onAfterSave }: { onAfterSave?: (gomPct: number) => void }) {
+    const { saveEstimation, isSaving, readOnly, gomPercent } = useOpportunityEstimation();
     const { toast } = useToast();
 
     if (readOnly) return null;
@@ -220,6 +220,7 @@ function PresalesSaveButton() {
         try {
             await saveEstimation();
             toast({ title: "Saved", description: "Estimation data saved successfully." });
+            onAfterSave?.(gomPercent);
         } catch {
             toast({ title: "Error", description: "Failed to save estimation data." });
         }
@@ -247,6 +248,12 @@ function GomPercentSync({ onGomPercentChange }: { onGomPercentChange: (pct: numb
     const { gomPercent } = useOpportunityEstimation();
     useEffect(() => { onGomPercentChange(gomPercent); }, [gomPercent, onGomPercentChange]);
     return null;
+}
+
+function hasPermission(user: any, permission: string) {
+    const permissions = user?.role?.permissions;
+    if (!Array.isArray(permissions)) return false;
+    return permissions.includes("*") || permissions.includes(permission);
 }
 
 export default function OpportunityDetailsPage({ params }: { params: Promise<{ id: string }> }) {
@@ -310,6 +317,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
     // Access Control Logic
     const isSalesOrPresales = user?.department === 'Sales' || user?.department === 'Presales' || user?.role?.name?.includes('Sales') || user?.role?.name?.includes('Presales');
+    const isManagerOrAdmin = !!(user?.role?.name?.toLowerCase().includes('manager') || user?.role?.name?.toLowerCase().includes('admin'));
+    const canApproveGom = hasPermission(user, 'approvals:manage');
     const isAssignedPresales = formData.presalesAssignee ? formData.presalesAssignee.split(',').map((n: string) => n.trim()).includes(user?.name || '') : false;
     const isOwnerOrAssigned = user?.id === opportunityOwnerId || user?.name === formData.salesRep || user?.name === opportunityManagerName || isAssignedPresales;
     const hasEditAccess = !isSalesOrPresales || isOwnerOrAssigned;
@@ -394,6 +403,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const [minGomPercent, setMinGomPercent] = useState(0);
     const [gomAutoApprovePercent, setGomAutoApprovePercent] = useState(0);
     const [gomApproved, setGomApproved] = useState(false);
+    const [approvedGomPercent, setApprovedGomPercent] = useState<number | null>(null);
     const [gomPendingApproval, setGomPendingApproval] = useState<{ id: string; requester: string; reviewer: string | null; reason: string } | null>(null);
 
     // Load managers by department when presales modal opens
@@ -582,21 +592,6 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
 
 
-    // Auto-approve GOM when GOM % reaches configured threshold
-    useEffect(() => {
-        if (skipDerivedEffects.current) return;
-        if (gomAutoApprovePercent > 0 && contextGomPercent >= gomAutoApprovePercent && !gomApproved && id) {
-            handleApproveGom(true);
-        }
-    }, [contextGomPercent, gomAutoApprovePercent]);
-
-    // Auto-revoke GOM approval when GOM % drops below 20% (Rejected threshold)
-    useEffect(() => {
-        if (skipDerivedEffects.current) return;
-        if (gomApproved && contextGomPercent < 20 && id) {
-            handleApproveGom(false);
-        }
-    }, [contextGomPercent, gomApproved]);
 
     // Auto-calculate tentative end date using standard formulas:
     // - Days: Start date = day 1, end = Nth working day (skip weekends/holidays)
@@ -694,6 +689,9 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 }
                 setDetailedStatus(data.detailedStatus || "");
                 setGomApproved(data.gomApproved === true);
+                setApprovedGomPercent(data.gomApproved === true && data.presalesData?.finalGomPercent != null
+                    ? Number(data.presalesData.finalGomPercent)
+                    : null);
 
                 // Fetch pending GOM approval status
                 if (!data.gomApproved) {
@@ -1037,6 +1035,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     toast({ title: "GOM Approval Requested", description: `Approval request sent to ${data.reviewer || 'your reporting manager'}.` });
                 } else {
                     setGomApproved(data.gomApproved);
+                    setApprovedGomPercent(data.gomApproved ? contextGomPercent : null);
                     setGomPendingApproval(null);
                     toast({ title: data.gomApproved ? "GOM Approved" : "GOM Approval Revoked", description: data.gomApproved ? "GOM has been approved. You can now move to Sales." : "GOM approval has been revoked." });
                 }
@@ -1058,6 +1057,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             if (res.ok) {
                 const data = await res.json();
                 setGomApproved(data.gomApproved);
+                setApprovedGomPercent(data.gomApproved ? contextGomPercent : null);
                 setGomPendingApproval(null);
                 toast({ title: approved ? "GOM Approved" : "GOM Rejected", description: approved ? "GOM has been approved by manager." : "GOM approval has been rejected." });
             }
@@ -2009,7 +2009,17 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     initialCurrency={globalCurrency}
                 >
                     <GomPercentSync onGomPercentChange={setContextGomPercent} />
-                    {opportunityStage < 2 && <PresalesSaveButton />}
+                    {opportunityStage < 2 && (
+                        <PresalesSaveButton onAfterSave={(gomPct) => {
+                            if (gomAutoApprovePercent <= 0) return;
+                            const gomChangedSinceApproval = approvedGomPercent != null && Math.abs(gomPct - approvedGomPercent) > 0.05;
+                            if (gomPct >= gomAutoApprovePercent && !gomApproved) {
+                                handleApproveGom(true);
+                            } else if (gomPct < gomAutoApprovePercent && gomApproved && gomChangedSinceApproval) {
+                                handleApproveGom(false);
+                            }
+                        }} />
+                    )}
                     <div className="bg-white rounded-lg shadow-sm border border-slate-200">
                         {isLost && (
                             <div className="mx-4 mt-3 px-3 py-1.5 bg-red-50 border border-red-200 rounded-md text-xs text-red-700 font-medium">
@@ -2536,7 +2546,17 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                         {/* TAB CONTENT: GOM Calculator */}
                         {activeTab === "GOM Calculator" && (
                             <div className="p-5">
-                                <GomCalculatorTab gomApproved={gomApproved} onApproveGom={handleApproveGom} canApprove={hasEditAccess && opportunityStage === 1 && !isLost} />
+                                <GomCalculatorTab
+                                    gomApproved={gomApproved}
+                                    approvedGomPercent={approvedGomPercent}
+                                    onApproveGom={handleApproveGom}
+                                    canManagerApprove={canApproveGom && hasEditAccess && opportunityStage === 1 && !isLost}
+                                    canRequestApproval={!canApproveGom && hasEditAccess && opportunityStage === 1 && !isLost && gomAutoApprovePercent > 0 && contextGomPercent > 0 && contextGomPercent < gomAutoApprovePercent}
+                                    isManagerOrAdmin={isManagerOrAdmin}
+                                    gomThreshold={gomAutoApprovePercent}
+                                    pendingApproval={gomPendingApproval}
+                                    onReviewGomApproval={handleReviewGomApproval}
+                                />
                             </div>
                         )}
                     </div>

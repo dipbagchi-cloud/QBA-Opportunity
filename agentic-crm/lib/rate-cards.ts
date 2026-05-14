@@ -14,7 +14,7 @@ export interface RateCardEntry {
 export const MOCK_ASSUMPTIONS = {
     marginPercent: 35,
     benchPercent: 10,
-    workingDaysPerYear: 240,
+    workingDaysPerYear: 220,
 };
 
 // Fetch rate cards from backend API and compute derived fields

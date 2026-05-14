@@ -794,9 +794,9 @@ const BUDGET_ASSUMPTIONS_KEY = 'budget_assumptions';
 
 const DEFAULT_BUDGET_ASSUMPTIONS = {
   marginPercent: 35,
-  workingDaysPerYear: 240,
-  deliveryMgmtPercent: 5,
-  benchPercent: 10,
+  workingDaysPerYear: 220,
+  deliveryMgmtPercent: 10,
+  benchPercent: 20,
   leaveEligibilityPercent: 0,
   annualGrowthBufferPercent: 0,
   averageIncrementPercent: 0,

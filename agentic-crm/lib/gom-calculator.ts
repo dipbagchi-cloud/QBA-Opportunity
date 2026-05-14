@@ -47,9 +47,9 @@ export function calculateRateCard(params: RateCardParams): RateCardResult {
     const totalAnnualCost = annualCtc + dmCost + benchCost + leaveCost + growthCost + incrementCost;
 
     const monthlyCost = totalAnnualCost / 12;
-    // dailyCost = raw CTC per day (no overhead loadings)
-    // Overhead (DM, bench, leave, growth, increment) is added separately in calculateProjectGom
-    const dailyCost = annualCtc / workingDaysPerYear;
+    // dailyCost = loaded cost per day (CTC + all overhead loadings)
+    // This is the actual cost to the company per working day
+    const dailyCost = totalAnnualCost / workingDaysPerYear;
 
     return {
         adjustedCost: totalAnnualCost,
@@ -114,8 +114,13 @@ export function calculateProjectGom(lines: ResourceLine[], otherCosts: OtherCost
 
     const monthlyData: Record<string, ReturnType<typeof getMonthData>> = {};
 
-    // 1. Calculate Resource-based Costs (Salary + Auto-calculated Overheads)
+    // 1. Calculate Resource-based Costs
+    // dailyCost is loaded (includes org-level overhead: DM, Bench, Leave, Growth, Increment).
+    // We decompose it into raw salary + overhead for GOM display purposes.
     const workingDaysPerMonth = assumptions.workingDaysPerYear / 12;
+    const overheadPct = (assumptions.deliveryMgmtPercent + assumptions.benchPercent +
+        assumptions.leaveEligibilityPercent + assumptions.annualGrowthBufferPercent +
+        assumptions.averageIncrementPercent) / 100;
 
     for (const line of lines) {
         for (const m of line.months) {
@@ -131,34 +136,32 @@ export function calculateProjectGom(lines: ResourceLine[], otherCosts: OtherCost
             monthlyData[m.month].revenue += rev;
             totalRevenue += rev;
 
-            // Direct Salary Cost (raw CTC-based, no overhead loadings)
-            const salary = days * line.dailyCost;
-            monthlyData[m.month].salary += salary;
+            // Total loaded cost for this resource-month
+            const totalLoaded = days * line.dailyCost;
 
-            // Resource Loading: DM, Bench, Leave, Growth, Increment (as separate overhead)
-            const overheadPct = (assumptions.deliveryMgmtPercent + assumptions.benchPercent +
-                assumptions.leaveEligibilityPercent + assumptions.annualGrowthBufferPercent +
-                assumptions.averageIncrementPercent) / 100;
-            const overhead = salary * overheadPct;
+            // Split into raw salary and org-level overhead for display
+            // loaded = raw * (1 + overheadPct), so raw = loaded / (1 + overheadPct)
+            const rawSalary = overheadPct > 0 ? totalLoaded / (1 + overheadPct) : totalLoaded;
+            const overhead = totalLoaded - rawSalary;
+
+            monthlyData[m.month].salary += rawSalary;
             monthlyData[m.month].overhead += overhead;
 
-            // Auto-Calculated Costs based on Assumptions
-            const bonus = salary * (assumptions.bonusPercent / 100);
+            // Project-level costs (bonus, indirect, welfare, training) based on raw salary
+            const bonus = rawSalary * (assumptions.bonusPercent / 100);
             monthlyData[m.month].bonus += bonus;
 
-            // Indirect Cost (% of Salary)
-            const indirect = salary * (assumptions.indirectCostPercent / 100);
+            const indirect = rawSalary * (assumptions.indirectCostPercent / 100);
             monthlyData[m.month].indirect += indirect;
 
-            // Fixed per FTE
             const welfare = (assumptions.welfarePerFte / 12) * fte;
             monthlyData[m.month].welfare += welfare;
 
             const training = (assumptions.trainingPerFte / 12) * fte;
             monthlyData[m.month].training += training;
 
-            // Total for this line-month
-            const lineCost = salary + overhead + bonus + indirect + welfare + training;
+            // Total for this line-month = loaded salary + project-level costs
+            const lineCost = totalLoaded + bonus + indirect + welfare + training;
             monthlyData[m.month].cost += lineCost;
             totalCost += lineCost;
         }

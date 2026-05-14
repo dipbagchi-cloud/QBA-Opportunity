@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { sendNotificationEmail } from '../lib/email';
 import { evaluateStageChangeRules, evaluateDataConditionRules, evaluateOpportunityCreatedRules, resolveCalculatedFields } from '../lib/notification-engine';
+import { calculateOpportunityProbability } from '../lib/opportunity-probability';
 import path from 'path';
 import fs from 'fs';
 
@@ -87,32 +88,10 @@ export async function listOpportunities(req: Request, res: Response) {
         // Transform for frontend with dynamic intelligence 
         const formatted = opportunities.map(opp => {
             const stageName = opp.stage?.name || opp.currentStage || 'Discovery';
+            const probability = calculateOpportunityProbability(opp);
 
-            // 1. Dynamic Probability based on stage progression
-            // Logic: Each stage represents increasing likelihood of closing
-            let probability = 10;
-            switch (stageName) {
-                case 'Discovery': probability = 10; break;
-                case 'Qualification': probability = 25; break;
-                case 'Proposal': probability = 50; break;
-                case 'Negotiation': probability = 75; break;
-                case 'Closed Won': probability = 100; break;
-                case 'Closed Lost': probability = 0; break;
-                default: probability = 10;
-            }
-
-            // Boost probability based on completeness
             const hasPresalesData = opp.presalesData && Object.keys(opp.presalesData as any).length > 0;
-            const hasSalesData = opp.salesData && Object.keys(opp.salesData as any).length > 0;
-            const hasExpectedClose = !!opp.expectedCloseDate;
-            const hasDescription = !!opp.description;
-            const hasDuration = !!opp.tentativeDuration;
             const hasRate = opp.expectedDayRate && Number(opp.expectedDayRate) > 0;
-            const completenessBonus = [hasPresalesData, hasSalesData, hasExpectedClose, hasDescription, hasDuration, hasRate]
-                .filter(Boolean).length; // 0-6 fields
-            // Add up to +10% for completeness (but cap at stage ceiling)
-            const maxForStage = probability;
-            probability = Math.min(probability + Math.round(completenessBonus * 1.5), Math.min(maxForStage + 15, 100));
 
             // 2. Days in Stage - use stageHistory.enteredAt for accurate calculation
             const currentStageEntry = opp.stageHistory?.[0];
@@ -171,7 +150,7 @@ export async function listOpportunities(req: Request, res: Response) {
                 currency: opp.currency || 'INR',
                 stage: stageName,
                 currentStage: opp.currentStage,
-                probability: opp.probability != null ? Number(opp.probability) : probability,
+                probability: probability,
                 lastActivity: daysInStage === 0 ? 'Today' : `${daysInStage} days ago`,
                 owner: opp.owner.name,
                 salesRepName: opp.salesRepName || '',
@@ -321,7 +300,7 @@ export async function createOpportunity(req: Request, res: Response) {
                 createdByName: creator?.name || '',
                 value: newOpp.value != null ? Number(newOpp.value) : null,
                 currency: newOpp.currency || 'INR',
-                probability: newOpp.probability,
+                probability: calculateOpportunityProbability(newOpp as any),
                 region: (newOpp as any).region || undefined,
                 technology: (newOpp as any).technology || undefined,
                 practice: (newOpp as any).practice || undefined,
@@ -332,6 +311,8 @@ export async function createOpportunity(req: Request, res: Response) {
                 tentativeDuration: (newOpp as any).tentativeDuration != null
                     ? `${(newOpp as any).tentativeDuration} ${(newOpp as any).tentativeDurationUnit || ''}`.trim()
                     : undefined,
+                expectedCloseDate: (newOpp as any).expectedCloseDate ? new Date((newOpp as any).expectedCloseDate).toISOString().slice(0, 10) : undefined,
+                expectedDayRate: (newOpp as any).expectedDayRate != null ? Number((newOpp as any).expectedDayRate) : null,
             });
         } catch (notifyErr) {
             console.error('[opportunity_created] notification dispatch failed:', notifyErr);
@@ -425,15 +406,6 @@ export async function updateOpportunity(req: Request, res: Response) {
                     stageId: stage.id,
                     currentStage: newStageName
                 };
-
-                // Update probability based on the new stage
-                const stageProbMap: Record<string, number> = {
-                    'Discovery': 10, 'Qualification': 25, 'Proposal': 50,
-                    'Negotiation': 75, 'Closed Won': 100, 'Closed Lost': 0,
-                };
-                if (stageProbMap[newStageName] !== undefined) {
-                    stageUpdate.probability = stageProbMap[newStageName];
-                }
 
                 if (newStageName === 'Closed Won' || newStageName === 'Closed Lost') {
                     stageUpdate.actualCloseDate = new Date();
@@ -780,6 +752,31 @@ export async function approveGom(req: Request, res: Response) {
 
         await prisma.auditLog.create({ data: { entity: 'Opportunity', entityId: id, action: 'GOM_APPROVAL_REQUESTED', userId: req.user!.userId, changes: `GOM Approval requested at ${gomPercent?.toFixed(1) || '?'}%. Sent to ${requester?.reportingManagerName || 'unassigned manager'}` } });
 
+        // Notify manager via in-app notification + email
+        if (reviewerId) {
+            const opp = await prisma.opportunity.findUnique({ where: { id }, select: { title: true } });
+            const manager = await prisma.user.findUnique({ where: { id: reviewerId }, select: { email: true, name: true } });
+            await prisma.notification.create({
+                data: {
+                    type: 'gom_approval_requested',
+                    title: `GOM Approval Required: ${opp?.title || id}`,
+                    message: `${requester?.name || 'A team member'} has requested GOM approval. GOM is ${gomPercent?.toFixed(1) || '?'}% (below ${autoApproveThreshold}% threshold).`,
+                    link: `/dashboard/opportunities/${id}`,
+                    userId: reviewerId,
+                },
+            });
+            if (manager?.email) {
+                await sendNotificationEmail('gom_approval_requested', manager.email, manager.name || 'Manager', {
+                    opportunityTitle: opp?.title || id,
+                    requesterName: requester?.name || 'A team member',
+                    gomPercent: `${gomPercent?.toFixed(1) || '?'}%`,
+                    threshold: `${autoApproveThreshold}%`,
+                    opportunityId: id,
+                    opportunityLink: `${process.env.FRONTEND_URL || 'https://qcrm.qbadvisory.com'}/dashboard/opportunities/${id}`,
+                }).catch(() => {});
+            }
+        }
+
         res.json({ gomApproved: false, pendingApproval: true, approvalId: approval.id, reviewer: requester?.reportingManagerName || null });
     } catch (error) {
         console.error("Approve GOM Error:", error);
@@ -823,6 +820,33 @@ export async function reviewGomApproval(req: Request, res: Response) {
         }
 
         await prisma.auditLog.create({ data: { entity: 'Opportunity', entityId: id, action: approved ? 'GOM_APPROVED' : 'GOM_REJECTED', userId: req.user!.userId, changes: `GOM ${approved ? 'Approved' : 'Rejected'} by manager${comments ? `: ${comments}` : ''}` } });
+
+        // Notify requester via in-app + email
+        const opp = await prisma.opportunity.findUnique({ where: { id }, select: { title: true } });
+        const requesterUser = await prisma.user.findUnique({ where: { id: pending.requesterId }, select: { email: true, name: true } });
+        const reviewerUser = await prisma.user.findUnique({ where: { id: req.user!.userId }, select: { name: true } });
+        if (requesterUser) {
+            await prisma.notification.create({
+                data: {
+                    type: 'gom_decision_made',
+                    title: `GOM ${approved ? 'Approved' : 'Rejected'}: ${opp?.title || id}`,
+                    message: `Your GOM approval request has been ${approved ? 'approved' : 'rejected'} by ${reviewerUser?.name || 'the manager'}${comments ? `. Note: ${comments}` : ''}.`,
+                    link: `/dashboard/opportunities/${id}`,
+                    userId: pending.requesterId,
+                },
+            });
+            if (requesterUser.email) {
+                await sendNotificationEmail('gom_decision_made', requesterUser.email, requesterUser.name || 'Team Member', {
+                    opportunityTitle: opp?.title || id,
+                    decision: approved ? 'Approved' : 'Rejected',
+                    decisionLower: approved ? 'approved' : 'rejected',
+                    comments: comments || '',
+                    managerName: reviewerUser?.name || 'the manager',
+                    opportunityId: id,
+                    opportunityLink: `${process.env.FRONTEND_URL || 'https://qcrm.qbadvisory.com'}/dashboard/opportunities/${id}`,
+                }).catch(() => {});
+            }
+        }
 
         res.json({ gomApproved: approved === true, status: approved ? 'Approved' : 'Rejected' });
     } catch (error) {

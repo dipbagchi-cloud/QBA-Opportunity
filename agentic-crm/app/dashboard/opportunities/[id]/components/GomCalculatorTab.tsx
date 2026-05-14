@@ -6,11 +6,27 @@ import { useCurrency } from "@/components/providers/currency-provider";
 
 interface GomCalculatorTabProps {
     gomApproved?: boolean;
+    approvedGomPercent?: number | null;
     onApproveGom?: (approved: boolean) => void;
-    canApprove?: boolean;
+    canManagerApprove?: boolean;
+    canRequestApproval?: boolean;
+    isManagerOrAdmin?: boolean;
+    gomThreshold?: number;
+    pendingApproval?: { id: string; requester: string; reviewer: string | null; reason: string } | null;
+    onReviewGomApproval?: (approved: boolean, comments?: string) => void;
 }
 
-export function GomCalculatorTab({ gomApproved = false, onApproveGom, canApprove = false }: GomCalculatorTabProps) {
+export function GomCalculatorTab({
+    gomApproved = false,
+    approvedGomPercent = null,
+    onApproveGom,
+    canManagerApprove = false,
+    canRequestApproval = false,
+    isManagerOrAdmin = false,
+    gomThreshold = 35,
+    pendingApproval = null,
+    onReviewGomApproval,
+}: GomCalculatorTabProps) {
     const {
         assumptions,
         setAssumptions,
@@ -34,6 +50,7 @@ export function GomCalculatorTab({ gomApproved = false, onApproveGom, canApprove
         gomSummary,
         saveEstimation,
         isSaving,
+        isLoaded,
         resources,
         readOnly,
         specialCosts,
@@ -98,27 +115,35 @@ export function GomCalculatorTab({ gomApproved = false, onApproveGom, canApprove
 
             {/* GOM Approval */}
             {(() => {
-                const gomRejected = gomStatus.text === 'Rejected';
-                const showConflict = gomApproved && gomRejected;
+                const belowThreshold = gomThreshold > 0 && gomPercent < gomThreshold;
+                const hasPending = !!pendingApproval;
+                const gomChangedSinceApproval = approvedGomPercent != null && Math.abs(gomPercent - approvedGomPercent) > 0.05;
+                const showConflict = isLoaded && gomApproved && gomChangedSinceApproval && belowThreshold;
+
                 const bgClass = showConflict
                     ? 'bg-red-50 border-red-300'
-                    : gomApproved ? 'bg-green-50 border-green-300' : 'bg-amber-50 border-amber-300';
-                const iconClass = showConflict
-                    ? 'text-red-600'
-                    : gomApproved ? 'text-green-600' : 'text-amber-600';
-                const titleClass = showConflict
-                    ? 'text-red-800'
-                    : gomApproved ? 'text-green-800' : 'text-amber-800';
+                    : gomApproved ? 'bg-green-50 border-green-300'
+                    : hasPending ? 'bg-blue-50 border-blue-300'
+                    : 'bg-amber-50 border-amber-300';
+                const iconClass = showConflict ? 'text-red-600' : gomApproved ? 'text-green-600' : hasPending ? 'text-blue-600' : 'text-amber-600';
+                const titleClass = showConflict ? 'text-red-800' : gomApproved ? 'text-green-800' : hasPending ? 'text-blue-800' : 'text-amber-800';
                 const title = showConflict
                     ? 'GOM Approved but Currently Rejected'
-                    : gomApproved ? 'GOM Approved' : 'GOM Not Approved';
+                    : gomApproved ? 'GOM Approved'
+                    : hasPending ? `Pending Manager Approval (requested by ${pendingApproval!.requester || 'team member'})`
+                    : 'GOM Not Approved';
                 const subtitle = showConflict
                     ? `GOM is ${gomPercent.toFixed(1)}% (below threshold). Estimation has changed since approval. Consider revoking.`
                     : gomApproved
                     ? 'This opportunity can be moved to Sales.'
+                    : hasPending
+                    ? `Awaiting review${pendingApproval!.reviewer ? ` by ${pendingApproval!.reviewer}` : ''}. GOM is ${gomPercent.toFixed(1)}%.`
+                    : belowThreshold && !isManagerOrAdmin
+                    ? `GOM is ${gomPercent.toFixed(1)}% (below ${gomThreshold}% threshold). Request manager approval to proceed.`
                     : 'GOM must be approved before this opportunity can move to Sales.';
+
                 return (
-                    <div className={`rounded-lg border-2 p-4 flex items-center justify-between ${bgClass}`}>
+                    <div className={`rounded-lg border-2 p-4 flex items-start justify-between gap-4 ${bgClass}`}>
                         <div className="flex items-center gap-3">
                             {showConflict
                                 ? <AlertCircle className="w-6 h-6 text-red-600" />
@@ -131,14 +156,46 @@ export function GomCalculatorTab({ gomApproved = false, onApproveGom, canApprove
                                 <div className="text-xs text-slate-600">{subtitle}</div>
                             </div>
                         </div>
-                        {canApprove && onApproveGom && (
+
+                        {/* Manager/Admin: full approve / revoke controls */}
+                        {canManagerApprove && onApproveGom && (
+                            <div className="flex items-center gap-2 shrink-0">
+                                {hasPending && onReviewGomApproval && (
+                                    <>
+                                        <button
+                                            onClick={() => onReviewGomApproval(true)}
+                                            className="px-3 py-1.5 rounded-md text-sm font-bold bg-green-600 text-white hover:bg-green-700 shadow-sm transition-colors"
+                                        >
+                                            Approve
+                                        </button>
+                                        <button
+                                            onClick={() => onReviewGomApproval(false)}
+                                            className="px-3 py-1.5 rounded-md text-sm font-bold bg-white border border-red-300 text-red-600 hover:bg-red-50 transition-colors"
+                                        >
+                                            Reject
+                                        </button>
+                                    </>
+                                )}
+                                {!hasPending && (
+                                    <button
+                                        onClick={() => onApproveGom(!gomApproved)}
+                                        className={`px-4 py-2 rounded-md text-sm font-bold transition-colors ${gomApproved
+                                            ? 'bg-white border border-red-300 text-red-600 hover:bg-red-50'
+                                            : 'bg-green-600 text-white hover:bg-green-700 shadow-sm'}`}
+                                    >
+                                        {gomApproved ? 'Revoke Approval' : 'Approve GOM'}
+                                    </button>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Presales/Sales: show "Request Approval" only when GOM < threshold and no pending */}
+                        {canRequestApproval && !hasPending && onApproveGom && (
                             <button
-                                onClick={() => onApproveGom(!gomApproved)}
-                                className={`px-4 py-2 rounded-md text-sm font-bold transition-colors ${gomApproved
-                                    ? 'bg-white border border-red-300 text-red-600 hover:bg-red-50'
-                                    : 'bg-green-600 text-white hover:bg-green-700 shadow-sm'}`}
+                                onClick={() => onApproveGom(true)}
+                                className="px-4 py-2 rounded-md text-sm font-bold bg-blue-600 text-white hover:bg-blue-700 shadow-sm transition-colors shrink-0"
                             >
-                                {gomApproved ? 'Revoke Approval' : 'Approve GOM'}
+                                Request Approval
                             </button>
                         )}
                     </div>

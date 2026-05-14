@@ -19,8 +19,8 @@ export interface BudgetAssumptions {
 export const DEFAULT_ASSUMPTIONS: BudgetAssumptions = {
     marginPercent: 35,
     workingDaysPerYear: 220,
-    deliveryMgmtPercent: 5,
-    benchPercent: 10,
+    deliveryMgmtPercent: 10,
+    benchPercent: 20,
     leaveEligibilityPercent: 0,
     annualGrowthBufferPercent: 0,
     averageIncrementPercent: 0,

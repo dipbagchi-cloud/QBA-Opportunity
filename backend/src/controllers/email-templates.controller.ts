@@ -194,6 +194,7 @@ export async function sendTestEmail(req: Request, res: Response) {
       'calc:daysUntilClose': '45',
       'calc:formattedValue': 'USD 250,000',
       'calc:weightedValue': 'USD 175,000',
+      'calc:probability': '70',
       'calc:stageProgress': '33%',
       'calc:currentDate': new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
       'calc:currentTime': new Date().toLocaleString('en-US', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }),

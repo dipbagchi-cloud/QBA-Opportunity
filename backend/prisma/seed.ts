@@ -583,7 +583,7 @@ async function main() {
 <tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Client</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">{{clientName}}</td></tr>
 <tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Stage</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">{{stageName}}</td></tr>
 <tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Value</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">{{currency}} {{value}}</td></tr>
-<tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Probability</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">{{probability}}%</td></tr>
+<tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Probability</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">{{calc:probability}}%</td></tr>
 <tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Region</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">{{region}}</td></tr>
 <tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Practice</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">{{practice}}</td></tr>
 <tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Technology</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">{{technology}}</td></tr>

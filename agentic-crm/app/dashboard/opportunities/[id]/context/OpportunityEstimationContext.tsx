@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
-import { BudgetAssumptions, ResourceLine, OtherCost, GomResult, calculateProjectGom } from "@/lib/gom-calculator";
+import { BudgetAssumptions, ResourceLine, OtherCost, GomResult, calculateProjectGom, calculateRateCard } from "@/lib/gom-calculator";
 import { DEFAULT_ASSUMPTIONS } from "../components/AssumptionsView";
 import { apiClient, API_URL, getAuthHeaders } from "@/lib/api";
 import { useCurrency } from "@/components/providers/currency-provider";
@@ -155,6 +155,26 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
             }
         })();
     }, []);
+
+    // Recalculate all resources' dailyCost & dailyRate when assumptions change.
+    // This ensures saved resources (with stale dailyCost) get updated
+    // when the correct assumptions are fetched from the API.
+    const assumptionsRef = useCallback(() => assumptions, [assumptions]);
+    useEffect(() => {
+        setResources(prev => {
+            if (prev.length === 0) return prev;
+            let changed = false;
+            const updated = prev.map(r => {
+                if (!r.annualCTC || r.annualCTC <= 0) return r;
+                const rc = calculateRateCard({ annualCtc: r.annualCTC, monthsPerYear: 12, ...assumptions });
+                // Only update if dailyCost actually changed (avoid unnecessary re-renders)
+                if (Math.abs(rc.dailyCost - r.dailyCost) < 0.01) return r;
+                changed = true;
+                return { ...r, dailyCost: rc.dailyCost, dailyRate: rc.dailyCost * (1 + (markupPercent / 100)) };
+            });
+            return changed ? updated : prev;
+        });
+    }, [assumptions, markupPercent]);
 
     // Sync currency with global currency if not read-only
     useEffect(() => {
@@ -348,8 +368,8 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
                 role: resource.role,
                 location: resource.type,
                 dailyRate: resource.dailyRate,
-                // Always use raw daily cost (CTC / working days) to match GOM sheet
-                dailyCost: resource.annualCTC > 0 ? resource.annualCTC / assumptions.workingDaysPerYear : resource.dailyCost,
+                // Use the loaded daily cost (includes overhead: DM, Bench, Leave, Growth, Increment)
+                dailyCost: resource.dailyCost,
                 months: monthsData,
                 experienceBand: resource.experienceBand,
                 skill: resource.skill,

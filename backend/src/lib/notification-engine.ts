@@ -1,5 +1,6 @@
 import { prisma } from './prisma';
 import { sendNotificationEmail } from './email';
+import { calculateOpportunityProbability } from './opportunity-probability';
 
 // Roles that are "global" - all users with these roles get notified regardless of assignment
 const GLOBAL_ROLES = ['Admin'];
@@ -135,6 +136,8 @@ interface OpportunityCreatedContext {
   description?: string;
   tentativeStartDate?: string;
   tentativeDuration?: string;
+  expectedCloseDate?: string;
+  expectedDayRate?: number | null;
 }
 
 /**
@@ -148,6 +151,15 @@ export async function evaluateOpportunityCreatedRules(ctx: OpportunityCreatedCon
         isActive: true,
         triggerType: 'opportunity_created',
       },
+    });
+
+    const createdProbability = calculateOpportunityProbability({
+      stage: { name: ctx.stageName },
+      currentStage: ctx.stageName,
+      description: ctx.description,
+      tentativeDuration: ctx.tentativeDuration,
+      expectedCloseDate: ctx.expectedCloseDate,
+      expectedDayRate: ctx.expectedDayRate,
     });
 
     for (const rule of rules) {
@@ -187,7 +199,7 @@ export async function evaluateOpportunityCreatedRules(ctx: OpportunityCreatedCon
         value: ctx.value != null ? fmtNum(Number(ctx.value)) : '',
         currency: _oppCurrency,
         'opportunity.currency': _oppCurrency,
-        probability: ctx.probability != null ? String(ctx.probability) : '',
+        probability: String(createdProbability),
         region: ctx.region || '',
         technology: ctx.technology || '',
         practice: ctx.practice || '',
@@ -202,6 +214,9 @@ export async function evaluateOpportunityCreatedRules(ctx: OpportunityCreatedCon
       // Merge calculated fields
       const calcFields = await resolveCalculatedFields(ctx.opportunityId);
       Object.assign(variables, calcFields);
+      variables['calc:probability'] = String(createdProbability);
+      variables.probability = String(createdProbability);
+      variables['opportunity.probability'] = String(createdProbability);
 
       const title = rule.titleTemplate
         ? renderTemplate(rule.titleTemplate, variables)
@@ -330,6 +345,9 @@ export async function evaluateStageChangeRules(ctx: StageChangeContext): Promise
       // Merge calculated fields
       const calcFields = await resolveCalculatedFields(ctx.opportunityId);
       Object.assign(variables, calcFields);
+      if (calcFields['opportunity.probability']) {
+        variables.probability = calcFields['opportunity.probability'];
+      }
 
       // Build notification title and message from templates or defaults
       const title = rule.titleTemplate
@@ -441,6 +459,9 @@ export async function evaluateDataConditionRules(opportunity: {
       // Merge calculated fields
       const calcFields = await resolveCalculatedFields(opportunity.id);
       Object.assign(variables, calcFields);
+      if (calcFields['opportunity.probability']) {
+        variables.probability = calcFields['opportunity.probability'];
+      }
 
       const title = rule.titleTemplate
         ? renderTemplate(rule.titleTemplate, variables)
@@ -538,7 +559,8 @@ export async function resolveCalculatedFields(opportunityId: string): Promise<Re
     calc['calc:formattedValue'] = value != null ? fmtMoney(currency, value) : 'N/A';
 
     // calc:weightedValue — value × probability / 100
-    const prob = opp.probability ?? 0;
+    const prob = calculateOpportunityProbability(opp as any);
+    calc['calc:probability'] = String(prob);
     calc['calc:weightedValue'] = value != null ? fmtMoney(currency, Math.round(value * prob / 100)) : 'N/A';
 
     // calc:stageProgress — current stage order / total stages as percentage
@@ -578,7 +600,7 @@ export async function resolveCalculatedFields(opportunityId: string): Promise<Re
     calc['opportunity.description'] = opp.description || '';
     calc['opportunity.value'] = value != null ? fmtMoney(currency, value) : '';
     calc['opportunity.currency'] = currency;
-    calc['opportunity.probability'] = opp.probability != null ? String(opp.probability) : '';
+    calc['opportunity.probability'] = String(prob);
     calc['opportunity.currentStage'] = opp.currentStage || '';
     calc['opportunity.detailedStatus'] = opp.detailedStatus || '';
     calc['opportunity.region'] = opp.region || '';
@@ -631,7 +653,7 @@ export async function resolveCalculatedFields(opportunityId: string): Promise<Re
 function getFieldValue(opp: any, field: string): any {
   switch (field) {
     case 'value': return opp.value;
-    case 'probability': return opp.probability;
+    case 'probability': return calculateOpportunityProbability(opp as any);
     case 'stage': return opp.currentStage;
     case 'region': return opp.region;
     case 'technology': return opp.technology;

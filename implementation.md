@@ -1,6 +1,6 @@
 # Q-CRM — Detailed Functional Implementation Reference
 
-> **Last Updated:** May 12, 2026  
+> **Last Updated:** May 14, 2026  
 > **Production:** https://qcrm.qbadvisory.com  
 > **Stack:** Next.js 15 (frontend) · Express.js + TypeScript (backend) · PostgreSQL + Prisma (database)
 
@@ -1194,6 +1194,204 @@ Two demo agent types:
 ### Frontend Implementation
 
 **File:** `agentic-crm/app/dashboard/agents/page.tsx`
+
+---
+
+## 17. Deal-to-Project Conversion
+
+*(See backend/src/controllers/opportunities.controller.ts — convertToProject)*
+
+When an opportunity reaches **Closed Won**, it can be converted to a project. The conversion creates a project record with SOW details, allocated resources, and financials carried over from the estimation data.
+
+---
+
+## 18. Attachments & File Management
+
+*(See backend/src/controllers/opportunities.controller.ts — file upload routes)*
+
+Multer-based file upload with disk storage under `uploads/` directory. Files are associated with opportunities and accessible through the opportunity detail page.
+
+---
+
+## 19. Currency Management
+
+### Backend Implementation
+
+**File:** `backend/src/controllers/admin.controller.ts` — Currency rate sync  
+**File:** `agentic-crm/components/providers/currency-provider.tsx` — Client-side conversion
+
+### Key Behavior
+
+- **Base currency:** INR (all rate cards and CTC values stored in INR)
+- **Supported currencies:** INR, USD, EUR, GBP, AED, SGD (configurable via admin)
+- **Exchange rates:** Stored in `currency_rates` table, synced from external API
+- **Conversion:** Client-side only — all DB values remain in INR; display conversion uses `useCurrency()` hook
+- **Snapshot:** When estimation is saved, current exchange rates are snapshotted into `metadata.exchangeRatesSnapshot` so read-only views show rates from time of save
+
+---
+
+## 20. Frontend Architecture
+
+### Key Patterns
+
+- **App Router:** Next.js 15 with `app/` directory structure
+- **Authentication:** `AuthProvider` wraps app, stores JWT in `sessionStorage` (primary) + `localStorage` (fallback)
+- **Role Switching:** Users with multiple roles see a "Switch Role" option in sidebar
+- **Currency Provider:** Global currency context with `format()`, `convert()`, `symbol`, `getRate()`
+- **Error Handling:** `error.tsx` with auto-reload using cache-bust parameter (`?_cb=timestamp`) to recover from ChunkLoadError
+
+### Session Storage Strategy
+
+```
+sessionStorage: authToken, qcrm_user (primary — tab-scoped)
+localStorage: qcrm_auth_token, qcrm_user (fallback — persists across tabs)
+```
+
+On refresh, token is read from sessionStorage first, then localStorage fallback. This prevents cross-tab session leaks while surviving page reloads.
+
+---
+
+## 21. May 2026 Feature Updates
+
+This section documents all enhancements and bug fixes implemented in May 2026.
+
+### 21.1 Presales Assignment Fix (PATCH migration)
+
+**Problem:** Presales assignment used PUT which replaced the entire opportunity record, causing data loss.  
+**Fix:** Changed to PATCH — only `presalesAssigneeName` and related fields are updated.  
+**Files:** `backend/src/controllers/opportunities.controller.ts`, `agentic-crm/app/dashboard/opportunities/[id]/components/PresalesAssignment.tsx`
+
+### 21.2 ChunkLoadError Recovery
+
+**Problem:** Browser cached stale HTML after deploys, causing `ChunkLoadError` and screen "dancing" (white flash loops).  
+**Root Cause:** Old HTML referenced JS chunks that no longer exist after rebuild.  
+**Fix (3 layers):**
+1. **Nginx:** `proxy_hide_header Cache-Control` + `add_header "Cache-Control" "no-store, no-cache, must-revalidate"` on HTML responses
+2. **Next.js:** `next.config.ts` sets `headers()` with `Cache-Control: no-store` for all routes
+3. **error.tsx:** Auto-reload uses `?_cb=<timestamp>` cache-bust parameter to force fresh HTML  
+**File:** `agentic-crm/app/error.tsx`, `nginx_qcrm_updated.conf`
+
+### 21.3 GOM Calculator Overhaul — Loaded Cost Model
+
+**Problem:** The daily resource cost shown in the estimation was raw CTC ÷ working days (e.g., ₹19,318), but the actual cost to the company includes org-level overhead loadings. User expected ₹25,114.
+
+**Root Cause Analysis:**
+- `calculateRateCard()` was returning `annualCtc / workingDaysPerYear` (raw)
+- `DEFAULT_ASSUMPTIONS` in `AssumptionsView.tsx` had DM=5%, Bench=10% (wrong — DB has DM=10%, Bench=20%)
+- Saved resources loaded from `presalesData.resources` with stale `dailyCost` — never recalculated when assumptions changed
+
+**Fix (multi-layered):**
+
+1. **`calculateRateCard()` now returns loaded daily cost:**
+   ```
+   totalAnnualCost = CTC + DM% + Bench% + Leave% + Growth% + Increment%
+   dailyCost = totalAnnualCost / workingDaysPerYear
+   ```
+   For >15yr .NET Dev: ₹42,50,000 × 1.30 / 220 = **₹25,114/day**
+
+2. **`calculateProjectGom()` decomposes loaded cost for GOM display:**
+   ```
+   rawSalary = loadedCost / (1 + overheadPct)
+   overhead = loadedCost - rawSalary
+   ```
+   - Salary row shows **loaded cost** (₹25,114) — matches Resource Assignment tab
+   - Resource Loading row shows overhead breakdown (₹5,795) — **display-only**, marked "incl. in salary"
+   - Project-level costs (Bonus, Indirect, Welfare, Training) calculated on raw CTC
+
+3. **`DEFAULT_ASSUMPTIONS` fixed to match DB:**
+   - `deliveryMgmtPercent: 10` (was 5)
+   - `benchPercent: 20` (was 10)
+   - `workingDaysPerYear: 220` (was 240 in backend fallback)
+
+4. **Auto-recalculation on assumptions load:**
+   Added `useEffect` in `OpportunityEstimationContext` that recalculates all resources' `dailyCost` and `dailyRate` when assumptions change — fixes stale saved resources.
+
+**Files Modified:**
+- `lib/gom-calculator.ts` — `calculateRateCard()`, `calculateProjectGom()`
+- `app/.../context/OpportunityEstimationContext.tsx` — assumptions recalculation effect
+- `app/.../components/AssumptionsView.tsx` — DEFAULT_ASSUMPTIONS values
+- `app/.../components/ResourceAssignmentTab.tsx` — cost tooltip, dailyRate fix
+- `app/.../components/EstimationTab.tsx` — salary row uses loaded cost, overhead display-only
+- `backend/src/controllers/admin.controller.ts` — DEFAULT_BUDGET_ASSUMPTIONS
+- `lib/rate-cards.ts` — MOCK_ASSUMPTIONS workingDaysPerYear
+
+### 21.4 Budget Assumptions (from DB)
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| `deliveryMgmtPercent` | 10% | Delivery management overhead |
+| `benchPercent` | 20% | Bench/buffer overhead |
+| `leaveEligibilityPercent` | 0% | Leave provision |
+| `annualGrowthBufferPercent` | 0% | Growth buffer |
+| `averageIncrementPercent` | 0% | Increment provision |
+| `bonusPercent` | 0% | Bonus (project-level) |
+| `indirectCostPercent` | 0% | Indirect cost (project-level) |
+| `welfarePerFte` | 0 | Welfare per FTE (project-level) |
+| `trainingPerFte` | 0 | Training per FTE (project-level) |
+| `workingDaysPerYear` | 220 | Working days for daily rate calc |
+| `marginPercent` | 35% | Target GOM margin |
+
+**Total org-level overhead = DM + Bench + Leave + Growth + Increment = 30%**
+
+### 21.5 Monthly GOM Distribution Fix
+
+**Problem:** Sales commission and pre-sales cost appeared only in the GOM Total column but not in monthly breakdown.  
+**Fix:** Both are now allocated proportionally across months by revenue share: `monthShare = monthRevenue / totalRevenue`.  
+**File:** `app/.../components/EstimationTab.tsx`
+
+### 21.6 Special Cost Currency Tracking
+
+**Problem:** Special costs (Subcontracting, HW, SW, Misc) and travel costs entered in GBP were treated as INR when display currency changed, causing wild value swings.  
+**Fix:** Added `dataCurrency` state that tracks which currency costs were entered in. On save, costs are stored with `currency: globalCurrency`. On load, `dataCurrency` is restored from saved data. Conversion only applies when `dataCurrency ≠ displayCurrency`.  
+**File:** `app/.../context/OpportunityEstimationContext.tsx`
+
+### 21.7 Probability Sync on Stage Change
+
+**Problem:** When an opportunity's stage changed, the probability displayed in the list didn't match the expected stage-based probability.  
+**Fix:** Added probability update in the PATCH handler's stage-change block using `stageProbMap`:
+
+```typescript
+const stageProbMap: Record<string, number> = {
+    'Discovery': 10, 'Qualification': 25, 'Proposal': 50,
+    'Negotiation': 75, 'Closed Won': 100, 'Closed Lost': 0
+};
+```
+
+**File:** `backend/src/controllers/opportunities.controller.ts`
+
+### 21.8 Notification Currency & Value Fix
+
+**Problem:** Notification emails showed estimated value as raw number (e.g., "100000") without currency prefix.  
+**Fix:** Both create and update notification paths now format value as `${currency} ${value.toLocaleString()}` (e.g., "GBP 100,000").  
+**Files:** `backend/src/lib/notification-engine.ts`, `backend/src/controllers/opportunities.controller.ts`
+
+### 21.9 Resource Cost Tooltip
+
+**Problem:** No visibility into how the Cost column value is derived in Resource Assignment.  
+**Fix:** Hovering on the Cost value shows a tooltip with full formula breakdown:
+```
+Annual CTC: INR 42,50,000
+Overhead: DM 10% + Bench 20% + Leave 0% + Growth 0% + Incr 0% = 30%
+Loaded Annual: INR 55,25,000
+Working Days: 220
+Daily Cost: INR 25,114 (raw: INR 19,318)
+
+Jul: 1d x INR 25,114 = INR 25,114
+Total: 1d x INR 25,114 = INR 25,114
+```
+
+**File:** `app/.../components/ResourceAssignmentTab.tsx`
+
+### 21.10 Description Multiline Support
+
+**Problem:** Long opportunity descriptions were truncated to a single line in the list view.  
+**Fix:** Added `whitespace-pre-wrap` CSS and expanded the description field to `<textarea>` in the edit form.  
+**Files:** `app/.../components/OpportunityDetail.tsx`, list view components
+
+### 21.11 GOM Calculator Tab Sync
+
+**Problem:** GOM Calculator tab and Estimation tab showed different totals because sales commission and pre-sales cost weren't included in the GOM Calculator's output.  
+**Fix:** `contextTotalCost` in OpportunityEstimationContext now adds `salesCommissionAmount` and `preSalesCostAmount` to the GOM calculator's `totalCost`.
 
 Agent cards with "Run" buttons. Each agent shows real-time execution steps streamed via SSE. Includes:
 - Agent type selection

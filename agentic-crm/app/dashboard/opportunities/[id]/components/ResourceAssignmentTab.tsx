@@ -95,9 +95,8 @@ export function ResourceAssignmentTab() {
             ...assumptions
         });
 
-        // dailyCost is raw (CTC/workingDays), dailyRate uses loaded cost for billing
-        const loadedDailyCost = rateCardResult.adjustedCost / assumptions.workingDaysPerYear;
-        const dailyRate = loadedDailyCost * (1 + (markupPercent / 100));
+        // dailyCost is loaded (CTC + overhead loadings / workingDays), dailyRate adds markup
+        const dailyRate = rateCardResult.dailyCost * (1 + (markupPercent / 100));
 
         const newRow: ResourceRow = {
             id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : (Date.now() + '-' + Math.random().toString(36).slice(2)),
@@ -391,9 +390,12 @@ export function ResourceAssignmentTab() {
                                                     return line;
                                                 })
                                                 .join('\n');
-                                            let tooltip = `${row.skill || row.role}\nDaily Cost: INR ${row.dailyCost.toLocaleString()}`;
+                                            // Formula tooltip: CTC + overhead breakdown
+                                            const overheadPct = assumptions.deliveryMgmtPercent + assumptions.benchPercent + assumptions.leaveEligibilityPercent + assumptions.annualGrowthBufferPercent + assumptions.averageIncrementPercent;
+                                            const rawDaily = row.annualCTC / assumptions.workingDaysPerYear;
+                                            let tooltip = `${row.skill || row.role}\nAnnual CTC: INR ${row.annualCTC?.toLocaleString() || '—'}\nOverhead: DM ${assumptions.deliveryMgmtPercent}% + Bench ${assumptions.benchPercent}% + Leave ${assumptions.leaveEligibilityPercent}% + Growth ${assumptions.annualGrowthBufferPercent}% + Incr ${assumptions.averageIncrementPercent}% = ${overheadPct}%\nLoaded Annual: INR ${(row.annualCTC * (1 + overheadPct/100)).toLocaleString(undefined, {maximumFractionDigits: 0})}\nWorking Days: ${assumptions.workingDaysPerYear}\nDaily Cost: INR ${row.dailyCost.toLocaleString(undefined, {maximumFractionDigits: 0})} (raw: INR ${rawDaily.toLocaleString(undefined, {maximumFractionDigits: 0})})`;
                                             if (showConverted) tooltip += ` (${cSym}${convertCurrency(row.dailyCost).toLocaleString(undefined, {maximumFractionDigits: 2})})`;
-                                            tooltip += `\n\n${monthBreakup || '(no days allocated)'}\n\nTotal: ${totalDays}d x INR ${row.dailyCost.toLocaleString()} = INR ${cost.toLocaleString()}`;
+                                            tooltip += `\n\n${monthBreakup || '(no days allocated)'}\n\nTotal: ${totalDays}d x INR ${row.dailyCost.toLocaleString(undefined, {maximumFractionDigits: 0})} = INR ${cost.toLocaleString()}`;
                                             if (showConverted) tooltip += ` (${cSym}${convertCurrency(cost).toLocaleString(undefined, {maximumFractionDigits: 2})})`;
                                             return <span title={tooltip} className="cursor-help underline decoration-dotted decoration-slate-400">{fmtCurrency(cost)}</span>;
                                         })()}
@@ -547,7 +549,7 @@ export function ResourceAssignmentTab() {
                                             monthsPerYear: 12,
                                             ...assumptions
                                         });
-                                        const loadedDailyCost = rateCardResult.adjustedCost / assumptions.workingDaysPerYear;
+                                        const loadedDailyCost = rateCardResult.dailyCost;
                                         const dailyRate = loadedDailyCost * (1 + (markupPercent / 100));
                                         setEditingResource({ ...editingResource, annualCTC: ctc, dailyCost: rateCardResult.dailyCost, dailyRate });
                                     }}

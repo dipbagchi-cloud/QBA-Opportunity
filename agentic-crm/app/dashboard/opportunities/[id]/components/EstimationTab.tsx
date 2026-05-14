@@ -316,9 +316,11 @@ export function EstimationTab() {
                                 <td colSpan={months.length + 2} className="p-1 px-2 border-b">Direct Costs</td>
                             </tr>
 
-                            {/* Salary */}
+                            {/* Salary (loaded cost — includes org-level overhead) */}
                             <tr>
-                                <td className="p-2 border-r pl-4">Salary (Resource Cost)</td>
+                                <td className="p-2 border-r pl-4">
+                                    Salary (Resource Cost)
+                                </td>
                                 {months.map(m => {
                                     const val = expenseRows["Salary"][m] || 0;
                                     return <td key={m} className="p-2 text-right border-r text-slate-600">{val > 0 ? Math.round(convert(val)).toLocaleString() : '-'}</td>
@@ -357,11 +359,11 @@ export function EstimationTab() {
 
                             {/* Auto-calculated costs from summary */}
                             {gomSummary && [
-                                { label: "Resource Loading (DM, Bench, etc.)", key: "overhead" },
-                                { label: "Bonus", key: "bonus" },
-                                { label: "Indirect Cost", key: "indirect" },
-                                { label: "Team Building+Welfare", key: "welfare" },
-                                { label: "Training", key: "training" },
+                                { label: "Resource Loading (DM, Bench, etc.)", key: "overhead", infoOnly: true },
+                                { label: "Bonus", key: "bonus", infoOnly: false },
+                                { label: "Indirect Cost", key: "indirect", infoOnly: false },
+                                { label: "Team Building+Welfare", key: "welfare", infoOnly: false },
+                                { label: "Training", key: "training", infoOnly: false },
                             ].map((item) => {
                                 const rowData = months.reduce((acc, m) => {
                                     const mData = gomSummary.monthlyData[m];
@@ -372,8 +374,11 @@ export function EstimationTab() {
                                 const total = Object.values(rowData).reduce((a, b) => a + b, 0);
 
                                 return (
-                                    <tr key={item.label} className="hover:bg-slate-50/30 transition-colors">
-                                        <td className="p-1 px-2 border-r pl-4 text-slate-700">{item.label}</td>
+                                    <tr key={item.label} className={`hover:bg-slate-50/30 transition-colors ${item.infoOnly ? 'italic text-slate-400' : ''}`}>
+                                        <td className="p-1 px-2 border-r pl-4 text-slate-700">
+                                            {item.label}
+                                            {item.infoOnly && <span className="text-[9px] ml-1">(incl. in salary)</span>}
+                                        </td>
                                         {months.map(m => (
                                             <td key={m} className="p-1 px-2 text-right border-r text-slate-600 font-mono text-[11px]">
                                                 {rowData[m] !== 0 ? Math.round(convert(rowData[m])).toLocaleString() : '-'}
@@ -415,6 +420,7 @@ export function EstimationTab() {
                                     const totalRev = Object.values(revenueRow).reduce((a, b) => a + b, 0);
                                     return months.map(m => {
                                         const rev = revenueRow[m] || 0;
+                                        // Salary already includes org-level overhead (loaded cost)
                                         let totalCost = expenseRows["Salary"]?.[m] || 0;
 
                                         // Add manual items
@@ -422,11 +428,11 @@ export function EstimationTab() {
                                             totalCost += expenseRows[key]?.[m] || 0;
                                         });
 
-                                        // Add auto items if summary exists
+                                        // Add project-level auto items (NOT overhead — already in salary)
                                         if (gomSummary) {
                                             const mData = gomSummary.monthlyData[m];
                                             if (mData) {
-                                                totalCost += (mData.overhead || 0) + (mData.bonus || 0) + (mData.indirect || 0) + (mData.welfare || 0) + (mData.training || 0);
+                                                totalCost += (mData.bonus || 0) + (mData.indirect || 0) + (mData.welfare || 0) + (mData.training || 0);
                                             }
                                         }
 
@@ -455,16 +461,18 @@ export function EstimationTab() {
                                     const totalRev = Object.values(revenueRow).reduce((a, b) => a + b, 0);
                                     return months.map(m => {
                                         const rev = revenueRow[m] || 0;
+                                        // Salary already includes org-level overhead (loaded cost)
                                         let totalCost = expenseRows["Salary"]?.[m] || 0;
 
                                         ["Subcontracting", "Travel + Stay", "Miscl. Expense", "Special HW Cost", "Special SW Cost", "Other Indirect Cost"].forEach(key => {
                                             totalCost += expenseRows[key]?.[m] || 0;
                                         });
 
+                                        // Add project-level auto items (NOT overhead — already in salary)
                                         if (gomSummary) {
                                             const mData = gomSummary.monthlyData[m];
                                             if (mData) {
-                                                totalCost += (mData.overhead || 0) + (mData.bonus || 0) + (mData.indirect || 0) + (mData.welfare || 0) + (mData.training || 0);
+                                                totalCost += (mData.bonus || 0) + (mData.indirect || 0) + (mData.welfare || 0) + (mData.training || 0);
                                             }
                                         }
 
