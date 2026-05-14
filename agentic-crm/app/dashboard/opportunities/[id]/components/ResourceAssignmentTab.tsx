@@ -18,6 +18,7 @@ export function ResourceAssignmentTab() {
         assumptions,
         markupPercent,
         readOnly,
+        currentUserName,
         startDate,
         endDate,
         effortType,
@@ -87,6 +88,11 @@ export function ResourceAssignmentTab() {
         );
     }, [rateCards, searchTerm]);
 
+    // A row is editable if: not globally readOnly, AND either no ownership info exists
+    // (backward compat) OR the row belongs to the current user.
+    const canEditRow = (row: ResourceRow) =>
+        !readOnly && (!currentUserName || !row.addedBy || row.addedBy === currentUserName);
+
     const addRole = (roleItem: any) => {
         // Calculate daily cost and rate using assumptions
         const rateCardResult = calculateRateCard({
@@ -110,6 +116,7 @@ export function ResourceAssignmentTab() {
             dailyCost: rateCardResult.dailyCost,
             dailyRate: dailyRate,
             monthlyEfforts: {},
+            addedBy: currentUserName || undefined,
         };
         setResources([...resources, newRow]);
         setIsAdding(false);
@@ -323,12 +330,19 @@ export function ResourceAssignmentTab() {
                                     </td>
                                 </tr>
                             )}
-                            {resources.map((row) => (
+                            {resources.map((row) => {
+                                const rowEditable = canEditRow(row);
+                                return (
                                 <tr key={row.id} className="hover:bg-slate-50 transition-colors">
                                     <td className="p-2 px-3 font-medium text-slate-900 border-r sticky left-0 bg-white z-10">
                                         <div className="flex flex-col">
                                             <span className="text-sm font-semibold">{row.skill || row.role}</span>
                                             <span className="text-xs text-slate-500 mt-0.5">{row.experienceBand || '-'} | {fmtINR(row.annualCTC, { compact: true })} CTC</span>
+                                            {row.addedBy && (
+                                                <span className="text-[10px] mt-0.5 text-indigo-500 font-medium">
+                                                    {rowEditable ? "Your estimate" : `by ${row.addedBy}`}
+                                                </span>
+                                            )}
                                         </div>
                                     </td>
                                     <td className="p-2 border-r">
@@ -337,7 +351,7 @@ export function ResourceAssignmentTab() {
                                                 className="w-full bg-slate-50 border-transparent rounded px-2 py-1 text-slate-700 text-xs focus:bg-white focus:ring-1 focus:ring-slate-200 disabled:cursor-not-allowed"
                                                 value={row.baseLocation}
                                                 onChange={(e) => updateRow(row.id, "baseLocation", e.target.value)}
-                                                disabled={readOnly}
+                                                disabled={!rowEditable}
                                             >
                                                 <option value="India">India</option>
                                                 <option value="USA">USA</option>
@@ -347,7 +361,7 @@ export function ResourceAssignmentTab() {
                                                 className="w-full bg-slate-50 border-transparent rounded px-2 py-1 text-slate-700 text-xs focus:bg-white focus:ring-1 focus:ring-slate-200 disabled:cursor-not-allowed"
                                                 value={row.deliveryFrom}
                                                 onChange={(e) => updateRow(row.id, "deliveryFrom", e.target.value)}
-                                                disabled={readOnly}
+                                                disabled={!rowEditable}
                                             >
                                                 <option value="Hyderabad">Hyderabad</option>
                                                 <option value="Bangalore">Bangalore</option>
@@ -357,7 +371,7 @@ export function ResourceAssignmentTab() {
                                     </td>
                                     {visibleMonths.map(month => (
                                         <td key={month} className="p-1 border-r">
-                                            {readOnly ? (
+                                            {!rowEditable ? (
                                                 <div className="w-full text-center text-xs p-1 text-slate-700">{row.monthlyEfforts[month] || 0}</div>
                                             ) : (
                                                 <div className="relative group">
@@ -402,24 +416,31 @@ export function ResourceAssignmentTab() {
                                     </td>
                                     {!readOnly && (
                                         <td className="p-2 text-center flex items-center justify-center gap-2">
-                                            <button
-                                                onClick={() => setEditingResource(row)}
-                                                className="text-slate-400 hover:text-blue-600 transition-colors p-1"
-                                                title="Edit Resource"
-                                            >
-                                                <Edit2 className="w-4 h-4" />
-                                            </button>
-                                            <button
-                                                onClick={() => removeRow(row.id)}
-                                                className="text-slate-400 hover:text-red-600 transition-colors p-1"
-                                                title="Remove Resource"
-                                            >
-                                                <Trash2 className="w-4 h-4" />
-                                            </button>
+                                            {rowEditable ? (
+                                                <>
+                                                    <button
+                                                        onClick={() => setEditingResource(row)}
+                                                        className="text-slate-400 hover:text-blue-600 transition-colors p-1"
+                                                        title="Edit Resource"
+                                                    >
+                                                        <Edit2 className="w-4 h-4" />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => removeRow(row.id)}
+                                                        className="text-slate-400 hover:text-red-600 transition-colors p-1"
+                                                        title="Remove Resource"
+                                                    >
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </button>
+                                                </>
+                                            ) : (
+                                                <span className="text-[10px] text-slate-400 italic">view only</span>
+                                            )}
                                         </td>
                                     )}
                                 </tr>
-                            ))}
+                                );
+                            })}
 
                             {/* Totals Row */}
                             {resources.length > 0 && (

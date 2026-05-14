@@ -270,25 +270,24 @@ Get-Content -LiteralPath "local\path\[id]\file.tsx" -Raw | ssh qcrm "cat > '/hom
 ### Frontend Deployment (Next.js)
 
 ```bash
-# 1. Stop frontend
-pm2 stop qcrm-frontend
-fuser -k 3000/tcp 2>/dev/null
+# 1. Upload changed source files (tar approach to preserve LF line endings)
+# On Windows:
+tar -czf /tmp/deploy.tar.gz <files...>
+scp /tmp/deploy.tar.gz qcrm:/tmp/deploy.tar.gz
+ssh qcrm "cd /home/azureuser/app/agentic-crm && tar -xzf /tmp/deploy.tar.gz"
 
-# 2. Clean build (recommended for production)
-cd /home/azureuser/app/agentic-crm
-rm -rf .next
-sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'  # Free RAM for build
+# 2. Build on VM
+ssh qcrm "cd /home/azureuser/app/agentic-crm && sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches' && NODE_OPTIONS='--max-old-space-size=3072' npx next build"
 
-# 3. Build with increased memory
-NODE_OPTIONS='--max-old-space-size=3072' npx next build
+# 3. Safe restart (kills ghost process on 3000 if any, then restarts PM2)
+ssh qcrm "/home/azureuser/app/start-safe.sh 3000 qcrm-frontend"
 
-# 4. Restart
-pm2 restart qcrm-frontend
-
-# 5. Verify
+# 4. Verify
 curl -s -o /dev/null -w 'Frontend: %{http_code}\n' http://localhost:3000/
 # Expected: 307 (redirect to login)
 ```
+
+> **Why not `pm2 restart` directly?** PM2 tracks the `npm start` wrapper PID. When it kills the wrapper, the actual `node` child can survive and hold the port. `start-safe.sh` detects and kills the zombie first. See **Ghost Process Problem** section below.
 
 **Build time:** ~3-5 minutes on Standard_D4s_v3 (4 vCPUs, 16GB RAM).  
 **Memory note:** `--max-old-space-size=3072` is required — default Node heap is too small for the Next.js build.
@@ -296,14 +295,19 @@ curl -s -o /dev/null -w 'Frontend: %{http_code}\n' http://localhost:3000/
 ### Backend Deployment (Express + TypeScript)
 
 ```bash
-# 1. Compile TypeScript
-cd /home/azureuser/app/backend
-npx tsc --skipLibCheck
+# 1. Build locally (on Windows workstation)
+cd d:/Opportunity/Jaydeep_work/backend
+npm run build
 
-# 2. Restart
-pm2 restart qcrm-backend
+# 2. Upload compiled dist via tar (preserves LF line endings)
+tar -czf /tmp/backend_dist.tar.gz dist/
+scp /tmp/backend_dist.tar.gz qcrm:/tmp/backend_dist.tar.gz
+ssh qcrm "cd /home/azureuser/app/backend && tar -xzf /tmp/backend_dist.tar.gz"
 
-# 3. Verify
+# 3. Safe restart (kills ghost on 3001, then restarts PM2)
+ssh qcrm "/home/azureuser/app/start-safe.sh 3001 qcrm-backend"
+
+# 4. Verify
 curl -s -o /dev/null -w 'Backend: %{http_code}\n' http://localhost:3001/api/health
 # Expected: 401 (auth required = healthy)
 ```
@@ -358,14 +362,65 @@ curl -s -o /dev/null -w '%{http_code}\n' http://localhost:3001/api/health
 curl -s -o /dev/null -w '%{http_code}\n' https://qcrm.qbadvisory.com/
 ```
 
+### Ghost Process Problem (IMPORTANT)
+
+**Symptom:** After a `pm2 restart`, the new process crashes with `EADDRINUSE: address already in use :::3000` (or 3001). The old process survives as a zombie not tracked by PM2, silently serving stale code. Users see `400 Bad Request` on JS chunks, "screen dancing", or features that should be updated still behaving as before.
+
+**Root cause:** `pm2 restart` sends SIGINT/SIGTERM to the process it tracks, but if the tracked PID was an npm wrapper (the `npm start` shell), the actual `node dist/index.js` child may outlive it and keep the port open.
+
+**Detection:**
+```bash
+fuser 3000/tcp      # shows PID holding port 3000
+fuser 3001/tcp      # shows PID holding port 3001
+pm2 ls              # compare PIDs — if fuser PID not in pm2 list, it's a ghost
+```
+
+**Fix (immediate):**
+```bash
+kill $(fuser 3000/tcp 2>/dev/null)   # kill ghost frontend
+sleep 2
+kill $(fuser 3001/tcp 2>/dev/null)   # kill ghost backend
+sleep 2
+pm2 restart qcrm-frontend
+pm2 restart qcrm-backend
+```
+
+**Prevention — always use `start-safe.sh` for restarts:**
+```bash
+# Located at /home/azureuser/app/start-safe.sh
+# Kills any stale port holder before restarting PM2 process
+
+/home/azureuser/app/start-safe.sh 3000 qcrm-frontend
+/home/azureuser/app/start-safe.sh 3001 qcrm-backend
+```
+
+**Updated deployment one-liners** (use these instead of bare `pm2 restart`):
+```bash
+# Frontend deploy + safe restart
+ssh qcrm "cd /home/azureuser/app/agentic-crm && NODE_OPTIONS='--max-old-space-size=3072' npx next build && /home/azureuser/app/start-safe.sh 3000 qcrm-frontend"
+
+# Backend deploy + safe restart
+ssh qcrm "cd /home/azureuser/app/backend && npx tsc --skipLibCheck --noEmitOnError false 2>/dev/null; /home/azureuser/app/start-safe.sh 3001 qcrm-backend"
+```
+
+**Verify after restart:**
+```bash
+# Confirm the port is held by the expected PM2 PID
+fuser 3000/tcp && pm2 ls | grep qcrm-frontend
+fuser 3001/tcp && pm2 ls | grep qcrm-backend
+```
+
+---
+
 ### Common Issues & Fixes
 
 | Issue | Symptom | Fix |
 |-------|---------|-----|
-| **ChunkLoadError** | White screen flashing | Users: Ctrl+Shift+R. Devs: Rebuild + deploy frontend |
+| **ChunkLoadError** | White screen / 400 on JS chunks | Ghost process on port 3000 — run `start-safe.sh 3000 qcrm-frontend` |
+| **Stale API responses** | New backend code not taking effect | Ghost process on port 3001 — run `start-safe.sh 3001 qcrm-backend` |
 | **Build OOM** | Build hangs or crashes | `sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'` before build |
-| **Port in use** | Frontend won't start | `fuser -k 3000/tcp` then `pm2 restart qcrm-frontend` |
-| **Stale TypeScript** | Backend errors after code change | `npx tsc --skipLibCheck` then `pm2 restart qcrm-backend` |
+| **Port in use** | PM2 process won't start | `fuser -k 3000/tcp` then `pm2 restart qcrm-frontend` |
+| **Stale TypeScript** | Backend errors after code change | `npx tsc --skipLibCheck` then `start-safe.sh 3001 qcrm-backend` |
 | **DB connection** | Prisma connection errors | Check `DATABASE_URL` in `.env`, verify PostgreSQL running: `systemctl status postgresql` |
 | **SSL expired** | HTTPS errors | `sudo certbot renew` |
 | **PM2 not persisting** | Processes gone after reboot | `pm2 save && pm2 startup` |

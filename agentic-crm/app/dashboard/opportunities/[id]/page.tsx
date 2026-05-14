@@ -2060,18 +2060,19 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
             {/* PRESALES VIEW (Step 1) */}
             {activeStep === 1 && (
-                <OpportunityEstimationProvider 
-                    opportunityId={id} 
-                    readOnly={!canEditPresalesData || opportunityStage >= 2 || isStalled || isLost} 
-                    startDate={formData.tentativeStartDate} 
-                    endDate={formData.tentativeEndDate} 
+                <OpportunityEstimationProvider
+                    opportunityId={id}
+                    readOnly={!canEditPresalesData || opportunityStage >= 2 || isStalled || isLost}
+                    startDate={formData.tentativeStartDate}
+                    endDate={formData.tentativeEndDate}
                     durationInDays={
                         formData.durationUnit === 'months' && formData.tentativeStartDate
                             ? countWorkingDaysInPeriod(formData.tentativeStartDate, Number(formData.duration) || 0, holidays)
                             : durationToWorkingDays(Number(formData.duration) || 0, formData.durationUnit)
                     }
-                    adjustedEstimatedValue={Number(adjustedEstimatedValue) || 0} 
+                    adjustedEstimatedValue={Number(adjustedEstimatedValue) || 0}
                     initialCurrency={globalCurrency}
+                    currentUserName={user?.name || ''}
                 >
                     <GomPercentSync onGomPercentChange={setContextGomPercent} />
                     {opportunityStage < 2 && (
@@ -2949,16 +2950,14 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
             {/* Comments & Audit Log — visible on all stages */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 min-h-[300px]">
-                <AssignmentPane 
-                    opportunityId={id} 
-                    salesRepName={formData.salesRep} 
-                    managerName={opportunityManagerName} 
+                <AssignmentPane
+                    opportunityId={id}
+                    salesRepName={formData.salesRep}
+                    managerName={opportunityManagerName}
                     presalesAssigneeName={formData.presalesAssignee}
                     setFormData={setFormData}
-                    setOpportunityManagerName={setOpportunityManagerName}
-                    hasEditAccess={hasEditAccess}
-                    userRole={user?.role?.name || ''}
-                    userName={user?.name || ''}
+                    isAssignedManager={!!opportunityAccess?.assignment?.isManager}
+                    isAdmin={!!opportunityAccess?.assignment?.canEditAssignedOpportunity && !opportunityAccess?.assignment?.isDirectlyAssigned}
                 />
                 <CommentsPanel opportunityId={id} currentStage={steps[activeStep]} readOnly={!canComment} readOnlyReason={viewOnlyReason} />
                 <AuditLogPane opportunityId={id} />

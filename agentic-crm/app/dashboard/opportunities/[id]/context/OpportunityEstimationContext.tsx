@@ -18,6 +18,7 @@ interface ResourceRow {
     monthlyEfforts: Record<string, number>; // month -> days
     experienceBand?: string;
     skill?: string;
+    addedBy?: string; // presales person who added this resource
 }
 
 interface TravelCostEntry {
@@ -89,6 +90,9 @@ interface OpportunityEstimationContextType {
     // Read-only mode (when estimation submitted)
     readOnly: boolean;
 
+    // Who is currently logged in (used to scope resource editing to own rows)
+    currentUserName: string;
+
     // Date range for calendar columns
     startDate: string;
     endDate: string;
@@ -98,7 +102,7 @@ interface OpportunityEstimationContextType {
 
 const OpportunityEstimationContext = createContext<OpportunityEstimationContextType | undefined>(undefined);
 
-export function OpportunityEstimationProvider({ children, opportunityId, readOnly = false, startDate = '', endDate = '', durationInDays = 0, adjustedEstimatedValue = 0, initialCurrency = "INR" }: { children: ReactNode; opportunityId?: string; readOnly?: boolean; startDate?: string; endDate?: string; durationInDays?: number; adjustedEstimatedValue?: number; initialCurrency?: string }) {
+export function OpportunityEstimationProvider({ children, opportunityId, readOnly = false, startDate = '', endDate = '', durationInDays = 0, adjustedEstimatedValue = 0, initialCurrency = "INR", currentUserName = "" }: { children: ReactNode; opportunityId?: string; readOnly?: boolean; startDate?: string; endDate?: string; durationInDays?: number; adjustedEstimatedValue?: number; initialCurrency?: string; currentUserName?: string }) {
     // State
     const [assumptions, setAssumptions] = useState<BudgetAssumptions>(DEFAULT_ASSUMPTIONS);
     const [resources, setResources] = useState<ResourceRow[]>([]);
@@ -542,6 +546,7 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
         isSaving,
         isLoaded,
         readOnly,
+        currentUserName,
         startDate,
         endDate,
         durationInDays,
