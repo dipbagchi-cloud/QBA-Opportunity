@@ -1681,7 +1681,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     disabled={!isPipelineEditable}
                                     required={true}
                                 />
-                                <button type="button" onClick={() => setShowAddClient(true)} className="p-2.5 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors">
+                                <button type="button" onClick={() => setShowAddClient(true)} disabled={!isPipelineEditable} className="p-2.5 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                                     <Plus className="w-5 h-5" />
                                 </button>
                             </div>
