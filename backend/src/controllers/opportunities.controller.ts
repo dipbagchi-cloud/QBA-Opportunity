@@ -171,7 +171,7 @@ export async function listOpportunities(req: Request, res: Response) {
                 currency: opp.currency || 'INR',
                 stage: stageName,
                 currentStage: opp.currentStage,
-                probability,
+                probability: opp.probability != null ? Number(opp.probability) : probability,
                 lastActivity: daysInStage === 0 ? 'Today' : `${daysInStage} days ago`,
                 owner: opp.owner.name,
                 salesRepName: opp.salesRepName || '',

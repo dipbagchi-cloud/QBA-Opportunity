@@ -2130,7 +2130,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     )}
                                     <div className="col-span-2">
                                         <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Description</label>
-                                        <div className="font-semibold text-slate-800 truncate">{formData.description}</div>
+                                        <div className="font-semibold text-slate-800 whitespace-pre-wrap">{formData.description}</div>
                                     </div>
                                 </div>
 
