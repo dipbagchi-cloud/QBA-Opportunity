@@ -176,7 +176,9 @@ export function EstimationTab() {
                 <Info className="w-12 h-12 text-slate-300 mb-3" />
                 <h3 className="text-base font-semibold text-slate-700 mb-2">No Resources Assigned</h3>
                 <p className="text-sm text-slate-500 text-center max-w-md">
-                    Please go to the <strong>Resource Assignment</strong> tab to add resources and define monthly efforts before viewing the estimation summary.
+                    {readOnly
+                        ? "Estimation summary will appear here once presales resources and monthly efforts are available."
+                        : <>Please go to the <strong>Resource Assignment</strong> tab to add resources and define monthly efforts before viewing the estimation summary.</>}
                 </p>
             </div>
         );

@@ -9,6 +9,7 @@ import {
 import { apiClient } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { motion, AnimatePresence } from "framer-motion";
+import { useAuthStore } from "@/lib/auth-store";
 
 interface Contact {
     id: string;
@@ -44,6 +45,8 @@ const emptyForm = {
 
 export default function ContactsPage() {
     const { toast } = useToast();
+    const { hasPermission } = useAuthStore();
+    const canEditContacts = hasPermission("contacts:write");
     const [contacts, setContacts] = useState<Contact[]>([]);
     const [total, setTotal] = useState(0);
     const [page, setPage] = useState(1);
@@ -101,12 +104,14 @@ export default function ContactsPage() {
     }, [searchInput]);
 
     const openCreate = () => {
+        if (!canEditContacts) return;
         setForm(emptyForm);
         setEditingId(null);
         setShowModal(true);
     };
 
     const openEdit = (c: Contact) => {
+        if (!canEditContacts) return;
         setForm({
             firstName: c.firstName,
             lastName: c.lastName,
@@ -177,12 +182,19 @@ export default function ContactsPage() {
                 </div>
                 <button
                     onClick={openCreate}
+                    disabled={!canEditContacts}
                     className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold flex items-center gap-2 hover:bg-indigo-700 transition-colors shadow-sm"
                 >
                     <Plus className="w-4 h-4" />
                     Add Contact
                 </button>
             </div>
+
+            {!canEditContacts && (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                    This role has view-only access to Contacts. Create, edit, and delete actions are disabled.
+                </div>
+            )}
 
             {/* Search & Filter Bar */}
             <div className="flex flex-col sm:flex-row gap-3">
@@ -250,14 +262,16 @@ export default function ContactsPage() {
                                         <p className="text-xs text-slate-500">{contact.title || "No title"}</p>
                                     </div>
                                 </div>
-                                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <button onClick={() => openEdit(contact)} className="p-1.5 hover:bg-slate-100 rounded-md text-slate-400 hover:text-indigo-600">
-                                        <Edit className="w-3.5 h-3.5" />
-                                    </button>
-                                    <button onClick={() => setDeleteId(contact.id)} className="p-1.5 hover:bg-red-50 rounded-md text-slate-400 hover:text-red-600">
-                                        <Trash2 className="w-3.5 h-3.5" />
-                                    </button>
-                                </div>
+                                {canEditContacts && (
+                                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <button onClick={() => openEdit(contact)} className="p-1.5 hover:bg-slate-100 rounded-md text-slate-400 hover:text-indigo-600">
+                                            <Edit className="w-3.5 h-3.5" />
+                                        </button>
+                                        <button onClick={() => setDeleteId(contact.id)} className="p-1.5 hover:bg-red-50 rounded-md text-slate-400 hover:text-red-600">
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                    </div>
+                                )}
                             </div>
 
                             <div className="flex items-center gap-1.5 mb-3">
@@ -627,13 +641,15 @@ export default function ContactsPage() {
                                 >
                                     Close
                                 </button>
-                                <button
-                                    onClick={() => { openEdit(viewContact); setViewContact(null); }}
-                                    className="px-4 py-2 text-sm font-semibold bg-indigo-600 text-white rounded-md hover:bg-indigo-700 flex items-center gap-2"
-                                >
-                                    <Edit className="w-3.5 h-3.5" />
-                                    Edit
-                                </button>
+                                {canEditContacts && (
+                                    <button
+                                        onClick={() => { openEdit(viewContact); setViewContact(null); }}
+                                        className="px-4 py-2 text-sm font-semibold bg-indigo-600 text-white rounded-md hover:bg-indigo-700 flex items-center gap-2"
+                                    >
+                                        <Edit className="w-3.5 h-3.5" />
+                                        Edit
+                                    </button>
+                                )}
                             </div>
                         </motion.div>
                     </motion.div>

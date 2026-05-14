@@ -319,7 +319,7 @@ export function ResourceAssignmentTab() {
                             {resources.length === 0 && (
                                 <tr>
                                     <td colSpan={visibleMonths.length + 4} className="p-6 text-center text-slate-400 italic">
-                                        No resources assigned. Click "Add Resource" to begin.
+                                        {readOnly ? "No resources assigned." : 'No resources assigned. Click "Add Resource" to begin.'}
                                     </td>
                                 </tr>
                             )}

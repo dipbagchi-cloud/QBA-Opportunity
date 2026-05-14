@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { API_URL } from './api';
+import { hasAnyGrantedPermission, hasGrantedPermission } from './access-control';
 
 export interface AuthUser {
   id: string;
@@ -207,17 +208,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   hasPermission: (permission: string) => {
     const user = get().user;
     if (!user) return false;
-    const perms = user.role.permissions;
-    if (perms.includes('*')) return true;
-    return perms.includes(permission);
+    return hasGrantedPermission(user.role.permissions, permission);
   },
 
   hasAnyPermission: (permissions: string[]) => {
     const user = get().user;
     if (!user) return false;
-    const perms = user.role.permissions;
-    if (perms.includes('*')) return true;
-    return permissions.some((p) => perms.includes(p));
+    return hasAnyGrantedPermission(user.role.permissions, permissions);
   },
 
   clearError: () => set({ error: null }),

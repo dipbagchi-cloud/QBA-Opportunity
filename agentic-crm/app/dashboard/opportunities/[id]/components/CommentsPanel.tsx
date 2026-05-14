@@ -15,9 +15,11 @@ interface Comment {
 interface CommentsPanelProps {
     opportunityId: string;
     currentStage: string; // Pipeline, Presales, Sales, Project
+    readOnly?: boolean;
+    readOnlyReason?: string | null;
 }
 
-export function CommentsPanel({ opportunityId, currentStage }: CommentsPanelProps) {
+export function CommentsPanel({ opportunityId, currentStage, readOnly = false, readOnlyReason = null }: CommentsPanelProps) {
     const [comments, setComments] = useState<Comment[]>([]);
     const [newComment, setNewComment] = useState("");
     const [isLoading, setIsLoading] = useState(false);
@@ -90,18 +92,24 @@ export function CommentsPanel({ opportunityId, currentStage }: CommentsPanelProp
                         rows={2}
                         value={newComment}
                         onChange={(e) => setNewComment(e.target.value)}
-                        placeholder="Add a comment..."
-                        className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-sm resize-none focus:outline-none focus:ring-1 focus:ring-indigo-500/30 focus:border-indigo-300"
+                        placeholder={readOnly ? "Comments are view-only for this opportunity." : "Add a comment..."}
+                        disabled={readOnly}
+                        title={readOnlyReason || undefined}
+                        className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-sm resize-none focus:outline-none focus:ring-1 focus:ring-indigo-500/30 focus:border-indigo-300 disabled:bg-slate-100 disabled:cursor-not-allowed"
                         onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit(); } }}
                     />
                     <button
                         onClick={handleSubmit}
-                        disabled={isSending || !newComment.trim()}
+                        disabled={readOnly || isSending || !newComment.trim()}
+                        title={readOnlyReason || undefined}
                         className="self-end px-3 py-2 bg-indigo-600 text-white rounded-md text-sm hover:bg-indigo-700 disabled:opacity-50"
                     >
                         <Send className="w-4 h-4" />
                     </button>
                 </div>
+                {readOnly && readOnlyReason && (
+                    <p className="mt-2 text-xs text-slate-500">{readOnlyReason}</p>
+                )}
             </div>
 
             {/* Comments list */}

@@ -3,8 +3,27 @@ import { prisma } from '../lib/prisma';
 import { sendNotificationEmail } from '../lib/email';
 import { evaluateStageChangeRules, evaluateDataConditionRules, evaluateOpportunityCreatedRules, resolveCalculatedFields } from '../lib/notification-engine';
 import { calculateOpportunityProbability } from '../lib/opportunity-probability';
+import { buildOpportunityAccess } from '../lib/opportunity-access';
 import path from 'path';
 import fs from 'fs';
+
+async function resolveOpportunityAccess(
+    authUser: NonNullable<Request['user']>,
+    opportunity: { ownerId: string; salesRepName?: string | null; managerName?: string | null; presalesAssigneeName?: string | null },
+    pendingApproval?: { reviewerId?: string | null } | null
+) {
+    const currentUser = await prisma.user.findUnique({
+        where: { id: authUser.userId },
+        select: { id: true, name: true },
+    });
+
+    return buildOpportunityAccess({
+        authUser,
+        currentUser,
+        opportunity,
+        pendingApproval,
+    });
+}
 
 // GET /api/opportunities
 export async function listOpportunities(req: Request, res: Response) {
@@ -66,6 +85,11 @@ export async function listOpportunities(req: Request, res: Response) {
             where.AND = andFilters;
         }
 
+        const currentUser = await prisma.user.findUnique({
+            where: { id: req.user!.userId },
+            select: { id: true, name: true },
+        });
+
         const [opportunities, total] = await Promise.all([
             prisma.opportunity.findMany({
                 where,
@@ -88,7 +112,7 @@ export async function listOpportunities(req: Request, res: Response) {
         // Transform for frontend with dynamic intelligence 
         const formatted = opportunities.map(opp => {
             const stageName = opp.stage?.name || opp.currentStage || 'Discovery';
-            const probability = calculateOpportunityProbability(opp);
+            const probability = calculateOpportunityProbability(opp as any);
 
             const hasPresalesData = opp.presalesData && Object.keys(opp.presalesData as any).length > 0;
             const hasRate = opp.expectedDayRate && Number(opp.expectedDayRate) > 0;
@@ -103,6 +127,11 @@ export async function listOpportunities(req: Request, res: Response) {
 
             // 3. Stalled detection
             const isStalled = opp.isStalled || (daysInStage > 30 && !['Closed Won', 'Closed Lost'].includes(stageName));
+            const access = buildOpportunityAccess({
+                authUser: req.user!,
+                currentUser,
+                opportunity: opp,
+            });
 
             // 4. Dynamic Health Score (composite of 4 factors)
             //    a) Stage Progress (30%): further along = healthier
@@ -151,11 +180,16 @@ export async function listOpportunities(req: Request, res: Response) {
                 stage: stageName,
                 currentStage: opp.currentStage,
                 probability: probability,
+                ownerId: opp.ownerId,
                 lastActivity: daysInStage === 0 ? 'Today' : `${daysInStage} days ago`,
                 owner: opp.owner.name,
                 salesRepName: opp.salesRepName || '',
                 managerName: (opp as any).managerName || '',
                 presalesAssigneeName: (opp as any).presalesAssigneeName || '',
+                access: {
+                    canEdit: access.assignment.canEditAssignedOpportunity,
+                    viewOnlyReason: access.viewOnlyReason,
+                },
                 status: opp.isStalled ? 'stalled' : (finalHealth > 70 ? 'healthy' : (finalHealth > 40 ? 'at-risk' : 'critical')),
                 detailedStatus: opp.detailedStatus,
                 description: opp.description,
@@ -346,9 +380,15 @@ export async function getOpportunity(req: Request, res: Response) {
             return res.status(404).json({ error: 'Opportunity not found' });
         }
 
+        const pendingApproval = await prisma.approvalRequest.findFirst({
+            where: { opportunityId: id, type: 'GOM_APPROVAL', status: 'Pending' },
+            select: { reviewerId: true },
+        });
+        const access = await resolveOpportunityAccess(req.user!, opportunity, pendingApproval);
+
         // Include project info if exists
         const project = await prisma.project.findFirst({ where: { opportunityId: id } });
-        res.json({ ...opportunity, project: project || null });
+        res.json({ ...opportunity, project: project || null, access });
     } catch (error) {
         res.status(500).json({ error: 'Failed to fetch opportunity' });
     }
@@ -370,18 +410,11 @@ export async function updateOpportunity(req: Request, res: Response) {
             return res.status(404).json({ error: 'Opportunity not found' });
         }
 
-        // Authorization Check
-        const currentUser = await prisma.user.findUnique({ where: { id: req.user!.userId } });
-        if (currentUser) {
-            const role = req.user!.roleName.toLowerCase();
-            if (role === 'sales' || role === 'presales') {
-                const isOwner = previous.ownerId === currentUser.id;
-                const presalesNames = (previous.presalesAssigneeName || '').split(',').map((n: string) => n.trim());
-                const isAssigned = previous.salesRepName === currentUser.name || previous.managerName === currentUser.name || presalesNames.includes(currentUser.name);
-                if (!isOwner && !isAssigned) {
-                    return res.status(403).json({ error: 'You do not have permission to update this opportunity. View-only access.' });
-                }
-            }
+        const access = await resolveOpportunityAccess(req.user!, previous);
+        if (!access.assignment.canEditAssignedOpportunity) {
+            return res.status(403).json({
+                error: access.viewOnlyReason || 'You do not have permission to update this opportunity. View-only access.',
+            });
         }
 
         // Handle Client update if name changed
@@ -705,12 +738,40 @@ export async function approveGom(req: Request, res: Response) {
     try {
         const { id } = req.params;
         const { approved, gomPercent } = req.body;
+        const opportunity = await prisma.opportunity.findUnique({
+            where: { id },
+            select: {
+                id: true,
+                title: true,
+                ownerId: true,
+                salesRepName: true,
+                managerName: true,
+                presalesAssigneeName: true,
+                gomApproved: true,
+            },
+        });
+        if (!opportunity) {
+            return res.status(404).json({ error: 'Opportunity not found' });
+        }
+
+        const access = await resolveOpportunityAccess(req.user!, opportunity);
 
         // If revoking, just revoke
         if (approved === false) {
-            const updated = await prisma.opportunity.update({ where: { id }, data: { gomApproved: false } });
+            if (!access.workflow.gomApprovalManageable) {
+                return res.status(403).json({
+                    error: access.viewOnlyReason || 'Only assigned users with approval access can revoke GOM approval.',
+                });
+            }
+            await prisma.opportunity.update({ where: { id }, data: { gomApproved: false } });
             await prisma.auditLog.create({ data: { entity: 'Opportunity', entityId: id, action: 'GOM_REVOKED', userId: req.user!.userId, changes: 'GOM Approval Revoked' } });
             return res.json({ gomApproved: false });
+        }
+
+        if (!access.workflow.gomRequestAllowed && !access.workflow.gomApprovalManageable) {
+            return res.status(403).json({
+                error: access.viewOnlyReason || 'Only assigned users with workflow access can update GOM approval.',
+            });
         }
 
         // Get auto-approve threshold from budget assumptions
@@ -804,11 +865,23 @@ export async function reviewGomApproval(req: Request, res: Response) {
     try {
         const { id } = req.params;
         const { approved, comments } = req.body;
+        const opportunity = await prisma.opportunity.findUnique({
+            where: { id },
+            select: { ownerId: true, salesRepName: true, managerName: true, presalesAssigneeName: true },
+        });
+        if (!opportunity) return res.status(404).json({ error: 'Opportunity not found' });
 
         const pending = await prisma.approvalRequest.findFirst({
             where: { opportunityId: id, type: 'GOM_APPROVAL', status: 'Pending' },
         });
         if (!pending) return res.status(404).json({ error: 'No pending GOM approval request found' });
+
+        const access = await resolveOpportunityAccess(req.user!, opportunity, pending);
+        if (!access.workflow.gomApprovalReviewable) {
+            return res.status(403).json({
+                error: 'Only the assigned reviewer can approve or reject this GOM request.',
+            });
+        }
 
         await prisma.approvalRequest.update({
             where: { id: pending.id },
@@ -871,6 +944,13 @@ export async function convertOpportunity(req: Request, res: Response) {
 
         if (!opportunity) {
             return res.status(404).json({ error: 'Opportunity not found' });
+        }
+
+        const access = await resolveOpportunityAccess(req.user!, opportunity);
+        if (!access.workflow.salesEditable) {
+            return res.status(403).json({
+                error: access.viewOnlyReason || 'Only assigned users with sales edit access can convert this opportunity.',
+            });
         }
 
         // 2. Idempotency Check
@@ -966,6 +1046,19 @@ export async function addComment(req: Request, res: Response) {
         if (!content || !content.trim()) {
             return res.status(400).json({ error: 'Comment content is required' });
         }
+        const opportunity = await prisma.opportunity.findUnique({
+            where: { id },
+            select: { ownerId: true, salesRepName: true, managerName: true, presalesAssigneeName: true },
+        });
+        if (!opportunity) {
+            return res.status(404).json({ error: 'Opportunity not found' });
+        }
+        const access = await resolveOpportunityAccess(req.user!, opportunity);
+        if (!access.workflow.commentsWritable) {
+            return res.status(403).json({
+                error: access.viewOnlyReason || 'Only assigned team members can add comments to this opportunity.',
+            });
+        }
         const comment = await prisma.note.create({
             data: {
                 content: content.trim(),
@@ -1014,8 +1107,17 @@ export async function uploadAttachment(req: Request, res: Response) {
         const file = (req as any).file;
         if (!file) return res.status(400).json({ error: 'No file uploaded' });
 
-        const opp = await prisma.opportunity.findUnique({ where: { id } });
+        const opp = await prisma.opportunity.findUnique({
+            where: { id },
+            select: { ownerId: true, salesRepName: true, managerName: true, presalesAssigneeName: true },
+        });
         if (!opp) return res.status(404).json({ error: 'Opportunity not found' });
+        const access = await resolveOpportunityAccess(req.user!, opp);
+        if (!access.workflow.attachmentsEditable) {
+            return res.status(403).json({
+                error: access.viewOnlyReason || 'Only assigned team members can upload attachments for this opportunity.',
+            });
+        }
 
         // Store relative path from project root for portability
         const relativePath = path.relative(PROJECT_ROOT, file.path);
@@ -1065,8 +1167,21 @@ export async function downloadAttachment(req: Request, res: Response) {
 // DELETE /api/opportunities/:id/attachments/:attachmentId
 export async function deleteAttachment(req: Request, res: Response) {
     try {
-        const { attachmentId } = req.params;
-        const attachment = await prisma.attachment.findUnique({ where: { id: attachmentId } });
+        const { id, attachmentId } = req.params;
+        const opp = await prisma.opportunity.findUnique({
+            where: { id },
+            select: { ownerId: true, salesRepName: true, managerName: true, presalesAssigneeName: true },
+        });
+        if (!opp) return res.status(404).json({ error: 'Opportunity not found' });
+        const access = await resolveOpportunityAccess(req.user!, opp);
+        if (!access.workflow.attachmentsEditable) {
+            return res.status(403).json({
+                error: access.viewOnlyReason || 'Only assigned team members can delete attachments from this opportunity.',
+            });
+        }
+
+        const { attachmentId: attachmentRecordId } = req.params;
+        const attachment = await prisma.attachment.findUnique({ where: { id: attachmentRecordId } });
         if (!attachment) return res.status(404).json({ error: 'Attachment not found' });
 
         // Resolve relative path to absolute for file deletion
@@ -1079,7 +1194,7 @@ export async function deleteAttachment(req: Request, res: Response) {
             fs.unlinkSync(absPath);
         }
 
-        await prisma.attachment.delete({ where: { id: attachmentId } });
+        await prisma.attachment.delete({ where: { id: attachmentRecordId } });
         res.json({ success: true });
     } catch (error) {
         console.error('Delete attachment error:', error);

@@ -5,6 +5,7 @@ import { User, Lock, Users, Shield, Plus, X, Check, AlertCircle, RotateCcw, Penc
 import { useAuthStore } from "@/lib/auth-store";
 import { apiClient, API_URL, getAuthHeaders } from "@/lib/api";
 import { useCurrency } from "@/components/providers/currency-provider";
+import { canAccessSettingsTab, hasAnyGrantedPermission, type SettingsTabKey } from "@/lib/access-control";
 import { SowAdminTab } from "./components/SowAdminTab";
 import EmailTemplateBuilder, { CustomCalcField } from "@/components/email-templates/EmailTemplateBuilder";
 
@@ -125,17 +126,14 @@ interface TeamOption {
     name: string;
 }
 
-type Tab = "profile" | "security" | "users" | "roles" | "qpeoplemapping" | "authconfig" | "ratecards" | "budgetassumptions" | "currencyrates" | "gomcalculator" | "clients" | "regions" | "technologies" | "pricingmodels" | "projecttypes" | "auditlog" | "emailtemplates" | "notificationrules" | "sowadmin" | "holidays";
+type Tab = SettingsTabKey;
 
 export default function SettingsPage() {
-    const { user, hasPermission } = useAuthStore();
-    const isAdmin = hasPermission("users:manage");
-    const canManageRoles = hasPermission("roles:manage");
-    const canManageCostCards = hasPermission("costcard:manage");
-    const canManageMetadata = hasPermission("metadata:manage");
-    const canViewAuditLogs = hasPermission("auditlogs:view");
+    const { user } = useAuthStore();
+    const userPermissions = user?.role?.permissions || [];
+    const canShowTab = useCallback((tab: Tab) => canAccessSettingsTab(tab, userPermissions), [userPermissions]);
 
-    const sidebarSections: { label: string; adminOnly?: boolean; tabs: { key: Tab; label: string; icon: any; adminOnly?: boolean }[] }[] = [
+    const sidebarSections: { label: string; permissionAny?: string[]; tabs: { key: Tab; label: string; icon: any; permissionAny?: string[] }[] }[] = [
         {
             label: "Personal",
             tabs: [
@@ -145,56 +143,56 @@ export default function SettingsPage() {
         },
         {
             label: "Administration",
-            adminOnly: true,
+            permissionAny: ["users:manage", "roles:manage", "settings:manage"],
             tabs: [
-                { key: "users", label: "Users", icon: Users, adminOnly: true },
-                { key: "roles", label: "Roles", icon: Shield, adminOnly: true },
-                { key: "qpeoplemapping", label: "QPeople Role Mapping", icon: RefreshCw, adminOnly: true },
-                { key: "authconfig", label: "Authentication", icon: ShieldCheck, adminOnly: true },
+                { key: "users", label: "Users", icon: Users, permissionAny: ["users:manage"] },
+                { key: "roles", label: "Roles", icon: Shield, permissionAny: ["roles:manage"] },
+                { key: "qpeoplemapping", label: "QPeople Role Mapping", icon: RefreshCw, permissionAny: ["roles:manage"] },
+                { key: "authconfig", label: "Authentication", icon: ShieldCheck, permissionAny: ["settings:manage"] },
             ],
         },
         {
             label: "Cost Management",
-            adminOnly: true,
+            permissionAny: ["costcard:manage", "settings:manage"],
             tabs: [
-                { key: "ratecards", label: "Rate Cards", icon: DollarSign, adminOnly: true },
-                { key: "budgetassumptions", label: "Budget Assumptions", icon: Settings2, adminOnly: true },
-                { key: "currencyrates", label: "Currency Rates", icon: Coins, adminOnly: true },
-                { key: "gomcalculator", label: "GOM Calculator", icon: DollarSign, adminOnly: true },
+                { key: "ratecards", label: "Rate Cards", icon: DollarSign, permissionAny: ["costcard:manage"] },
+                { key: "budgetassumptions", label: "Budget Assumptions", icon: Settings2, permissionAny: ["settings:manage"] },
+                { key: "currencyrates", label: "Currency Rates", icon: Coins, permissionAny: ["settings:manage"] },
+                { key: "gomcalculator", label: "GOM Calculator", icon: DollarSign, permissionAny: ["settings:manage"] },
             ],
         },
         {
             label: "Master Data",
-            adminOnly: true,
+            permissionAny: ["metadata:manage", "settings:manage"],
             tabs: [
-                { key: "clients", label: "Clients", icon: Building2, adminOnly: true },
-                { key: "regions", label: "Regions", icon: Globe, adminOnly: true },
-                { key: "technologies", label: "Technologies", icon: Cpu, adminOnly: true },
-                { key: "pricingmodels", label: "Pricing Models", icon: Tag, adminOnly: true },
-                { key: "projecttypes", label: "Project Types", icon: Briefcase, adminOnly: true },
-                { key: "holidays", label: "Holidays", icon: Calendar, adminOnly: true },
+                { key: "clients", label: "Clients", icon: Building2, permissionAny: ["metadata:manage"] },
+                { key: "regions", label: "Regions", icon: Globe, permissionAny: ["metadata:manage"] },
+                { key: "technologies", label: "Technologies", icon: Cpu, permissionAny: ["metadata:manage"] },
+                { key: "pricingmodels", label: "Pricing Models", icon: Tag, permissionAny: ["metadata:manage"] },
+                { key: "projecttypes", label: "Project Types", icon: Briefcase, permissionAny: ["metadata:manage"] },
+                { key: "holidays", label: "Holidays", icon: Calendar, permissionAny: ["settings:manage"] },
             ],
         },
         {
             label: "SOW Management",
-            adminOnly: true,
+            permissionAny: ["settings:manage"],
             tabs: [
-                { key: "sowadmin", label: "SOW Administration", icon: FileText, adminOnly: true },
+                { key: "sowadmin", label: "SOW Administration", icon: FileText, permissionAny: ["settings:manage"] },
             ],
         },
         {
             label: "Compliance",
-            adminOnly: true,
+            permissionAny: ["auditlogs:view"],
             tabs: [
-                { key: "auditlog", label: "Audit Log", icon: FileText, adminOnly: true },
+                { key: "auditlog", label: "Audit Log", icon: FileText, permissionAny: ["auditlogs:view"] },
             ],
         },
         {
             label: "Notifications",
-            adminOnly: true,
+            permissionAny: ["settings:manage"],
             tabs: [
-                { key: "emailtemplates", label: "Email Templates", icon: Mail, adminOnly: true },
-                { key: "notificationrules", label: "Notification Rules", icon: Bell, adminOnly: true },
+                { key: "emailtemplates", label: "Email Templates", icon: Mail, permissionAny: ["settings:manage"] },
+                { key: "notificationrules", label: "Notification Rules", icon: Bell, permissionAny: ["settings:manage"] },
             ],
         },
     ];
@@ -206,6 +204,31 @@ export default function SettingsPage() {
     const toggleSection = (label: string) => {
         setCollapsedSections(prev => ({ ...prev, [label]: !prev[label] }));
     };
+
+    const visibleSections = sidebarSections
+        .map((section) => {
+            const visibleTabs = section.tabs.filter((tab) => {
+                if (tab.permissionAny?.length && !hasAnyGrantedPermission(userPermissions, tab.permissionAny)) {
+                    return false;
+                }
+                return canShowTab(tab.key);
+            });
+            if (visibleTabs.length === 0) return null;
+            if (section.permissionAny?.length && !hasAnyGrantedPermission(userPermissions, section.permissionAny)) {
+                return null;
+            }
+            return { ...section, visibleTabs };
+        })
+        .filter(Boolean) as Array<{ label: string; visibleTabs: { key: Tab; label: string; icon: any }[] }>;
+
+    useEffect(() => {
+        if (!canShowTab(activeTab)) {
+            const fallback = visibleSections.flatMap((section) => section.visibleTabs)[0]?.key || "profile";
+            if (fallback !== activeTab) {
+                setActiveTab(fallback);
+            }
+        }
+    }, [activeTab, canShowTab, visibleSections]);
 
     return (
         <div className="w-full space-y-4 animate-in fade-in duration-500">
@@ -228,11 +251,8 @@ export default function SettingsPage() {
                     >
                         {sidebarExpanded ? <PanelLeftClose className="w-4 h-4" /> : <PanelLeftOpen className="w-4 h-4" />}
                     </button>
-                    {sidebarSections
-                        .filter(section => !section.adminOnly || isAdmin)
+                    {visibleSections
                         .map((section, sIdx, arr) => {
-                            const visibleTabs = section.tabs.filter(t => !t.adminOnly || isAdmin);
-                            if (visibleTabs.length === 0) return null;
                             const isCollapsed = collapsedSections[section.label];
                             const isLast = sIdx === arr.length - 1;
                             return (
@@ -249,7 +269,7 @@ export default function SettingsPage() {
                                     )}
                                     {(!isCollapsed || !sidebarExpanded) && (
                                         <div className="space-y-0.5 pb-1">
-                                            {visibleTabs.map(t => (
+                                            {section.visibleTabs.map((t) => (
                                                 <button
                                                     key={t.key}
                                                     onClick={() => setActiveTab(t.key)}
@@ -277,24 +297,24 @@ export default function SettingsPage() {
                 <div className="flex-1 min-w-0">
                     {activeTab === "profile" && <ProfileTab />}
                     {activeTab === "security" && <SecurityTab />}
-                    {activeTab === "users" && isAdmin && <UsersTab />}
-                    {activeTab === "roles" && canManageRoles && <RolesTab />}
-                    {activeTab === "qpeoplemapping" && isAdmin && <QPeopleMappingTab />}
-                    {activeTab === "authconfig" && isAdmin && <AuthConfigTab />}
-                    {activeTab === "ratecards" && canManageCostCards && <RateCardsTab />}
-                    {activeTab === "budgetassumptions" && isAdmin && <BudgetAssumptionsTab />}
-                    {activeTab === "currencyrates" && isAdmin && <CurrencyRatesTab />}
-                    {activeTab === "gomcalculator" && isAdmin && <GomCalculatorTab />}
-                    {activeTab === "clients" && canManageMetadata && <MasterDataTab entity="clients" label="Client" />}
-                    {activeTab === "regions" && canManageMetadata && <RegionManagementTab />}
-                    {activeTab === "technologies" && canManageMetadata && <MasterDataTab entity="technologies" label="Technology" />}
-                    {activeTab === "pricingmodels" && canManageMetadata && <MasterDataTab entity="pricing-models" label="Pricing Model" />}
-                    {activeTab === "projecttypes" && canManageMetadata && <MasterDataTab entity="project-types" label="Project Type" />}
-                    {activeTab === "sowadmin" && isAdmin && <SowAdminTab />}
-                    {activeTab === "auditlog" && canViewAuditLogs && <AuditLogTab />}
-                    {activeTab === "emailtemplates" && isAdmin && <EmailTemplatesTab />}
-                    {activeTab === "notificationrules" && isAdmin && <NotificationRulesTab />}
-                    {activeTab === "holidays" && isAdmin && <HolidaysTab />}
+                    {activeTab === "users" && canShowTab("users") && <UsersTab />}
+                    {activeTab === "roles" && canShowTab("roles") && <RolesTab />}
+                    {activeTab === "qpeoplemapping" && canShowTab("qpeoplemapping") && <QPeopleMappingTab />}
+                    {activeTab === "authconfig" && canShowTab("authconfig") && <AuthConfigTab />}
+                    {activeTab === "ratecards" && canShowTab("ratecards") && <RateCardsTab />}
+                    {activeTab === "budgetassumptions" && canShowTab("budgetassumptions") && <BudgetAssumptionsTab />}
+                    {activeTab === "currencyrates" && canShowTab("currencyrates") && <CurrencyRatesTab />}
+                    {activeTab === "gomcalculator" && canShowTab("gomcalculator") && <GomCalculatorTab />}
+                    {activeTab === "clients" && canShowTab("clients") && <MasterDataTab entity="clients" label="Client" />}
+                    {activeTab === "regions" && canShowTab("regions") && <RegionManagementTab />}
+                    {activeTab === "technologies" && canShowTab("technologies") && <MasterDataTab entity="technologies" label="Technology" />}
+                    {activeTab === "pricingmodels" && canShowTab("pricingmodels") && <MasterDataTab entity="pricing-models" label="Pricing Model" />}
+                    {activeTab === "projecttypes" && canShowTab("projecttypes") && <MasterDataTab entity="project-types" label="Project Type" />}
+                    {activeTab === "sowadmin" && canShowTab("sowadmin") && <SowAdminTab />}
+                    {activeTab === "auditlog" && canShowTab("auditlog") && <AuditLogTab />}
+                    {activeTab === "emailtemplates" && canShowTab("emailtemplates") && <EmailTemplatesTab />}
+                    {activeTab === "notificationrules" && canShowTab("notificationrules") && <NotificationRulesTab />}
+                    {activeTab === "holidays" && canShowTab("holidays") && <HolidaysTab />}
                 </div>
             </div>
         </div>

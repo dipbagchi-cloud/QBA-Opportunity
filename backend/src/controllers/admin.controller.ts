@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
+import { DEFAULT_ROLE_PERMISSIONS, validatePermissions } from '../lib/permissions';
 import { hashPassword } from '../services/auth.service';
 import { isSSOUser, getAuthMode } from './auth.controller';
 
@@ -343,8 +344,16 @@ export async function createRole(req: Request, res: Response) {
       return res.status(409).json({ error: 'A role with this name already exists' });
     }
 
+    const validation = validatePermissions(permissions);
+    if (!validation.valid) {
+      return res.status(400).json({
+        error: 'One or more permissions are invalid',
+        invalidPermissions: validation.invalid,
+      });
+    }
+
     const role = await prisma.role.create({
-      data: { name, description, permissions, isSystem: false },
+      data: { name, description, permissions: validation.permissions, isSystem: false },
     });
 
     await prisma.auditLog.create({
@@ -353,7 +362,7 @@ export async function createRole(req: Request, res: Response) {
         entityId: role.id,
         action: 'CREATE_ROLE',
         userId: req.user!.userId,
-        changes: { name, permissions },
+        changes: { name, permissions: validation.permissions },
       },
     });
 
@@ -382,7 +391,14 @@ export async function updateRole(req: Request, res: Response) {
       if (!Array.isArray(permissions)) {
         return res.status(400).json({ error: 'permissions must be an array' });
       }
-      updateData.permissions = permissions;
+      const validation = validatePermissions(permissions);
+      if (!validation.valid) {
+        return res.status(400).json({
+          error: 'One or more permissions are invalid',
+          invalidPermissions: validation.invalid,
+        });
+      }
+      updateData.permissions = validation.permissions;
     }
 
     const updated = await prisma.role.update({
@@ -517,35 +533,6 @@ export async function removeUserFromRole(req: Request, res: Response) {
 }
 
 // POST /api/admin/roles/reset-defaults — Reset all system roles to default permissions
-const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
-  'Admin': ['*'],
-  'Manager': [
-    'dashboard:view', 'pipeline:view', 'pipeline:write', 'presales:view', 'presales:write',
-    'sales:view', 'sales:write', 'estimation:manage', 'approvals:manage',
-    'contacts:view', 'contacts:write', 'analytics:view', 'analytics:export',
-    'agents:execute', 'gom:view', 'leads:manage', 'resources:manage', 'settings:view', 'auditlogs:view',
-  ],
-  'Sales': [
-    'dashboard:view', 'pipeline:view', 'pipeline:write', 'presales:view',
-    'sales:view', 'sales:write', 'contacts:view', 'contacts:write',
-    'analytics:view', 'agents:execute', 'gom:view', 'leads:manage', 'settings:view',
-  ],
-  'Presales': [
-    'dashboard:view', 'pipeline:view', 'presales:view', 'presales:write',
-    'estimation:manage', 'sales:view', 'contacts:view', 'analytics:view',
-    'agents:execute', 'gom:view', 'settings:view',
-  ],
-  'Read-Only': [
-    'dashboard:view', 'pipeline:view', 'presales:view', 'sales:view',
-    'contacts:view', 'analytics:view', 'gom:view', 'settings:view',
-  ],
-  'Management': [
-    'dashboard:view', 'pipeline:view', 'presales:view', 'sales:view',
-    'contacts:view', 'analytics:view', 'analytics:export', 'approvals:manage',
-    'auditlogs:view', 'gom:view', 'settings:view',
-  ],
-};
-
 export async function resetRoleDefaults(req: Request, res: Response) {
   try {
     const results: { role: string; status: string }[] = [];

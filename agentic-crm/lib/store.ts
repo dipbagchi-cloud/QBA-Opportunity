@@ -5,6 +5,7 @@ export interface Opportunity {
     id: string;
     name: string;
     client: string;
+    ownerId?: string;
     value: number;
     stage: string;
     probability: number;
@@ -27,6 +28,10 @@ export interface Opportunity {
     isStalled?: boolean;
     daysInStage?: number;
     gomApproved?: boolean;
+    access?: {
+        canEdit: boolean;
+        viewOnlyReason?: string | null;
+    };
 }
 
 export interface PaginationParams {

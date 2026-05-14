@@ -250,12 +250,6 @@ function GomPercentSync({ onGomPercentChange }: { onGomPercentChange: (pct: numb
     return null;
 }
 
-function hasPermission(user: any, permission: string) {
-    const permissions = user?.role?.permissions;
-    if (!Array.isArray(permissions)) return false;
-    return permissions.includes("*") || permissions.includes(permission);
-}
-
 export default function OpportunityDetailsPage({ params }: { params: Promise<{ id: string }> }) {
     const router = useRouter();
     const { currency: globalCurrency, getSymbol, getRate, setCurrency } = useCurrency();
@@ -279,7 +273,9 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const [isSaving, setIsSaving] = useState(false);
     const [showPresalesModal, setShowPresalesModal] = useState(false);
     const [showAssignPresalesModal, setShowAssignPresalesModal] = useState(false);
+    const [showViewOnlyModal, setShowViewOnlyModal] = useState(false);
     const [opportunityOwnerId, setOpportunityOwnerId] = useState<string>('');
+    const [opportunityAccess, setOpportunityAccess] = useState<any>(null);
 
     // Dynamic dropdown data
     const [clients, setClients] = useState<{ id: string; name: string }[]>([]);
@@ -314,14 +310,6 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         description: "",
         value: 0
     });
-
-    // Access Control Logic
-    const isSalesOrPresales = user?.department === 'Sales' || user?.department === 'Presales' || user?.role?.name?.includes('Sales') || user?.role?.name?.includes('Presales');
-    const isManagerOrAdmin = !!(user?.role?.name?.toLowerCase().includes('manager') || user?.role?.name?.toLowerCase().includes('admin'));
-    const canApproveGom = hasPermission(user, 'approvals:manage');
-    const isAssignedPresales = formData.presalesAssignee ? formData.presalesAssignee.split(',').map((n: string) => n.trim()).includes(user?.name || '') : false;
-    const isOwnerOrAssigned = user?.id === opportunityOwnerId || user?.name === formData.salesRep || user?.name === opportunityManagerName || isAssignedPresales;
-    const hasEditAccess = !isSalesOrPresales || isOwnerOrAssigned;
 
     useEffect(() => {
         if (skipDerivedEffects.current) return;
@@ -375,6 +363,67 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const [opportunityStage, setOpportunityStage] = useState(0); // actual DB stage (0-3), stays fixed when navigating steps
     const [currentStageName, setCurrentStageName] = useState(''); // actual Kanban stage name (Discovery, Qualification, Proposal, Negotiation, Closed Won, Closed Lost)
     const steps = ["Pipeline", "Presales", "Sales", "SOW", "Project"];
+    const isManagerOrAdmin = !!opportunityAccess?.permissions?.approvals?.manage;
+    const canApproveGom = !!opportunityAccess?.permissions?.approvals?.manage;
+    const canViewPipeline = !!opportunityAccess?.permissions?.pipeline?.view;
+    const canViewPresales = !!(opportunityAccess?.permissions?.presales?.view || opportunityAccess?.permissions?.estimation?.manage || opportunityAccess?.permissions?.gom?.view || opportunityAccess?.permissions?.approvals?.manage);
+    const canViewSales = !!opportunityAccess?.permissions?.sales?.view;
+    const canViewProject = !!(opportunityAccess?.permissions?.sales?.view || opportunityAccess?.permissions?.sow?.view);
+    const canEditPipeline = !!opportunityAccess?.workflow?.pipelineEditable;
+    const canEditPresales = !!opportunityAccess?.workflow?.presalesEditable;
+    const canManageEstimation = !!opportunityAccess?.workflow?.estimationEditable;
+    const canEditSales = !!opportunityAccess?.workflow?.salesEditable;
+    const canEditProjectDetails = !!opportunityAccess?.workflow?.projectDetailsEditable;
+    const canManageAttachments = !!opportunityAccess?.workflow?.attachmentsEditable;
+    const canComment = !!opportunityAccess?.workflow?.commentsWritable;
+    const canRequestGomApproval = !!opportunityAccess?.workflow?.gomRequestAllowed;
+    const canManageGomApproval = !!opportunityAccess?.workflow?.gomApprovalManageable;
+    const canReviewGomApproval = !!opportunityAccess?.workflow?.gomApprovalReviewable;
+    const viewOnlyReason = opportunityAccess?.viewOnlyReason || null;
+    const canEditPresalesData = canEditPresales || canManageEstimation;
+    const canEditPresalesAttachments = canManageAttachments && canEditPresalesData;
+    const canWorkPresalesStage = canEditPresalesData || canManageGomApproval;
+    const canWorkSalesStage = canEditSales;
+    const hasEditAccess = opportunityStage === 0
+        ? canEditPipeline
+        : opportunityStage === 1
+            ? canWorkPresalesStage
+            : opportunityStage === 2
+                ? canWorkSalesStage
+                : false;
+
+    useEffect(() => {
+        const stepAccess = [
+            canViewPipeline,
+            canViewPresales,
+            canViewSales,
+            false,
+            canViewProject,
+        ];
+        if (stepAccess[activeStep]) return;
+
+        const reachableSteps =
+            opportunityStage === 3 ? [4, 2, 1, 0] :
+            opportunityStage === 2 ? [2, 1, 0] :
+            opportunityStage === 1 ? [1, 0] :
+            [0];
+        const fallback = reachableSteps.find((step) => stepAccess[step]);
+        if (fallback !== undefined && fallback !== activeStep) {
+            setActiveStep(fallback);
+        }
+    }, [activeStep, opportunityStage, canViewPipeline, canViewPresales, canViewSales, canViewProject]);
+
+    useEffect(() => {
+        const visibleTabs = [
+            ...(canViewPresales ? ["Project Details", "Schedule", "Resource Assignment"] : []),
+            ...(opportunityAccess?.permissions?.gom?.view || opportunityAccess?.permissions?.approvals?.manage ? ["GOM Calculator"] : []),
+            ...(canViewPresales ? ["Estimation"] : []),
+        ];
+        if (!visibleTabs.length) return;
+        if (!visibleTabs.includes(activeTab)) {
+            setActiveTab(visibleTabs[0]);
+        }
+    }, [activeTab, canViewPresales, opportunityAccess?.permissions?.approvals?.manage, opportunityAccess?.permissions?.gom?.view]);
 
     // Sales view collapsible sections
     const [salesPipelineOpen, setSalesPipelineOpen] = useState(false);
@@ -677,6 +726,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 setOpportunityCurrency(globalCurrency);
                 setOpportunityMetadata(data.metadata || null);
                 setOpportunityOwnerId(data.ownerId || data.owner?.id || '');
+                setOpportunityAccess(data.access || null);
+                setShowViewOnlyModal(!!data.access?.viewOnlyReason && !data.access?.assignment?.canEditAssignedOpportunity);
 
                 // Load attachments
                 if (data.attachments && Array.isArray(data.attachments)) {
@@ -835,6 +886,10 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
     // Attachment upload handler
     const handleFileUpload = async (files: FileList | null) => {
+        if (!canManageAttachments) {
+            toast({ title: "View Only", description: viewOnlyReason || "You do not have permission to upload attachments for this opportunity." });
+            return;
+        }
         if (!files || files.length === 0) return;
         setIsUploading(true);
         try {
@@ -877,6 +932,10 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
     // Attachment delete handler
     const handleDeleteAttachment = async (attachmentId: string) => {
+        if (!canManageAttachments) {
+            toast({ title: "View Only", description: viewOnlyReason || "You do not have permission to delete attachments from this opportunity." });
+            return;
+        }
         try {
             const res = await fetch(`${API_URL}/api/opportunities/${id}/attachments/${attachmentId}`, {
                 method: "DELETE",
@@ -894,7 +953,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         e.preventDefault();
 
         if (!hasEditAccess) {
-            toast({ title: "View Only", description: "You do not have permission to edit this opportunity." });
+            toast({ title: "View Only", description: viewOnlyReason || "You do not have permission to edit this opportunity." });
             return;
         }
 
@@ -942,7 +1001,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     formDataRef.current = formData;
 
     useEffect(() => {
-        if (autoSaveIntervalMinutes <= 0 || opportunityStage !== 0 || isLost || !hasEditAccess) return;
+        if (autoSaveIntervalMinutes <= 0 || opportunityStage !== 0 || isLost || !canEditPipeline) return;
 
         autoSaveRef.current = setInterval(async () => {
             try {
@@ -967,8 +1026,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const handlePresalesSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         
-        if (!hasEditAccess) {
-            toast({ title: "View Only", description: "You do not have permission to edit this opportunity." });
+        if (!canEditPipeline) {
+            toast({ title: "View Only", description: viewOnlyReason || "You do not have permission to edit this opportunity." });
             return;
         }
 
@@ -1372,7 +1431,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     >
                         <ArrowLeft className="w-4 h-4" /> Back
                     </button>
-                    {hasEditAccess && opportunityStage === 0 && !isLost && (
+                    {canEditPipeline && opportunityStage === 0 && !isLost && (
                         <>
                             <button
                                 onClick={() => setShowPresalesModal(true)}
@@ -1391,7 +1450,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             </button>
                         </>
                     )}
-                    {hasEditAccess && opportunityStage === 1 && !isLost && (
+                    {canWorkPresalesStage && opportunityStage === 1 && !isLost && (
                         <>
                             <button
                                 onClick={() => { setLostModalType('Proposal Lost'); setShowLostModal(true); }}
@@ -1410,7 +1469,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             </button>
                         </>
                     )}
-                    {hasEditAccess && opportunityStage === 2 && !isLost && currentStageName === 'Proposal' && (
+                    {canWorkSalesStage && opportunityStage === 2 && !isLost && currentStageName === 'Proposal' && (
                         <>
                             <button
                                 onClick={() => { setLostModalType('Proposal Lost'); setShowLostModal(true); }}
@@ -1435,7 +1494,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             </button>
                         </>
                     )}
-                    {hasEditAccess && opportunityStage === 2 && !isLost && currentStageName === 'Negotiation' && (
+                    {canWorkSalesStage && opportunityStage === 2 && !isLost && currentStageName === 'Negotiation' && (
                         <>
                             <button
                                 onClick={() => { setLostModalType('Closed Lost'); setShowLostModal(true); }}
@@ -1514,7 +1573,12 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                         const stageForIdx = idx <= 2 ? idx : idx === 3 ? 2 : 3;
                         const isCompleted = idx <= 2 ? idx < opportunityStage : idx === 3 ? opportunityStage >= 3 : opportunityStage === 3;
                         const isActive = idx === activeStep;
-                        const isAccessible = opportunityStage >= stageForIdx;
+                        const hasStepAccess =
+                            idx === 0 ? canViewPipeline :
+                            idx === 1 ? canViewPresales :
+                            idx === 2 ? canViewSales :
+                            canViewProject;
+                        const isAccessible = opportunityStage >= stageForIdx && hasStepAccess;
 
                         let bgClass = "bg-slate-100 text-slate-300 cursor-not-allowed";
                         if (isAccessible) {
@@ -1555,7 +1619,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
             {/* PIPELINE VIEW (Step 0) */}
             {activeStep === 0 && (() => {
-                const isPipelineEditable = hasEditAccess && opportunityStage < 3 && !isLost && !isStalled && currentStageName !== 'Proposal' && currentStageName !== 'Negotiation';
+                const isPipelineEditable = canEditPipeline && opportunityStage < 3 && !isLost && !isStalled && currentStageName !== 'Proposal' && currentStageName !== 'Negotiation';
                 const disabledClass = !isPipelineEditable ? "bg-slate-50 cursor-not-allowed opacity-70" : "bg-white";
                 return (
                 <div className="space-y-4 mt-4">
@@ -1925,12 +1989,13 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 type="file"
                                 multiple
                                 className="hidden"
+                                disabled={!canManageAttachments}
                                 onChange={(e) => handleFileUpload(e.target.files)}
                             />
                             {attachments.length === 0 ? (
                                 <div className="mt-1 border border-slate-300 rounded-md p-4 bg-white flex flex-col items-center justify-center text-slate-400 gap-2 border-dashed h-[120px]">
                                     <span className="text-xs">No files attached.</span>
-                                    {isPipelineEditable && (
+                                    {canManageAttachments && (
                                         <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="flex items-center gap-1 text-slate-600 font-semibold text-xs hover:text-indigo-600">
                                             <Upload className="w-3 h-3" />
                                             {isUploading ? "Uploading..." : "Attach file"}
@@ -1947,7 +2012,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                                     <button type="button" onClick={() => handleDownloadAttachment(att.id, att.fileName)} className="text-indigo-600 hover:underline truncate text-left">{att.fileName}</button>
                                                     <span className="text-slate-400">{(att.fileSize / 1024).toFixed(0)} KB</span>
                                                 </div>
-                                                {isPipelineEditable && (
+                                                {canManageAttachments && (
                                                     <button type="button" onClick={() => handleDeleteAttachment(att.id)} className="text-slate-400 hover:text-red-600 flex-shrink-0">
                                                         <Trash2 className="w-3.5 h-3.5" />
                                                     </button>
@@ -1955,7 +2020,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                             </div>
                                         ))}
                                     </div>
-                                    {isPipelineEditable && (
+                                    {canManageAttachments && (
                                         <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="flex items-center gap-1 text-slate-600 font-semibold text-xs hover:text-indigo-600">
                                             <Upload className="w-3 h-3" />
                                             {isUploading ? "Uploading..." : "Attach more"}
@@ -1969,7 +2034,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
                     {/* Footer Actions */}
                     <div className="mt-8 flex justify-end gap-3 pt-4 border-t border-slate-100">
-                        {hasEditAccess && opportunityStage === 0 && !isLost && !isStalled && (
+                        {canEditPipeline && opportunityStage === 0 && !isLost && !isStalled && (
                             <button
                                 type="button"
                                 onClick={() => { setLostModalType('Closed Lost'); setShowLostModal(true); }}
@@ -1997,7 +2062,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             {activeStep === 1 && (
                 <OpportunityEstimationProvider 
                     opportunityId={id} 
-                    readOnly={!hasEditAccess || opportunityStage >= 2 || isStalled || isLost} 
+                    readOnly={!canEditPresalesData || opportunityStage >= 2 || isStalled || isLost} 
                     startDate={formData.tentativeStartDate} 
                     endDate={formData.tentativeEndDate} 
                     durationInDays={
@@ -2033,7 +2098,11 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                         )}
                         {/* Inner Tabs */}
                         <div className="flex items-center gap-4 px-4 border-b border-slate-200 text-sm font-medium">
-                            {["Project Details", "Schedule", "Resource Assignment", "GOM Calculator", "Estimation"].map(tab => (
+                            {[
+                                ...(canViewPresales ? ["Project Details", "Schedule", "Resource Assignment"] : []),
+                                ...(opportunityAccess?.permissions?.gom?.view || opportunityAccess?.permissions?.approvals?.manage ? ["GOM Calculator"] : []),
+                                ...(canViewPresales ? ["Estimation"] : []),
+                            ].map(tab => (
                                 <button
                                     key={tab}
                                     onClick={() => setActiveTab(tab)}
@@ -2153,8 +2222,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                         <h3 className="font-bold text-slate-900">Attachments</h3>
                                         {opportunityStage < 2 && (
                                             <>
-                                                <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(e) => handleFileUpload(e.target.files)} />
-                                                <button onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="px-3 py-1.5 bg-slate-100 text-slate-700 font-medium rounded text-xs hover:bg-slate-200 flex items-center gap-2">
+                                                <input ref={fileInputRef} type="file" multiple className="hidden" disabled={!canEditPresalesAttachments} onChange={(e) => handleFileUpload(e.target.files)} />
+                                                <button onClick={() => fileInputRef.current?.click()} disabled={isUploading || !canEditPresalesAttachments} className="px-3 py-1.5 bg-slate-100 text-slate-700 font-medium rounded text-xs hover:bg-slate-200 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
                                                     <Paperclip className="w-3 h-3" /> {isUploading ? "Uploading..." : "Attach"}
                                                 </button>
                                             </>
@@ -2185,7 +2254,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                                         <td className="px-3 py-2">{new Date(att.uploadedAt).toLocaleDateString()}</td>
                                                         <td className="px-3 py-2 flex items-center gap-2">
                                                             <button type="button" onClick={() => handleDownloadAttachment(att.id, att.fileName)} className="text-slate-400 hover:text-indigo-600"><Download className="w-3.5 h-3.5" /></button>
-                                                            {opportunityStage < 2 && (
+                                                            {opportunityStage < 2 && canEditPresalesAttachments && (
                                                                 <button onClick={() => handleDeleteAttachment(att.id)} className="text-slate-400 hover:text-red-600"><Trash2 className="w-3.5 h-3.5" /></button>
                                                             )}
                                                         </td>
@@ -2208,7 +2277,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                             {getBadgeText()}
                                         </span>
                                     </div>
-                                    {hasEditAccess && opportunityStage < 2 && (
+                                    {canEditPresalesData && opportunityStage < 2 && (
                                         <button onClick={async () => {
                                             setIsSaving(true);
                                             try {
@@ -2245,7 +2314,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                             name="tentativeStartDate"
                                             value={formData.tentativeStartDate}
                                             onChange={handleChange}
-                                            disabled={!hasEditAccess || opportunityStage >= 2}
+                                            disabled={!canEditPresalesData || opportunityStage >= 2}
                                             className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm disabled:bg-slate-100 disabled:cursor-not-allowed cursor-pointer"
                                             onClick={(e) => !(e.target as HTMLInputElement).disabled && (e.target as HTMLInputElement).showPicker?.()}
                                         />
@@ -2260,7 +2329,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                                 min="1"
                                                 value={formData.duration}
                                                 onChange={handleChange}
-                                                disabled={!hasEditAccess || opportunityStage >= 2}
+                                                disabled={!canEditPresalesData || opportunityStage >= 2}
                                                 placeholder="Enter duration"
                                                 className="flex-1 px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm disabled:bg-slate-100 disabled:cursor-not-allowed"
                                             />
@@ -2268,7 +2337,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                                 name="durationUnit"
                                                 value={formData.durationUnit}
                                                 onChange={handleChange}
-                                                disabled={!hasEditAccess || opportunityStage >= 2}
+                                                disabled={!canEditPresalesData || opportunityStage >= 2}
                                                 className="w-28 px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm disabled:bg-slate-100 disabled:cursor-not-allowed"
                                             >
                                                 {DURATION_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
@@ -2550,8 +2619,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     gomApproved={gomApproved}
                                     approvedGomPercent={approvedGomPercent}
                                     onApproveGom={handleApproveGom}
-                                    canManagerApprove={canApproveGom && hasEditAccess && opportunityStage === 1 && !isLost}
-                                    canRequestApproval={!canApproveGom && hasEditAccess && opportunityStage === 1 && !isLost && gomAutoApprovePercent > 0 && contextGomPercent > 0 && contextGomPercent < gomAutoApprovePercent}
+                                    canManagerApprove={(canManageGomApproval || canReviewGomApproval) && opportunityStage === 1 && !isLost}
+                                    canRequestApproval={!canApproveGom && canRequestGomApproval && canEditPresalesData && opportunityStage === 1 && !isLost && gomAutoApprovePercent > 0 && contextGomPercent > 0 && contextGomPercent < gomAutoApprovePercent}
                                     isManagerOrAdmin={isManagerOrAdmin}
                                     gomThreshold={gomAutoApprovePercent}
                                     pendingApproval={gomPendingApproval}
@@ -2891,9 +2960,34 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     userRole={user?.role?.name || ''}
                     userName={user?.name || ''}
                 />
-                <CommentsPanel opportunityId={id} currentStage={steps[activeStep]} />
+                <CommentsPanel opportunityId={id} currentStage={steps[activeStep]} readOnly={!canComment} readOnlyReason={viewOnlyReason} />
                 <AuditLogPane opportunityId={id} />
             </div>
+
+            {showViewOnlyModal && viewOnlyReason && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden">
+                        <div className="px-6 py-4 border-b border-slate-100 bg-white">
+                            <h3 className="font-bold text-lg text-slate-800">View-Only Access</h3>
+                        </div>
+                        <div className="p-6 space-y-3">
+                            <p className="text-sm text-slate-600">{viewOnlyReason}</p>
+                            <p className="text-xs text-slate-500">
+                                Action buttons and editable fields are disabled until you are assigned as the owner, sales rep, manager, or named presales assignee for this opportunity.
+                            </p>
+                        </div>
+                        <div className="px-6 py-4 border-t border-slate-100 flex justify-end">
+                            <button
+                                type="button"
+                                onClick={() => setShowViewOnlyModal(false)}
+                                className="px-4 py-2 bg-slate-900 text-white rounded-md text-sm font-medium hover:bg-slate-800"
+                            >
+                                Understood
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Presales Modal */}
             {showPresalesModal && (

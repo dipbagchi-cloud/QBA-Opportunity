@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
+import { PERMISSIONS, hasAnyPermission, hasPermission } from '../lib/permissions';
 
 export const globalSearch = async (req: Request, res: Response) => {
     try {
@@ -14,11 +15,29 @@ export const globalSearch = async (req: Request, res: Response) => {
         }
 
         const searchQuery = q.trim();
+        const permissions = req.user?.permissions || [];
+        const canSearchOpportunities = hasAnyPermission(permissions, [
+            PERMISSIONS.PIPELINE_VIEW,
+            PERMISSIONS.PRESALES_VIEW,
+            PERMISSIONS.SALES_VIEW,
+        ]);
+        const canSearchContacts = hasAnyPermission(permissions, [
+            PERMISSIONS.CONTACTS_VIEW,
+            PERMISSIONS.CONTACTS_WRITE,
+        ]);
+        const canSearchUsers = hasPermission(permissions, PERMISSIONS.USERS_MANAGE);
+        const canSearchProjects = hasAnyPermission(permissions, [
+            PERMISSIONS.SALES_VIEW,
+            PERMISSIONS.SALES_WRITE,
+            PERMISSIONS.SOW_VIEW,
+            PERMISSIONS.SOW_WRITE,
+            PERMISSIONS.SOW_ADMIN,
+        ]);
 
         // Perform parallel queries
         const [opportunities, contacts, clients, users, projects] = await Promise.all([
             // Opportunities
-            prisma.opportunity.findMany({
+            canSearchOpportunities ? prisma.opportunity.findMany({
                 where: {
                     OR: [
                         { title: { contains: searchQuery, mode: 'insensitive' } },
@@ -30,9 +49,9 @@ export const globalSearch = async (req: Request, res: Response) => {
                 },
                 select: { id: true, title: true, client: { select: { name: true } }, currentStage: true },
                 take: 5
-            }),
+            }) : Promise.resolve([]),
             // Contacts
-            prisma.contact.findMany({
+            canSearchContacts ? prisma.contact.findMany({
                 where: {
                     OR: [
                         { firstName: { contains: searchQuery, mode: 'insensitive' } },
@@ -43,9 +62,9 @@ export const globalSearch = async (req: Request, res: Response) => {
                 },
                 select: { id: true, firstName: true, lastName: true, email: true, title: true, client: { select: { name: true } } },
                 take: 5
-            }),
+            }) : Promise.resolve([]),
             // Clients
-            prisma.client.findMany({
+            canSearchContacts ? prisma.client.findMany({
                 where: {
                     OR: [
                         { name: { contains: searchQuery, mode: 'insensitive' } },
@@ -55,9 +74,9 @@ export const globalSearch = async (req: Request, res: Response) => {
                 },
                 select: { id: true, name: true, domain: true, industry: true },
                 take: 5
-            }),
+            }) : Promise.resolve([]),
             // Users
-            prisma.user.findMany({
+            canSearchUsers ? prisma.user.findMany({
                 where: {
                     OR: [
                         { name: { contains: searchQuery, mode: 'insensitive' } },
@@ -68,9 +87,9 @@ export const globalSearch = async (req: Request, res: Response) => {
                 },
                 select: { id: true, name: true, email: true, title: true, department: true },
                 take: 5
-            }),
+            }) : Promise.resolve([]),
             // Projects
-            prisma.project.findMany({
+            canSearchProjects ? prisma.project.findMany({
                 where: {
                     OR: [
                         { name: { contains: searchQuery, mode: 'insensitive' } },
@@ -81,7 +100,7 @@ export const globalSearch = async (req: Request, res: Response) => {
                 },
                 select: { id: true, name: true, code: true, status: true, client: { select: { name: true } } },
                 take: 5
-            })
+            }) : Promise.resolve([])
         ]);
 
         res.json({

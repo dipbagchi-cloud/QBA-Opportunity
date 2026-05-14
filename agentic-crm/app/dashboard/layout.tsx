@@ -26,6 +26,8 @@ import { motion } from "framer-motion";
 import { AuthProvider } from "@/components/providers/auth-provider";
 import { CurrencyProvider, useCurrency } from "@/components/providers/currency-provider";
 import { useAuthStore } from "@/lib/auth-store";
+import { canAccessDashboardRoute, hasAnyGrantedPermission } from "@/lib/access-control";
+import { AccessDenied } from "@/components/auth/AccessDenied";
 import ChatBot from "@/components/chatbot/ChatBot";
 import GlobalSearch from "@/components/ui/GlobalSearch";
 
@@ -33,16 +35,16 @@ interface NavItem {
     icon: any;
     label: string;
     href: string;
-    permission?: string;
+    permissionsAny?: string[];
 }
 
 const allSidebarItems: NavItem[] = [
-    { icon: LayoutDashboard, label: "Dashboard", href: "/dashboard" },
-    { icon: Briefcase, label: "Opportunities", href: "/dashboard/opportunities", permission: "pipeline:view" },
-    { icon: Users, label: "Contacts", href: "/dashboard/contacts", permission: "contacts:view" },
-    { icon: BarChart3, label: "Analytics", href: "/dashboard/analytics", permission: "analytics:view" },
-    { icon: Bot, label: "Agentic AI", href: "/dashboard/agents", permission: "agents:execute" },
-    { icon: Settings, label: "Settings", href: "/dashboard/settings", permission: "settings:view" },
+    { icon: LayoutDashboard, label: "Dashboard", href: "/dashboard", permissionsAny: ["dashboard:view"] },
+    { icon: Briefcase, label: "Opportunities", href: "/dashboard/opportunities", permissionsAny: ["pipeline:view", "presales:view", "sales:view"] },
+    { icon: Users, label: "Contacts", href: "/dashboard/contacts", permissionsAny: ["contacts:view", "contacts:write"] },
+    { icon: BarChart3, label: "Analytics", href: "/dashboard/analytics", permissionsAny: ["analytics:view", "analytics:export"] },
+    { icon: Bot, label: "Agentic AI", href: "/dashboard/agents", permissionsAny: ["agents:execute"] },
+    { icon: Settings, label: "Settings", href: "/dashboard/settings", permissionsAny: ["settings:view", "settings:manage", "users:manage", "roles:manage", "metadata:manage", "costcard:manage", "auditlogs:view"] },
 ];
 
 export default function DashboardLayout({
@@ -65,13 +67,15 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
     const [switchingRole, setSwitchingRole] = useState(false);
     const pathname = usePathname();
     const router = useRouter();
-    const { user, logout, hasPermission, switchRole } = useAuthStore();
-    const { currency: globalCurrency, setCurrency: setGlobalCurrency, currencies, symbol: currencySymbol } = useCurrency();
+    const { user, logout, switchRole } = useAuthStore();
+    const { currency: globalCurrency, setCurrency: setGlobalCurrency, currencies } = useCurrency();
+    const userPermissions = user?.role?.permissions || [];
 
     const sidebarItems = allSidebarItems.filter((item) => {
-        if (!item.permission) return true;
-        return hasPermission(item.permission);
+        if (!item.permissionsAny?.length) return true;
+        return hasAnyGrantedPermission(userPermissions, item.permissionsAny);
     });
+    const canAccessCurrentRoute = canAccessDashboardRoute(pathname, userPermissions);
 
     const userInitials = user?.name
         ? user.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
@@ -285,7 +289,9 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
 
                 {/* Scrollable Content */}
                 <main className="flex-1 overflow-y-auto p-4 scrollbar-thin">
-                    {children}
+                    {canAccessCurrentRoute ? children : (
+                        <AccessDenied description="Admin-defined role access does not allow this screen for your current role." />
+                    )}
                 </main>
             </div>
 

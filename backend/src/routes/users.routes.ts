@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { getUserDetails } from '../controllers/users.controller';
-import { authenticate } from '../middleware/auth';
+import { authenticate, authorize } from '../middleware/auth';
+import { PERMISSIONS } from '../lib/permissions';
 
 const router = Router();
 
@@ -8,6 +9,6 @@ const router = Router();
 router.use(authenticate);
 
 // GET /api/users/:id
-router.get('/:id', getUserDetails);
+router.get('/:id', authorize(PERMISSIONS.USERS_MANAGE), getUserDetails);
 
 export default router;

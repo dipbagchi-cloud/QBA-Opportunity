@@ -62,22 +62,14 @@ const EMPTY_FILTERS: OpportunityFilters = {
 
 export default function OpportunitiesPage() {
     const { opportunities, deleteOpportunity, fetchOpportunities, total, page, totalPages, isLoading } = useOpportunityStore();
-    const { user } = useAuthStore();
+    const { hasPermission } = useAuthStore();
     const [activeMenu, setActiveMenu] = useState<string | null>(null);
     const [searchTerm, setSearchTerm] = useState("");
     const [currentPage, setCurrentPage] = useState(1);
     const limit = 10;
 
-    const isViewOnly = useCallback((opp: any) => {
-        if (!user || !user.role || !user.role.name) return true;
-        const role = user.role.name.toLowerCase();
-        if (role === 'sales' || role === 'presales') {
-            const isOwner = opp.ownerId === user.id || opp.owner?.id === user.id || opp.owner === user.name;
-            const isAssigned = opp.salesRepName === user.name || opp.managerName === user.name;
-            return !isOwner && !isAssigned;
-        }
-        return false;
-    }, [user]);
+    const isViewOnly = useCallback((opp: any) => opp.access?.canEdit === false, []);
+    const canCreateOpportunity = hasPermission("pipeline:write");
 
     const [viewMode, setViewMode] = useState<'list' | 'kanban' | 'by_owner'>('list');
     const { currency: globalCurrency, getSymbol, getRate } = useCurrency();
@@ -230,12 +222,14 @@ export default function OpportunitiesPage() {
                             </span>
                         )}
                     </button>
-                    <Link href="/dashboard/opportunities/new">
-                        <button className="btn-primary flex items-center gap-1.5">
-                            <Plus className="w-4 h-4" />
-                            New Opportunity
-                        </button>
-                    </Link>
+                    {canCreateOpportunity && (
+                        <Link href="/dashboard/opportunities/new">
+                            <button className="btn-primary flex items-center gap-1.5">
+                                <Plus className="w-4 h-4" />
+                                New Opportunity
+                            </button>
+                        </Link>
+                    )}
 
                     {showFilters && (
                         <div className="absolute right-0 top-full mt-2 z-30 w-[420px] bg-white border border-slate-200 rounded-xl shadow-xl p-4">
@@ -602,7 +596,11 @@ export default function OpportunitiesPage() {
                                                             onClick={() => setActiveMenu(null)}
                                                         />
                                                         <div className="absolute right-8 top-8 z-20 w-48 bg-white rounded-xl shadow-xl border border-slate-100 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-                                                            <Link href={`/dashboard/opportunities/${opp.id}`} className="w-full text-left px-4 py-2.5 text-sm text-slate-600 hover:bg-slate-50 flex items-center gap-2">
+                                                            <Link
+                                                                href={`/dashboard/opportunities/${opp.id}`}
+                                                                title={opp.access?.viewOnlyReason || undefined}
+                                                                className="w-full text-left px-4 py-2.5 text-sm text-slate-600 hover:bg-slate-50 flex items-center gap-2"
+                                                            >
                                                                 {isViewOnly(opp) ? <Info className="w-4 h-4" /> : <Edit className="w-4 h-4" />}
                                                                 {isViewOnly(opp) ? "View Details" : "Edit Details"}
                                                             </Link>
