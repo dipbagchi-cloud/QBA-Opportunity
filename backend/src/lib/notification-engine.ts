@@ -168,6 +168,7 @@ export async function evaluateOpportunityCreatedRules(ctx: OpportunityCreatedCon
       // Exclude users already in To list from CC
       ccUsers = ccUsers.filter(u => !toUsers.find(t => t.id === u.id));
 
+      const _oppCurrency = ctx.currency || 'USD';
       const variables: Record<string, string> = {
         dealName: ctx.opportunityTitle,
         opportunityTitle: ctx.opportunityTitle,
@@ -183,9 +184,9 @@ export async function evaluateOpportunityCreatedRules(ctx: OpportunityCreatedCon
         salesRepName: ctx.salesRepName,
         createdBy: ctx.createdByName,
         updatedBy: ctx.createdByName,
-        value: ctx.value != null ? `${ctx.currency || 'INR'} ${Number(ctx.value).toLocaleString('en-US')}` : '',
-        currency: ctx.currency || 'INR',
-        'opportunity.currency': ctx.currency || 'INR',
+        value: ctx.value != null ? Number(ctx.value).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '',
+        currency: _oppCurrency,
+        'opportunity.currency': _oppCurrency,
         probability: ctx.probability != null ? String(ctx.probability) : '',
         region: ctx.region || '',
         technology: ctx.technology || '',
@@ -293,6 +294,7 @@ export async function evaluateStageChangeRules(ctx: StageChangeContext): Promise
       const recipients = await resolveAssignedRecipients(ctx.opportunityId, recipientRoles, recipientUsers);
 
       // Template variables for message rendering
+      const _stageCurrency = ctx.currency || 'USD';
       const variables: Record<string, string> = {
         dealName: ctx.opportunityTitle,
         opportunityTitle: ctx.opportunityTitle,
@@ -310,16 +312,16 @@ export async function evaluateStageChangeRules(ctx: StageChangeContext): Promise
         managerName: ctx.managerName,
         userName: ctx.updatedByName,
         updatedBy: ctx.updatedByName,
-        value: ctx.value != null ? `${ctx.currency || 'INR'} ${Number(ctx.value).toLocaleString('en-US')}` : '',
-        currency: ctx.currency || 'INR',
-        'opportunity.currency': ctx.currency || 'INR',
+        value: ctx.value != null ? Number(ctx.value).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '',
+        currency: _stageCurrency,
+        'opportunity.currency': _stageCurrency,
         probability: ctx.probability != null ? String(ctx.probability) : '',
         region: ctx.region || '',
         technology: ctx.technology || '',
         comment: ctx.comment || '',
         reason: ctx.comment || '',
         adjustedEstimatedValue: ctx.adjustedEstimatedValue
-          ? `${ctx.currency || 'INR'} ${Number(ctx.adjustedEstimatedValue).toLocaleString('en-US')}`
+          ? `${_stageCurrency} ${Number(ctx.adjustedEstimatedValue).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
           : '',
         reEstimateCount: ctx.reEstimateCount != null ? String(ctx.reEstimateCount) : '0',
         opportunityLink: `${process.env.FRONTEND_URL || 'https://qcrm.qbadvisory.com'}/dashboard/opportunities/${ctx.opportunityId}`,
@@ -411,6 +413,7 @@ export async function evaluateDataConditionRules(opportunity: {
       // Only notify assigned users per role (Admin gets all)
       const recipients = await resolveAssignedRecipients(opportunity.id, recipientRoles, recipientUsers);
 
+      const _dataCurrency = (opportunity as any).currency || 'USD';
       const variables: Record<string, string> = {
         dealName: opportunity.title,
         opportunityTitle: opportunity.title,
@@ -425,7 +428,9 @@ export async function evaluateDataConditionRules(opportunity: {
         salesRepName: opportunity.salesRepName || '',
         manager: opportunity.managerName || '',
         managerName: opportunity.managerName || '',
-        value: opportunity.value != null ? `${(opportunity as any).currency || 'INR'} ${Number(opportunity.value).toLocaleString('en-US')}` : '',
+        value: opportunity.value != null ? Number(opportunity.value).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '',
+        currency: _dataCurrency,
+        'opportunity.currency': _dataCurrency,
         probability: opportunity.probability != null ? String(opportunity.probability) : '',
         region: opportunity.region || '',
         technology: opportunity.technology || '',
@@ -560,6 +565,78 @@ export async function resolveCalculatedFields(opportunityId: string): Promise<Re
 
     // calc:createdDateFormatted — created date formatted
     calc['calc:createdDateFormatted'] = createdAt.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+
+    // ── Populate all opportunity.* fields so templates using the Opportunity
+    //    table catalog actually resolve (engine previously only set opportunity.currency)
+    calc['opportunity.title'] = opp.title || '';
+    calc['opportunity.description'] = opp.description || '';
+    calc['opportunity.value'] = value != null ? value.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '';
+    calc['opportunity.currency'] = currency;
+    calc['opportunity.probability'] = opp.probability != null ? String(opp.probability) : '';
+    calc['opportunity.currentStage'] = opp.currentStage || '';
+    calc['opportunity.detailedStatus'] = opp.detailedStatus || '';
+    calc['opportunity.region'] = opp.region || '';
+    calc['opportunity.practice'] = opp.practice || '';
+    calc['opportunity.technology'] = opp.technology || '';
+    calc['opportunity.projectType'] = opp.projectType || '';
+    calc['opportunity.pricingModel'] = opp.pricingModel || '';
+    calc['opportunity.salesRepName'] = opp.salesRepName || '';
+    calc['opportunity.managerName'] = opp.managerName || '';
+    calc['opportunity.geolocation'] = opp.geolocation || '';
+    calc['opportunity.reEstimateCount'] = String(opp.reEstimateCount ?? 0);
+    calc['opportunity.gomApproved'] = opp.gomApproved ? 'Yes' : 'No';
+    calc['opportunity.expectedDayRate'] = opp.expectedDayRate != null
+      ? Number(opp.expectedDayRate).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
+      : '';
+    calc['opportunity.adjustedEstimatedValue'] = opp.adjustedEstimatedValue != null
+      ? `${currency} ${Number(opp.adjustedEstimatedValue).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+      : '';
+    calc['opportunity.tentativeDuration'] = opp.tentativeDuration != null
+      ? `${opp.tentativeDuration} ${opp.tentativeDurationUnit || ''}`.trim()
+      : '';
+    calc['opportunity.tentativeDurationUnit'] = opp.tentativeDurationUnit || '';
+    if (opp.tentativeStartDate) {
+      calc['opportunity.tentativeStartDate'] = new Date(opp.tentativeStartDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+    } else {
+      calc['opportunity.tentativeStartDate'] = '';
+    }
+    if (opp.tentativeEndDate) {
+      calc['opportunity.tentativeEndDate'] = new Date(opp.tentativeEndDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+    } else {
+      calc['opportunity.tentativeEndDate'] = '';
+    }
+    if (opp.expectedCloseDate) {
+      calc['opportunity.expectedCloseDate'] = new Date(opp.expectedCloseDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+    } else {
+      calc['opportunity.expectedCloseDate'] = '';
+    }
+    if (opp.actualCloseDate) {
+      calc['opportunity.actualCloseDate'] = new Date(opp.actualCloseDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+    } else {
+      calc['opportunity.actualCloseDate'] = '';
+    }
+
+    // ── GOM profitability from presalesData
+    if (opp.presalesData && typeof opp.presalesData === 'object' && !Array.isArray(opp.presalesData)) {
+      const pData = opp.presalesData as any;
+      calc['calc:gomPercent'] = pData.gomPercent != null
+        ? `${Number(pData.gomPercent).toFixed(1)}%`
+        : 'N/A';
+      calc['calc:totalRevenue'] = pData.totalRevenue != null
+        ? `${currency} ${Number(pData.totalRevenue).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+        : 'N/A';
+      calc['calc:totalCost'] = pData.totalCost != null
+        ? `${currency} ${Number(pData.totalCost).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+        : 'N/A';
+      calc['calc:gomAbsolute'] = pData.gomFull != null
+        ? `${currency} ${Number(pData.gomFull).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+        : 'N/A';
+    } else {
+      calc['calc:gomPercent'] = 'N/A';
+      calc['calc:totalRevenue'] = 'N/A';
+      calc['calc:totalCost'] = 'N/A';
+      calc['calc:gomAbsolute'] = 'N/A';
+    }
 
   } catch (error) {
     console.error('[NotificationEngine] Error resolving calculated fields:', error);
