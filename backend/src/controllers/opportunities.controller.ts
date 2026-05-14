@@ -425,6 +425,16 @@ export async function updateOpportunity(req: Request, res: Response) {
                     stageId: stage.id,
                     currentStage: newStageName
                 };
+
+                // Update probability based on the new stage
+                const stageProbMap: Record<string, number> = {
+                    'Discovery': 10, 'Qualification': 25, 'Proposal': 50,
+                    'Negotiation': 75, 'Closed Won': 100, 'Closed Lost': 0,
+                };
+                if (stageProbMap[newStageName] !== undefined) {
+                    stageUpdate.probability = stageProbMap[newStageName];
+                }
+
                 if (newStageName === 'Closed Won' || newStageName === 'Closed Lost') {
                     stageUpdate.actualCloseDate = new Date();
                 }
@@ -644,7 +654,7 @@ export async function updateOpportunity(req: Request, res: Response) {
             adjustedEstimatedValue: body.adjustedEstimatedValue ? String(body.adjustedEstimatedValue) : '',
             ownerName: previous?.owner?.name || '',
             ownerEmail: previous?.owner?.email || '',
-            value: updatedOpp.value != null ? String(updatedOpp.value) : '',
+            value: updatedOpp.value != null ? `${updatedOpp.currency || 'INR'} ${Number(updatedOpp.value).toLocaleString('en-US')}` : '',
             probability: updatedOpp.probability != null ? String(updatedOpp.probability) : '',
             region: updatedOpp.region || '',
             technology: updatedOpp.technology || '',

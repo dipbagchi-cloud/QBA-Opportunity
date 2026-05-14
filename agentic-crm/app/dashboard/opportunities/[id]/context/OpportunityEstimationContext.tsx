@@ -119,6 +119,19 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
     const [isLoaded, setIsLoaded] = useState(false);
     const [exchangeRatesSnapshot, setExchangeRatesSnapshot] = useState<Record<string, number> | undefined>();
     const { getRate, currency: globalCurrency } = useCurrency();
+    // Track the currency that special/travel cost values were entered in.
+    // This ensures conversions stay stable when the user switches display currency.
+    const [dataCurrency, setDataCurrency] = useState<string>(initialCurrency || 'INR');
+
+    // Wrapped setters: when user edits special/travel costs, mark dataCurrency as the current display currency
+    const userSetSpecialCosts: React.Dispatch<React.SetStateAction<SpecialCosts>> = useCallback((updater) => {
+        setSpecialCosts(updater);
+        setDataCurrency(globalCurrency);
+    }, [globalCurrency]);
+    const userSetTravelCosts = useCallback((costs: TravelCosts) => {
+        setTravelCosts(costs);
+        setDataCurrency(globalCurrency);
+    }, [globalCurrency]);
 
     // Wrap setMarkupPercent to also recalculate all resources' dailyRate
     const setMarkupPercent = useCallback((newMarkup: number) => {
@@ -194,6 +207,8 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
                     if (saved.salesCommissionPercent != null) setSalesCommissionPercent(saved.salesCommissionPercent);
                     if (saved.preSalesCostPercent != null) setPreSalesCostPercent(saved.preSalesCostPercent);
                     if (readOnly && saved.currency) setCurrency(saved.currency);
+                    // Track the currency the cost data was saved in
+                    if (saved.currency) setDataCurrency(saved.currency);
                     if (saved.effortType) setEffortType(saved.effortType);
                     if (saved.selectedYear) setSelectedYear(saved.selectedYear);
                 }
@@ -264,7 +279,7 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
                     markupPercent,
                     salesCommissionPercent,
                     preSalesCostPercent,
-                    currency,
+                    currency: globalCurrency,
                     effortType,
                     selectedYear,
                     gomSummary,
@@ -279,10 +294,12 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
                 headers: getAuthHeaders(),
                 body: JSON.stringify(payload),
             });
+            // After save, dataCurrency = the currency we just saved with
+            setDataCurrency(globalCurrency);
         } finally {
             setIsSaving(false);
         }
-    }, [opportunityId, resources, travelCosts, specialCosts, markupPercent, salesCommissionPercent, preSalesCostPercent, currency, effortType, selectedYear, gomSummary, revenue, totalCost, gomPercent]);
+    }, [opportunityId, resources, travelCosts, specialCosts, markupPercent, salesCommissionPercent, preSalesCostPercent, globalCurrency, effortType, selectedYear, gomSummary, revenue, totalCost, gomPercent]);
 
     // Calculate months from resources
     useEffect(() => {
@@ -302,13 +319,13 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
         setMonths(Array.from(allMonths).sort());
     }, [resources, selectedYear]);
 
-    // Calculate total travel cost (convert from global display currency to INR base)
+    // Calculate total travel cost (convert from data entry currency to INR base)
     useEffect(() => {
         const rawTotal = travelCosts.reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
-        const rate = getRate(globalCurrency);
-        const totalInBase = rate && rate !== 0 ? rawTotal / rate : rawTotal;
+        const rate = getRate(dataCurrency);
+        const totalInBase = dataCurrency !== 'INR' && rate && rate !== 0 ? rawTotal / rate : rawTotal;
         setTotalTravelCost(totalInBase);
-    }, [travelCosts, getRate, globalCurrency]);
+    }, [travelCosts, getRate, dataCurrency]);
 
     // Calculate resource cost and GOM
     useEffect(() => {
@@ -374,10 +391,10 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
                               (Number(specialCosts.specialHwCost) || 0) + 
                               (Number(specialCosts.specialSwCost) || 0);
 
-        // Convert special costs from global display currency to INR base (same as travel costs)
-        const specRate = getRate(globalCurrency);
+        // Convert special costs from data entry currency to INR base (stable regardless of display currency)
+        const specRate = getRate(dataCurrency);
         const specToBase = (val: number) => {
-            if (globalCurrency === 'INR' || !specRate || specRate === 0) return val;
+            if (dataCurrency === 'INR' || !specRate || specRate === 0) return val;
             return val / specRate;
         };
 
@@ -405,7 +422,7 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
         }
 
         setOtherCosts(otherCosts);
-        setTotalSpecCost(currentTotalSpecCost);
+        setTotalSpecCost(specToBase(currentTotalSpecCost));
 
         // Calculate GOM Summary
         if (resourceLines.length > 0) {
@@ -459,7 +476,7 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
             setGomPercent(gom);
             setGomSummary(null);
         }
-    }, [resources, totalTravelCost, specialCosts, markupPercent, salesCommissionPercent, preSalesCostPercent, assumptions, selectedYear, months, adjustedEstimatedValue, startDate, globalCurrency, getRate]);
+    }, [resources, totalTravelCost, specialCosts, markupPercent, salesCommissionPercent, preSalesCostPercent, assumptions, selectedYear, months, adjustedEstimatedValue, startDate, dataCurrency, getRate]);
 
     // Determine GOM status
     const getGomStatus = () => {
@@ -476,9 +493,9 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
         selectedYear,
         setSelectedYear,
         travelCosts,
-        setTravelCosts,
+        setTravelCosts: userSetTravelCosts,
         specialCosts,
-        setSpecialCosts,
+        setSpecialCosts: userSetSpecialCosts,
         markupPercent,
         setMarkupPercent,
         salesCommissionPercent,

@@ -25,8 +25,10 @@ export default function GlobalError({
       const now = Date.now();
       if (!lastReload || now - parseInt(lastReload) > 30000) {
         sessionStorage.setItem("chunk_error_reload", String(now));
-        // Hard reload bypassing cache
-        window.location.href = window.location.href;
+        // Hard reload bypassing cache with cache-bust param
+        const url = new URL(window.location.href);
+        url.searchParams.set("_cb", String(now));
+        window.location.href = url.toString();
         return;
       }
     }

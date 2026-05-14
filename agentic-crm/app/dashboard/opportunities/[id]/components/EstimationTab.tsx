@@ -411,31 +411,39 @@ export function EstimationTab() {
                             {/* GOM Row */}
                             <tr>
                                 <td className="p-2 border-r">GOM Value</td>
-                                {months.map(m => {
-                                    const rev = revenueRow[m] || 0;
-                                    let totalCost = expenseRows["Salary"]?.[m] || 0;
+                                {(() => {
+                                    const totalRev = Object.values(revenueRow).reduce((a, b) => a + b, 0);
+                                    return months.map(m => {
+                                        const rev = revenueRow[m] || 0;
+                                        let totalCost = expenseRows["Salary"]?.[m] || 0;
 
-                                    // Add manual items
-                                    ["Subcontracting", "Travel + Stay", "Miscl. Expense", "Special HW Cost", "Special SW Cost", "Other Indirect Cost"].forEach(key => {
-                                        totalCost += expenseRows[key]?.[m] || 0;
-                                    });
+                                        // Add manual items
+                                        ["Subcontracting", "Travel + Stay", "Miscl. Expense", "Special HW Cost", "Special SW Cost", "Other Indirect Cost"].forEach(key => {
+                                            totalCost += expenseRows[key]?.[m] || 0;
+                                        });
 
-                                    // Add auto items if summary exists
-                                    if (gomSummary) {
-                                        const mData = gomSummary.monthlyData[m];
-                                        if (mData) {
-                                            totalCost += (mData.overhead || 0) + (mData.bonus || 0) + (mData.indirect || 0) + (mData.welfare || 0) + (mData.training || 0);
+                                        // Add auto items if summary exists
+                                        if (gomSummary) {
+                                            const mData = gomSummary.monthlyData[m];
+                                            if (mData) {
+                                                totalCost += (mData.overhead || 0) + (mData.bonus || 0) + (mData.indirect || 0) + (mData.welfare || 0) + (mData.training || 0);
+                                            }
                                         }
-                                    }
 
-                                    const gom = rev - totalCost;
-                                    const isNeg = gom < 0;
-                                    return (
-                                        <td key={m} className={`p-2 text-right border-r ${isNeg ? 'text-red-700' : 'text-green-700'}`}>
-                                            {isNeg ? '(' : ''}{Math.round(convert(Math.abs(gom))).toLocaleString()}{isNeg ? ')' : ''}
-                                        </td>
-                                    );
-                                })}
+                                        // Allocate sales commission and pre-sales cost proportionally
+                                        const monthShare = totalRev > 0 ? rev / totalRev : 0;
+                                        totalCost += salesCommissionAmount * monthShare;
+                                        totalCost += preSalesCostAmount * monthShare;
+
+                                        const gom = rev - totalCost;
+                                        const isNeg = gom < 0;
+                                        return (
+                                            <td key={m} className={`p-2 text-right border-r ${isNeg ? 'text-red-700' : 'text-green-700'}`}>
+                                                {isNeg ? '(' : ''}{Math.round(convert(Math.abs(gom))).toLocaleString()}{isNeg ? ')' : ''}
+                                            </td>
+                                        );
+                                    });
+                                })()}
                                 <td className={`p-2 text-right ${(revenue - contextTotalCost) < 0 ? 'text-red-700' : 'text-green-800'}`}>
                                     {Math.round(convert(revenue - contextTotalCost)).toLocaleString()}
                                 </td>
@@ -443,29 +451,37 @@ export function EstimationTab() {
                             {/* GOM % Row */}
                             <tr className="text-blue-700">
                                 <td className="p-2 border-r">GOM %</td>
-                                {months.map(m => {
-                                    const rev = revenueRow[m] || 0;
-                                    let totalCost = expenseRows["Salary"]?.[m] || 0;
+                                {(() => {
+                                    const totalRev = Object.values(revenueRow).reduce((a, b) => a + b, 0);
+                                    return months.map(m => {
+                                        const rev = revenueRow[m] || 0;
+                                        let totalCost = expenseRows["Salary"]?.[m] || 0;
 
-                                    ["Subcontracting", "Travel + Stay", "Miscl. Expense", "Special HW Cost", "Special SW Cost", "Other Indirect Cost"].forEach(key => {
-                                        totalCost += expenseRows[key]?.[m] || 0;
-                                    });
+                                        ["Subcontracting", "Travel + Stay", "Miscl. Expense", "Special HW Cost", "Special SW Cost", "Other Indirect Cost"].forEach(key => {
+                                            totalCost += expenseRows[key]?.[m] || 0;
+                                        });
 
-                                    if (gomSummary) {
-                                        const mData = gomSummary.monthlyData[m];
-                                        if (mData) {
-                                            totalCost += (mData.overhead || 0) + (mData.bonus || 0) + (mData.indirect || 0) + (mData.welfare || 0) + (mData.training || 0);
+                                        if (gomSummary) {
+                                            const mData = gomSummary.monthlyData[m];
+                                            if (mData) {
+                                                totalCost += (mData.overhead || 0) + (mData.bonus || 0) + (mData.indirect || 0) + (mData.welfare || 0) + (mData.training || 0);
+                                            }
                                         }
-                                    }
 
-                                    const gom = rev - totalCost;
-                                    const pct = rev > 0 ? (gom / rev) * 100 : 0;
-                                    return (
-                                        <td key={m} className="p-2 text-right border-r">
-                                            {pct.toFixed(1)}%
-                                        </td>
-                                    );
-                                })}
+                                        // Allocate sales commission and pre-sales cost proportionally
+                                        const monthShare = totalRev > 0 ? rev / totalRev : 0;
+                                        totalCost += salesCommissionAmount * monthShare;
+                                        totalCost += preSalesCostAmount * monthShare;
+
+                                        const gom = rev - totalCost;
+                                        const pct = rev > 0 ? (gom / rev) * 100 : 0;
+                                        return (
+                                            <td key={m} className="p-2 text-right border-r">
+                                                {pct.toFixed(1)}%
+                                            </td>
+                                        );
+                                    });
+                                })()}
                                 <td className="p-2 text-right">
                                     {gomPercent.toFixed(1)}%
                                 </td>
