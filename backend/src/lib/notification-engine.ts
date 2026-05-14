@@ -184,7 +184,7 @@ export async function evaluateOpportunityCreatedRules(ctx: OpportunityCreatedCon
         salesRepName: ctx.salesRepName,
         createdBy: ctx.createdByName,
         updatedBy: ctx.createdByName,
-        value: ctx.value != null ? Number(ctx.value).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '',
+        value: ctx.value != null ? fmtNum(Number(ctx.value)) : '',
         currency: _oppCurrency,
         'opportunity.currency': _oppCurrency,
         probability: ctx.probability != null ? String(ctx.probability) : '',
@@ -312,7 +312,7 @@ export async function evaluateStageChangeRules(ctx: StageChangeContext): Promise
         managerName: ctx.managerName,
         userName: ctx.updatedByName,
         updatedBy: ctx.updatedByName,
-        value: ctx.value != null ? Number(ctx.value).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '',
+        value: ctx.value != null ? fmtNum(Number(ctx.value)) : '',
         currency: _stageCurrency,
         'opportunity.currency': _stageCurrency,
         probability: ctx.probability != null ? String(ctx.probability) : '',
@@ -321,7 +321,7 @@ export async function evaluateStageChangeRules(ctx: StageChangeContext): Promise
         comment: ctx.comment || '',
         reason: ctx.comment || '',
         adjustedEstimatedValue: ctx.adjustedEstimatedValue
-          ? `${_stageCurrency} ${Number(ctx.adjustedEstimatedValue).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+          ? fmtMoney(_stageCurrency, Number(ctx.adjustedEstimatedValue))
           : '',
         reEstimateCount: ctx.reEstimateCount != null ? String(ctx.reEstimateCount) : '0',
         opportunityLink: `${process.env.FRONTEND_URL || 'https://qcrm.qbadvisory.com'}/dashboard/opportunities/${ctx.opportunityId}`,
@@ -428,7 +428,7 @@ export async function evaluateDataConditionRules(opportunity: {
         salesRepName: opportunity.salesRepName || '',
         manager: opportunity.managerName || '',
         managerName: opportunity.managerName || '',
-        value: opportunity.value != null ? Number(opportunity.value).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '',
+        value: opportunity.value != null ? fmtNum(Number(opportunity.value)) : '',
         currency: _dataCurrency,
         'opportunity.currency': _dataCurrency,
         probability: opportunity.probability != null ? String(opportunity.probability) : '',
@@ -481,6 +481,19 @@ function renderTemplate(template: string, variables: Record<string, string>): st
   return template.replace(/\{\{([\w.:]+)\}\}/g, (_, key) => variables[key] ?? '');
 }
 
+/** ICU-independent number formatter — works on any Node.js build. */
+function fmtNum(n: number, decimals = 0): string {
+  const fixed = n.toFixed(decimals);
+  const [integer, decimal] = fixed.split('.');
+  const intFormatted = integer.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return decimal !== undefined && decimals > 0 ? `${intFormatted}.${decimal}` : intFormatted;
+}
+
+/** Format a monetary amount with currency prefix, e.g. "GBP 20,000" */
+function fmtMoney(currency: string, amount: number): string {
+  return `${currency} ${fmtNum(amount)}`;
+}
+
 /**
  * Resolve calculated fields (calc:xxx) for an opportunity.
  * Fetches the opportunity with relations and computes derived values.
@@ -519,18 +532,14 @@ export async function resolveCalculatedFields(opportunityId: string): Promise<Re
       calc['calc:daysUntilClose'] = 'N/A';
     }
 
-    // calc:formattedValue — value with currency
+    // calc:formattedValue — value with currency (ICU-independent formatting)
     const currency = (opp as any).currency || 'USD';
     const value = opp.value != null ? Number(opp.value) : null;
-    calc['calc:formattedValue'] = value != null
-      ? `${currency} ${value.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
-      : 'N/A';
+    calc['calc:formattedValue'] = value != null ? fmtMoney(currency, value) : 'N/A';
 
     // calc:weightedValue — value × probability / 100
     const prob = opp.probability ?? 0;
-    calc['calc:weightedValue'] = value != null
-      ? `${currency} ${Math.round(value * prob / 100).toLocaleString('en-US')}`
-      : 'N/A';
+    calc['calc:weightedValue'] = value != null ? fmtMoney(currency, Math.round(value * prob / 100)) : 'N/A';
 
     // calc:stageProgress — current stage order / total stages as percentage
     if (opp.stage) {
@@ -550,27 +559,24 @@ export async function resolveCalculatedFields(opportunityId: string): Promise<Re
       calc['calc:stageSLA'] = 'N/A';
     }
 
-    // calc:currentDate — today formatted
-    calc['calc:currentDate'] = now.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-
-    // calc:currentTime — now formatted with time
-    calc['calc:currentTime'] = now.toLocaleString('en-US', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-
-    // calc:expectedCloseFormatted — expected close date formatted
-    if (opp.expectedCloseDate) {
-      calc['calc:expectedCloseFormatted'] = new Date(opp.expectedCloseDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-    } else {
-      calc['calc:expectedCloseFormatted'] = 'N/A';
-    }
-
-    // calc:createdDateFormatted — created date formatted
-    calc['calc:createdDateFormatted'] = createdAt.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+    // calc:currentDate / calc:currentTime — ICU-independent date formatting
+    const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    const fmtDate = (d: Date) => `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+    const fmtDateTime = (d: Date) => {
+      const h = d.getHours(), m = d.getMinutes().toString().padStart(2, '0');
+      return `${fmtDate(d)} ${h % 12 || 12}:${m} ${h >= 12 ? 'PM' : 'AM'}`;
+    };
+    calc['calc:currentDate'] = fmtDate(now);
+    calc['calc:currentTime'] = fmtDateTime(now);
+    calc['calc:expectedCloseFormatted'] = opp.expectedCloseDate ? fmtDate(new Date(opp.expectedCloseDate)) : 'N/A';
+    calc['calc:createdDateFormatted'] = fmtDate(createdAt);
 
     // ── Populate all opportunity.* fields so templates using the Opportunity
-    //    table catalog actually resolve (engine previously only set opportunity.currency)
+    //    table catalog actually resolve. opportunity.value includes currency
+    //    prefix (e.g. "GBP 20,000") so it matches what users see in the UI.
     calc['opportunity.title'] = opp.title || '';
     calc['opportunity.description'] = opp.description || '';
-    calc['opportunity.value'] = value != null ? value.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '';
+    calc['opportunity.value'] = value != null ? fmtMoney(currency, value) : '';
     calc['opportunity.currency'] = currency;
     calc['opportunity.probability'] = opp.probability != null ? String(opp.probability) : '';
     calc['opportunity.currentStage'] = opp.currentStage || '';
@@ -586,35 +592,19 @@ export async function resolveCalculatedFields(opportunityId: string): Promise<Re
     calc['opportunity.reEstimateCount'] = String(opp.reEstimateCount ?? 0);
     calc['opportunity.gomApproved'] = opp.gomApproved ? 'Yes' : 'No';
     calc['opportunity.expectedDayRate'] = opp.expectedDayRate != null
-      ? Number(opp.expectedDayRate).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
+      ? fmtNum(Number(opp.expectedDayRate), 2)
       : '';
     calc['opportunity.adjustedEstimatedValue'] = opp.adjustedEstimatedValue != null
-      ? `${currency} ${Number(opp.adjustedEstimatedValue).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+      ? fmtMoney(currency, Number(opp.adjustedEstimatedValue))
       : '';
     calc['opportunity.tentativeDuration'] = opp.tentativeDuration != null
       ? `${opp.tentativeDuration} ${opp.tentativeDurationUnit || ''}`.trim()
       : '';
     calc['opportunity.tentativeDurationUnit'] = opp.tentativeDurationUnit || '';
-    if (opp.tentativeStartDate) {
-      calc['opportunity.tentativeStartDate'] = new Date(opp.tentativeStartDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-    } else {
-      calc['opportunity.tentativeStartDate'] = '';
-    }
-    if (opp.tentativeEndDate) {
-      calc['opportunity.tentativeEndDate'] = new Date(opp.tentativeEndDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-    } else {
-      calc['opportunity.tentativeEndDate'] = '';
-    }
-    if (opp.expectedCloseDate) {
-      calc['opportunity.expectedCloseDate'] = new Date(opp.expectedCloseDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-    } else {
-      calc['opportunity.expectedCloseDate'] = '';
-    }
-    if (opp.actualCloseDate) {
-      calc['opportunity.actualCloseDate'] = new Date(opp.actualCloseDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-    } else {
-      calc['opportunity.actualCloseDate'] = '';
-    }
+    calc['opportunity.tentativeStartDate'] = opp.tentativeStartDate ? fmtDate(new Date(opp.tentativeStartDate)) : '';
+    calc['opportunity.tentativeEndDate'] = opp.tentativeEndDate ? fmtDate(new Date(opp.tentativeEndDate)) : '';
+    calc['opportunity.expectedCloseDate'] = opp.expectedCloseDate ? fmtDate(new Date(opp.expectedCloseDate)) : '';
+    calc['opportunity.actualCloseDate'] = opp.actualCloseDate ? fmtDate(new Date(opp.actualCloseDate)) : '';
 
     // ── GOM profitability from presalesData
     if (opp.presalesData && typeof opp.presalesData === 'object' && !Array.isArray(opp.presalesData)) {
@@ -622,15 +612,9 @@ export async function resolveCalculatedFields(opportunityId: string): Promise<Re
       calc['calc:gomPercent'] = pData.gomPercent != null
         ? `${Number(pData.gomPercent).toFixed(1)}%`
         : 'N/A';
-      calc['calc:totalRevenue'] = pData.totalRevenue != null
-        ? `${currency} ${Number(pData.totalRevenue).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
-        : 'N/A';
-      calc['calc:totalCost'] = pData.totalCost != null
-        ? `${currency} ${Number(pData.totalCost).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
-        : 'N/A';
-      calc['calc:gomAbsolute'] = pData.gomFull != null
-        ? `${currency} ${Number(pData.gomFull).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
-        : 'N/A';
+      calc['calc:totalRevenue'] = pData.totalRevenue != null ? fmtMoney(currency, Number(pData.totalRevenue)) : 'N/A';
+      calc['calc:totalCost'] = pData.totalCost != null ? fmtMoney(currency, Number(pData.totalCost)) : 'N/A';
+      calc['calc:gomAbsolute'] = pData.gomFull != null ? fmtMoney(currency, Number(pData.gomFull)) : 'N/A';
     } else {
       calc['calc:gomPercent'] = 'N/A';
       calc['calc:totalRevenue'] = 'N/A';

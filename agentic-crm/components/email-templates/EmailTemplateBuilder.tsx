@@ -47,7 +47,7 @@ const SAMPLE_DATA: Record<string, string> = {
     // opportunity.* fields — populated from the live opportunity record
     "opportunity.title": "Cloud Migration – Acme Corp",
     "opportunity.description": "Enterprise cloud migration for Acme Corp's legacy infra",
-    "opportunity.value": "250,000",
+    "opportunity.value": "USD 250,000",
     "opportunity.currency": "USD",
     "opportunity.probability": "70",
     "opportunity.currentStage": "Presales",
