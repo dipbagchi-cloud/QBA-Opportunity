@@ -267,6 +267,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const [isLoading, setIsLoading] = useState(true);
     // Guard: skip derived-value effects during initial data load to prevent cascading re-renders ("dancing")
     const skipDerivedEffects = useRef(true);
+    // Two-phase reveal: skeleton → hidden content → visible content
+    const [dataReady, setDataReady] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [showPresalesModal, setShowPresalesModal] = useState(false);
     const [showAssignPresalesModal, setShowAssignPresalesModal] = useState(false);
@@ -750,11 +752,20 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         if (id) fetchDetails();
     }, [id]);
 
-    // Enable derived-value effects after the initial data render has painted
+    // Enable derived-value effects after the initial data render has fully painted.
+    // Wait 2 animation frames so React's batched state updates have all flushed.
     useEffect(() => {
         if (!isLoading && skipDerivedEffects.current) {
-            const raf = requestAnimationFrame(() => { skipDerivedEffects.current = false; });
-            return () => cancelAnimationFrame(raf);
+            // Frame 1: React has rendered with data
+            const raf1 = requestAnimationFrame(() => {
+                // Frame 2: layout is stable
+                const raf2 = requestAnimationFrame(() => {
+                    skipDerivedEffects.current = false;
+                    setDataReady(true);
+                });
+                return () => cancelAnimationFrame(raf2);
+            });
+            return () => cancelAnimationFrame(raf1);
         }
     }, [isLoading]);
 
@@ -1232,7 +1243,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     };
 
     if (isLoading) return (
-        <div className="max-w-[1400px] mx-auto space-y-4 animate-pulse">
+        <div className="max-w-[1400px] mx-auto space-y-4 animate-pulse" style={{ minHeight: '100vh' }}>
             {/* Header skeleton */}
             <div className="flex items-center justify-between">
                 <div className="h-6 w-64 bg-slate-200 rounded" />
@@ -1342,7 +1353,10 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     // Access Control Logic already handled above
 
     return (
-        <div className="max-w-[1400px] mx-auto space-y-4 relative">
+        <div
+            className="max-w-[1400px] mx-auto space-y-4 relative transition-opacity duration-300"
+            style={{ opacity: dataReady ? 1 : 0, minHeight: '100vh' }}
+        >
             {/* Header with Actions */}
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
