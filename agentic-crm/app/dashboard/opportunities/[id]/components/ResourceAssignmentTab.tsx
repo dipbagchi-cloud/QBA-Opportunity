@@ -95,8 +95,9 @@ export function ResourceAssignmentTab() {
             ...assumptions
         });
 
-        // Calculate daily rate with markup
-        const dailyRate = rateCardResult.dailyCost * (1 + (markupPercent / 100));
+        // dailyCost is raw (CTC/workingDays), dailyRate uses loaded cost for billing
+        const loadedDailyCost = rateCardResult.adjustedCost / assumptions.workingDaysPerYear;
+        const dailyRate = loadedDailyCost * (1 + (markupPercent / 100));
 
         const newRow: ResourceRow = {
             id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : (Date.now() + '-' + Math.random().toString(36).slice(2)),
@@ -546,7 +547,8 @@ export function ResourceAssignmentTab() {
                                             monthsPerYear: 12,
                                             ...assumptions
                                         });
-                                        const dailyRate = rateCardResult.dailyCost * (1 + (markupPercent / 100));
+                                        const loadedDailyCost = rateCardResult.adjustedCost / assumptions.workingDaysPerYear;
+                                        const dailyRate = loadedDailyCost * (1 + (markupPercent / 100));
                                         setEditingResource({ ...editingResource, annualCTC: ctc, dailyCost: rateCardResult.dailyCost, dailyRate });
                                     }}
                                     className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"

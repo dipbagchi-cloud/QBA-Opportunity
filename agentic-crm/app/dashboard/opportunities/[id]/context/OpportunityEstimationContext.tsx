@@ -331,7 +331,8 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
                 role: resource.role,
                 location: resource.type,
                 dailyRate: resource.dailyRate,
-                dailyCost: resource.dailyCost,
+                // Always use raw daily cost (CTC / working days) to match GOM sheet
+                dailyCost: resource.annualCTC > 0 ? resource.annualCTC / assumptions.workingDaysPerYear : resource.dailyCost,
                 months: monthsData,
                 experienceBand: resource.experienceBand,
                 skill: resource.skill,
@@ -373,6 +374,13 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
                               (Number(specialCosts.specialHwCost) || 0) + 
                               (Number(specialCosts.specialSwCost) || 0);
 
+        // Convert special costs from global display currency to INR base (same as travel costs)
+        const specRate = getRate(globalCurrency);
+        const specToBase = (val: number) => {
+            if (globalCurrency === 'INR' || !specRate || specRate === 0) return val;
+            return val / specRate;
+        };
+
         if (currentTotalSpecCost > 0) {
             let specMonth = months.length > 0 ? months[0] : null;
             if (!specMonth && startDate) {
@@ -383,16 +391,16 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
                 specMonth = `${selectedYear}-01`;
             }
             if (Number(specialCosts.subcontracting) > 0) {
-                otherCosts.push({ id: "spec-1", description: "Subcontracting", amount: Number(specialCosts.subcontracting), month: specMonth, category: "Subcontracting" });
+                otherCosts.push({ id: "spec-1", description: "Subcontracting", amount: specToBase(Number(specialCosts.subcontracting)), month: specMonth, category: "Subcontracting" });
             }
             if (Number(specialCosts.miscExpense) > 0) {
-                otherCosts.push({ id: "spec-2", description: "Miscl. Expense", amount: Number(specialCosts.miscExpense), month: specMonth, category: "Miscl. Expense" });
+                otherCosts.push({ id: "spec-2", description: "Miscl. Expense", amount: specToBase(Number(specialCosts.miscExpense)), month: specMonth, category: "Miscl. Expense" });
             }
             if (Number(specialCosts.specialHwCost) > 0) {
-                otherCosts.push({ id: "spec-3", description: "Special HW Cost", amount: Number(specialCosts.specialHwCost), month: specMonth, category: "Special HW Cost" });
+                otherCosts.push({ id: "spec-3", description: "Special HW Cost", amount: specToBase(Number(specialCosts.specialHwCost)), month: specMonth, category: "Special HW Cost" });
             }
             if (Number(specialCosts.specialSwCost) > 0) {
-                otherCosts.push({ id: "spec-4", description: "Special SW Cost", amount: Number(specialCosts.specialSwCost), month: specMonth, category: "Special SW Cost" });
+                otherCosts.push({ id: "spec-4", description: "Special SW Cost", amount: specToBase(Number(specialCosts.specialSwCost)), month: specMonth, category: "Special SW Cost" });
             }
         }
 
@@ -451,7 +459,7 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
             setGomPercent(gom);
             setGomSummary(null);
         }
-    }, [resources, totalTravelCost, specialCosts, markupPercent, salesCommissionPercent, preSalesCostPercent, assumptions, selectedYear, months, adjustedEstimatedValue, startDate]);
+    }, [resources, totalTravelCost, specialCosts, markupPercent, salesCommissionPercent, preSalesCostPercent, assumptions, selectedYear, months, adjustedEstimatedValue, startDate, globalCurrency, getRate]);
 
     // Determine GOM status
     const getGomStatus = () => {

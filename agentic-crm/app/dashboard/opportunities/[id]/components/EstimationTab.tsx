@@ -20,6 +20,9 @@ export function EstimationTab() {
         setCurrency,
         revenue,
         gomPercent,
+        totalCost: contextTotalCost,
+        salesCommissionAmount,
+        preSalesCostAmount,
         otherCosts,
         readOnly,
         exchangeRatesSnapshot,
@@ -354,6 +357,7 @@ export function EstimationTab() {
 
                             {/* Auto-calculated costs from summary */}
                             {gomSummary && [
+                                { label: "Resource Loading (DM, Bench, etc.)", key: "overhead" },
                                 { label: "Bonus", key: "bonus" },
                                 { label: "Indirect Cost", key: "indirect" },
                                 { label: "Team Building+Welfare", key: "welfare" },
@@ -379,6 +383,29 @@ export function EstimationTab() {
                                     </tr>
                                 );
                             })}
+
+                            {/* Sales Commission & Pre-Sales Cost */}
+                            {(salesCommissionAmount > 0 || preSalesCostAmount > 0) && (
+                                <>
+                                    <tr className="bg-slate-50/50 italic text-slate-500">
+                                        <td colSpan={months.length + 2} className="p-1 px-2 border-b">Revenue-Based Costs</td>
+                                    </tr>
+                                    {salesCommissionAmount > 0 && (
+                                        <tr className="hover:bg-slate-50/30 transition-colors">
+                                            <td className="p-1 px-2 border-r pl-4 text-slate-700">Sales Commission</td>
+                                            {months.map(m => <td key={m} className="p-1 px-2 text-right border-r text-slate-600 font-mono text-[11px]">-</td>)}
+                                            <td className="p-1 px-2 text-right font-medium text-slate-800 text-[11px]">{Math.round(convert(salesCommissionAmount)).toLocaleString()}</td>
+                                        </tr>
+                                    )}
+                                    {preSalesCostAmount > 0 && (
+                                        <tr className="hover:bg-slate-50/30 transition-colors">
+                                            <td className="p-1 px-2 border-r pl-4 text-slate-700">Pre-Sales Cost</td>
+                                            {months.map(m => <td key={m} className="p-1 px-2 text-right border-r text-slate-600 font-mono text-[11px]">-</td>)}
+                                            <td className="p-1 px-2 text-right font-medium text-slate-800 text-[11px]">{Math.round(convert(preSalesCostAmount)).toLocaleString()}</td>
+                                        </tr>
+                                    )}
+                                </>
+                            )}
                         </tbody>
                         <tfoot className="bg-slate-100 font-bold border-t-2 border-slate-300 text-slate-900">
                             {/* GOM Row */}
@@ -397,7 +424,7 @@ export function EstimationTab() {
                                     if (gomSummary) {
                                         const mData = gomSummary.monthlyData[m];
                                         if (mData) {
-                                            totalCost += (mData.bonus || 0) + (mData.indirect || 0) + (mData.welfare || 0) + (mData.training || 0);
+                                            totalCost += (mData.overhead || 0) + (mData.bonus || 0) + (mData.indirect || 0) + (mData.welfare || 0) + (mData.training || 0);
                                         }
                                     }
 
@@ -409,8 +436,8 @@ export function EstimationTab() {
                                         </td>
                                     );
                                 })}
-                                <td className="p-2 text-right text-green-800">
-                                    {gomSummary ? Math.round(convert(gomSummary.gomFull)).toLocaleString() : '0'}
+                                <td className={`p-2 text-right ${(revenue - contextTotalCost) < 0 ? 'text-red-700' : 'text-green-800'}`}>
+                                    {Math.round(convert(revenue - contextTotalCost)).toLocaleString()}
                                 </td>
                             </tr>
                             {/* GOM % Row */}
@@ -427,7 +454,7 @@ export function EstimationTab() {
                                     if (gomSummary) {
                                         const mData = gomSummary.monthlyData[m];
                                         if (mData) {
-                                            totalCost += (mData.bonus || 0) + (mData.indirect || 0) + (mData.welfare || 0) + (mData.training || 0);
+                                            totalCost += (mData.overhead || 0) + (mData.bonus || 0) + (mData.indirect || 0) + (mData.welfare || 0) + (mData.training || 0);
                                         }
                                     }
 
@@ -440,12 +467,7 @@ export function EstimationTab() {
                                     );
                                 })}
                                 <td className="p-2 text-right">
-                                    {(() => {
-                                        const revTotal = Object.values(revenueRow).reduce((a, b) => a + b, 0);
-                                        const gomTotal = gomSummary ? gomSummary.gomFull : 0;
-                                        const pct = revTotal > 0 ? (gomTotal / revTotal) * 100 : 0;
-                                        return pct.toFixed(1) + '%';
-                                    })()}
+                                    {gomPercent.toFixed(1)}%
                                 </td>
                             </tr>
                         </tfoot>

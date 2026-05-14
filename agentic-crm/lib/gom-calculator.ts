@@ -47,7 +47,9 @@ export function calculateRateCard(params: RateCardParams): RateCardResult {
     const totalAnnualCost = annualCtc + dmCost + benchCost + leaveCost + growthCost + incrementCost;
 
     const monthlyCost = totalAnnualCost / 12;
-    const dailyCost = totalAnnualCost / workingDaysPerYear;
+    // dailyCost = raw CTC per day (no overhead loadings)
+    // Overhead (DM, bench, leave, growth, increment) is added separately in calculateProjectGom
+    const dailyCost = annualCtc / workingDaysPerYear;
 
     return {
         adjustedCost: totalAnnualCost,
@@ -91,6 +93,7 @@ export type GomResult = {
         gom: number;
         // Breakdowns for detail view
         salary: number;
+        overhead: number;
         bonus: number;
         welfare: number;
         training: number;
@@ -106,7 +109,7 @@ export function calculateProjectGom(lines: ResourceLine[], otherCosts: OtherCost
     // Helper to init month data
     const getMonthData = (m: string) => ({
         revenue: 0, cost: 0, gom: 0,
-        salary: 0, bonus: 0, welfare: 0, training: 0, indirect: 0, other: 0
+        salary: 0, overhead: 0, bonus: 0, welfare: 0, training: 0, indirect: 0, other: 0
     });
 
     const monthlyData: Record<string, ReturnType<typeof getMonthData>> = {};
@@ -128,9 +131,16 @@ export function calculateProjectGom(lines: ResourceLine[], otherCosts: OtherCost
             monthlyData[m.month].revenue += rev;
             totalRevenue += rev;
 
-            // Direct Salary Cost
+            // Direct Salary Cost (raw CTC-based, no overhead loadings)
             const salary = days * line.dailyCost;
             monthlyData[m.month].salary += salary;
+
+            // Resource Loading: DM, Bench, Leave, Growth, Increment (as separate overhead)
+            const overheadPct = (assumptions.deliveryMgmtPercent + assumptions.benchPercent +
+                assumptions.leaveEligibilityPercent + assumptions.annualGrowthBufferPercent +
+                assumptions.averageIncrementPercent) / 100;
+            const overhead = salary * overheadPct;
+            monthlyData[m.month].overhead += overhead;
 
             // Auto-Calculated Costs based on Assumptions
             const bonus = salary * (assumptions.bonusPercent / 100);
@@ -148,7 +158,7 @@ export function calculateProjectGom(lines: ResourceLine[], otherCosts: OtherCost
             monthlyData[m.month].training += training;
 
             // Total for this line-month
-            const lineCost = salary + bonus + indirect + welfare + training;
+            const lineCost = salary + overhead + bonus + indirect + welfare + training;
             monthlyData[m.month].cost += lineCost;
             totalCost += lineCost;
         }
