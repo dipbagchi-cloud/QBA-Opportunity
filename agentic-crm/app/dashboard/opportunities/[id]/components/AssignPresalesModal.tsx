@@ -68,7 +68,7 @@ export function AssignPresalesModal({ opportunityId, isOpen, onAssign, onClose, 
         try {
             const joinedNames = selectedPresales.join(", ");
             const response = await fetch(`${API_URL}/api/opportunities/${opportunityId}`, {
-                method: "PUT",
+                method: "PATCH",
                 headers: getAuthHeaders(),
                 body: JSON.stringify({
                     presalesAssigneeName: joinedNames
