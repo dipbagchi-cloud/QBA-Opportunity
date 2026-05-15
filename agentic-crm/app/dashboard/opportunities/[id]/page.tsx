@@ -2816,45 +2816,92 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             <div className="px-6 pb-4 border-t border-slate-100 pt-3">
                                 {/* Travel & Cost Details */}
                                 <h4 className="text-xs font-semibold text-slate-700 mb-2">Travel & Cost Assumptions</h4>
-                                <div className="grid grid-cols-2 md:grid-cols-4 gap-y-3 gap-x-6 text-sm mb-4">
+                                <div className="flex items-center gap-6 mb-3 text-sm">
                                     <div>
                                         <span className="text-xs text-slate-500 uppercase tracking-wide">Markup %</span>
-                                        <p className="font-medium text-slate-800 mt-1">{(rawPresalesData?.markupPercent || 0)}%</p>
+                                        <p className="font-medium text-slate-800 mt-0.5">{rawPresalesData?.markupPercent || 0}%</p>
                                     </div>
                                     <div>
-                                        <span className="text-xs text-slate-500 uppercase tracking-wide">Mode of Travel</span>
-                                        <p className="font-medium text-slate-800 mt-1">{(rawPresalesData?.travelCosts?.modeOfTravel || "N/A") || "N/A"}</p>
+                                        <span className="text-xs text-slate-500 uppercase tracking-wide">Sales Comm. %</span>
+                                        <p className="font-medium text-slate-800 mt-0.5">{rawPresalesData?.salesCommissionPercent || 0}%</p>
                                     </div>
                                     <div>
-                                        <span className="text-xs text-slate-500 uppercase tracking-wide">Travel Frequency</span>
-                                        <p className="font-medium text-slate-800 mt-1">{(rawPresalesData?.travelCosts?.frequency || "N/A") || "N/A"}</p>
-                                    </div>
-                                    <div>
-                                        <span className="text-xs text-slate-500 uppercase tracking-wide">Round Trip Cost</span>
-                                        <p className="font-medium text-slate-800 mt-1">
-                                            {cSym}{getPresalesConverted(rawPresalesData?.travelCosts?.roundTripCost || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</p>
-                                    </div>
-                                    <div>
-                                        <span className="text-xs text-slate-500 uppercase tracking-wide">Medical Insurance</span>
-                                        <p className="font-medium text-slate-800 mt-1">
-                                            {cSym}{getPresalesConverted(rawPresalesData?.travelCosts?.medicalInsurance || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</p>
-                                    </div>
-                                    <div>
-                                        <span className="text-xs text-slate-500 uppercase tracking-wide">Visa Cost</span>
-                                        <p className="font-medium text-slate-800 mt-1">
-                                            {cSym}{getPresalesConverted(rawPresalesData?.travelCosts?.visaCost || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</p>
-                                    </div>
-                                    <div>
-                                        <span className="text-xs text-slate-500 uppercase tracking-wide">Vaccine Cost</span>
-                                        <p className="font-medium text-slate-800 mt-1">
-                                            {cSym}{getPresalesConverted(rawPresalesData?.travelCosts?.vaccineCost || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</p>
-                                    </div>
-                                    <div>
-                                        <span className="text-xs text-slate-500 uppercase tracking-wide">Hotel Cost</span>
-                                        <p className="font-medium text-slate-800 mt-1">
-                                            {cSym}{getPresalesConverted(rawPresalesData?.travelCosts?.hotelCost || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</p>
+                                        <span className="text-xs text-slate-500 uppercase tracking-wide">Pre-Sales Cost %</span>
+                                        <p className="font-medium text-slate-800 mt-0.5">{rawPresalesData?.preSalesCostPercent || 0}%</p>
                                     </div>
                                 </div>
+                                {(() => {
+                                    const tc = rawPresalesData?.travelCosts;
+                                    // New array format
+                                    if (Array.isArray(tc) && tc.length > 0) {
+                                        const total = tc.reduce((s: number, e: any) => s + (Number(e.amount) || 0), 0);
+                                        return (
+                                            <div className="mb-4">
+                                                <table className="w-full text-sm border border-slate-200 rounded-md overflow-hidden">
+                                                    <thead className="bg-slate-50">
+                                                        <tr>
+                                                            <th className="text-left px-3 py-1.5 text-xs font-semibold text-slate-500 uppercase">Category</th>
+                                                            <th className="text-left px-3 py-1.5 text-xs font-semibold text-slate-500 uppercase">Description</th>
+                                                            <th className="text-right px-3 py-1.5 text-xs font-semibold text-slate-500 uppercase">Amount</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {tc.map((entry: any, i: number) => (
+                                                            <tr key={entry.id || i} className="border-t border-slate-100">
+                                                                <td className="px-3 py-1.5 text-slate-700">{entry.category || "—"}</td>
+                                                                <td className="px-3 py-1.5 text-slate-600">{entry.description || "—"}</td>
+                                                                <td className="px-3 py-1.5 text-right font-medium text-slate-800">{cSym}{getPresalesConverted(Number(entry.amount) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                    <tfoot className="bg-blue-50 border-t border-slate-200">
+                                                        <tr>
+                                                            <td colSpan={2} className="px-3 py-1.5 text-xs font-semibold text-blue-800">Total Travel & Hospitality</td>
+                                                            <td className="px-3 py-1.5 text-right font-bold text-blue-700">{cSym}{getPresalesConverted(total).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                                        </tr>
+                                                    </tfoot>
+                                                </table>
+                                            </div>
+                                        );
+                                    }
+                                    // Legacy object format fallback
+                                    if (tc && !Array.isArray(tc)) {
+                                        const fields: [string, number][] = ([
+                                            ['Round Trip', tc.roundTripCost || 0],
+                                            ['Medical Insurance', tc.medicalInsurance || 0],
+                                            ['Visa', tc.visaCost || 0],
+                                            ['Vaccine', tc.vaccineCost || 0],
+                                            ['Hotel', tc.hotelCost || 0],
+                                            ['Local Conveyance', tc.localConveyance || 0],
+                                            ['Marketing/Comm.', tc.marketingCom || 0],
+                                        ] as [string, number][]).filter(([, v]) => v > 0);
+                                        if (fields.length > 0) return (
+                                            <div className="grid grid-cols-2 md:grid-cols-4 gap-y-2 gap-x-6 text-sm mb-4">
+                                                {fields.map(([label, val]) => (
+                                                    <div key={label}>
+                                                        <span className="text-xs text-slate-500 uppercase tracking-wide">{label}</span>
+                                                        <p className="font-medium text-slate-800 mt-0.5">{cSym}{getPresalesConverted(val).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        );
+                                    }
+                                    return <p className="text-xs text-slate-400 italic mb-4">No travel costs recorded.</p>;
+                                })()}
+                                {/* Special Costs */}
+                                {rawPresalesData?.specialCosts && Object.values(rawPresalesData.specialCosts).some((v: any) => Number(v) > 0) && (
+                                    <div className="mb-4">
+                                        <h4 className="text-xs font-semibold text-slate-700 mb-2">Special Costs</h4>
+                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-y-2 gap-x-6 text-sm">
+                                            {([['Subcontracting', rawPresalesData.specialCosts.subcontracting], ['Miscl. Expense', rawPresalesData.specialCosts.miscExpense], ['Special HW', rawPresalesData.specialCosts.specialHwCost], ['Special SW', rawPresalesData.specialCosts.specialSwCost]] as [string, number][]).filter(([, v]) => Number(v) > 0).map(([label, val]) => (
+                                                <div key={label}>
+                                                    <span className="text-xs text-slate-500 uppercase tracking-wide">{label}</span>
+                                                    <p className="font-medium text-slate-800 mt-0.5">{cSym}{getPresalesConverted(Number(val)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
 
                                 {/* GOM Summary */}
                                 <h4 className="text-xs font-semibold text-slate-700 mb-2 pt-3 border-t border-slate-100">GOM Summary</h4>
