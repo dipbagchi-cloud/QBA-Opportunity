@@ -116,6 +116,10 @@ export function buildOpportunityAccess(params: {
     viewOnlyReason = 'You have screen access through your role, but only the assigned owner, sales rep, manager, or named presales assignees can edit this opportunity.';
   }
 
+  // Presales content editing is restricted to the named presales assignees.
+  // Being a sales rep or manager grants access to those stages only, not presales.
+  const canEditPresalesContent = isAdmin || isAssignedPresales;
+
   return {
     viewOnlyReason,
     assignment: {
@@ -129,8 +133,8 @@ export function buildOpportunityAccess(params: {
     permissions: permissionState,
     workflow: {
       pipelineEditable: (isAdmin || permissionState.pipeline.edit) && canEditAssignedOpportunity,
-      presalesEditable: (isAdmin || permissionState.presales.edit) && canEditAssignedOpportunity,
-      estimationEditable: (isAdmin || permissionState.estimation.manage) && canEditAssignedOpportunity,
+      presalesEditable: (isAdmin || permissionState.presales.edit) && canEditPresalesContent,
+      estimationEditable: (isAdmin || permissionState.estimation.manage) && canEditPresalesContent,
       salesEditable: (isAdmin || permissionState.sales.edit) && canEditAssignedOpportunity,
       gomRequestAllowed:
         (isAdmin || permissionState.pipeline.edit || permissionState.presales.edit || permissionState.sales.edit) &&
