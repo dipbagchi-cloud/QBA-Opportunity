@@ -204,7 +204,12 @@ export async function listOpportunities(req: Request, res: Response) {
                 isStalled,
                 healthScore: finalHealth,
                 metadata: opp.metadata,
-                quote: opp.adjustedEstimatedValue != null ? Number(opp.adjustedEstimatedValue) : null
+                quote: (() => {
+                    const pd = opp.presalesData as any;
+                    if (pd?.totalRevenue != null) return Number(pd.totalRevenue);
+                    if (opp.adjustedEstimatedValue != null) return Number(opp.adjustedEstimatedValue);
+                    return null;
+                })()
             };
         });
 
