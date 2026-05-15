@@ -29,7 +29,6 @@ export function GomCalculatorTab({
 }: GomCalculatorTabProps) {
     const {
         assumptions,
-        setAssumptions,
         travelCosts,
         setTravelCosts,
         markupPercent,
@@ -48,8 +47,6 @@ export function GomCalculatorTab({
         gomPercent,
         gomStatus,
         gomSummary,
-        saveEstimation,
-        isSaving,
         isLoaded,
         resources,
         readOnly,
@@ -60,7 +57,7 @@ export function GomCalculatorTab({
 
     const hasSalesTarget = salesTargetRevenue > 0;
 
-    const { format: fmtCurrency, symbol: cSym, convert: convertCurrency, currency: selectedCurrency, setCurrency: setSelectedCurrency, currencies, getRate, getSymbol } = useCurrency();
+    const { format: fmtCurrency, symbol: cSym, convert: convertCurrency, currency: selectedCurrency, getRate, getSymbol } = useCurrency();
 
     // Get status icon
     const getStatusIcon = () => {
@@ -247,15 +244,13 @@ export function GomCalculatorTab({
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                             <div>
                                 <label className="block text-xs font-medium text-slate-700 mb-1">
-                                    {hasSalesTarget ? "Implied Markup (%)" : "Markup (%)"}
+                                    Markup (%)
                                 </label>
                                 <input
                                     type="number"
-                                    value={hasSalesTarget
-                                        ? (totalCost > 0 ? (((salesTargetRevenue / (totalCost - salesCommissionAmount - preSalesCostAmount)) - 1) * 100).toFixed(1) : "—")
-                                        : markupPercent}
-                                    onChange={(e) => { if (!hasSalesTarget) setMarkupPercent(Number(e.target.value)); }}
-                                    disabled={readOnly || hasSalesTarget}
+                                    value={markupPercent}
+                                    onChange={(e) => setMarkupPercent(Number(e.target.value))}
+                                    disabled={readOnly}
                                     className="flex h-9 w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:bg-slate-100 disabled:cursor-not-allowed"
                                     placeholder="Markup"
                                     min="0"
