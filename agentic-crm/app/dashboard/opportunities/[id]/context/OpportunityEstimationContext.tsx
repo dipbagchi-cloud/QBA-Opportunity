@@ -458,10 +458,8 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
 
             const baseCost = summary.totalCost;
 
-            // When sales has set a target revenue, use it. Otherwise derive from markup.
-            const calculatedRevenue = salesTargetRevenue > 0
-                ? salesTargetRevenue
-                : baseCost * (1 + markupPercent / 100);
+            // Revenue is always markup-driven. salesTargetRevenue is display-only reference.
+            const calculatedRevenue = baseCost * (1 + markupPercent / 100);
 
             setRevenue(calculatedRevenue);
 
@@ -480,9 +478,7 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
             // No resources, simple calculation
             const baseCost = totalTravelCost + specToBase(currentTotalSpecCost);
 
-            const calculatedRevenue = salesTargetRevenue > 0
-                ? salesTargetRevenue
-                : baseCost * (1 + markupPercent / 100);
+            const calculatedRevenue = baseCost * (1 + markupPercent / 100);
 
             setRevenue(calculatedRevenue);
 
@@ -499,7 +495,7 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
             setGomPercent(gom);
             setGomSummary(null);
         }
-    }, [resources, totalTravelCost, specialCosts, markupPercent, salesCommissionPercent, preSalesCostPercent, assumptions, selectedYear, months, startDate, dataCurrency, getRate, salesTargetRevenue]);
+    }, [resources, totalTravelCost, specialCosts, markupPercent, salesCommissionPercent, preSalesCostPercent, assumptions, selectedYear, months, startDate, dataCurrency, getRate]);
 
     // Determine GOM status
     const getGomStatus = () => {
