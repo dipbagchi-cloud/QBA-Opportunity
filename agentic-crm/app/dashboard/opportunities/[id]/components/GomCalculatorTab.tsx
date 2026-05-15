@@ -143,7 +143,7 @@ export function GomCalculatorTab({
                     ? `GOM is ${gomPercent.toFixed(1)}% (below threshold). Estimation has changed since approval. Consider revoking.`
                     : effectivelyApproved
                     ? autoApproved && !gomApproved
-                        ? `GOM is ${gomPercent.toFixed(1)}% — above the ${gomThreshold}% threshold. This opportunity can be moved to Sales.`
+                        ? `GOM is ${gomPercent.toFixed(1)}% - above the ${gomThreshold}% threshold. This opportunity can be moved to Sales.`
                         : 'This opportunity can be moved to Sales.'
                     : hasPending
                     ? `Awaiting review${pendingApproval!.reviewer ? ` by ${pendingApproval!.reviewer}` : ''}. GOM is ${gomPercent.toFixed(1)}%.`
@@ -254,10 +254,10 @@ export function GomCalculatorTab({
                                             {revenue > 0 && (
                                                 <span className="ml-2 font-normal">
                                                     {revenue < salesTargetRevenue
-                                                        ? `— ↑ ${fmtCurrency(salesTargetRevenue - revenue)} below target (raise markup to close gap)`
+                                                        ? `- ${fmtCurrency(salesTargetRevenue - revenue)} below target (raise markup to close gap)`
                                                         : revenue > salesTargetRevenue
-                                                        ? `— ↓ ${fmtCurrency(revenue - salesTargetRevenue)} above target`
-                                                        : `— ✓ matches target`}
+                                                        ? `- ${fmtCurrency(revenue - salesTargetRevenue)} above target`
+                                                        : `- matches target`}
                                                 </span>
                                             )}
                                         </div>
