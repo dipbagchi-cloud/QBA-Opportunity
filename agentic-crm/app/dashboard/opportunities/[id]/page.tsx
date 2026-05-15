@@ -1126,8 +1126,9 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     };
 
     const handleMoveToSales = async () => {
-        // Check GOM approval
-        if (!gomApproved) {
+        // GOM is effectively approved when flagged by manager OR when above the auto-approve threshold
+        const effectivelyGomApproved = gomApproved || (gomAutoApprovePercent > 0 && contextGomPercent >= gomAutoApprovePercent);
+        if (!effectivelyGomApproved) {
             toast({ title: "GOM Not Approved", description: "GOM must be approved before moving to Sales. Please approve the GOM in the GOM Calculator tab." });
             return;
         }
@@ -1459,14 +1460,19 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             >
                                 <span className="flex items-center gap-1.5"><XCircle className="w-4 h-4" /> Proposal Lost</span>
                             </button>
-                            <button
-                                onClick={handleMoveToSales}
-                                disabled={isSaving || isStalled || !gomApproved}
-                                className={`px-4 py-2 rounded-md font-medium disabled:opacity-50 ${gomApproved && !isStalled ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-slate-300 text-slate-600 cursor-not-allowed'}`}
-                                title={!gomApproved ? 'GOM must be approved first (see GOM Calculator tab)' : ''}
-                            >
-                                {isSaving ? 'Moving...' : 'Move to Sales'}
-                            </button>
+                            {(() => {
+                                const canMove = gomApproved || (gomAutoApprovePercent > 0 && contextGomPercent >= gomAutoApprovePercent);
+                                return (
+                                    <button
+                                        onClick={handleMoveToSales}
+                                        disabled={isSaving || isStalled || !canMove}
+                                        className={`px-4 py-2 rounded-md font-medium disabled:opacity-50 ${canMove && !isStalled ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-slate-300 text-slate-600 cursor-not-allowed'}`}
+                                        title={!canMove ? 'GOM must be approved first (see GOM Calculator tab)' : ''}
+                                    >
+                                        {isSaving ? 'Moving...' : 'Move to Sales'}
+                                    </button>
+                                );
+                            })()}
                         </>
                     )}
                     {canWorkSalesStage && opportunityStage === 2 && !isLost && currentStageName === 'Proposal' && (
