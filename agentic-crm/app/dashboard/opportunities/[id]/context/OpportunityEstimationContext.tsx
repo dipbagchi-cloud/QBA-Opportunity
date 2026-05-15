@@ -93,6 +93,9 @@ interface OpportunityEstimationContextType {
     // Who is currently logged in (used to scope resource editing to own rows)
     currentUserName: string;
 
+    // Revenue target set by sales (locks revenue; markup becomes derived/display-only)
+    salesTargetRevenue: number;
+
     // Date range for calendar columns
     startDate: string;
     endDate: string;
@@ -102,7 +105,7 @@ interface OpportunityEstimationContextType {
 
 const OpportunityEstimationContext = createContext<OpportunityEstimationContextType | undefined>(undefined);
 
-export function OpportunityEstimationProvider({ children, opportunityId, readOnly = false, startDate = '', endDate = '', durationInDays = 0, initialCurrency = "INR", currentUserName = "" }: { children: ReactNode; opportunityId?: string; readOnly?: boolean; startDate?: string; endDate?: string; durationInDays?: number; initialCurrency?: string; currentUserName?: string }) {
+export function OpportunityEstimationProvider({ children, opportunityId, readOnly = false, startDate = '', endDate = '', durationInDays = 0, salesTargetRevenue = 0, initialCurrency = "INR", currentUserName = "" }: { children: ReactNode; opportunityId?: string; readOnly?: boolean; startDate?: string; endDate?: string; durationInDays?: number; salesTargetRevenue?: number; initialCurrency?: string; currentUserName?: string }) {
     // State
     const [assumptions, setAssumptions] = useState<BudgetAssumptions>(DEFAULT_ASSUMPTIONS);
     const [resources, setResources] = useState<ResourceRow[]>([]);
@@ -453,21 +456,21 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
             const summary = calculateProjectGom(resourceLines, otherCosts, assumptions);
             setGomSummary(summary);
 
-            // Calculate Base Cost (now includes budget assumptions from calculateProjectGom)
             const baseCost = summary.totalCost;
 
-            const calculatedRevenue = baseCost * (1 + markupPercent / 100);
-            
+            // When sales has set a target revenue, use it. Otherwise derive from markup.
+            const calculatedRevenue = salesTargetRevenue > 0
+                ? salesTargetRevenue
+                : baseCost * (1 + markupPercent / 100);
+
             setRevenue(calculatedRevenue);
 
-            // Calculate Additional Costs based on Revenue
             const commAmount = calculatedRevenue * (salesCommissionPercent / 100);
             const preSalesAmount = calculatedRevenue * (preSalesCostPercent / 100);
-            
+
             setSalesCommissionAmount(commAmount);
             setPreSalesCostAmount(preSalesAmount);
 
-            // Final Total Cost includes these additional components
             const finalCost = baseCost + commAmount + preSalesAmount;
             setTotalCost(finalCost);
 
@@ -475,9 +478,11 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
             setGomPercent(gom);
         } else {
             // No resources, simple calculation
-            const baseCost = totalTravelCost + currentTotalSpecCost;
-            
-            const calculatedRevenue = baseCost * (1 + markupPercent / 100);
+            const baseCost = totalTravelCost + specToBase(currentTotalSpecCost);
+
+            const calculatedRevenue = salesTargetRevenue > 0
+                ? salesTargetRevenue
+                : baseCost * (1 + markupPercent / 100);
 
             setRevenue(calculatedRevenue);
 
@@ -494,7 +499,7 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
             setGomPercent(gom);
             setGomSummary(null);
         }
-    }, [resources, totalTravelCost, specialCosts, markupPercent, salesCommissionPercent, preSalesCostPercent, assumptions, selectedYear, months, startDate, dataCurrency, getRate]);
+    }, [resources, totalTravelCost, specialCosts, markupPercent, salesCommissionPercent, preSalesCostPercent, assumptions, selectedYear, months, startDate, dataCurrency, getRate, salesTargetRevenue]);
 
     // Determine GOM status
     const getGomStatus = () => {
@@ -541,6 +546,7 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
         isLoaded,
         readOnly,
         currentUserName,
+        salesTargetRevenue,
         startDate,
         endDate,
         durationInDays,
