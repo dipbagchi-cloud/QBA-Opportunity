@@ -2070,7 +2070,6 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             ? countWorkingDaysInPeriod(formData.tentativeStartDate, Number(formData.duration) || 0, holidays)
                             : durationToWorkingDays(Number(formData.duration) || 0, formData.durationUnit)
                     }
-                    adjustedEstimatedValue={Number(adjustedEstimatedValue) || 0}
                     initialCurrency={globalCurrency}
                     currentUserName={user?.name || ''}
                 >

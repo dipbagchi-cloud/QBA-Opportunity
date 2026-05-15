@@ -102,7 +102,7 @@ interface OpportunityEstimationContextType {
 
 const OpportunityEstimationContext = createContext<OpportunityEstimationContextType | undefined>(undefined);
 
-export function OpportunityEstimationProvider({ children, opportunityId, readOnly = false, startDate = '', endDate = '', durationInDays = 0, adjustedEstimatedValue = 0, initialCurrency = "INR", currentUserName = "" }: { children: ReactNode; opportunityId?: string; readOnly?: boolean; startDate?: string; endDate?: string; durationInDays?: number; adjustedEstimatedValue?: number; initialCurrency?: string; currentUserName?: string }) {
+export function OpportunityEstimationProvider({ children, opportunityId, readOnly = false, startDate = '', endDate = '', durationInDays = 0, initialCurrency = "INR", currentUserName = "" }: { children: ReactNode; opportunityId?: string; readOnly?: boolean; startDate?: string; endDate?: string; durationInDays?: number; initialCurrency?: string; currentUserName?: string }) {
     // State
     const [assumptions, setAssumptions] = useState<BudgetAssumptions>(DEFAULT_ASSUMPTIONS);
     const [resources, setResources] = useState<ResourceRow[]>([]);
@@ -456,11 +456,7 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
             // Calculate Base Cost (now includes budget assumptions from calculateProjectGom)
             const baseCost = summary.totalCost;
 
-            // Use adjustedEstimatedValue as revenue if provided, otherwise use markup calculation
-            // Base Cost is used for markup to determine the sale price.
-            const calculatedRevenue = adjustedEstimatedValue > 0
-                ? adjustedEstimatedValue
-                : baseCost * (1 + markupPercent / 100);
+            const calculatedRevenue = baseCost * (1 + markupPercent / 100);
             
             setRevenue(calculatedRevenue);
 
@@ -481,10 +477,8 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
             // No resources, simple calculation
             const baseCost = totalTravelCost + currentTotalSpecCost;
             
-            const calculatedRevenue = adjustedEstimatedValue > 0
-                ? adjustedEstimatedValue
-                : baseCost * (1 + markupPercent / 100);
-            
+            const calculatedRevenue = baseCost * (1 + markupPercent / 100);
+
             setRevenue(calculatedRevenue);
 
             const commAmount = calculatedRevenue * (salesCommissionPercent / 100);
@@ -500,7 +494,7 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
             setGomPercent(gom);
             setGomSummary(null);
         }
-    }, [resources, totalTravelCost, specialCosts, markupPercent, salesCommissionPercent, preSalesCostPercent, assumptions, selectedYear, months, adjustedEstimatedValue, startDate, dataCurrency, getRate]);
+    }, [resources, totalTravelCost, specialCosts, markupPercent, salesCommissionPercent, preSalesCostPercent, assumptions, selectedYear, months, startDate, dataCurrency, getRate]);
 
     // Determine GOM status
     const getGomStatus = () => {
