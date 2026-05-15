@@ -2077,6 +2077,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             : durationToWorkingDays(Number(formData.duration) || 0, formData.durationUnit)
                     }
                     salesTargetRevenue={Number(adjustedEstimatedValue) || 0}
+                    isReEstimation={detailedStatus === 'Re-estimation'}
                     initialCurrency={globalCurrency}
                     currentUserName={user?.name || ''}
                 >

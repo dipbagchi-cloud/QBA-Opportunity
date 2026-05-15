@@ -51,11 +51,13 @@ export function GomCalculatorTab({
         resources,
         readOnly,
         salesTargetRevenue,
+        isReEstimation,
         specialCosts,
         setSpecialCosts
     } = useOpportunityEstimation();
 
     const hasSalesTarget = salesTargetRevenue > 0;
+    const revenueIsLocked = isReEstimation && hasSalesTarget;
 
     const { format: fmtCurrency, symbol: cSym, convert: convertCurrency, currency: selectedCurrency, getRate, getSymbol } = useCurrency();
 
@@ -236,24 +238,30 @@ export function GomCalculatorTab({
                     <h3 className="text-base font-bold text-slate-800 mb-4">GOM Configuration</h3>
 
                     <div className="space-y-3">
-                        {/* Sales target reference banner */}
+                        {/* Sales target banner */}
                         {hasSalesTarget && (
-                            <div className="flex items-start gap-2 px-3 py-2 bg-orange-50 border border-orange-300 rounded-md">
-                                <TrendingUp className="w-4 h-4 text-orange-600 shrink-0 mt-0.5" />
-                                <div className="text-xs text-orange-800 space-y-0.5">
-                                    <div>
-                                        <span className="font-semibold">Sales target: {fmtCurrency(salesTargetRevenue)}</span>
-                                        {revenue > 0 && (
-                                            <span className="ml-2 font-normal">
-                                                {revenue < salesTargetRevenue
-                                                    ? `— ↑ ${fmtCurrency(salesTargetRevenue - revenue)} below target (raise markup to close gap)`
-                                                    : revenue > salesTargetRevenue
-                                                    ? `— ↓ ${fmtCurrency(revenue - salesTargetRevenue)} above target`
-                                                    : `— ✓ matches target`}
-                                            </span>
-                                        )}
-                                    </div>
-                                    <div className="font-normal opacity-75">Adjust markup until calculated revenue meets this figure.</div>
+                            <div className={`flex items-start gap-2 px-3 py-2 rounded-md border ${revenueIsLocked ? 'bg-rose-50 border-rose-300' : 'bg-orange-50 border-orange-300'}`}>
+                                <TrendingUp className={`w-4 h-4 shrink-0 mt-0.5 ${revenueIsLocked ? 'text-rose-600' : 'text-orange-600'}`} />
+                                <div className={`text-xs space-y-0.5 ${revenueIsLocked ? 'text-rose-800' : 'text-orange-800'}`}>
+                                    {revenueIsLocked ? (
+                                        <>
+                                            <div className="font-semibold">Revenue locked at {fmtCurrency(salesTargetRevenue)} (sales target)</div>
+                                            <div className="font-normal opacity-75">GOM is recalculated from this fixed revenue. Markup does not change revenue.</div>
+                                        </>
+                                    ) : (
+                                        <div>
+                                            <span className="font-semibold">Sales target: {fmtCurrency(salesTargetRevenue)}</span>
+                                            {revenue > 0 && (
+                                                <span className="ml-2 font-normal">
+                                                    {revenue < salesTargetRevenue
+                                                        ? `— ↑ ${fmtCurrency(salesTargetRevenue - revenue)} below target (raise markup to close gap)`
+                                                        : revenue > salesTargetRevenue
+                                                        ? `— ↓ ${fmtCurrency(revenue - salesTargetRevenue)} above target`
+                                                        : `— ✓ matches target`}
+                                                </span>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         )}

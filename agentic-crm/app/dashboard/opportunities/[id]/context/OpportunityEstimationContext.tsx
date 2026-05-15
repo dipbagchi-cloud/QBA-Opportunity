@@ -93,8 +93,11 @@ interface OpportunityEstimationContextType {
     // Who is currently logged in (used to scope resource editing to own rows)
     currentUserName: string;
 
-    // Revenue target set by sales (locks revenue; markup becomes derived/display-only)
+    // Revenue target set by sales (used as locked revenue when isReEstimation=true)
     salesTargetRevenue: number;
+
+    // Whether this opportunity is in re-estimation mode (sales sent back with a target revenue)
+    isReEstimation: boolean;
 
     // Date range for calendar columns
     startDate: string;
@@ -105,7 +108,7 @@ interface OpportunityEstimationContextType {
 
 const OpportunityEstimationContext = createContext<OpportunityEstimationContextType | undefined>(undefined);
 
-export function OpportunityEstimationProvider({ children, opportunityId, readOnly = false, startDate = '', endDate = '', durationInDays = 0, salesTargetRevenue = 0, initialCurrency = "INR", currentUserName = "" }: { children: ReactNode; opportunityId?: string; readOnly?: boolean; startDate?: string; endDate?: string; durationInDays?: number; salesTargetRevenue?: number; initialCurrency?: string; currentUserName?: string }) {
+export function OpportunityEstimationProvider({ children, opportunityId, readOnly = false, startDate = '', endDate = '', durationInDays = 0, salesTargetRevenue = 0, isReEstimation = false, initialCurrency = "INR", currentUserName = "" }: { children: ReactNode; opportunityId?: string; readOnly?: boolean; startDate?: string; endDate?: string; durationInDays?: number; salesTargetRevenue?: number; isReEstimation?: boolean; initialCurrency?: string; currentUserName?: string }) {
     // State
     const [assumptions, setAssumptions] = useState<BudgetAssumptions>(DEFAULT_ASSUMPTIONS);
     const [resources, setResources] = useState<ResourceRow[]>([]);
@@ -458,8 +461,11 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
 
             const baseCost = summary.totalCost;
 
-            // Revenue is always markup-driven. salesTargetRevenue is display-only reference.
-            const calculatedRevenue = baseCost * (1 + markupPercent / 100);
+            // In re-estimation mode with a sales target, lock revenue to that target.
+            // Otherwise revenue is markup-driven.
+            const calculatedRevenue = (isReEstimation && salesTargetRevenue > 0)
+                ? salesTargetRevenue
+                : baseCost * (1 + markupPercent / 100);
 
             setRevenue(calculatedRevenue);
 
@@ -478,7 +484,9 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
             // No resources, simple calculation
             const baseCost = totalTravelCost + specToBase(currentTotalSpecCost);
 
-            const calculatedRevenue = baseCost * (1 + markupPercent / 100);
+            const calculatedRevenue = (isReEstimation && salesTargetRevenue > 0)
+                ? salesTargetRevenue
+                : baseCost * (1 + markupPercent / 100);
 
             setRevenue(calculatedRevenue);
 
@@ -495,7 +503,7 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
             setGomPercent(gom);
             setGomSummary(null);
         }
-    }, [resources, totalTravelCost, specialCosts, markupPercent, salesCommissionPercent, preSalesCostPercent, assumptions, selectedYear, months, startDate, dataCurrency, getRate]);
+    }, [resources, totalTravelCost, specialCosts, markupPercent, salesCommissionPercent, preSalesCostPercent, assumptions, selectedYear, months, startDate, dataCurrency, getRate, isReEstimation, salesTargetRevenue]);
 
     // Determine GOM status
     const getGomStatus = () => {
@@ -543,6 +551,7 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
         readOnly,
         currentUserName,
         salesTargetRevenue,
+        isReEstimation,
         startDate,
         endDate,
         durationInDays,
