@@ -4059,10 +4059,17 @@ function QPeopleMappingTab() {
 const TRIGGER_TYPES = [
     { value: "opportunity_created", label: "New Opportunity", description: "When a new opportunity is created" },
     { value: "stage_change", label: "Stage Change", description: "When an opportunity moves between stages" },
+    { value: "assignment_change", label: "Assignment Change", description: "When Sales Rep / Manager / Presales is reassigned" },
     { value: "data_condition", label: "Data Condition", description: "When opportunity data matches a condition" },
     { value: "approval", label: "Approval Required", description: "When an approval action is needed" },
     { value: "stalled_deal", label: "Stalled Deal", description: "When a deal stays too long in a stage" },
     { value: "health_drop", label: "Health Score Drop", description: "When deal health score drops" },
+];
+
+const ASSIGNMENT_FIELDS = [
+    { value: "sales_rep", label: "Sales Rep" },
+    { value: "manager", label: "Manager" },
+    { value: "presales", label: "Presales Assignee" },
 ];
 
 const STAGES = ["Discovery", "Qualification", "Re-estimation", "Proposal", "Negotiation", "Closed Won", "Closed Lost", "Proposal Lost"];
@@ -4568,6 +4575,18 @@ function NotificationRulesTab() {
                                             {STAGES.map(s => <option key={s} value={s}>{s}</option>)}
                                         </select>
                                     </div>
+                                </div>
+                            )}
+
+                            {/* Assignment Change fields — piggybacks on toStage to store the field key */}
+                            {formTriggerType === 'assignment_change' && (
+                                <div className="p-3 bg-blue-50/50 rounded-lg border border-blue-100">
+                                    <label className="block text-xs font-medium text-slate-700 mb-1">Assignment Field</label>
+                                    <select value={formToStage} onChange={e => setFormToStage(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:ring-2 focus:ring-indigo-500 outline-none">
+                                        <option value="">Any field (Sales Rep / Manager / Presales)</option>
+                                        {ASSIGNMENT_FIELDS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+                                    </select>
+                                    <p className="text-[10px] text-slate-500 mt-1">Fires when this assignment field changes on any opportunity. The newly assigned user is always notified (even if their role isn&apos;t in Recipients).</p>
                                 </div>
                             )}
 

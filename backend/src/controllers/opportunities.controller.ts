@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { sendNotificationEmail } from '../lib/email';
-import { evaluateStageChangeRules, evaluateDataConditionRules, evaluateOpportunityCreatedRules, resolveCalculatedFields } from '../lib/notification-engine';
+import { evaluateStageChangeRules, evaluateDataConditionRules, evaluateOpportunityCreatedRules, evaluateAssignmentChangeRules, resolveCalculatedFields } from '../lib/notification-engine';
 import { calculateOpportunityProbability } from '../lib/opportunity-probability';
 import { buildOpportunityAccess } from '../lib/opportunity-access';
 import path from 'path';
@@ -482,6 +482,11 @@ export async function updateOpportunity(req: Request, res: Response) {
             // Pipeline tab (step 0) is reachable from Discovery/Qualification/Proposal;
             // Presales tab (step 1) from Qualification/Proposal; Sales tab (step 2) from Proposal.
             // Negotiation/Closed/etc. are already blocked above via lockedAssignmentStages.
+            // Handoff rule (product spec): a non-admin sales rep / manager may hand off the
+            // field ONCE; subsequent reassignments require Admin. Counts live in opp.metadata.
+            const prevMeta = (previous?.metadata as any) || {};
+            const salesRepHandoffsDone = Number(prevMeta.salesRepHandoffs) || 0;
+            const managerHandoffsDone = Number(prevMeta.managerHandoffs) || 0;
             if (salesRepChanged) {
                 if (!isAdminRole && activeRoleName !== 'sales') {
                     invalidAssignmentEdits.push('Sales Rep');
@@ -489,6 +494,9 @@ export async function updateOpportunity(req: Request, res: Response) {
                 const salesRepAllowedStages = new Set(['Discovery', 'Qualification', 'Proposal']);
                 if (!isAdminRole && !salesRepAllowedStages.has(previousStageName)) {
                     invalidAssignmentEdits.push('Sales Rep');
+                }
+                if (!isAdminRole && salesRepHandoffsDone >= 1) {
+                    invalidAssignmentEdits.push('Sales Rep (already handed off once — Admin only)');
                 }
             }
 
@@ -499,6 +507,9 @@ export async function updateOpportunity(req: Request, res: Response) {
                 const managerAllowedStages = new Set(['Qualification', 'Proposal']);
                 if (!isAdminRole && !isInitialMoveToPresales && !managerAllowedStages.has(previousStageName)) {
                     invalidAssignmentEdits.push('Manager');
+                }
+                if (!isAdminRole && !isInitialMoveToPresales && managerHandoffsDone >= 1) {
+                    invalidAssignmentEdits.push('Manager (already handed off once — Admin only)');
                 }
             }
 
@@ -587,12 +598,29 @@ export async function updateOpportunity(req: Request, res: Response) {
                 acc[rate.code] = rate.rateToBase;
                 return acc;
             }, { INR: 1.0 });
-            
+
             const existingMetadata = previous?.metadata ? (previous.metadata as any) : {};
             metadataUpdate = {
                 ...existingMetadata,
                 exchangeRatesSnapshot: ratesSnapshot
             };
+        }
+
+        // Increment handoff counter when a non-admin actually changes sales rep / manager.
+        // Admin reassignments are unlimited and don't bump the counter.
+        if (!isAdminRole && (salesRepChanged || managerChanged)) {
+            const baseMeta = metadataUpdate || ((previous?.metadata as any) || {});
+            metadataUpdate = { ...baseMeta };
+            if (salesRepChanged) {
+                metadataUpdate.salesRepHandoffs = (Number(baseMeta.salesRepHandoffs) || 0) + 1;
+                metadataUpdate.salesRepLastHandoffAt = new Date().toISOString();
+                metadataUpdate.salesRepLastHandoffBy = req.user!.userId;
+            }
+            if (managerChanged) {
+                metadataUpdate.managerHandoffs = (Number(baseMeta.managerHandoffs) || 0) + 1;
+                metadataUpdate.managerLastHandoffAt = new Date().toISOString();
+                metadataUpdate.managerLastHandoffBy = req.user!.userId;
+            }
         }
 
         let newPresalesData = body.presalesData !== undefined ? body.presalesData : undefined;
@@ -819,6 +847,46 @@ export async function updateOpportunity(req: Request, res: Response) {
                 adjustedEstimatedValue: body.adjustedEstimatedValue ? String(body.adjustedEstimatedValue) : undefined,
                 reEstimateCount: (updatedOpp as any).reEstimateCount || 0,
             });
+        }
+
+        // Assignment-change notifications: fire one event per changed field
+        // (sales rep / manager / presales) so the newly-assigned person is emailed.
+        const fireAssignmentEvent = (field: 'sales_rep' | 'manager' | 'presales', prevVal: string, nextVal: string) => {
+            if (!nextVal || nextVal === prevVal) return;
+            evaluateAssignmentChangeRules({
+                opportunityId: id,
+                opportunityTitle: updatedOpp.title,
+                field,
+                previousValue: prevVal || '',
+                newValue: nextVal || '',
+                clientName: previous?.client?.name || '',
+                stageName: (updatedOpp as any).currentStage || previous?.stage?.name || '',
+                ownerName: previous?.owner?.name || '',
+                updatedByName: req.user?.email || 'System',
+                value: updatedOpp.value != null ? Number(updatedOpp.value) : null,
+                currency: updatedOpp.currency || 'USD',
+                region: updatedOpp.region || undefined,
+                technology: updatedOpp.technology || undefined,
+                salesRepName: (updatedOpp as any).salesRepName || '',
+                managerName: (updatedOpp as any).managerName || '',
+                presalesAssigneeName: (updatedOpp as any).presalesAssigneeName || '',
+            });
+        };
+        if (salesRepChanged) {
+            fireAssignmentEvent('sales_rep', previous?.salesRepName || '', (updatedOpp as any).salesRepName || '');
+        }
+        if (managerChanged) {
+            fireAssignmentEvent('manager', previous?.managerName || '', (updatedOpp as any).managerName || '');
+        }
+        if (presalesAssigneeChanged) {
+            // For presales (comma-separated list) fire one event per newly-added name.
+            const prevSet = new Set(((previous as any)?.presalesAssigneeName || '').split(',').map((s: string) => s.trim()).filter(Boolean));
+            const nextNames = ((updatedOpp as any).presalesAssigneeName || '').split(',').map((s: string) => s.trim()).filter(Boolean);
+            for (const name of nextNames) {
+                if (!prevSet.has(name)) {
+                    fireAssignmentEvent('presales', '', name);
+                }
+            }
         }
 
         // Evaluate data condition rules on every update

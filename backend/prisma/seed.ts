@@ -610,14 +610,57 @@ async function main() {
         },
     ];
 
-    for (const tmpl of emailTemplates) {
+    // Reassignment / assignment notification templates
+    const assignmentTemplateBody = (header: string) => `<div style="font-family:Arial,sans-serif;max-width:640px;margin:0 auto;padding:20px">
+<h2 style="color:#4f46e5;margin:0 0 16px">${header}</h2>
+<p>Hi {{recipientName}},</p>
+<p>You have been assigned as <strong>{{assignmentField}}</strong> on the following opportunity:</p>
+<table style="width:100%;border-collapse:collapse;margin:16px 0;font-size:14px">
+<tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;width:40%"><strong>Opportunity</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">{{opportunityTitle}}</td></tr>
+<tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Client</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">{{clientName}}</td></tr>
+<tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Stage</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">{{stageName}}</td></tr>
+<tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Value</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">{{currency}} {{value}}</td></tr>
+<tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Region</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">{{region}}</td></tr>
+<tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Technology</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">{{technology}}</td></tr>
+<tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Sales Rep</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">{{salesRepName}}</td></tr>
+<tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Manager</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">{{managerName}}</td></tr>
+<tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Presales</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">{{presalesAssigneeName}}</td></tr>
+<tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Previously</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">{{previousAssignee}}</td></tr>
+<tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Reassigned By</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">{{updatedBy}}</td></tr>
+</table>
+<p style="margin-top:20px"><a href="{{opportunityLink}}" style="background:#4f46e5;color:#fff;padding:10px 20px;text-decoration:none;border-radius:6px;display:inline-block">View Opportunity</a></p>
+<p style="color:#64748b;font-size:12px;margin-top:24px">This is an automated notification from Q-CRM.</p>
+</div>`;
+
+    const reassignmentTemplates = [
+        {
+            eventKey: 'sales_rep_reassigned',
+            name: 'Sales Rep Reassigned',
+            subject: 'Q-CRM: You are the new Sales Rep on "{{opportunityTitle}}"',
+            body: assignmentTemplateBody('You are the new Sales Rep'),
+        },
+        {
+            eventKey: 'manager_reassigned',
+            name: 'Manager Reassigned',
+            subject: 'Q-CRM: You are the new Offshore Manager on "{{opportunityTitle}}"',
+            body: assignmentTemplateBody('You are the new Offshore Manager'),
+        },
+        {
+            eventKey: 'presales_assigned',
+            name: 'Presales Assigned',
+            subject: 'Q-CRM: You are now on the Presales team for "{{opportunityTitle}}"',
+            body: assignmentTemplateBody('You are now on the Presales team'),
+        },
+    ];
+
+    for (const tmpl of [...emailTemplates, ...reassignmentTemplates]) {
         await prisma.emailTemplate.upsert({
             where: { eventKey: tmpl.eventKey },
             update: { subject: tmpl.subject, body: tmpl.body },
             create: tmpl,
         });
     }
-    console.log(`  ✅ Seeded ${emailTemplates.length} email templates`);
+    console.log(`  ✅ Seeded ${emailTemplates.length + reassignmentTemplates.length} email templates`);
 
     // Default notification rule: notify Admin + Manager on new opportunity (in-app + email)
     const existingRule = await prisma.notificationRule.findFirst({
@@ -638,6 +681,36 @@ async function main() {
             },
         });
         console.log(`  ✅ Seeded default 'opportunity_created' notification rule`);
+    }
+
+    // Default rules for assignment changes — emit one rule per field so admins
+    // can tune recipients/templates individually from Settings → Notifications.
+    const assignmentRuleDefs: { field: 'sales_rep' | 'manager' | 'presales'; templateKey: string; label: string }[] = [
+        { field: 'sales_rep', templateKey: 'sales_rep_reassigned', label: 'Sales Rep' },
+        { field: 'manager',   templateKey: 'manager_reassigned',   label: 'Manager' },
+        { field: 'presales',  templateKey: 'presales_assigned',    label: 'Presales' },
+    ];
+    for (const def of assignmentRuleDefs) {
+        const existing = await prisma.notificationRule.findFirst({
+            where: { triggerType: 'assignment_change', toStage: def.field },
+        });
+        if (!existing) {
+            await prisma.notificationRule.create({
+                data: {
+                    name: `${def.label} Reassigned → Notify New Assignee`,
+                    description: `Emails the newly assigned ${def.label} whenever the field changes on an opportunity.`,
+                    isActive: true,
+                    triggerType: 'assignment_change',
+                    toStage: def.field, // reuse toStage column to store assignment field key
+                    recipientRoles: [],
+                    channels: ['in_app', 'email'],
+                    emailTemplateKey: def.templateKey,
+                    titleTemplate: 'You are the new {{assignmentField}} on "{{opportunityTitle}}"',
+                    messageTemplate: '{{updatedBy}} assigned you as {{assignmentField}} for {{clientName}} on {{opportunityTitle}}.',
+                },
+            });
+            console.log(`  ✅ Seeded default '${def.field}' assignment_change notification rule`);
+        }
     }
 
     // ════════════════════════════════════════════════════════════════════════

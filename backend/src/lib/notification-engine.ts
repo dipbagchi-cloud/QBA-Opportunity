@@ -385,6 +385,167 @@ export async function evaluateStageChangeRules(ctx: StageChangeContext): Promise
   }
 }
 
+/* ------------------------------------------------------------------ */
+/* Assignment change events                                            */
+/* ------------------------------------------------------------------ */
+
+export type AssignmentField = 'sales_rep' | 'manager' | 'presales';
+
+interface AssignmentChangeContext {
+  opportunityId: string;
+  opportunityTitle: string;
+  field: AssignmentField;
+  previousValue: string;
+  newValue: string;
+  clientName: string;
+  stageName: string;
+  ownerName: string;
+  updatedByName: string;
+  value?: number | null;
+  currency?: string;
+  region?: string;
+  technology?: string;
+  salesRepName: string;
+  managerName: string;
+  presalesAssigneeName: string;
+}
+
+const ASSIGNMENT_DEFAULT_TEMPLATE: Record<AssignmentField, string> = {
+  sales_rep: 'sales_rep_reassigned',
+  manager: 'manager_reassigned',
+  presales: 'presales_assigned',
+};
+
+/**
+ * Evaluate notification rules for an assignment change event.
+ * Notifies the newly-assigned person (and any matching rule's role recipients).
+ * Fire-and-forget: errors are caught and logged.
+ */
+export async function evaluateAssignmentChangeRules(ctx: AssignmentChangeContext): Promise<void> {
+  try {
+    const rules = await prisma.notificationRule.findMany({
+      where: { isActive: true, triggerType: 'assignment_change' },
+    });
+
+    // Filter rules to ones that target this assignment field. We piggy-back on
+    // the existing toStage column to store the field key ('sales_rep' | 'manager' | 'presales').
+    // A rule with toStage = null applies to all assignment changes.
+    const matched = rules.filter(r => !r.toStage || r.toStage === ctx.field);
+
+    // Look up the newly-assigned user so we can email them directly even when
+    // no NotificationRule explicitly targets their role.
+    const newAssignee = ctx.newValue
+      ? await prisma.user.findFirst({
+          where: { name: ctx.newValue, isActive: true },
+          select: { id: true, email: true, name: true, muteNotification: true, roles: { select: { name: true } } },
+        })
+      : null;
+
+    const _currency = ctx.currency || 'USD';
+    const fieldLabel: Record<AssignmentField, string> = {
+      sales_rep: 'Sales Rep',
+      manager: 'Manager',
+      presales: 'Presales Assignee',
+    };
+    const variables: Record<string, string> = {
+      dealName: ctx.opportunityTitle,
+      opportunityTitle: ctx.opportunityTitle,
+      opportunityId: ctx.opportunityId,
+      assignmentField: fieldLabel[ctx.field],
+      assignmentFieldKey: ctx.field,
+      previousAssignee: ctx.previousValue || '(unassigned)',
+      newAssignee: ctx.newValue || '(unassigned)',
+      stage: ctx.stageName,
+      stageName: ctx.stageName,
+      client: ctx.clientName,
+      clientName: ctx.clientName,
+      owner: ctx.ownerName,
+      ownerName: ctx.ownerName,
+      salesRep: ctx.salesRepName,
+      salesRepName: ctx.salesRepName,
+      manager: ctx.managerName,
+      managerName: ctx.managerName,
+      presalesAssigneeName: ctx.presalesAssigneeName,
+      updatedBy: ctx.updatedByName,
+      userName: ctx.updatedByName,
+      value: ctx.value != null ? fmtNum(Number(ctx.value)) : '',
+      currency: _currency,
+      'opportunity.currency': _currency,
+      region: ctx.region || '',
+      technology: ctx.technology || '',
+      opportunityLink: `${process.env.FRONTEND_URL || 'https://qcrm.qbadvisory.com'}/dashboard/opportunities/${ctx.opportunityId}`,
+    };
+
+    const calcFields = await resolveCalculatedFields(ctx.opportunityId);
+    Object.assign(variables, calcFields);
+
+    // Fallback path: no rules at all → still email the newly-assigned user
+    // using the default template, so the feature works out-of-the-box.
+    if (matched.length === 0 && newAssignee && !newAssignee.muteNotification) {
+      const templateKey = ASSIGNMENT_DEFAULT_TEMPLATE[ctx.field];
+      sendNotificationEmail(templateKey, newAssignee.email, newAssignee.name, variables);
+      await prisma.notification.create({
+        data: {
+          type: 'assignment_change',
+          title: `You were assigned as ${fieldLabel[ctx.field]} on "${ctx.opportunityTitle}"`,
+          message: `${ctx.updatedByName} assigned you as ${fieldLabel[ctx.field]} for ${ctx.clientName}.`,
+          link: `/dashboard/opportunities/${ctx.opportunityId}`,
+          userId: newAssignee.id,
+        },
+      });
+      console.log(`[NotificationEngine] assignment_change (no rules) ${ctx.field}: notified new assignee ${newAssignee.email}`);
+      return;
+    }
+
+    for (const rule of matched) {
+      const recipientRoles = (rule.recipientRoles as string[]) || [];
+      const channels = (rule.channels as string[]) || [];
+      if (channels.length === 0) continue;
+
+      const recipientUsers = rule.recipientUsers as Record<string, string[]> | null;
+      const roleRecipients = recipientRoles.length > 0
+        ? await resolveAssignedRecipients(ctx.opportunityId, recipientRoles, recipientUsers)
+        : [];
+
+      // Always include the new assignee (deduped) so they're notified even if
+      // their role isn't currently in recipientRoles for this rule.
+      const combined = [...roleRecipients];
+      if (newAssignee && !combined.find(u => u.id === newAssignee.id)) {
+        combined.push(newAssignee);
+      }
+      if (combined.length === 0) continue;
+
+      const title = rule.titleTemplate
+        ? renderTemplate(rule.titleTemplate, variables)
+        : `Assignment change: ${fieldLabel[ctx.field]} → ${ctx.newValue || '(unassigned)'}`;
+      const message = rule.messageTemplate
+        ? renderTemplate(rule.messageTemplate, variables)
+        : `${ctx.updatedByName} set ${fieldLabel[ctx.field]} of "${ctx.opportunityTitle}" to ${ctx.newValue || '(unassigned)'}.`;
+
+      for (const user of combined) {
+        if (channels.includes('in_app')) {
+          await prisma.notification.create({
+            data: {
+              type: 'assignment_change',
+              title,
+              message,
+              link: `/dashboard/opportunities/${ctx.opportunityId}`,
+              userId: user.id,
+            },
+          });
+        }
+        if (channels.includes('email') && !user.muteNotification) {
+          const templateKey = rule.emailTemplateKey || ASSIGNMENT_DEFAULT_TEMPLATE[ctx.field];
+          sendNotificationEmail(templateKey, user.email, user.name, variables);
+        }
+      }
+      console.log(`[NotificationEngine] assignment_change rule "${rule.name}" (${ctx.field}): notified ${combined.length} users via [${channels.join(', ')}]`);
+    }
+  } catch (error) {
+    console.error('[NotificationEngine] Error evaluating assignment_change rules:', error);
+  }
+}
+
 /**
  * Evaluate data condition rules against an opportunity.
  * Called after opportunity updates.
