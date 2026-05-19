@@ -574,6 +574,44 @@ export default function DashboardPage() {
         data: sales?.managerKpi || [],
     };
 
+    // Stage tiles — bucketed counts/values + drill-down to project-level table
+    const STAGE_BUCKETS: { label: string; stages: string[]; iconBg: string; iconColor: string; badgeColor: string }[] = [
+        { label: 'Pipeline',    stages: ['Discovery', 'Pipeline'],                  iconBg: 'bg-sky-100',     iconColor: 'text-sky-600',     badgeColor: 'bg-sky-50 text-sky-700 border-sky-200' },
+        { label: 'Presales',    stages: ['Qualification', 'Presales'],              iconBg: 'bg-amber-100',   iconColor: 'text-amber-600',   badgeColor: 'bg-amber-50 text-amber-700 border-amber-200' },
+        { label: 'Sales',       stages: ['Proposal', 'Sales'],                       iconBg: 'bg-purple-100',  iconColor: 'text-purple-600',  badgeColor: 'bg-purple-50 text-purple-700 border-purple-200' },
+        { label: 'Negotiation', stages: ['Negotiation'],                             iconBg: 'bg-indigo-100',  iconColor: 'text-indigo-600',  badgeColor: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
+        { label: 'Closed Won',  stages: ['Closed Won', 'Closed-Won', 'Delivered'],   iconBg: 'bg-emerald-100', iconColor: 'text-emerald-600', badgeColor: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+        { label: 'Closed Lost', stages: ['Closed Lost', 'Proposal Lost'],            iconBg: 'bg-rose-100',    iconColor: 'text-rose-600',    badgeColor: 'bg-rose-50 text-rose-700 border-rose-200' },
+    ];
+
+    const stageProjectColumns: { key: string; label: string; format?: 'currency' | 'percent' | 'number' | 'text' }[] = [
+        { key: 'name',               label: 'Project',         format: 'text' },
+        { key: 'client',             label: 'Client',          format: 'text' },
+        { key: 'value',              label: 'Value',           format: 'currency' },
+        { key: 'currentStage',       label: 'Stage',           format: 'text' },
+        { key: 'probability',        label: 'Probability',     format: 'percent' },
+        { key: 'tentativeStartDate', label: 'Est. Start',      format: 'text' },
+        { key: 'tentativeEndDate',   label: 'Est. End',        format: 'text' },
+        { key: 'expectedCloseDate',  label: 'Expected Close',  format: 'text' },
+        { key: 'technology',         label: 'Technology',      format: 'text' },
+        { key: 'region',             label: 'Region',          format: 'text' },
+        { key: 'owner',              label: 'Owner',           format: 'text' },
+        { key: 'salesRepName',       label: 'Sales Rep',       format: 'text' },
+        { key: 'managerName',        label: 'Manager',         format: 'text' },
+        { key: 'daysInStage',        label: 'Days in Stage',   format: 'number' },
+    ];
+
+    const stageTiles = STAGE_BUCKETS.map(bucket => {
+        const oppsInStage = opportunities.filter(o => bucket.stages.includes((o as any).currentStage));
+        const totalValue = oppsInStage.reduce((sum, o) => sum + (Number(o.value) || 0), 0);
+        const drill: DrillDownConfig = {
+            title: `${bucket.label} — Project Details`,
+            columns: stageProjectColumns,
+            data: oppsInStage,
+        };
+        return { ...bucket, count: oppsInStage.length, totalValue, drill };
+    });
+
     const insightsDrill: DrillDownConfig = {
         title: "Pipeline Insights & Deal Health",
         columns: [
@@ -712,6 +750,20 @@ export default function DashboardPage() {
                         </div>
                         <p className="text-sm font-bold text-slate-900 leading-tight">{stat.value}</p>
                         <p className="text-[10px] text-slate-400 mt-0.5 truncate">{stat.subtitle}</p>
+                    </ExpandableCard>
+                ))}
+            </div>
+
+            {/* Stage Tiles — click to view project-level details */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+                {stageTiles.map(tile => (
+                    <ExpandableCard key={tile.label} drillConfig={tile.drill} className="bg-white rounded-lg px-3 py-2.5 border border-slate-100 hover:border-slate-200 transition-colors">
+                        <div className="flex items-center gap-1.5 mb-1">
+                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-semibold border ${tile.badgeColor}`}>{tile.label}</span>
+                            <span className="text-[10px] text-slate-400 ml-auto">{tile.count}</span>
+                        </div>
+                        <p className="text-sm font-bold text-slate-900 leading-tight">{fmtCurrency(tile.totalValue, { compact: true })}</p>
+                        <p className="text-[10px] text-slate-400 mt-0.5 truncate">{tile.count} {tile.count === 1 ? 'opportunity' : 'opportunities'}</p>
                     </ExpandableCard>
                 ))}
             </div>
