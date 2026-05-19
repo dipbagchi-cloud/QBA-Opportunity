@@ -460,6 +460,24 @@ export async function updateOpportunity(req: Request, res: Response) {
                 !['Qualification', 'Presales', 'Proposal', 'Negotiation'].includes(previousStageName);
             const invalidAssignmentEdits: string[] = [];
 
+            // Debug information to help trace assignment validation failures
+            try {
+                const debugInfo = {
+                    userId: req.user?.userId,
+                    roleName: req.user?.roleName,
+                    isAdminRole,
+                    previousStageName,
+                    isInitialMoveToPresales,
+                    accessAssignmentIsManager: access?.assignment?.isManager ?? null,
+                    salesRepChanged,
+                    managerChanged,
+                    presalesAssigneeChanged,
+                };
+                console.error('ASSIGNMENT_DEBUG:', JSON.stringify(debugInfo));
+            } catch (e) {
+                console.error('ASSIGNMENT_DEBUG_FAILED', e);
+            }
+
             if (salesRepChanged) {
                 if (!isAdminRole && activeRoleName !== 'sales') {
                     invalidAssignmentEdits.push('Sales Rep');
