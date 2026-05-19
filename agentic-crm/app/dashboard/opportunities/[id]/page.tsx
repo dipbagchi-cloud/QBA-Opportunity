@@ -549,6 +549,13 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const [isStalled, setIsStalled] = useState(false);
     const [lostModalType, setLostModalType] = useState<string>('Closed Lost');
 
+    const activeRoleName = (user?.role?.name || "").trim().toLowerCase();
+    const isActiveAdmin = !!user?.role?.permissions?.includes("*") || activeRoleName === "admin";
+    const baseAssignmentLock = opportunityStage >= 3 || isLost || isStalled || currentStageName === 'Negotiation';
+    const canEditSalesRepAssignment = !baseAssignmentLock && (isActiveAdmin || activeRoleName === "sales") && (activeStep === 0 || activeStep === 2);
+    const canEditManagerAssignment = !baseAssignmentLock && (isActiveAdmin || activeRoleName === "manager") && (activeStep === 1 || activeStep === 2);
+    const canEditPresalesAssignment = !baseAssignmentLock && (isActiveAdmin || activeRoleName === "presales" || (activeRoleName === "manager" && opportunityAccess?.assignment?.isManager)) && (activeStep === 0 || activeStep === 1);
+
     // Technology multiselect state
     const [techDropdownOpen, setTechDropdownOpen] = useState(false);
     const [techSearch, setTechSearch] = useState("");
@@ -1816,14 +1823,6 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             {activeStep === 0 && (() => {
                 const isPipelineEditable = canEditPipeline && opportunityStage < 3 && !isLost && !isStalled && currentStageName !== 'Negotiation' && currentStageName !== 'Proposal';
                 const isClientCountryEditable = isPipelineEditable && opportunityStage === 0;
-                // Assignment ownership stays editable through Pipeline -> Presales -> Sales,
-                // then locks once the opportunity moves to Negotiation.
-                const assignmentWindowOpen = canEditPipeline && opportunityStage < 3 && !isLost && !isStalled && currentStageName !== 'Negotiation';
-                const activeRoleName = (user?.role?.name || "").trim().toLowerCase();
-                const isActiveAdmin = !!user?.role?.permissions?.includes("*") || activeRoleName === "admin";
-                const canEditSalesRepAssignment = assignmentWindowOpen && (isActiveAdmin || activeRoleName === "sales");
-                const canEditManagerAssignment = assignmentWindowOpen && (isActiveAdmin || activeRoleName === "manager");
-                const canEditPresalesAssignment = assignmentWindowOpen && (isActiveAdmin || activeRoleName === "presales");
                 const hasAssignmentEdit = canEditSalesRepAssignment || canEditManagerAssignment || canEditPresalesAssignment;
                 const managerOptions = managers.map(m => ({ value: m.name, label: `${m.name}${m.department ? ` (${m.department})` : ''}` }));
                 if (opportunityManagerName && !managerOptions.some(o => o.value === opportunityManagerName)) {
@@ -3247,8 +3246,13 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     managerName={opportunityManagerName}
                     presalesAssigneeName={formData.presalesAssignee}
                     setFormData={setFormData}
-                    isAssignedManager={!!opportunityAccess?.assignment?.isManager}
-                    isAdmin={!!opportunityAccess?.assignment?.canEditAssignedOpportunity && !opportunityAccess?.assignment?.isDirectlyAssigned}
+                    canEditSalesRep={canEditSalesRepAssignment}
+                    canEditManager={canEditManagerAssignment}
+                    canEditPresales={canEditPresalesAssignment}
+                    salesUsers={salespersons}
+                    managerUsers={managers}
+                    onSalesRepChange={(name) => { setFormData(prev => ({...prev, salesRep: name})); }}
+                    onManagerChange={(name) => { setOpportunityManagerName(name); }}
                 />
                 <CommentsPanel opportunityId={id} currentStage={steps[activeStep]} readOnly={!canComment} readOnlyReason={viewOnlyReason} />
                 <AuditLogPane opportunityId={id} />

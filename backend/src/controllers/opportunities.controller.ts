@@ -460,19 +460,38 @@ export async function updateOpportunity(req: Request, res: Response) {
                 !['Qualification', 'Presales', 'Proposal', 'Negotiation'].includes(previousStageName);
             const invalidAssignmentEdits: string[] = [];
 
-            if (salesRepChanged && !isAdminRole && activeRoleName !== 'sales') {
-                invalidAssignmentEdits.push('Sales Rep');
+            if (salesRepChanged) {
+                if (!isAdminRole && activeRoleName !== 'sales') {
+                    invalidAssignmentEdits.push('Sales Rep');
+                }
+                const salesRepAllowedStages = new Set(['Discovery', 'Proposal']);
+                if (!isAdminRole && !salesRepAllowedStages.has(previousStageName)) {
+                    invalidAssignmentEdits.push('Sales Rep');
+                }
             }
-            if (managerChanged && !isAdminRole && activeRoleName !== 'manager' && !isInitialMoveToPresales) {
-                invalidAssignmentEdits.push('Manager');
+
+            if (managerChanged) {
+                if (!isAdminRole && activeRoleName !== 'manager' && !isInitialMoveToPresales) {
+                    invalidAssignmentEdits.push('Manager');
+                }
+                const managerAllowedStages = new Set(['Qualification', 'Proposal']);
+                if (!isAdminRole && !isInitialMoveToPresales && !managerAllowedStages.has(previousStageName)) {
+                    invalidAssignmentEdits.push('Manager');
+                }
             }
-            if (
-                presalesAssigneeChanged &&
-                !isAdminRole &&
-                activeRoleName !== 'presales' &&
-                !(activeRoleName === 'manager' && access.assignment.isManager)
-            ) {
-                invalidAssignmentEdits.push('Presales Assignee');
+
+            if (presalesAssigneeChanged) {
+                if (
+                    !isAdminRole &&
+                    activeRoleName !== 'presales' &&
+                    !(activeRoleName === 'manager' && access.assignment.isManager)
+                ) {
+                    invalidAssignmentEdits.push('Presales Assignee');
+                }
+                const presalesAllowedStages = new Set(['Discovery', 'Qualification']);
+                if (!isAdminRole && !presalesAllowedStages.has(previousStageName)) {
+                    invalidAssignmentEdits.push('Presales Assignee');
+                }
             }
 
             if (invalidAssignmentEdits.length > 0) {

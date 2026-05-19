@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { UserCircle, Briefcase, Code, Loader2, Plus, X } from "lucide-react";
+import { UserCircle, Briefcase, Code, Loader2, Plus, X, Search, ChevronDown } from "lucide-react";
 import { API_URL, getAuthHeaders } from "@/lib/api";
 
 interface AssignmentPaneProps {
@@ -8,8 +8,87 @@ interface AssignmentPaneProps {
     managerName: string;
     presalesAssigneeName: string;
     setFormData: (data: any) => void;
-    isAssignedManager: boolean;
-    isAdmin: boolean;
+    canEditSalesRep: boolean;
+    canEditManager: boolean;
+    canEditPresales: boolean;
+    salesUsers: { id: string; name: string; department?: string | null }[];
+    managerUsers: { id: string; name: string; department?: string | null }[];
+    onSalesRepChange: (name: string) => void;
+    onManagerChange: (name: string) => void;
+}
+
+type SearchableSelectOption = { value: string; label: string };
+
+function SearchableSelect({ name, value, options, disabled, onChange, placeholder }: {
+    name: string;
+    value: string;
+    options: SearchableSelectOption[];
+    disabled?: boolean;
+    onChange: (event: { target: { name: string; value: string }; }) => void;
+    placeholder: string;
+}) {
+    const [open, setOpen] = useState(false);
+    const [search, setSearch] = useState("");
+    const ref = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (ref.current && !ref.current.contains(e.target as Node)) {
+                setOpen(false);
+            }
+        };
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, []);
+
+    const filtered = options.filter((o) => o.label.toLowerCase().includes(search.toLowerCase()));
+    const selectedOption = options.find((o) => o.value === value);
+
+    return (
+        <div className="relative w-full" ref={ref}>
+            <div
+                className={`w-full min-h-[42px] px-3 py-2 border border-slate-300 rounded-md text-sm shadow-sm flex items-center justify-between ${disabled ? 'bg-slate-50 cursor-not-allowed opacity-70' : 'bg-white cursor-pointer'}`}
+                onClick={() => { if (!disabled) { setOpen(!open); setSearch(""); } }}
+            >
+                <span className={selectedOption ? "text-slate-800" : "text-slate-400"}>
+                    {selectedOption ? selectedOption.label : placeholder}
+                </span>
+                <ChevronDown className="w-4 h-4 text-slate-400" />
+            </div>
+            {open && (
+                <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg">
+                    <div className="p-2 border-b border-slate-100">
+                        <div className="flex items-center gap-2 px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-md">
+                            <Search className="w-3.5 h-3.5 text-slate-400" />
+                            <input
+                                type="text"
+                                value={search}
+                                onChange={(e) => setSearch(e.target.value)}
+                                placeholder="Search..."
+                                className="flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400"
+                                autoFocus
+                            />
+                        </div>
+                    </div>
+                    <div className="max-h-48 overflow-y-auto">
+                        {filtered.map((o) => (
+                            <div
+                                key={o.value}
+                                className={`px-3 py-2 text-sm cursor-pointer hover:bg-slate-50 ${o.value === value ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-700'}`}
+                                onClick={() => {
+                                    onChange({ target: { name, value: o.value } });
+                                    setOpen(false);
+                                }}
+                            >
+                                {o.label}
+                            </div>
+                        ))}
+                        {filtered.length === 0 && <div className="px-3 py-4 text-sm text-slate-400 text-center">No results found</div>}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
 }
 
 interface UserSuggestion {
@@ -24,8 +103,13 @@ export function AssignmentPane({
     managerName,
     presalesAssigneeName,
     setFormData,
-    isAssignedManager,
-    isAdmin,
+    canEditSalesRep,
+    canEditManager,
+    canEditPresales,
+    salesUsers,
+    managerUsers,
+    onSalesRepChange,
+    onManagerChange,
 }: AssignmentPaneProps) {
     const [saving, setSaving] = useState(false);
     const [addingPresales, setAddingPresales] = useState(false);
@@ -40,7 +124,21 @@ export function AssignmentPane({
         ? presalesAssigneeName.split(",").map((n) => n.trim()).filter(Boolean)
         : [];
 
-    const canEditPresales = isAdmin || isAssignedManager;
+    const salesOptions = salesUsers.map((u) => ({
+        value: u.name,
+        label: `${u.name}${u.department ? ` (${u.department})` : ''}`,
+    }));
+    if (salesRepName && !salesOptions.some((o) => o.value === salesRepName)) {
+        salesOptions.unshift({ value: salesRepName, label: salesRepName });
+    }
+
+    const managerOptions = managerUsers.map((u) => ({
+        value: u.name,
+        label: `${u.name}${u.department ? ` (${u.department})` : ''}`,
+    }));
+    if (managerName && !managerOptions.some((o) => o.value === managerName)) {
+        managerOptions.unshift({ value: managerName, label: managerName });
+    }
 
     const fetchSuggestions = useCallback(async (q: string) => {
         setLoadingSuggestions(true);
@@ -97,6 +195,16 @@ export function AssignmentPane({
         }
     };
 
+    const handleSalesRepChange = async (selectedName: string) => {
+        onSalesRepChange(selectedName);
+        await patchAssignment("salesRepName", selectedName);
+    };
+
+    const handleManagerChange = async (selectedName: string) => {
+        onManagerChange(selectedName);
+        await patchAssignment("managerName", selectedName);
+    };
+
     const handleSelectUser = async (user: UserSuggestion) => {
         const updated = [...presalesNames, user.name].join(", ");
         setFormData((prev: any) => ({ ...prev, presalesAssignee: updated }));
@@ -149,9 +257,20 @@ export function AssignmentPane({
                         <Briefcase className="w-3 h-3 text-emerald-500" />
                         Sales Person
                     </label>
-                    <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-sm text-slate-800 font-medium">
-                        {salesRepName || <span className="text-slate-400 font-normal italic">Unassigned</span>}
-                    </div>
+                    {canEditSalesRep ? (
+                        <SearchableSelect
+                            name="salesRep"
+                            value={salesRepName}
+                            options={salesOptions}
+                            onChange={(e) => handleSalesRepChange(e.target.value)}
+                            placeholder="Select Sales Rep"
+                            disabled={!canEditSalesRep}
+                        />
+                    ) : (
+                        <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-sm text-slate-800 font-medium">
+                            {salesRepName || <span className="text-slate-400 font-normal italic">Unassigned</span>}
+                        </div>
+                    )}
                 </div>
 
                 {/* Offshore Manager */}
@@ -160,9 +279,20 @@ export function AssignmentPane({
                         <UserCircle className="w-3 h-3 text-blue-500" />
                         Offshore Manager
                     </label>
-                    <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-sm text-slate-800 font-medium">
-                        {managerName || <span className="text-slate-400 font-normal italic">Unassigned</span>}
-                    </div>
+                    {canEditManager ? (
+                        <SearchableSelect
+                            name="managerName"
+                            value={managerName}
+                            options={managerOptions}
+                            onChange={(e) => handleManagerChange(e.target.value)}
+                            placeholder="Select Manager"
+                            disabled={!canEditManager}
+                        />
+                    ) : (
+                        <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-sm text-slate-800 font-medium">
+                            {managerName || <span className="text-slate-400 font-normal italic">Unassigned</span>}
+                        </div>
+                    )}
                 </div>
 
                 {/* Presales Team */}
