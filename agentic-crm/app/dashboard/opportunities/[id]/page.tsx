@@ -698,6 +698,19 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 const res = await fetch(`${API_URL}/api/opportunities/${id}`, {
                     headers: getAuthHeaders(),
                 });
+                if (res.status === 401) {
+                    // Token expired/invalidated (e.g. backend restarted -> new bootId).
+                    // Clear stale token and force re-login instead of silently
+                    // degrading the whole page to a permission-less read-only state.
+                    if (typeof window !== "undefined") {
+                        sessionStorage.removeItem("auth_token");
+                        localStorage.removeItem("auth_token");
+                        if (!window.location.pathname.startsWith("/login")) {
+                            window.location.href = "/login";
+                        }
+                    }
+                    return;
+                }
                 if (!res.ok) throw new Error("Failed to load");
                 const data = await res.json();
 
