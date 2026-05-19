@@ -290,7 +290,10 @@ curl -s -o /dev/null -w 'Frontend: %{http_code}\n' http://localhost:3000/
 > **Why not `pm2 restart` directly?** PM2 tracks the `npm start` wrapper PID. When it kills the wrapper, the actual `node` child can survive and hold the port. `start-safe.sh` detects and kills the zombie first. See **Ghost Process Problem** section below.
 
 **Build time:** ~3-5 minutes on Standard_D4s_v3 (4 vCPUs, 16GB RAM).  
-**Memory note:** `--max-old-space-size=3072` is required — default Node heap is too small for the Next.js build.
+**Memory note:** `--max-old-space-size=3072` is required — default Node heap is too small for the Next.js build.  
+**Status updates:** During builds, continuously report deployment status to the user every 30 seconds. Check the background task log for progress (compile → type check → static pages → build traces → done) and relay the current stage.
+
+> **Important:** Always use the project's local Next.js binary (`./node_modules/.bin/next build`) instead of `npx next build`. Using `npx` may download a newer incompatible version (e.g., Next.js 16.x with Turbopack changes) and cause build failures.
 
 ### Backend Deployment (Express + TypeScript)
 
@@ -397,10 +400,10 @@ pm2 restart qcrm-backend
 **Updated deployment one-liners** (use these instead of bare `pm2 restart`):
 ```bash
 # Frontend deploy + safe restart
-ssh qcrm "cd /home/azureuser/app/agentic-crm && NODE_OPTIONS='--max-old-space-size=3072' npx next build && /home/azureuser/app/start-safe.sh 3000 qcrm-frontend"
+ssh qcrm "cd /home/azureuser/app/agentic-crm && NODE_OPTIONS='--max-old-space-size=3072' ./node_modules/.bin/next build && bash /home/azureuser/app/start-safe.sh 3000 qcrm-frontend"
 
 # Backend deploy + safe restart
-ssh qcrm "cd /home/azureuser/app/backend && npx tsc --skipLibCheck --noEmitOnError false 2>/dev/null; /home/azureuser/app/start-safe.sh 3001 qcrm-backend"
+ssh qcrm "cd /home/azureuser/app/backend && npx prisma generate && npx tsc --skipLibCheck --noEmitOnError false 2>/dev/null; bash /home/azureuser/app/start-safe.sh 3001 qcrm-backend"
 ```
 
 **Verify after restart:**
@@ -410,17 +413,48 @@ fuser 3000/tcp && pm2 ls | grep qcrm-frontend
 fuser 3001/tcp && pm2 ls | grep qcrm-backend
 ```
 
+### Backend 502 After Frontend Deploy (CRITICAL)
+
+**Symptom:** After a frontend-only deploy, the backend returns `502 Bad Gateway` on all `/api/*` routes. The backend crash-loops in PM2 with the error: `@prisma/client did not initialize yet. Please run "prisma generate"`.
+
+**Root cause (two-part):**
+
+1. **`start-safe.sh` cascade kill:** The script runs `fuser ${PORT}/tcp` which can return multiple PIDs (parent npm wrapper + child node process). `kill $STALE` kills all of them, and PM2 detects the crash and triggers a cascade restart of ALL managed processes — including `qcrm-backend` — even though only the frontend was being restarted.
+
+2. **`git pull` invalidates Prisma client:** When `git pull` brings updated `prisma/schema.prisma`, the existing generated Prisma client in `node_modules/@prisma/client` becomes stale. When PM2 restarts the backend (from the cascade), it fails to initialize because the client doesn't match the schema.
+
+**Prevention — MANDATORY post-deploy checklist:**
+
+After **every** frontend deploy that involved `git pull`, always run:
+```bash
+# 1. Regenerate Prisma client (safe even if schema didn't change)
+ssh qcrm "cd /home/azureuser/app/backend && npx prisma generate"
+
+# 2. Restart backend safely
+ssh qcrm "bash /home/azureuser/app/start-safe.sh 3001 qcrm-backend"
+
+# 3. Then restart frontend
+ssh qcrm "bash /home/azureuser/app/start-safe.sh 3000 qcrm-frontend"
+
+# 4. Verify both services
+ssh qcrm "curl -s -o /dev/null -w 'Backend: %{http_code}\n' http://localhost:3001/api/health && curl -s -o /dev/null -w 'Frontend: %{http_code}\n' http://localhost:3000/"
+```
+
+**Order matters:** Always restart backend BEFORE frontend to avoid serving pages that call a dead API.
+
 ---
 
 ### Common Issues & Fixes
 
 | Issue | Symptom | Fix |
 |-------|---------|-----|
+| **Backend 502 after frontend deploy** | 502 on `/api/*` after `git pull` + frontend restart | `cd backend && npx prisma generate && start-safe.sh 3001 qcrm-backend` |
 | **ChunkLoadError** | White screen / 400 on JS chunks | Ghost process on port 3000 — run `start-safe.sh 3000 qcrm-frontend` |
 | **Stale API responses** | New backend code not taking effect | Ghost process on port 3001 — run `start-safe.sh 3001 qcrm-backend` |
 | **Build OOM** | Build hangs or crashes | `sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'` before build |
 | **Port in use** | PM2 process won't start | `fuser -k 3000/tcp` then `pm2 restart qcrm-frontend` |
 | **Stale TypeScript** | Backend errors after code change | `npx tsc --skipLibCheck` then `start-safe.sh 3001 qcrm-backend` |
+| **Prisma client stale** | `@prisma/client did not initialize yet` | `cd backend && npx prisma generate && start-safe.sh 3001 qcrm-backend` |
 | **DB connection** | Prisma connection errors | Check `DATABASE_URL` in `.env`, verify PostgreSQL running: `systemctl status postgresql` |
 | **SSL expired** | HTTPS errors | `sudo certbot renew` |
 | **PM2 not persisting** | Processes gone after reboot | `pm2 save && pm2 startup` |
