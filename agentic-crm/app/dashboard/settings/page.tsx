@@ -1576,11 +1576,16 @@ interface RateCardItem {
     existingCtc: number;
     maxCtc: number;
     ctc: number;
+    ctcHyd: number;
+    ctcPune: number;
+    ctcNigeriaLagos: number;
+    ctcLuxembourg: number;
     category: string;
     isActive: boolean;
 }
 
 function RateCardsTab() {
+    const { format: fmtCurrency } = useCurrency();
     const [rateCards, setRateCards] = useState<RateCardItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [showCreate, setShowCreate] = useState(false);
@@ -1603,7 +1608,9 @@ function RateCardsTab() {
 
     const [formData, setFormData] = useState({
         code: "", role: "", skill: "", experienceBand: "",
-        masterCtc: "", mercerCtc: "", copilot: "", existingCtc: "", maxCtc: "", ctc: "", category: "Technology"
+        masterCtc: "", mercerCtc: "", copilot: "", existingCtc: "", maxCtc: "",
+        ctc: "", ctcHyd: "", ctcPune: "", ctcNigeriaLagos: "", ctcLuxembourg: "",
+        category: "Technology"
     });
 
     const fetchRateCards = useCallback(async (pg = 1, search = "") => {
@@ -1650,7 +1657,7 @@ function RateCardsTab() {
     }, [searchTerm, fetchRateCards]);
 
     const resetForm = () => {
-        setFormData({ code: "", role: "", skill: "", experienceBand: "", masterCtc: "", mercerCtc: "", copilot: "", existingCtc: "", maxCtc: "", ctc: "", category: "Technology" });
+        setFormData({ code: "", role: "", skill: "", experienceBand: "", masterCtc: "", mercerCtc: "", copilot: "", existingCtc: "", maxCtc: "", ctc: "", ctcHyd: "", ctcPune: "", ctcNigeriaLagos: "", ctcLuxembourg: "", category: "Technology" });
         setEditingId(null); setShowCreate(false);
     };
 
@@ -1660,7 +1667,10 @@ function RateCardsTab() {
             code: rc.code, role: rc.role, skill: rc.skill, experienceBand: rc.experienceBand,
             masterCtc: String(rc.masterCtc), mercerCtc: String(rc.mercerCtc),
             copilot: String(rc.copilot), existingCtc: String(rc.existingCtc),
-            maxCtc: String(rc.maxCtc), ctc: String(rc.ctc), category: rc.category
+            maxCtc: String(rc.maxCtc), ctc: String(rc.ctc),
+            ctcHyd: String(rc.ctcHyd ?? 0), ctcPune: String(rc.ctcPune ?? 0),
+            ctcNigeriaLagos: String(rc.ctcNigeriaLagos ?? 0), ctcLuxembourg: String(rc.ctcLuxembourg ?? 0),
+            category: rc.category
         });
         setShowCreate(false);
     };
@@ -1686,7 +1696,11 @@ function RateCardsTab() {
                 copilot: Number(formData.copilot) || 0,
                 existingCtc: Number(formData.existingCtc) || 0,
                 maxCtc: Number(formData.maxCtc) || 0,
-                ctc: Number(formData.maxCtc) || 0,
+                ctc: Number(formData.ctc) || 0,
+                ctcHyd: Number(formData.ctcHyd) || 0,
+                ctcPune: Number(formData.ctcPune) || 0,
+                ctcNigeriaLagos: Number(formData.ctcNigeriaLagos) || 0,
+                ctcLuxembourg: Number(formData.ctcLuxembourg) || 0,
                 category: formData.category,
             };
             if (editingId) {
@@ -1785,6 +1799,32 @@ function RateCardsTab() {
                             <input className="w-full px-3 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm" placeholder="e.g. Technology" value={formData.category} onChange={(e) => setFormData({ ...formData, category: e.target.value })} />
                         </div>
                     </div>
+                    {/* Location-based CTCs */}
+                    <div>
+                        <p className="text-xs font-semibold text-indigo-700 mb-2">Location CTCs (Annual, used for resource assignment)</p>
+                        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                            <div>
+                                <label className="block text-xs font-medium text-slate-700 mb-1">India + Kolkata</label>
+                                <input type="number" className="w-full px-3 py-1.5 rounded-lg border border-indigo-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm" placeholder="0" value={formData.ctc} onChange={(e) => setFormData({ ...formData, ctc: e.target.value })} />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-medium text-slate-700 mb-1">India + Hyd</label>
+                                <input type="number" className="w-full px-3 py-1.5 rounded-lg border border-indigo-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm" placeholder="0" value={formData.ctcHyd} onChange={(e) => setFormData({ ...formData, ctcHyd: e.target.value })} />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-medium text-slate-700 mb-1">India + Pune</label>
+                                <input type="number" className="w-full px-3 py-1.5 rounded-lg border border-indigo-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm" placeholder="0" value={formData.ctcPune} onChange={(e) => setFormData({ ...formData, ctcPune: e.target.value })} />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-medium text-slate-700 mb-1">Nigeria + Lagos</label>
+                                <input type="number" className="w-full px-3 py-1.5 rounded-lg border border-indigo-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm" placeholder="0" value={formData.ctcNigeriaLagos} onChange={(e) => setFormData({ ...formData, ctcNigeriaLagos: e.target.value })} />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-medium text-slate-700 mb-1">Luxembourg</label>
+                                <input type="number" className="w-full px-3 py-1.5 rounded-lg border border-indigo-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm" placeholder="0" value={formData.ctcLuxembourg} onChange={(e) => setFormData({ ...formData, ctcLuxembourg: e.target.value })} />
+                            </div>
+                        </div>
+                    </div>
                     <div className="flex justify-end gap-2 pt-2">
                         <button onClick={resetForm} className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-600 hover:bg-slate-50 transition-colors">Cancel</button>
                         <button disabled={saving} onClick={handleSave} className="px-4 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors">
@@ -1817,9 +1857,11 @@ function RateCardsTab() {
                                 <SortableHeader label="Experience Band" sortKey="experienceBand" currentSort={rcSortKey} currentDir={rcSortDir} onSort={handleRcSort} className="text-left px-3 text-slate-600" />
                                 <SortableHeader label="Master CTC" sortKey="masterCtc" currentSort={rcSortKey} currentDir={rcSortDir} onSort={handleRcSort} className="text-right px-3 text-slate-600" />
                                 <SortableHeader label="Mercer CTC" sortKey="mercerCtc" currentSort={rcSortKey} currentDir={rcSortDir} onSort={handleRcSort} className="text-right px-3 text-slate-600" />
-                                <SortableHeader label="Copilot" sortKey="copilot" currentSort={rcSortKey} currentDir={rcSortDir} onSort={handleRcSort} className="text-right px-3 text-slate-600" />
-                                <SortableHeader label="Existing CTC" sortKey="existingCtc" currentSort={rcSortKey} currentDir={rcSortDir} onSort={handleRcSort} className="text-right px-3 text-slate-600" />
-                                <SortableHeader label="Max" sortKey="maxCtc" currentSort={rcSortKey} currentDir={rcSortDir} onSort={handleRcSort} className="text-right px-3 text-slate-600" />
+                                <SortableHeader label="India + Kolkata" sortKey="ctc" currentSort={rcSortKey} currentDir={rcSortDir} onSort={handleRcSort} className="text-right px-3 text-indigo-600" />
+                                <SortableHeader label="India + Hyd" sortKey="ctcHyd" currentSort={rcSortKey} currentDir={rcSortDir} onSort={handleRcSort} className="text-right px-3 text-indigo-600" />
+                                <SortableHeader label="India + Pune" sortKey="ctcPune" currentSort={rcSortKey} currentDir={rcSortDir} onSort={handleRcSort} className="text-right px-3 text-indigo-600" />
+                                <SortableHeader label="Nigeria + Lagos" sortKey="ctcNigeriaLagos" currentSort={rcSortKey} currentDir={rcSortDir} onSort={handleRcSort} className="text-right px-3 text-indigo-600" />
+                                <SortableHeader label="Luxembourg" sortKey="ctcLuxembourg" currentSort={rcSortKey} currentDir={rcSortDir} onSort={handleRcSort} className="text-right px-3 text-indigo-600" />
                                 <th className="text-right px-3 py-2 font-medium text-slate-600">Actions</th>
                             </tr>
                         </thead>
@@ -1830,19 +1872,25 @@ function RateCardsTab() {
                                     <td className="px-3 py-2 font-medium text-slate-800">{rc.skill || rc.role}</td>
                                     <td className="px-3 py-2 text-slate-600">{rc.experienceBand || '-'}</td>
                                     <td className="px-3 py-2 text-right font-mono text-slate-700">
-                                        {rc.masterCtc != null ? `₹${Math.round(rc.masterCtc).toLocaleString()}` : '-'}
+                                        {rc.masterCtc != null ? fmtCurrency(rc.masterCtc, { compact: true }) : '-'}
                                     </td>
                                     <td className="px-3 py-2 text-right font-mono text-slate-700">
-                                        {rc.mercerCtc != null ? `₹${Math.round(rc.mercerCtc).toLocaleString()}` : '-'}
+                                        {rc.mercerCtc != null ? fmtCurrency(rc.mercerCtc, { compact: true }) : '-'}
                                     </td>
-                                    <td className="px-3 py-2 text-right font-mono text-slate-700">
-                                        {rc.copilot != null ? `₹${Math.round(rc.copilot).toLocaleString()}` : '-'}
+                                    <td className="px-3 py-2 text-right font-mono font-semibold text-indigo-700">
+                                        {rc.ctc ? fmtCurrency(rc.ctc, { compact: true }) : <span className="text-slate-300">—</span>}
                                     </td>
-                                    <td className="px-3 py-2 text-right font-mono text-slate-700">
-                                        {rc.existingCtc != null ? `₹${Math.round(rc.existingCtc).toLocaleString()}` : '-'}
+                                    <td className="px-3 py-2 text-right font-mono text-indigo-700">
+                                        {rc.ctcHyd ? fmtCurrency(rc.ctcHyd, { compact: true }) : <span className="text-slate-300">—</span>}
                                     </td>
-                                    <td className="px-3 py-2 text-right font-mono font-semibold text-slate-800">
-                                        {rc.maxCtc != null ? `₹${Math.round(rc.maxCtc).toLocaleString()}` : '-'}
+                                    <td className="px-3 py-2 text-right font-mono text-indigo-700">
+                                        {rc.ctcPune ? fmtCurrency(rc.ctcPune, { compact: true }) : <span className="text-slate-300">—</span>}
+                                    </td>
+                                    <td className="px-3 py-2 text-right font-mono text-indigo-700">
+                                        {rc.ctcNigeriaLagos ? fmtCurrency(rc.ctcNigeriaLagos, { compact: true }) : <span className="text-slate-300">—</span>}
+                                    </td>
+                                    <td className="px-3 py-2 text-right font-mono text-indigo-700">
+                                        {rc.ctcLuxembourg ? fmtCurrency(rc.ctcLuxembourg, { compact: true }) : <span className="text-slate-300">—</span>}
                                     </td>
                                     <td className="px-3 py-2 text-right">
                                         <div className="flex items-center justify-end gap-2">

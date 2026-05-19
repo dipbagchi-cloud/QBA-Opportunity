@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useEffect } from "react";
 import { Plus, Trash2, Search, Edit2, X, AlertCircle } from "lucide-react";
-import { fetchRateCards } from "@/lib/rate-cards";
+import { fetchRateCards, LOCATION_KEYS, getCtcForLocation } from "@/lib/rate-cards";
 import { useOpportunityEstimation, ResourceRow } from "../context/OpportunityEstimationContext";
 import { calculateRateCard } from "@/lib/gom-calculator";
 import { useCurrency } from "@/components/providers/currency-provider";
@@ -24,23 +24,17 @@ export function ResourceAssignmentTab() {
         effortType,
         setEffortType,
         durationInDays, // Expected working days from duration field
+        isReEstimation,
     } = useOpportunityEstimation();
 
     const { format: fmtCurrency, convert: convertCurrency, symbol: cSym, currency: globalCurrencyCode } = useCurrency();
-
-    // Rate card CTC values are always in INR — format without currency conversion
-    const fmtINR = (val: number, opts?: { compact?: boolean }) => {
-        if (opts?.compact && Math.abs(val) >= 100000) {
-            return `₹${(val / 100000).toFixed(1)}L`;
-        }
-        return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(val);
-    };
 
     const currentYear = new Date().getFullYear();
     const [isAdding, setIsAdding] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
     const [rateCards, setRateCards] = useState<any[]>([]);
     const [editingResource, setEditingResource] = useState<ResourceRow | null>(null);
+    const [selectedAddLocation, setSelectedAddLocation] = useState<string>("India + Kolkata");
 
     useEffect(() => {
         fetchRateCards().then(setRateCards).catch(() => setRateCards([]));
@@ -90,18 +84,18 @@ export function ResourceAssignmentTab() {
 
     // A row is editable if: not globally readOnly, AND either no ownership info exists
     // (backward compat) OR the row belongs to the current user.
+    // During re-estimation, any assigned presales member may edit all rows
     const canEditRow = (row: ResourceRow) =>
-        !readOnly && (!currentUserName || !row.addedBy || row.addedBy === currentUserName);
+        !readOnly && (isReEstimation || !currentUserName || !row.addedBy || row.addedBy === currentUserName);
 
     const addRole = (roleItem: any) => {
-        // Calculate daily cost and rate using assumptions
+        // Pick CTC for the selected location; 0 if not defined in master
+        const ctcForLocation = getCtcForLocation(roleItem, selectedAddLocation);
         const rateCardResult = calculateRateCard({
-            annualCtc: roleItem.annualCtc,
+            annualCtc: ctcForLocation,
             monthsPerYear: 12,
             ...assumptions
         });
-
-        // dailyCost is loaded (CTC + overhead loadings / workingDays), dailyRate adds markup
         const dailyRate = rateCardResult.dailyCost * (1 + (markupPercent / 100));
 
         const newRow: ResourceRow = {
@@ -109,10 +103,12 @@ export function ResourceAssignmentTab() {
             role: roleItem.role,
             skill: roleItem.skill,
             experienceBand: roleItem.experienceBand,
+            locationKey: selectedAddLocation,
+            rateCardCode: roleItem.code,
             baseLocation: "India",
             deliveryFrom: "Hyderabad",
             type: "Offshore",
-            annualCTC: roleItem.annualCtc,
+            annualCTC: ctcForLocation,
             dailyCost: rateCardResult.dailyCost,
             dailyRate: dailyRate,
             monthlyEfforts: {},
@@ -123,12 +119,26 @@ export function ResourceAssignmentTab() {
         setSearchTerm("");
     };
 
-    const removeRow = (id: string) => {
-        setResources(resources.filter(r => r.id !== id));
+    // When a row's location changes, re-derive CTC + dailyCost from the stored rate card
+    const updateLocation = (id: string, newLocationKey: string) => {
+        setResources(resources.map(r => {
+            if (r.id !== id) return r;
+            const rc = rateCards.find((rc: any) => rc.code === r.rateCardCode);
+            if (!rc) return { ...r, locationKey: newLocationKey };
+            const ctc = getCtcForLocation(rc, newLocationKey);
+            const rateCardResult = calculateRateCard({ annualCtc: ctc, monthsPerYear: 12, ...assumptions });
+            return {
+                ...r,
+                locationKey: newLocationKey,
+                annualCTC: ctc,
+                dailyCost: rateCardResult.dailyCost,
+                dailyRate: rateCardResult.dailyCost * (1 + markupPercent / 100),
+            };
+        }));
     };
 
-    const updateRow = (id: string, field: keyof ResourceRow, value: any) => {
-        setResources(resources.map(r => r.id === id ? { ...r, [field]: value } : r));
+    const removeRow = (id: string) => {
+        setResources(resources.filter(r => r.id !== id));
     };
 
     const maxDaysPerMonth = useMemo(() => {
@@ -204,6 +214,9 @@ export function ResourceAssignmentTab() {
         return Object.values(monthlyTotals).reduce((sum, val) => sum + val, 0);
     }, [monthlyTotals]);
 
+    // Total capacity = each resource can work durationInDays over the project
+    const expectedTotalDays = durationInDays * resources.length;
+
     return (
         <div className="space-y-4">
             {/* Header with Year Selector and Effort Type */}
@@ -258,6 +271,18 @@ export function ResourceAssignmentTab() {
             {/* Search Panel */}
             {isAdding && !readOnly && (
                 <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 animate-in slide-in-from-top-2 shadow-sm">
+                    {/* Location selector */}
+                    <div className="flex items-center gap-3 mb-3">
+                        <label className="text-xs font-semibold text-slate-600 whitespace-nowrap">Location:</label>
+                        <select
+                            value={selectedAddLocation}
+                            onChange={(e) => setSelectedAddLocation(e.target.value)}
+                            className="px-2 py-1.5 border border-slate-200 rounded-md text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                        >
+                            {LOCATION_KEYS.map(loc => <option key={loc} value={loc}>{loc}</option>)}
+                        </select>
+                        <span className="text-xs text-slate-400">Rates shown below are for this location</span>
+                    </div>
                     <div className="relative">
                         <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
                         <input
@@ -282,25 +307,30 @@ export function ResourceAssignmentTab() {
                                     <th className="text-left p-2 pl-3 font-medium">Skill</th>
                                     <th className="text-left p-2 font-medium">Experience</th>
                                     <th className="text-left p-2 font-medium">Category</th>
-                                    <th className="text-right p-2 pr-3 font-medium">Annual CTC</th>
+                                    <th className="text-right p-2 pr-3 font-medium">Annual CTC ({selectedAddLocation})</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
                                 {filteredRoles.length === 0 && (
                                     <tr><td colSpan={4} className="p-3 text-sm text-slate-500 text-center">No roles found.</td></tr>
                                 )}
-                                {filteredRoles.map((r) => (
-                                    <tr
-                                        key={r.code || r.role}
-                                        onClick={() => addRole(r)}
-                                        className="hover:bg-blue-50 cursor-pointer transition-colors group"
-                                    >
-                                        <td className="p-2 pl-3 font-medium text-slate-800">{r.skill || r.role}</td>
-                                        <td className="p-2 text-slate-600">{r.experienceBand || '-'}</td>
-                                        <td className="p-2 text-slate-500 text-xs">{r.category}</td>
-                                        <td className="p-2 pr-3 text-right font-mono text-slate-500 group-hover:text-slate-700">{fmtINR(r.annualCtc, { compact: true })}</td>
-                                    </tr>
-                                ))}
+                                {filteredRoles.map((r) => {
+                                    const ctc = getCtcForLocation(r, selectedAddLocation);
+                                    return (
+                                        <tr
+                                            key={r.code || r.role}
+                                            onClick={() => addRole(r)}
+                                            className="hover:bg-blue-50 cursor-pointer transition-colors group"
+                                        >
+                                            <td className="p-2 pl-3 font-medium text-slate-800">{r.skill || r.role}</td>
+                                            <td className="p-2 text-slate-600">{r.experienceBand || '-'}</td>
+                                            <td className="p-2 text-slate-500 text-xs">{r.category}</td>
+                                            <td className={`p-2 pr-3 text-right font-mono group-hover:text-slate-700 ${ctc === 0 ? 'text-slate-300' : 'text-slate-500'}`}>
+                                                {ctc === 0 ? '—' : fmtCurrency(ctc, { compact: true })}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
                             </tbody>
                         </table>
                     </div>
@@ -314,9 +344,12 @@ export function ResourceAssignmentTab() {
                         <thead className="bg-slate-50 text-slate-700 font-semibold border-b">
                             <tr>
                                 <th className="p-3 border-r sticky left-0 bg-slate-50 z-10 min-w-[200px]">Skillset Experience</th>
-                                <th className="p-3 border-r min-w-[150px]">Base Location-Delivery From</th>
+                                <th className="p-3 border-r min-w-[150px]">Location</th>
                                 {visibleMonths.map(month => (
-                                    <th key={month} className="p-3 text-center border-r min-w-[80px]">{month}</th>
+                                    <th key={month} className="p-3 text-center border-r min-w-[80px]">
+                                        <div>{month}</div>
+                                        <div className="text-[10px] font-normal text-slate-400">(Days)</div>
+                                    </th>
                                 ))}
                                 <th className="p-3 text-center border-r min-w-[100px]">Cost</th>
                                 {!readOnly && <th className="p-3 text-center min-w-[60px]">Action</th>}
@@ -337,7 +370,7 @@ export function ResourceAssignmentTab() {
                                     <td className="p-2 px-3 font-medium text-slate-900 border-r sticky left-0 bg-white z-10">
                                         <div className="flex flex-col">
                                             <span className="text-sm font-semibold">{row.skill || row.role}</span>
-                                            <span className="text-xs text-slate-500 mt-0.5">{row.experienceBand || '-'} | {fmtINR(row.annualCTC, { compact: true })} CTC</span>
+                                            <span className="text-xs text-slate-500 mt-0.5">{row.experienceBand || '-'} | {fmtCurrency(row.annualCTC, { compact: true })} CTC</span>
                                             {row.addedBy && (
                                                 <span className="text-[10px] mt-0.5 text-indigo-500 font-medium">
                                                     {rowEditable ? "Your estimate" : `by ${row.addedBy}`}
@@ -346,28 +379,14 @@ export function ResourceAssignmentTab() {
                                         </div>
                                     </td>
                                     <td className="p-2 border-r">
-                                        <div className="flex flex-col gap-1">
-                                            <select
-                                                className="w-full bg-slate-50 border-transparent rounded px-2 py-1 text-slate-700 text-xs focus:bg-white focus:ring-1 focus:ring-slate-200 disabled:cursor-not-allowed"
-                                                value={row.baseLocation}
-                                                onChange={(e) => updateRow(row.id, "baseLocation", e.target.value)}
-                                                disabled={!rowEditable}
-                                            >
-                                                <option value="India">India</option>
-                                                <option value="USA">USA</option>
-                                                <option value="UK">UK</option>
-                                            </select>
-                                            <select
-                                                className="w-full bg-slate-50 border-transparent rounded px-2 py-1 text-slate-700 text-xs focus:bg-white focus:ring-1 focus:ring-slate-200 disabled:cursor-not-allowed"
-                                                value={row.deliveryFrom}
-                                                onChange={(e) => updateRow(row.id, "deliveryFrom", e.target.value)}
-                                                disabled={!rowEditable}
-                                            >
-                                                <option value="Hyderabad">Hyderabad</option>
-                                                <option value="Bangalore">Bangalore</option>
-                                                <option value="Pune">Pune</option>
-                                            </select>
-                                        </div>
+                                        <select
+                                            className="w-full bg-slate-50 border-transparent rounded px-2 py-1 text-slate-700 text-xs focus:bg-white focus:ring-1 focus:ring-slate-200 disabled:cursor-not-allowed"
+                                            value={row.locationKey || 'India + Kolkata'}
+                                            onChange={(e) => updateLocation(row.id, e.target.value)}
+                                            disabled={!rowEditable}
+                                        >
+                                            {LOCATION_KEYS.map(loc => <option key={loc} value={loc}>{loc}</option>)}
+                                        </select>
                                     </td>
                                     {visibleMonths.map(month => (
                                         <td key={month} className="p-1 border-r">
@@ -467,42 +486,43 @@ export function ResourceAssignmentTab() {
             </div>
 
             {/* Allocation Summary */}
-            {durationInDays > 0 && (
+            {durationInDays > 0 && resources.length > 0 && (
                 <div className={`p-4 rounded-lg border-2 ${
-                    totalAllocatedDays > durationInDays 
-                        ? 'bg-red-50 border-red-300' 
-                        : totalAllocatedDays === durationInDays
+                    totalAllocatedDays > expectedTotalDays
+                        ? 'bg-red-50 border-red-300'
+                        : totalAllocatedDays === expectedTotalDays
                         ? 'bg-emerald-50 border-emerald-300'
                         : 'bg-amber-50 border-amber-300'
                 }`}>
                     <div className="flex items-center justify-between">
                         <div>
                             <h4 className="text-sm font-semibold text-slate-700 mb-1">Working Days Allocation</h4>
+                            <p className="text-xs text-slate-500 mb-2">{resources.length} resource{resources.length !== 1 ? 's' : ''} × {durationInDays} days</p>
                             <div className="flex items-center gap-4 text-sm">
                                 <div>
                                     <span className="text-slate-600">Expected: </span>
-                                    <span className="font-bold text-slate-900">{durationInDays} days</span>
+                                    <span className="font-bold text-slate-900">{expectedTotalDays} days</span>
                                 </div>
                                 <div>
                                     <span className="text-slate-600">Allocated: </span>
                                     <span className={`font-bold ${
-                                        totalAllocatedDays > durationInDays ? 'text-red-600' :
-                                        totalAllocatedDays === durationInDays ? 'text-emerald-600' :
+                                        totalAllocatedDays > expectedTotalDays ? 'text-red-600' :
+                                        totalAllocatedDays === expectedTotalDays ? 'text-emerald-600' :
                                         'text-amber-600'
                                     }`}>{totalAllocatedDays} days</span>
                                 </div>
                                 <div>
                                     <span className="text-slate-600">Remaining: </span>
                                     <span className={`font-bold ${
-                                        durationInDays - totalAllocatedDays < 0 ? 'text-red-600' : 'text-slate-900'
-                                    }`}>{durationInDays - totalAllocatedDays} days</span>
+                                        expectedTotalDays - totalAllocatedDays < 0 ? 'text-red-600' : 'text-slate-900'
+                                    }`}>{expectedTotalDays - totalAllocatedDays} days</span>
                                 </div>
                             </div>
                         </div>
-                        {totalAllocatedDays > durationInDays && (
+                        {totalAllocatedDays > expectedTotalDays && (
                             <div className="flex items-center gap-2 text-red-600 text-sm font-semibold">
                                 <AlertCircle className="w-5 h-5" />
-                                Over-allocated by {totalAllocatedDays - durationInDays} days!
+                                Over-allocated by {totalAllocatedDays - expectedTotalDays} days!
                             </div>
                         )}
                     </div>
@@ -515,7 +535,7 @@ export function ResourceAssignmentTab() {
                 <div className="grid grid-cols-3 gap-4 text-sm">
                     <div className="flex items-center gap-2">
                         <span className="text-slate-600">Currency:</span>
-                        <span className="font-semibold text-slate-900">INR</span>
+                        <span className="font-semibold text-slate-900">{globalCurrencyCode}</span>
                     </div>
                     <div className="flex items-center gap-2">
                         <span className="text-slate-600">Total Resources:</span>
@@ -558,6 +578,26 @@ export function ResourceAssignmentTab() {
                                 />
                             </div>
                             <div className="space-y-1.5">
+                                <label className="text-sm font-semibold text-slate-700">Location</label>
+                                <select
+                                    value={editingResource.locationKey || 'India + Kolkata'}
+                                    onChange={(e) => {
+                                        const newLoc = e.target.value;
+                                        const rc = rateCards.find((rc: any) => rc.code === editingResource.rateCardCode);
+                                        if (rc) {
+                                            const ctc = getCtcForLocation(rc, newLoc);
+                                            const rateCardResult = calculateRateCard({ annualCtc: ctc, monthsPerYear: 12, ...assumptions });
+                                            setEditingResource({ ...editingResource, locationKey: newLoc, annualCTC: ctc, dailyCost: rateCardResult.dailyCost, dailyRate: rateCardResult.dailyCost * (1 + markupPercent / 100) });
+                                        } else {
+                                            setEditingResource({ ...editingResource, locationKey: newLoc });
+                                        }
+                                    }}
+                                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                >
+                                    {LOCATION_KEYS.map(loc => <option key={loc} value={loc}>{loc}</option>)}
+                                </select>
+                            </div>
+                            <div className="space-y-1.5">
                                 <label className="text-sm font-semibold text-slate-700">Annual CTC (INR)</label>
                                 <input
                                     type="number"
@@ -570,8 +610,7 @@ export function ResourceAssignmentTab() {
                                             monthsPerYear: 12,
                                             ...assumptions
                                         });
-                                        const loadedDailyCost = rateCardResult.dailyCost;
-                                        const dailyRate = loadedDailyCost * (1 + (markupPercent / 100));
+                                        const dailyRate = rateCardResult.dailyCost * (1 + (markupPercent / 100));
                                         setEditingResource({ ...editingResource, annualCTC: ctc, dailyCost: rateCardResult.dailyCost, dailyRate });
                                     }}
                                     className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"

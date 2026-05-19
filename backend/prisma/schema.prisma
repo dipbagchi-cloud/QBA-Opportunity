@@ -187,13 +187,17 @@ model RateCard {
   role            String
   skill           String   @default("")
   experienceBand  String   @default("")
-  masterCtc       Float    @default(0)
-  mercerCtc       Float    @default(0)
-  copilot         Float    @default(0)
-  existingCtc     Float    @default(0)
-  maxCtc          Float    @default(0)
-  ctc             Float
-  category        String
+  masterCtc          Float    @default(0)
+  mercerCtc          Float    @default(0)
+  copilot            Float    @default(0)
+  existingCtc        Float    @default(0)
+  maxCtc             Float    @default(0)
+  ctc                Float    @default(0)
+  ctcHyd             Float    @default(0)
+  ctcPune            Float    @default(0)
+  ctcNigeriaLagos    Float    @default(0)
+  ctcLuxembourg      Float    @default(0)
+  category           String
   isActive        Boolean  @default(true)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt

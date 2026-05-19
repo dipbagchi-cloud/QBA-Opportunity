@@ -47,7 +47,7 @@ export async function listAllRateCards(req: Request, res: Response) {
 
 // POST /api/admin/rate-cards — create rate card
 export async function createRateCard(req: Request, res: Response) {
-    const { code, role, skill, experienceBand, masterCtc, mercerCtc, copilot, existingCtc, maxCtc, ctc, category } = req.body;
+    const { code, role, skill, experienceBand, masterCtc, mercerCtc, copilot, existingCtc, maxCtc, ctc, ctcHyd, ctcPune, ctcNigeriaLagos, ctcLuxembourg, category } = req.body;
     if (!code || !role || !category) {
         res.status(400).json({ error: 'code, role, and category are required.' });
         return;
@@ -59,7 +59,7 @@ export async function createRateCard(req: Request, res: Response) {
         return;
     }
 
-    const rateCard = await prisma.rateCard.create({
+    const rateCard = await (prisma.rateCard as any).create({
         data: {
             code,
             role,
@@ -71,6 +71,10 @@ export async function createRateCard(req: Request, res: Response) {
             existingCtc: existingCtc != null ? Number(existingCtc) : 0,
             maxCtc: maxCtc != null ? Number(maxCtc) : 0,
             ctc: ctc != null ? Number(ctc) : 0,
+            ctcHyd: ctcHyd != null ? Number(ctcHyd) : 0,
+            ctcPune: ctcPune != null ? Number(ctcPune) : 0,
+            ctcNigeriaLagos: ctcNigeriaLagos != null ? Number(ctcNigeriaLagos) : 0,
+            ctcLuxembourg: ctcLuxembourg != null ? Number(ctcLuxembourg) : 0,
             category,
         },
     });
@@ -80,7 +84,7 @@ export async function createRateCard(req: Request, res: Response) {
 // PATCH /api/admin/rate-cards/:id — update rate card
 export async function updateRateCard(req: Request, res: Response) {
     const { id } = req.params;
-    const { code, role, skill, experienceBand, masterCtc, mercerCtc, copilot, existingCtc, maxCtc, ctc, category, isActive } = req.body;
+    const { code, role, skill, experienceBand, masterCtc, mercerCtc, copilot, existingCtc, maxCtc, ctc, ctcHyd, ctcPune, ctcNigeriaLagos, ctcLuxembourg, category, isActive } = req.body;
 
     const existing = await prisma.rateCard.findUnique({ where: { id } });
     if (!existing) {
@@ -97,7 +101,7 @@ export async function updateRateCard(req: Request, res: Response) {
         }
     }
 
-    const rateCard = await prisma.rateCard.update({
+    const rateCard = await (prisma.rateCard as any).update({
         where: { id },
         data: {
             ...(code !== undefined && { code }),
@@ -110,6 +114,10 @@ export async function updateRateCard(req: Request, res: Response) {
             ...(existingCtc !== undefined && { existingCtc: Number(existingCtc) }),
             ...(maxCtc !== undefined && { maxCtc: Number(maxCtc) }),
             ...(ctc !== undefined && { ctc: Number(ctc) }),
+            ...(ctcHyd !== undefined && { ctcHyd: Number(ctcHyd) }),
+            ...(ctcPune !== undefined && { ctcPune: Number(ctcPune) }),
+            ...(ctcNigeriaLagos !== undefined && { ctcNigeriaLagos: Number(ctcNigeriaLagos) }),
+            ...(ctcLuxembourg !== undefined && { ctcLuxembourg: Number(ctcLuxembourg) }),
             ...(category !== undefined && { category }),
             ...(isActive !== undefined && { isActive }),
         },

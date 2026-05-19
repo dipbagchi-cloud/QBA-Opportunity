@@ -56,8 +56,7 @@ export function GomCalculatorTab({
         setSpecialCosts
     } = useOpportunityEstimation();
 
-    const hasSalesTarget = salesTargetRevenue > 0;
-    const revenueIsLocked = isReEstimation && hasSalesTarget;
+    const hasSalesTarget = isReEstimation && salesTargetRevenue > 0;
 
     const { format: fmtCurrency, symbol: cSym, convert: convertCurrency, currency: selectedCurrency, getRate, getSymbol } = useCurrency();
 
@@ -238,33 +237,32 @@ export function GomCalculatorTab({
                     <h3 className="text-base font-bold text-slate-800 mb-4">GOM Configuration</h3>
 
                     <div className="space-y-3">
-                        {/* Sales target banner */}
-                        {hasSalesTarget && (
-                            <div className={`flex items-start gap-2 px-3 py-2 rounded-md border ${revenueIsLocked ? 'bg-rose-50 border-rose-300' : 'bg-orange-50 border-orange-300'}`}>
-                                <TrendingUp className={`w-4 h-4 shrink-0 mt-0.5 ${revenueIsLocked ? 'text-rose-600' : 'text-orange-600'}`} />
-                                <div className={`text-xs space-y-0.5 ${revenueIsLocked ? 'text-rose-800' : 'text-orange-800'}`}>
-                                    {revenueIsLocked ? (
-                                        <>
-                                            <div className="font-semibold">Revenue locked at {fmtCurrency(salesTargetRevenue)} (sales target)</div>
-                                            <div className="font-normal opacity-75">GOM is recalculated from this fixed revenue. Markup does not change revenue.</div>
-                                        </>
-                                    ) : (
-                                        <div>
-                                            <span className="font-semibold">Sales target: {fmtCurrency(salesTargetRevenue)}</span>
-                                            {revenue > 0 && (
-                                                <span className="ml-2 font-normal">
-                                                    {revenue < salesTargetRevenue
-                                                        ? `- ${fmtCurrency(salesTargetRevenue - revenue)} below target (raise markup to close gap)`
-                                                        : revenue > salesTargetRevenue
-                                                        ? `- ${fmtCurrency(revenue - salesTargetRevenue)} above target`
-                                                        : `- matches target`}
-                                                </span>
-                                            )}
-                                        </div>
-                                    )}
+                        {/* Sales target banner (re-estimation reference) */}
+                        {hasSalesTarget && (() => {
+                            const diff = revenue - salesTargetRevenue;
+                            const pctDiff = salesTargetRevenue > 0 ? Math.abs(diff / salesTargetRevenue) * 100 : 0;
+                            const isMatch = pctDiff < 0.5;
+                            const isAbove = diff > 0;
+                            const bg = isMatch ? 'bg-green-50 border-green-300' : isAbove ? 'bg-blue-50 border-blue-300' : 'bg-amber-50 border-amber-300';
+                            const ic = isMatch ? 'text-green-600' : isAbove ? 'text-blue-600' : 'text-amber-600';
+                            const tx = isMatch ? 'text-green-800' : isAbove ? 'text-blue-800' : 'text-amber-800';
+                            return (
+                                <div className={`flex items-start gap-2 px-3 py-2 rounded-md border ${bg}`}>
+                                    <TrendingUp className={`w-4 h-4 shrink-0 mt-0.5 ${ic}`} />
+                                    <div className={`text-xs space-y-0.5 ${tx}`}>
+                                        <div className="font-semibold">Sales target: {fmtCurrency(salesTargetRevenue)}</div>
+                                        {revenue > 0 && (
+                                            <div className="font-normal opacity-90">
+                                                {isMatch
+                                                    ? `Current revenue matches the sales target.`
+                                                    : `Current revenue ${fmtCurrency(revenue)} is ${pctDiff.toFixed(1)}% (${fmtCurrency(Math.abs(diff))}) ${isAbove ? 'above' : 'below'} target${!isAbove ? ' — adjust markup to close the gap' : ''}.`
+                                                }
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
-                            </div>
-                        )}
+                            );
+                        })()}
 
                         {/* Configuration Inputs */}
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -449,8 +447,8 @@ export function GomCalculatorTab({
                                     {idx === 0 && <label className="block text-xs font-medium text-slate-700 mb-1">Amount ({cSym})</label>}
                                     <input
                                         type="number"
-                                        value={entry.amount}
-                                        onChange={(e) => { const updated = [...travelCosts]; updated[idx] = { ...entry, amount: Number(e.target.value) }; setTravelCosts(updated); }}
+                                        value={Math.round(entry.amount * (getRate(selectedCurrency) || 1) * 100) / 100}
+                                        onChange={(e) => { const rate = getRate(selectedCurrency) || 1; const updated = [...travelCosts]; updated[idx] = { ...entry, amount: Math.round((Number(e.target.value) / rate) * 100) / 100 }; setTravelCosts(updated); }}
                                         disabled={readOnly}
                                         placeholder="0"
                                         min="0"
@@ -500,8 +498,8 @@ export function GomCalculatorTab({
                             </label>
                             <input
                                 type="number"
-                                value={specialCosts.subcontracting || ''}
-                                onChange={(e) => setSpecialCosts({ ...specialCosts, subcontracting: Number(e.target.value) })}
+                                value={Math.round((specialCosts.subcontracting || 0) * (getRate(selectedCurrency) || 1) * 100) / 100 || ''}
+                                onChange={(e) => { const rate = getRate(selectedCurrency) || 1; setSpecialCosts({ ...specialCosts, subcontracting: Math.round((Number(e.target.value) / rate) * 100) / 100 }); }}
                                 disabled={readOnly}
                                 className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                                 placeholder="0"
@@ -514,8 +512,8 @@ export function GomCalculatorTab({
                             </label>
                             <input
                                 type="number"
-                                value={specialCosts.miscExpense || ''}
-                                onChange={(e) => setSpecialCosts({ ...specialCosts, miscExpense: Number(e.target.value) })}
+                                value={Math.round((specialCosts.miscExpense || 0) * (getRate(selectedCurrency) || 1) * 100) / 100 || ''}
+                                onChange={(e) => { const rate = getRate(selectedCurrency) || 1; setSpecialCosts({ ...specialCosts, miscExpense: Math.round((Number(e.target.value) / rate) * 100) / 100 }); }}
                                 disabled={readOnly}
                                 className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                                 placeholder="0"
@@ -528,8 +526,8 @@ export function GomCalculatorTab({
                             </label>
                             <input
                                 type="number"
-                                value={specialCosts.specialHwCost || ''}
-                                onChange={(e) => setSpecialCosts({ ...specialCosts, specialHwCost: Number(e.target.value) })}
+                                value={Math.round((specialCosts.specialHwCost || 0) * (getRate(selectedCurrency) || 1) * 100) / 100 || ''}
+                                onChange={(e) => { const rate = getRate(selectedCurrency) || 1; setSpecialCosts({ ...specialCosts, specialHwCost: Math.round((Number(e.target.value) / rate) * 100) / 100 }); }}
                                 disabled={readOnly}
                                 className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                                 placeholder="0"
@@ -542,8 +540,8 @@ export function GomCalculatorTab({
                             </label>
                             <input
                                 type="number"
-                                value={specialCosts.specialSwCost || ''}
-                                onChange={(e) => setSpecialCosts({ ...specialCosts, specialSwCost: Number(e.target.value) })}
+                                value={Math.round((specialCosts.specialSwCost || 0) * (getRate(selectedCurrency) || 1) * 100) / 100 || ''}
+                                onChange={(e) => { const rate = getRate(selectedCurrency) || 1; setSpecialCosts({ ...specialCosts, specialSwCost: Math.round((Number(e.target.value) / rate) * 100) / 100 }); }}
                                 disabled={readOnly}
                                 className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                                 placeholder="0"

@@ -1,5 +1,22 @@
 import { apiClient } from './api';
 
+export const LOCATION_KEYS = ['India + Kolkata', 'India + Hyd', 'India + Pune', 'Nigeria + Lagos', 'Luxembourg'] as const;
+export type LocationKey = typeof LOCATION_KEYS[number];
+
+// Maps UI location label → DB field name on rate card
+const LOCATION_CTC_FIELD: Record<string, string> = {
+    'India + Kolkata': 'ctc',
+    'India + Hyd': 'ctcHyd',
+    'India + Pune': 'ctcPune',
+    'Nigeria + Lagos': 'ctcNigeriaLagos',
+    'Luxembourg': 'ctcLuxembourg',
+};
+
+export function getCtcForLocation(rateCard: any, locationKey: string): number {
+    const field = LOCATION_CTC_FIELD[locationKey] ?? 'ctc';
+    return Number((rateCard as any)[field]) || 0;
+}
+
 export interface RateCardEntry {
     id: string;
     code: string;
@@ -7,6 +24,10 @@ export interface RateCardEntry {
     skill: string;
     experienceBand: string;
     ctc: number;
+    ctcHyd: number;
+    ctcPune: number;
+    ctcNigeriaLagos: number;
+    ctcLuxembourg: number;
     category: string;
     isActive: boolean;
 }
@@ -32,7 +53,14 @@ export async function fetchRateCards() {
             skill: r.skill,
             experienceBand: r.experienceBand,
             category: r.category,
-            annualCtc: r.ctc,
+            // All location CTCs (raw, for re-lookup when location changes)
+            ctc: r.ctc || 0,
+            ctcHyd: r.ctcHyd || 0,
+            ctcPune: r.ctcPune || 0,
+            ctcNigeriaLagos: r.ctcNigeriaLagos || 0,
+            ctcLuxembourg: r.ctcLuxembourg || 0,
+            // Derived fields for default location (India + Kolkata) — kept for backward compat
+            annualCtc: r.ctc || 0,
             dailyCost: offDailyCost,
             dailyRate: offDailyRate,
         };

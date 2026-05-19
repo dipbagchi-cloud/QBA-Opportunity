@@ -210,13 +210,14 @@ function formatDuration(value: string, unit: string): string {
 }
 
 // Save button that uses the estimation context (must be inside the provider)
-function PresalesSaveButton({ onAfterSave }: { onAfterSave?: (gomPct: number) => void }) {
+function PresalesSaveButton({ onAfterSave, viewOnly = false }: { onAfterSave?: (gomPct: number) => void; viewOnly?: boolean }) {
     const { saveEstimation, isSaving, readOnly, gomPercent } = useOpportunityEstimation();
     const { toast } = useToast();
 
     if (readOnly) return null;
 
     const handleSave = async () => {
+        if (viewOnly) return;
         try {
             await saveEstimation();
             toast({ title: "Saved", description: "Estimation data saved successfully." });
@@ -230,8 +231,9 @@ function PresalesSaveButton({ onAfterSave }: { onAfterSave?: (gomPct: number) =>
         <div className="flex justify-end mb-2">
             <button
                 onClick={handleSave}
-                disabled={isSaving}
-                className="px-4 py-2 bg-emerald-600 text-white rounded-lg font-semibold text-sm hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-2 shadow-sm"
+                disabled={isSaving || viewOnly}
+                title={viewOnly ? "Switch to Resource Assignment or GOM Calculator to edit and save." : undefined}
+                className="px-4 py-2 bg-emerald-600 text-white rounded-lg font-semibold text-sm hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-sm"
             >
                 {isSaving ? (
                     <><RefreshCw className="w-4 h-4 animate-spin" /> Saving...</>
@@ -322,6 +324,10 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     value: prev.value && !isNaN(Number(prev.value)) ? Math.round((Number(prev.value) * newRate / oldRate) * 100) / 100 : prev.value,
                     expectedDayRate: prev.expectedDayRate ? String(Math.round((Number(prev.expectedDayRate) * newRate / oldRate) * 100) / 100) : ""
                 }));
+                setAdjustedEstimatedValue(prev => {
+                    const n = Number(prev);
+                    return n > 0 ? String(Math.round(n * newRate / oldRate * 100) / 100) : prev;
+                });
             }
             prevCurrencyRef.current = globalCurrency;
             setOpportunityCurrency(globalCurrency);
@@ -840,9 +846,10 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             const countryInfo = countryRegionMap[value];
             const autoRegion = countryInfo?.region || '';
             setFormData(prev => ({ ...prev, country: value, region: autoRegion }));
-            // Auto-switch global currency to the selected country's currency
+            // Auto-switch global currency to the selected country's currency (supported only)
             if (countryInfo?.currency) {
-                setCurrency(countryInfo.currency);
+                const SUPPORTED_CURRENCIES = new Set(['INR', 'USD', 'EUR', 'GBP', 'AED', 'SGD']);
+                setCurrency(SUPPORTED_CURRENCIES.has(countryInfo.currency) ? countryInfo.currency : 'USD');
             }
         } else {
             setFormData(prev => ({ ...prev, [name]: value }));
@@ -1625,7 +1632,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
             {/* PIPELINE VIEW (Step 0) */}
             {activeStep === 0 && (() => {
-                const isPipelineEditable = canEditPipeline && opportunityStage < 3 && !isLost && !isStalled && currentStageName !== 'Proposal' && currentStageName !== 'Negotiation';
+                const isPipelineEditable = canEditPipeline && opportunityStage < 3 && !isLost && !isStalled && currentStageName !== 'Negotiation';
+                const isClientCountryEditable = isPipelineEditable && opportunityStage === 0;
                 const disabledClass = !isPipelineEditable ? "bg-slate-50 cursor-not-allowed opacity-70" : "bg-white";
                 return (
                 <div className="space-y-4 mt-4">
@@ -1684,10 +1692,10 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     options={clients.map(c => ({ value: c.name, label: c.name }))}
                                     onChange={handleChange}
                                     placeholder="Select Client"
-                                    disabled={!isPipelineEditable}
+                                    disabled={!isClientCountryEditable}
                                     required={true}
                                 />
-                                <button type="button" onClick={() => setShowAddClient(true)} disabled={!isPipelineEditable} className="p-2.5 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                                <button type="button" onClick={() => setShowAddClient(true)} disabled={!isClientCountryEditable} className="p-2.5 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                                     <Plus className="w-5 h-5" />
                                 </button>
                             </div>
@@ -1701,7 +1709,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 options={countries.map(c => ({ value: c, label: c }))}
                                 onChange={handleChange}
                                 placeholder="Select Country"
-                                disabled={!isPipelineEditable}
+                                disabled={!isClientCountryEditable}
                                 required={false}
                             />
                         </div>
@@ -1714,7 +1722,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 options={regions.map(r => ({ value: r, label: r }))}
                                 onChange={handleChange}
                                 placeholder="Select Region"
-                                disabled={!isPipelineEditable || !!formData.country}
+                                disabled={!isClientCountryEditable || !!formData.country}
                                 required={true}
                             />
                             {formData.country && <p className="text-xs text-slate-400 mt-0.5">Auto-set from country</p>}
@@ -2076,14 +2084,18 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             ? countWorkingDaysInPeriod(formData.tentativeStartDate, Number(formData.duration) || 0, holidays)
                             : durationToWorkingDays(Number(formData.duration) || 0, formData.durationUnit)
                     }
-                    salesTargetRevenue={Number(adjustedEstimatedValue) || 0}
-                    isReEstimation={detailedStatus === 'Re-estimation'}
+                    salesTargetRevenue={
+                        Number(adjustedEstimatedValue) > 0 && getRate(globalCurrency) > 0
+                            ? Number(adjustedEstimatedValue) / getRate(globalCurrency)
+                            : Number(adjustedEstimatedValue) || 0
+                    }
+                    isReEstimation={detailedStatus === 'Re-estimation' || detailedStatus === 'Sent for Re-estimate'}
                     initialCurrency={globalCurrency}
                     currentUserName={user?.name || ''}
                 >
                     <GomPercentSync onGomPercentChange={setContextGomPercent} />
                     {opportunityStage < 2 && (
-                        <PresalesSaveButton onAfterSave={(gomPct) => {
+                        <PresalesSaveButton viewOnly={activeTab === "Estimation"} onAfterSave={(gomPct) => {
                             if (gomAutoApprovePercent <= 0) return;
                             const gomChangedSinceApproval = approvedGomPercent != null && Math.abs(gomPct - approvedGomPercent) > 0.05;
                             if (gomPct >= gomAutoApprovePercent && !gomApproved) {
@@ -2616,6 +2628,10 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                         {/* TAB CONTENT: Estimation */}
                         {activeTab === "Estimation" && (
                             <div className="p-5">
+                                <div className="mb-4 px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-xs text-slate-500 font-medium flex items-center gap-2">
+                                    <Info className="w-3.5 h-3.5 shrink-0" />
+                                    View only — This tab shows a read-only summary of the estimation. To make changes, use the Resource Assignment or GOM Calculator tabs.
+                                </div>
                                 <EstimationTab />
                             </div>
                         )}

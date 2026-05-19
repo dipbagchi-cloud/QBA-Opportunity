@@ -302,10 +302,14 @@ export default function NewOpportunityPage() {
             const countryInfo = countryRegionMap[value];
             const autoRegion = countryInfo?.region || '';
             setFormData(prev => ({ ...prev, country: value, region: autoRegion }));
-            // Auto-switch global currency to the selected country's currency
+            // Auto-switch global currency to the selected country's currency (supported only)
             if (countryInfo?.currency) {
-                setCurrency(countryInfo.currency);
+                const SUPPORTED_CURRENCIES = new Set(['INR', 'USD', 'EUR', 'GBP', 'AED', 'SGD']);
+                setCurrency(SUPPORTED_CURRENCIES.has(countryInfo.currency) ? countryInfo.currency : 'USD');
             }
+        } else if (name === 'duration') {
+            // Strip decimals — duration must be whole numbers only
+            setFormData(prev => ({ ...prev, duration: value.replace(/\..*/, '') }));
         } else {
             setFormData(prev => ({ ...prev, [name]: value }));
         }
@@ -680,6 +684,7 @@ export default function NewOpportunityPage() {
                                 type="number"
                                 name="duration"
                                 min="1"
+                                step="1"
                                 value={formData.duration}
                                 placeholder="Enter duration"
                                 className="flex-1 px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
