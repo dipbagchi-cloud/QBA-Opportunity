@@ -32,6 +32,8 @@ export function ResourceAssignmentTab() {
         setEffortType,
         durationInDays, // Expected working days from duration field
         isReEstimation,
+        totalResourceCost,
+        salesTargetRevenue,
     } = useOpportunityEstimation();
 
     const { format: fmtCurrency, convert: convertCurrency, symbol: cSym, currency: globalCurrencyCode } = useCurrency();
@@ -590,24 +592,57 @@ export function ResourceAssignmentTab() {
                 </div>
             )}
 
-            {/* Cost Details Section */}
-            <div className="bg-white p-4 rounded-lg border border-slate-200">
-                <h4 className="text-sm font-semibold text-slate-700 mb-3">Cost Details</h4>
-                <div className="grid grid-cols-3 gap-4 text-sm">
-                    <div className="flex items-center gap-2">
-                        <span className="text-slate-600">Currency:</span>
-                        <span className="font-semibold text-slate-900">{globalCurrencyCode}</span>
+            {/* Cost vs Projected Revenue (Sales Target) */}
+            {resources.length > 0 && (() => {
+                const target = Number(salesTargetRevenue) || 0;
+                const cost = Number(totalResourceCost) || 0;
+                const margin = target - cost;
+                const marginPct = target > 0 ? (margin / target) * 100 : 0;
+                const hasTarget = target > 0;
+                const over = hasTarget && cost > target;
+                const tone = !hasTarget
+                    ? 'bg-slate-50 border-slate-300'
+                    : over
+                    ? 'bg-red-50 border-red-300'
+                    : marginPct < 10
+                    ? 'bg-amber-50 border-amber-300'
+                    : 'bg-emerald-50 border-emerald-300';
+                return (
+                    <div className={`p-4 rounded-lg border-2 ${tone}`}>
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <h4 className="text-sm font-semibold text-slate-700 mb-1">Cost vs Projected Revenue</h4>
+                                <p className="text-xs text-slate-500 mb-2">Resource cost compared to the revenue set by Sales in the pipeline</p>
+                                <div className="flex items-center gap-4 text-sm flex-wrap">
+                                    <div>
+                                        <span className="text-slate-600">Projected Revenue: </span>
+                                        <span className="font-bold text-slate-900">{hasTarget ? fmtCurrency(target) : '—'}</span>
+                                    </div>
+                                    <div>
+                                        <span className="text-slate-600">Estimated Cost: </span>
+                                        <span className="font-bold text-slate-900">{fmtCurrency(cost)}</span>
+                                    </div>
+                                    <div>
+                                        <span className="text-slate-600">Margin: </span>
+                                        <span className={`font-bold ${over ? 'text-red-600' : marginPct < 10 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                                            {hasTarget ? `${fmtCurrency(margin)} (${marginPct.toFixed(1)}%)` : '—'}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                            {over && (
+                                <div className="flex items-center gap-2 text-red-600 text-sm font-semibold">
+                                    <AlertCircle className="w-5 h-5" />
+                                    Cost exceeds projected revenue!
+                                </div>
+                            )}
+                            {!hasTarget && (
+                                <div className="text-xs text-slate-500 font-medium">No projected revenue set in pipeline</div>
+                            )}
+                        </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                        <span className="text-slate-600">Total Resources:</span>
-                        <span className="font-semibold text-slate-900">{resources.length}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <span className="text-slate-600">Effort Type:</span>
-                        <span className="font-semibold text-slate-900">{effortType}</span>
-                    </div>
-                </div>
-            </div>
+                );
+            })()}
 
             {/* Edit Resource Modal */}
             {editingResource && (

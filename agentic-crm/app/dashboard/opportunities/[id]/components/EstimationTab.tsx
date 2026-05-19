@@ -48,11 +48,9 @@ export function EstimationTab() {
     };
 
     const workingDaysPerMonth = assumptions.workingDaysPerYear / 12 || 20;
-    const viewOnlyBanner = (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            <span className="font-semibold">View only.</span> Estimation is calculated from available presales data. Fields and save actions are disabled on this tab.
-        </div>
-    );
+    // Yellow "View only" banner removed per request; the gray page-level
+    // notice on the View Estimate tab already conveys read-only state.
+    const viewOnlyBanner = null;
 
     // 1. Grid 1: Billed Resources (Allocated Days)
     const resourceRows = useMemo(() => {

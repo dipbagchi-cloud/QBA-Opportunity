@@ -1655,6 +1655,12 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             {activeStep === 0 && (() => {
                 const isPipelineEditable = canEditPipeline && opportunityStage < 3 && !isLost && !isStalled && currentStageName !== 'Negotiation' && currentStageName !== 'Proposal';
                 const isClientCountryEditable = isPipelineEditable && opportunityStage === 0;
+                // Leadership/assignment fields (Sales Representative, Manager) stay editable
+                // through Pipeline -> Presales -> Sales for any assigned person, and lock
+                // ONLY when the opportunity moves to Negotiation (or Lost/On-Hold/SOW).
+                // Reassigning transfers role access to the new person automatically
+                // (access is resolved by name in buildOpportunityAccess).
+                const isLeadershipEditable = canEditPipeline && opportunityStage < 3 && !isLost && !isStalled && currentStageName !== 'Negotiation';
                 const disabledClass = !isPipelineEditable ? "bg-slate-50 cursor-not-allowed opacity-70" : "bg-white";
                 return (
                 <div className="space-y-4 mt-4">
@@ -1800,7 +1806,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 options={salespersons.map(s => ({ value: s.name, label: `${s.name}${s.department ? ` (${s.department})` : ''}` }))}
                                 onChange={handleChange}
                                 placeholder="Find SalesPerson"
-                                disabled={!isPipelineEditable}
+                                disabled={!isLeadershipEditable}
                                 required={true}
                             />
                         </div>
@@ -2078,7 +2084,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 <XCircle className="w-4 h-4" /> Mark as Lost
                             </button>
                         )}
-                        {isPipelineEditable && (
+                        {(isPipelineEditable || isLeadershipEditable) && (
                             <button
                                 type="submit"
                                 disabled={isSaving}

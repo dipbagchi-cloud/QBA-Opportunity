@@ -76,15 +76,41 @@ export function GomCalculatorTab({
     return (
         <div className="space-y-4">
             {/* Summary Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-3">
                 <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg p-3 text-white shadow-lg">
                     <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs font-medium opacity-90">Total Revenue</span>
+                        <span className="text-xs font-medium opacity-90">Total Quote</span>
                         <TrendingUp className="w-4 h-4 opacity-75" />
                     </div>
                     <div className="text-xl font-bold">{fmtCurrency(revenue)}</div>
-                    <div className="text-[10px] opacity-75 mt-0.5">Quote Price</div>
+                    <div className="text-[10px] opacity-75 mt-0.5">Calculated Quote Price</div>
                 </div>
+
+                <div className="bg-gradient-to-br from-cyan-500 to-cyan-600 rounded-lg p-3 text-white shadow-lg">
+                    <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs font-medium opacity-90">Projected Revenue</span>
+                        <TrendingUp className="w-4 h-4 opacity-75" />
+                    </div>
+                    <div className="text-xl font-bold">{fmtCurrency(salesTargetRevenue)}</div>
+                    <div className="text-[10px] opacity-75 mt-0.5">Set by Sales (Pipeline)</div>
+                </div>
+
+                {(() => {
+                    const diff = salesTargetRevenue - revenue;
+                    const within = diff >= 0;
+                    return (
+                        <div className={`bg-gradient-to-br rounded-lg p-3 text-white shadow-lg ${within ? 'from-emerald-500 to-emerald-600' : 'from-rose-500 to-rose-600'}`}>
+                            <div className="flex items-center justify-between mb-1">
+                                <span className="text-xs font-medium opacity-90">Difference</span>
+                                <span className="text-[10px] font-semibold px-1.5 py-0.5 bg-white/20 rounded">
+                                    {within ? 'Within' : 'Over'}
+                                </span>
+                            </div>
+                            <div className="text-xl font-bold">{fmtCurrency(Math.abs(diff))}</div>
+                            <div className="text-[10px] opacity-75 mt-0.5">Projected − Quote</div>
+                        </div>
+                    );
+                })()}
 
                 <div className="bg-gradient-to-br from-slate-700 to-slate-800 rounded-lg p-3 text-white shadow-lg">
                     <div className="flex items-center justify-between mb-1">
@@ -213,26 +239,6 @@ export function GomCalculatorTab({
                     </div>
                 );
             })()}
-
-            {/* Budget Assumptions (Read-Only from Admin Settings) */}
-            <div>
-                <h3 className="text-base font-bold text-slate-800 mb-3">Budget Assumptions <span className="text-xs font-normal text-slate-500">(Configured by Admin)</span></h3>
-                <div className="bg-slate-50 rounded-lg border border-slate-200 p-4">
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                        <div><span className="text-slate-500">Margin:</span> <span className="font-semibold">{assumptions.marginPercent}%</span></div>
-                        <div><span className="text-slate-500">Working Days/Year:</span> <span className="font-semibold">{assumptions.workingDaysPerYear}</span></div>
-                        <div><span className="text-slate-500">Delivery Mgmt:</span> <span className="font-semibold">{assumptions.deliveryMgmtPercent}%</span></div>
-                        <div><span className="text-slate-500">Bench:</span> <span className="font-semibold">{assumptions.benchPercent}%</span></div>
-                        <div><span className="text-slate-500">Leave Eligibility:</span> <span className="font-semibold">{assumptions.leaveEligibilityPercent}%</span></div>
-                        <div><span className="text-slate-500">Growth Buffer:</span> <span className="font-semibold">{assumptions.annualGrowthBufferPercent}%</span></div>
-                        <div><span className="text-slate-500">Increments:</span> <span className="font-semibold">{assumptions.averageIncrementPercent}%</span></div>
-                        <div><span className="text-slate-500">Bonus:</span> <span className="font-semibold">{assumptions.bonusPercent}%</span></div>
-                        <div><span className="text-slate-500">Indirect Cost:</span> <span className="font-semibold">{assumptions.indirectCostPercent}%</span></div>
-                        <div><span className="text-slate-500">Welfare/FTE:</span> <span className="font-semibold">{fmtCurrency(assumptions.welfarePerFte)}</span></div>
-                        <div><span className="text-slate-500">Training/FTE:</span> <span className="font-semibold">{fmtCurrency(assumptions.trainingPerFte)}</span></div>
-                    </div>
-                </div>
-            </div>
 
             {/* GOM Configuration & Travel Costs */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -687,6 +693,26 @@ export function GomCalculatorTab({
                         1 INR = {selectedRate.toFixed(4)} {selectedCurrency}
                     </span>
                     <span className="text-slate-400">• Live conversion</span>
+                </div>
+            </div>
+
+            {/* Budget Assumptions (Read-Only from Admin Settings) — shown at bottom */}
+            <div>
+                <h3 className="text-base font-bold text-slate-800 mb-3">Budget Assumptions <span className="text-xs font-normal text-slate-500">(Configured by Admin)</span></h3>
+                <div className="bg-slate-50 rounded-lg border border-slate-200 p-4">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                        <div><span className="text-slate-500">Margin:</span> <span className="font-semibold">{assumptions.marginPercent}%</span></div>
+                        <div><span className="text-slate-500">Working Days/Year:</span> <span className="font-semibold">{assumptions.workingDaysPerYear}</span></div>
+                        <div><span className="text-slate-500">Delivery Mgmt:</span> <span className="font-semibold">{assumptions.deliveryMgmtPercent}%</span></div>
+                        <div><span className="text-slate-500">Bench:</span> <span className="font-semibold">{assumptions.benchPercent}%</span></div>
+                        <div><span className="text-slate-500">Leave Eligibility:</span> <span className="font-semibold">{assumptions.leaveEligibilityPercent}%</span></div>
+                        <div><span className="text-slate-500">Growth Buffer:</span> <span className="font-semibold">{assumptions.annualGrowthBufferPercent}%</span></div>
+                        <div><span className="text-slate-500">Increments:</span> <span className="font-semibold">{assumptions.averageIncrementPercent}%</span></div>
+                        <div><span className="text-slate-500">Bonus:</span> <span className="font-semibold">{assumptions.bonusPercent}%</span></div>
+                        <div><span className="text-slate-500">Indirect Cost:</span> <span className="font-semibold">{assumptions.indirectCostPercent}%</span></div>
+                        <div><span className="text-slate-500">Welfare/FTE:</span> <span className="font-semibold">{fmtCurrency(assumptions.welfarePerFte)}</span></div>
+                        <div><span className="text-slate-500">Training/FTE:</span> <span className="font-semibold">{fmtCurrency(assumptions.trainingPerFte)}</span></div>
+                    </div>
                 </div>
             </div>
         </div>
