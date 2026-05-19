@@ -963,7 +963,11 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
 
-        if (!hasEditAccess) {
+        // The pipeline form must gate on pipeline edit permission specifically —
+        // NOT the stage-dependent hasEditAccess (which checks presales/sales perms
+        // once the opportunity moves past Pipeline stage and would wrongly block an
+        // assigned sales rep/manager from editing pipeline fields in presales/sales).
+        if (!canEditPipeline) {
             toast({ title: "View Only", description: viewOnlyReason || "You do not have permission to edit this opportunity." });
             return;
         }
