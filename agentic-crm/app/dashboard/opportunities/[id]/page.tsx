@@ -111,6 +111,105 @@ function SearchableSelect({ name, value, options, disabled, onChange, placeholde
     );
 }
 
+function SearchableMultiSelect({ name, value, options, disabled, onChange, placeholder, className }: any) {
+    const [open, setOpen] = useState(false);
+    const [search, setSearch] = useState("");
+    const ref = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (ref.current && !ref.current.contains(e.target as Node)) {
+                setOpen(false);
+            }
+        };
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, []);
+
+    const selectedValues = (value || "")
+        .split(",")
+        .map((v: string) => v.trim())
+        .filter(Boolean);
+    const selectedSet = new Set(selectedValues.map((v: string) => v.toLowerCase()));
+    const filtered = options.filter((o: any) => o.label.toLowerCase().includes(search.toLowerCase()));
+
+    const emitChange = (nextValues: string[]) => {
+        onChange({ target: { name, value: nextValues.join(", ") } });
+    };
+
+    const toggleOption = (optionValue: string) => {
+        const exists = selectedValues.some((v: string) => v.toLowerCase() === optionValue.toLowerCase());
+        emitChange(exists ? selectedValues.filter((v: string) => v.toLowerCase() !== optionValue.toLowerCase()) : [...selectedValues, optionValue]);
+    };
+
+    return (
+        <div className="relative w-full" ref={ref}>
+            <div
+                className={`w-full min-h-[42px] px-3 py-2 border border-slate-300 rounded-md text-sm shadow-sm flex items-center justify-between gap-2 ${disabled ? 'bg-slate-50 cursor-not-allowed opacity-70' : 'bg-white cursor-pointer'} ${className || ''}`}
+                onClick={() => { if (!disabled) { setOpen(!open); setSearch(""); } }}
+            >
+                <div className="flex-1 flex flex-wrap gap-1">
+                    {selectedValues.length > 0 ? selectedValues.map((selected: string) => (
+                        <span key={selected} className="inline-flex items-center gap-1 bg-amber-50 text-amber-800 text-xs px-2 py-0.5 rounded-full border border-amber-200">
+                            {selected}
+                            {!disabled && (
+                                <button
+                                    type="button"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        emitChange(selectedValues.filter((v: string) => v !== selected));
+                                    }}
+                                    className="hover:text-red-600"
+                                >
+                                    <X className="w-3 h-3" />
+                                </button>
+                            )}
+                        </span>
+                    )) : <span className="text-slate-400">{placeholder}</span>}
+                </div>
+                <ChevronDown className="w-4 h-4 text-slate-400 flex-shrink-0" />
+            </div>
+            {open && (
+                <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg">
+                    <div className="p-2 border-b border-slate-100">
+                        <div className="flex items-center gap-2 px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-md">
+                            <Search className="w-3.5 h-3.5 text-slate-400" />
+                            <input
+                                type="text"
+                                placeholder="Search..."
+                                value={search}
+                                onChange={(e) => setSearch(e.target.value)}
+                                className="flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400"
+                                autoFocus
+                            />
+                        </div>
+                    </div>
+                    <div className="max-h-48 overflow-y-auto">
+                        {filtered.map((o: any) => {
+                            const checked = selectedSet.has(o.value.toLowerCase());
+                            return (
+                                <label
+                                    key={o.value}
+                                    className={`flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-slate-50 ${checked ? 'bg-amber-50 text-amber-800 font-medium' : 'text-slate-700'}`}
+                                >
+                                    <input
+                                        type="checkbox"
+                                        className="w-3.5 h-3.5 rounded border-slate-300 text-amber-600 focus:ring-amber-500"
+                                        checked={checked}
+                                        onChange={() => toggleOption(o.value)}
+                                    />
+                                    {o.label}
+                                </label>
+                            );
+                        })}
+                        {filtered.length === 0 && <div className="px-3 py-4 text-sm text-slate-400 text-center">No results found</div>}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
 // Convert duration value + unit to total months (for end date / value calcs)
 function durationToDays(value: number, unit: string): number {
     switch (unit) {
@@ -295,6 +394,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const [managers, setManagers] = useState<{ id: string; name: string; department: string }[]>([]);
     const [isLoadingManagers, setIsLoadingManagers] = useState(false);
     const [opportunityManagerName, setOpportunityManagerName] = useState("");
+    const [presalesTeam, setPresalesTeam] = useState<{ id: string; name: string; department?: string | null }[]>([]);
+    const [isLoadingPresalesTeam, setIsLoadingPresalesTeam] = useState(false);
     const [projectTypes, setProjectTypes] = useState<string[]>([]);
     const [autoSaveIntervalMinutes, setAutoSaveIntervalMinutes] = useState(2);
 
@@ -481,6 +582,41 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             .catch(() => setManagers([]))
             .finally(() => setIsLoadingManagers(false));
     }, [showPresalesModal, formData.practice]);
+
+    useEffect(() => {
+        let cancelled = false;
+        const dept = formData.practice;
+        const managerUrl = dept
+            ? `${API_URL}/api/master/managers?department=${encodeURIComponent(dept)}`
+            : `${API_URL}/api/master/managers`;
+        const presalesUrl = dept
+            ? `${API_URL}/api/master/presales-team?department=${encodeURIComponent(dept)}`
+            : `${API_URL}/api/master/presales-team`;
+
+        setIsLoadingManagers(true);
+        setIsLoadingPresalesTeam(true);
+        Promise.all([
+            fetch(managerUrl, { headers: getAuthHeaders() }).then(r => r.ok ? r.json() : []),
+            fetch(presalesUrl, { headers: getAuthHeaders() }).then(r => r.ok ? r.json() : []),
+        ])
+            .then(([managerData, presalesData]) => {
+                if (cancelled) return;
+                setManagers(Array.isArray(managerData) ? managerData : []);
+                setPresalesTeam(Array.isArray(presalesData) ? presalesData : []);
+            })
+            .catch(() => {
+                if (cancelled) return;
+                setManagers([]);
+                setPresalesTeam([]);
+            })
+            .finally(() => {
+                if (cancelled) return;
+                setIsLoadingManagers(false);
+                setIsLoadingPresalesTeam(false);
+            });
+
+        return () => { cancelled = true; };
+    }, [formData.practice]);
 
     // Click-outside handler for tech dropdown
     useEffect(() => {
@@ -760,6 +896,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 }
 
                 setOpportunityManagerName(data.managerName || "");
+                setPresalesForm(prev => ({ ...prev, managerName: data.managerName || "" }));
                 setAdjustedEstimatedValue(data.adjustedEstimatedValue != null ? String(data.adjustedEstimatedValue) : "");
                 setDetailedStatus(data.detailedStatus || "");
                 setGomApproved(data.gomApproved === true);
@@ -996,7 +1133,13 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             const res = await fetch(`${API_URL}/api/opportunities/${id}`, {
                 method: 'PATCH',
                 headers: getAuthHeaders(),
-                body: JSON.stringify({ ...formData, currency: globalCurrency })
+                body: JSON.stringify({
+                    ...formData,
+                    salesRepName: formData.salesRep,
+                    managerName: opportunityManagerName,
+                    presalesAssigneeName: formData.presalesAssignee,
+                    currency: globalCurrency
+                })
             });
 
             if (res.ok) {
@@ -1005,6 +1148,9 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 const rawValue: any = formData.value;
                 if (rawValue !== '' && rawValue !== undefined) optimisticUpdates.value = Number(rawValue);
                 optimisticUpdates.currency = globalCurrency;
+                optimisticUpdates.salesRepName = formData.salesRep;
+                optimisticUpdates.managerName = opportunityManagerName;
+                optimisticUpdates.presalesAssigneeName = formData.presalesAssignee;
                 useOpportunityStore.setState((state) => ({
                     opportunities: state.opportunities.map((opp) =>
                         opp.id === id ? { ...opp, ...optimisticUpdates } : opp
@@ -1013,7 +1159,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 setOpportunityCurrency(globalCurrency);
                 toast({ title: "Success", description: "Opportunity updated successfully!" });
             } else {
-                toast({ title: "Error", description: "Failed to save changes. Please check all fields." });
+                const errorData = await res.json().catch(() => ({}));
+                toast({ title: "Error", description: errorData.error || "Failed to save changes. Please check all fields." });
             }
         } catch (error) {
             console.error("Update failed", error);
@@ -1463,7 +1610,10 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     {canEditPipeline && opportunityStage === 0 && !isLost && (
                         <>
                             <button
-                                onClick={() => setShowPresalesModal(true)}
+                                onClick={() => {
+                                    setPresalesForm(prev => ({ ...prev, managerName: prev.managerName || opportunityManagerName }));
+                                    setShowPresalesModal(true);
+                                }}
                                 disabled={isStalled}
                                 className={`px-4 py-2 text-white rounded-md font-medium ${isStalled ? 'bg-slate-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
                             >
@@ -1655,12 +1805,20 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             {activeStep === 0 && (() => {
                 const isPipelineEditable = canEditPipeline && opportunityStage < 3 && !isLost && !isStalled && currentStageName !== 'Negotiation' && currentStageName !== 'Proposal';
                 const isClientCountryEditable = isPipelineEditable && opportunityStage === 0;
-                // Leadership/assignment fields (Sales Representative, Manager) stay editable
-                // through Pipeline -> Presales -> Sales for any assigned person, and lock
-                // ONLY when the opportunity moves to Negotiation (or Lost/On-Hold/SOW).
-                // Reassigning transfers role access to the new person automatically
-                // (access is resolved by name in buildOpportunityAccess).
-                const isLeadershipEditable = canEditPipeline && opportunityStage < 3 && !isLost && !isStalled && currentStageName !== 'Negotiation';
+                // Assignment ownership stays editable through Pipeline -> Presales -> Sales,
+                // then locks once the opportunity moves to Negotiation.
+                const assignmentWindowOpen = canEditPipeline && opportunityStage < 3 && !isLost && !isStalled && currentStageName !== 'Negotiation';
+                const activeRoleName = (user?.role?.name || "").trim().toLowerCase();
+                const isActiveAdmin = !!user?.role?.permissions?.includes("*") || activeRoleName === "admin";
+                const canEditSalesRepAssignment = assignmentWindowOpen && (isActiveAdmin || activeRoleName === "sales");
+                const canEditManagerAssignment = assignmentWindowOpen && (isActiveAdmin || activeRoleName === "manager");
+                const canEditPresalesAssignment = assignmentWindowOpen && (isActiveAdmin || activeRoleName === "presales");
+                const hasAssignmentEdit = canEditSalesRepAssignment || canEditManagerAssignment || canEditPresalesAssignment;
+                const managerOptions = managers.map(m => ({ value: m.name, label: `${m.name}${m.department ? ` (${m.department})` : ''}` }));
+                if (opportunityManagerName && !managerOptions.some(o => o.value === opportunityManagerName)) {
+                    managerOptions.unshift({ value: opportunityManagerName, label: opportunityManagerName });
+                }
+                const presalesOptions = presalesTeam.map(p => ({ value: p.name, label: `${p.name}${p.department ? ` (${p.department})` : ''}` }));
                 const disabledClass = !isPipelineEditable ? "bg-slate-50 cursor-not-allowed opacity-70" : "bg-white";
                 return (
                 <div className="space-y-4 mt-4">
@@ -1806,8 +1964,37 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 options={salespersons.map(s => ({ value: s.name, label: `${s.name}${s.department ? ` (${s.department})` : ''}` }))}
                                 onChange={handleChange}
                                 placeholder="Find SalesPerson"
-                                disabled={!isLeadershipEditable}
+                                disabled={!canEditSalesRepAssignment}
                                 required={true}
+                            />
+                        </div>
+
+                        <div className="space-y-1.5">
+                            <label className="block text-sm font-bold text-slate-700">Manager</label>
+                            <SearchableSelect
+                                name="managerName"
+                                value={opportunityManagerName}
+                                options={managerOptions}
+                                onChange={(e: any) => {
+                                    const nextManager = e.target.value;
+                                    setOpportunityManagerName(nextManager);
+                                    setPresalesForm(prev => ({ ...prev, managerName: nextManager }));
+                                }}
+                                placeholder={isLoadingManagers ? "Loading managers..." : "Select Manager"}
+                                disabled={!canEditManagerAssignment || isLoadingManagers}
+                                required={false}
+                            />
+                        </div>
+
+                        <div className="space-y-1.5">
+                            <label className="block text-sm font-bold text-slate-700">Presales Assignee</label>
+                            <SearchableMultiSelect
+                                name="presalesAssignee"
+                                value={formData.presalesAssignee}
+                                options={presalesOptions}
+                                onChange={handleChange}
+                                placeholder={isLoadingPresalesTeam ? "Loading presales..." : "Select Presales"}
+                                disabled={!canEditPresalesAssignment || isLoadingPresalesTeam}
                             />
                         </div>
 
@@ -2084,7 +2271,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 <XCircle className="w-4 h-4" /> Mark as Lost
                             </button>
                         )}
-                        {(isPipelineEditable || isLeadershipEditable) && (
+                        {(isPipelineEditable || hasAssignmentEdit) && (
                             <button
                                 type="submit"
                                 disabled={isSaving}
@@ -3119,6 +3306,9 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                         onChange={(e) => setPresalesForm({ ...presalesForm, managerName: e.target.value })}
                                     >
                                         <option value="">Select Manager</option>
+                                        {presalesForm.managerName && !managers.some(m => m.name === presalesForm.managerName) && (
+                                            <option value={presalesForm.managerName}>{presalesForm.managerName}</option>
+                                        )}
                                         {managers.length > 0
                                             ? managers.map(m => (
                                                 <option key={m.id} value={m.name}>{m.name}{m.department ? ` (${m.department})` : ''}</option>

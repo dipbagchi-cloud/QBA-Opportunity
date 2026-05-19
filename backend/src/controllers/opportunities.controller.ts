@@ -437,6 +437,51 @@ export async function updateOpportunity(req: Request, res: Response) {
         // Handle Stage Transition
         let stageUpdate: any = {};
         const newStageName = body.stageName || body.stage;
+        const previousStageName = previous?.stage?.name || previous?.currentStage || '';
+        const activeRoleName = (req.user!.roleName || '').trim().toLowerCase();
+        const isAdminRole = (req.user!.permissions || []).includes('*') || activeRoleName === 'admin';
+        const normalizeAssignment = (value: unknown) => String(value ?? '').trim();
+        const assignmentValueChanged = (nextValue: unknown, previousValue: unknown) =>
+            nextValue !== undefined && normalizeAssignment(nextValue) !== normalizeAssignment(previousValue);
+
+        const submittedSalesRepName = body.salesRepName !== undefined ? body.salesRepName : body.salesRep;
+        const salesRepChanged = assignmentValueChanged(submittedSalesRepName, previous?.salesRepName);
+        const managerChanged = assignmentValueChanged(body.managerName, previous?.managerName);
+        const presalesAssigneeChanged = assignmentValueChanged(body.presalesAssigneeName, previous?.presalesAssigneeName);
+
+        if (salesRepChanged || managerChanged || presalesAssigneeChanged) {
+            const lockedAssignmentStages = new Set(['Negotiation', 'Closed Won', 'Closed-Won', 'Closed Lost', 'Proposal Lost', 'Delivered']);
+            if (lockedAssignmentStages.has(previousStageName) || previous?.isStalled || previous?.detailedStatus === 'On Hold') {
+                return res.status(400).json({ error: 'Assignment fields are locked for this opportunity stage/status.' });
+            }
+
+            const isInitialMoveToPresales =
+                newStageName === 'Qualification' &&
+                !['Qualification', 'Presales', 'Proposal', 'Negotiation'].includes(previousStageName);
+            const invalidAssignmentEdits: string[] = [];
+
+            if (salesRepChanged && !isAdminRole && activeRoleName !== 'sales') {
+                invalidAssignmentEdits.push('Sales Rep');
+            }
+            if (managerChanged && !isAdminRole && activeRoleName !== 'manager' && !isInitialMoveToPresales) {
+                invalidAssignmentEdits.push('Manager');
+            }
+            if (
+                presalesAssigneeChanged &&
+                !isAdminRole &&
+                activeRoleName !== 'presales' &&
+                !(activeRoleName === 'manager' && access.assignment.isManager)
+            ) {
+                invalidAssignmentEdits.push('Presales Assignee');
+            }
+
+            if (invalidAssignmentEdits.length > 0) {
+                return res.status(403).json({
+                    error: `Your active role cannot update: ${invalidAssignmentEdits.join(', ')}.`,
+                });
+            }
+        }
+
         if (newStageName) {
             const stage = await prisma.stage.findFirst({ where: { name: newStageName } });
             if (stage) {
@@ -581,6 +626,12 @@ export async function updateOpportunity(req: Request, res: Response) {
             changes.push(`Technology changed from '${previous?.technology || ''}' to '${body.technology}'`);
         if (body.pricingModel !== undefined && body.pricingModel !== previous?.pricingModel)
             changes.push(`Pricing Model changed from '${previous?.pricingModel || ''}' to '${body.pricingModel}'`);
+        if (salesRepChanged)
+            changes.push(`Sales Rep changed from '${previous?.salesRepName || ''}' to '${submittedSalesRepName}'`);
+        if (managerChanged)
+            changes.push(`Manager changed from '${previous?.managerName || ''}' to '${body.managerName}'`);
+        if (presalesAssigneeChanged)
+            changes.push(`Presales Assignee changed from '${previous?.presalesAssigneeName || ''}' to '${body.presalesAssigneeName}'`);
         if (body.presalesData !== undefined) {
             const prevPresales = JSON.stringify(previous?.presalesData || '');
             const newPresales = JSON.stringify(body.presalesData);
