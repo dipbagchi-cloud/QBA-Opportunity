@@ -552,9 +552,15 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const activeRoleName = (user?.role?.name || "").trim().toLowerCase();
     const isActiveAdmin = !!user?.role?.permissions?.includes("*") || activeRoleName === "admin";
     const baseAssignmentLock = opportunityStage >= 3 || isLost || isStalled || currentStageName === 'Negotiation';
-    const canEditSalesRepAssignment = !baseAssignmentLock && (isActiveAdmin || activeRoleName === "sales") && (activeStep === 0 || activeStep === 2);
-    const canEditManagerAssignment = !baseAssignmentLock && (isActiveAdmin || activeRoleName === "manager") && (activeStep === 1 || activeStep === 2);
-    const canEditPresalesAssignment = !baseAssignmentLock && (isActiveAdmin || activeRoleName === "presales" || (activeRoleName === "manager" && opportunityAccess?.assignment?.isManager)) && (activeStep === 0 || activeStep === 1);
+    // Stage rules mirror backend validation in opportunities.controller.ts updateOpportunity().
+    // Drive the gate off the opportunity's current Kanban stage, not the active tab —
+    // a manager/sales/presales user must be able to reassign from any tab they can view.
+    const salesRepStageAllowed = isActiveAdmin || ['Discovery', 'Proposal'].includes(currentStageName);
+    const managerStageAllowed = isActiveAdmin || ['Qualification', 'Proposal'].includes(currentStageName);
+    const presalesStageAllowed = isActiveAdmin || ['Discovery', 'Qualification'].includes(currentStageName);
+    const canEditSalesRepAssignment = !baseAssignmentLock && (isActiveAdmin || activeRoleName === "sales") && salesRepStageAllowed;
+    const canEditManagerAssignment = !baseAssignmentLock && (isActiveAdmin || activeRoleName === "manager") && managerStageAllowed;
+    const canEditPresalesAssignment = !baseAssignmentLock && (isActiveAdmin || activeRoleName === "presales" || (activeRoleName === "manager" && opportunityAccess?.assignment?.isManager)) && presalesStageAllowed;
 
     // Technology multiselect state
     const [techDropdownOpen, setTechDropdownOpen] = useState(false);
