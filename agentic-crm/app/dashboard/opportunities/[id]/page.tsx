@@ -377,7 +377,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const steps = ["Pipeline", "Presales", "Sales", "SOW", "Project"];
     const isManagerOrAdmin = !!opportunityAccess?.permissions?.approvals?.manage;
     const canApproveGom = !!opportunityAccess?.permissions?.approvals?.manage;
-    const canViewPipeline = !!opportunityAccess?.permissions?.pipeline?.view;
+    const canViewPipeline = !!(opportunityAccess?.permissions?.pipeline?.view || opportunityAccess?.workflow?.pipelineEditable);
     const canViewPresales = !!(opportunityAccess?.permissions?.presales?.view || opportunityAccess?.permissions?.estimation?.manage || opportunityAccess?.permissions?.gom?.view || opportunityAccess?.permissions?.approvals?.manage);
     const canViewSales = !!opportunityAccess?.permissions?.sales?.view;
     const canViewProject = !!(opportunityAccess?.permissions?.sales?.view || opportunityAccess?.permissions?.sow?.view);
