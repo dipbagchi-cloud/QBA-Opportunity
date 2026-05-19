@@ -48,6 +48,11 @@ export function EstimationTab() {
     };
 
     const workingDaysPerMonth = assumptions.workingDaysPerYear / 12 || 20;
+    const viewOnlyBanner = (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            <span className="font-semibold">View only.</span> Estimation is calculated from available presales data. Fields and save actions are disabled on this tab.
+        </div>
+    );
 
     // 1. Grid 1: Billed Resources (Allocated Days)
     const resourceRows = useMemo(() => {
@@ -172,20 +177,24 @@ export function EstimationTab() {
     // Show message if no data
     if (resources.length === 0) {
         return (
-            <div className="flex flex-col items-center justify-center py-12 px-4">
-                <Info className="w-12 h-12 text-slate-300 mb-3" />
-                <h3 className="text-base font-semibold text-slate-700 mb-2">No Resources Assigned</h3>
-                <p className="text-sm text-slate-500 text-center max-w-md">
-                    {readOnly
-                        ? "Estimation summary will appear here once presales resources and monthly efforts are available."
-                        : <>Please go to the <strong>Resource Assignment</strong> tab to add resources and define monthly efforts before viewing the estimation summary.</>}
-                </p>
+            <div className="space-y-4">
+                {viewOnlyBanner}
+                <div className="flex flex-col items-center justify-center py-12 px-4">
+                    <Info className="w-12 h-12 text-slate-300 mb-3" />
+                    <h3 className="text-base font-semibold text-slate-700 mb-2">No Resources Assigned</h3>
+                    <p className="text-sm text-slate-500 text-center max-w-md">
+                        {readOnly
+                            ? "Estimation summary will appear here once presales resources and monthly efforts are available."
+                            : <>Please go to the <strong>Resource Assignment</strong> tab to add resources and define monthly efforts before viewing the estimation summary.</>}
+                    </p>
+                </div>
             </div>
         );
     }
 
     return (
         <div className="space-y-4 animate-in fade-in duration-500">
+            {viewOnlyBanner}
 
             {/* Top Bar: Quote Price */}
             <div className="bg-gradient-to-r from-slate-900 to-slate-800 rounded-lg p-4 text-white shadow-xl flex flex-col md:flex-row justify-between items-center gap-4">
@@ -219,7 +228,7 @@ export function EstimationTab() {
                         <thead className="bg-slate-100 text-slate-700 font-medium sticky top-0 z-10 shadow-sm">
                             <tr>
                                 <th className="p-2 border-r border-b w-64 min-w-[200px] bg-slate-100 sticky left-0 z-20 shadow-[1px_0_0_0_rgba(0,0,0,0.05)]">Resource Skill Set</th>
-                                {months.map(m => <th key={m} className="p-2 text-center w-24 min-w-[80px] border-r border-b bg-slate-100">{DateFormat(m)}</th>)}
+                                {months.map(m => <th key={m} className="p-2 text-center w-24 min-w-[80px] border-r border-b bg-slate-100">{DateFormat(m)} (Days)</th>)}
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">

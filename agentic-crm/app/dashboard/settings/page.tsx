@@ -1742,7 +1742,7 @@ function RateCardsTab() {
             <div className="flex items-center justify-between">
                 <div>
                     <h3 className="text-base font-bold text-slate-900">Rate Card Management</h3>
-                    <p className="text-xs text-slate-500 mt-0.5">Columns: Skill, Experience Band, Master CTC, Mercer CTC, Copilot, Existing CTC, Max — matching the Excel</p>
+                    <p className="text-xs text-slate-500 mt-0.5">Columns include country/city CTCs used by resource assignment. The base CTC column is India + Kolkata.</p>
                 </div>
                 {!isEditing && (
                     <button onClick={openCreate} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 transition-colors">
@@ -1878,19 +1878,19 @@ function RateCardsTab() {
                                         {rc.mercerCtc != null ? fmtCurrency(rc.mercerCtc, { compact: true }) : '-'}
                                     </td>
                                     <td className="px-3 py-2 text-right font-mono font-semibold text-indigo-700">
-                                        {rc.ctc ? fmtCurrency(rc.ctc, { compact: true }) : <span className="text-slate-300">—</span>}
+                                        {fmtCurrency(Number(rc.ctc) || 0, { compact: true })}
                                     </td>
                                     <td className="px-3 py-2 text-right font-mono text-indigo-700">
-                                        {rc.ctcHyd ? fmtCurrency(rc.ctcHyd, { compact: true }) : <span className="text-slate-300">—</span>}
+                                        {fmtCurrency(Number(rc.ctcHyd) || 0, { compact: true })}
                                     </td>
                                     <td className="px-3 py-2 text-right font-mono text-indigo-700">
-                                        {rc.ctcPune ? fmtCurrency(rc.ctcPune, { compact: true }) : <span className="text-slate-300">—</span>}
+                                        {fmtCurrency(Number(rc.ctcPune) || 0, { compact: true })}
                                     </td>
                                     <td className="px-3 py-2 text-right font-mono text-indigo-700">
-                                        {rc.ctcNigeriaLagos ? fmtCurrency(rc.ctcNigeriaLagos, { compact: true }) : <span className="text-slate-300">—</span>}
+                                        {fmtCurrency(Number(rc.ctcNigeriaLagos) || 0, { compact: true })}
                                     </td>
                                     <td className="px-3 py-2 text-right font-mono text-indigo-700">
-                                        {rc.ctcLuxembourg ? fmtCurrency(rc.ctcLuxembourg, { compact: true }) : <span className="text-slate-300">—</span>}
+                                        {fmtCurrency(Number(rc.ctcLuxembourg) || 0, { compact: true })}
                                     </td>
                                     <td className="px-3 py-2 text-right">
                                         <div className="flex items-center justify-end gap-2">

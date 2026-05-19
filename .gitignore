@@ -12,6 +12,12 @@ node_modules
 dist
 coverage
 .vscode
+*.log
+*.err.log
+__pycache__/
+.pytest_cache/
+tests/selenium/.wdm/
+backend/prisma/.rbac-ui-test/
 
 # Runtime user uploads (not source)
 backend/uploads/attachments/

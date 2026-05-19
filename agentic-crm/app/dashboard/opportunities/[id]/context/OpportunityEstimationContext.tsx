@@ -9,6 +9,8 @@ import { useCurrency } from "@/components/providers/currency-provider";
 interface ResourceRow {
     id: string;
     role: string;
+    country?: string;
+    city?: string;
     locationKey?: string;   // e.g. "India + Kolkata" — drives rate lookup
     rateCardCode?: string;  // original rate card code, for re-lookup on location change
     baseLocation: string;

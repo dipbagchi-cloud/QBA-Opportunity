@@ -2,7 +2,14 @@
 
 import { useState, useMemo, useEffect } from "react";
 import { Plus, Trash2, Search, Edit2, X, AlertCircle } from "lucide-react";
-import { fetchRateCards, LOCATION_KEYS, getCtcForLocation } from "@/lib/rate-cards";
+import {
+    RATE_CARD_COUNTRIES,
+    fetchRateCards,
+    getCitiesForCountry,
+    getCtcForLocation,
+    getLocationKey,
+    getLocationParts,
+} from "@/lib/rate-cards";
 import { useOpportunityEstimation, ResourceRow } from "../context/OpportunityEstimationContext";
 import { calculateRateCard } from "@/lib/gom-calculator";
 import { useCurrency } from "@/components/providers/currency-provider";
@@ -34,7 +41,13 @@ export function ResourceAssignmentTab() {
     const [searchTerm, setSearchTerm] = useState("");
     const [rateCards, setRateCards] = useState<any[]>([]);
     const [editingResource, setEditingResource] = useState<ResourceRow | null>(null);
-    const [selectedAddLocation, setSelectedAddLocation] = useState<string>("India + Kolkata");
+    const [selectedAddCountry, setSelectedAddCountry] = useState("India");
+    const [selectedAddCity, setSelectedAddCity] = useState("Kolkata");
+    const selectedAddCities = useMemo(() => getCitiesForCountry(selectedAddCountry), [selectedAddCountry]);
+    const selectedAddLocation = useMemo(
+        () => getLocationKey(selectedAddCountry, selectedAddCity),
+        [selectedAddCountry, selectedAddCity]
+    );
 
     useEffect(() => {
         fetchRateCards().then(setRateCards).catch(() => setRateCards([]));
@@ -104,9 +117,11 @@ export function ResourceAssignmentTab() {
             skill: roleItem.skill,
             experienceBand: roleItem.experienceBand,
             locationKey: selectedAddLocation,
+            country: selectedAddCountry,
+            city: selectedAddCity,
             rateCardCode: roleItem.code,
-            baseLocation: "India",
-            deliveryFrom: "Hyderabad",
+            baseLocation: selectedAddCountry,
+            deliveryFrom: selectedAddCity,
             type: "Offshore",
             annualCTC: ctcForLocation,
             dailyCost: rateCardResult.dailyCost,
@@ -120,16 +135,21 @@ export function ResourceAssignmentTab() {
     };
 
     // When a row's location changes, re-derive CTC + dailyCost from the stored rate card
-    const updateLocation = (id: string, newLocationKey: string) => {
+    const updateLocation = (id: string, country: string, city: string) => {
+        const newLocationKey = getLocationKey(country, city);
         setResources(resources.map(r => {
             if (r.id !== id) return r;
             const rc = rateCards.find((rc: any) => rc.code === r.rateCardCode);
-            if (!rc) return { ...r, locationKey: newLocationKey };
+            if (!rc) return { ...r, locationKey: newLocationKey, country, city, baseLocation: country, deliveryFrom: city };
             const ctc = getCtcForLocation(rc, newLocationKey);
             const rateCardResult = calculateRateCard({ annualCtc: ctc, monthsPerYear: 12, ...assumptions });
             return {
                 ...r,
                 locationKey: newLocationKey,
+                country,
+                city,
+                baseLocation: country,
+                deliveryFrom: city,
                 annualCTC: ctc,
                 dailyCost: rateCardResult.dailyCost,
                 dailyRate: rateCardResult.dailyCost * (1 + markupPercent / 100),
@@ -216,6 +236,14 @@ export function ResourceAssignmentTab() {
 
     // Total capacity = each resource can work durationInDays over the project
     const expectedTotalDays = durationInDays * resources.length;
+    const editingLocation = editingResource
+        ? getLocationParts(
+            editingResource.locationKey,
+            editingResource.country || editingResource.baseLocation,
+            editingResource.city || editingResource.deliveryFrom
+        )
+        : null;
+    const editingCities = editingLocation ? getCitiesForCountry(editingLocation.country) : [];
 
     return (
         <div className="space-y-4">
@@ -271,17 +299,30 @@ export function ResourceAssignmentTab() {
             {/* Search Panel */}
             {isAdding && !readOnly && (
                 <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 animate-in slide-in-from-top-2 shadow-sm">
-                    {/* Location selector */}
-                    <div className="flex items-center gap-3 mb-3">
-                        <label className="text-xs font-semibold text-slate-600 whitespace-nowrap">Location:</label>
+                    {/* Country/city selector */}
+                    <div className="flex flex-wrap items-center gap-3 mb-3">
+                        <label className="text-xs font-semibold text-slate-600 whitespace-nowrap">Country:</label>
                         <select
-                            value={selectedAddLocation}
-                            onChange={(e) => setSelectedAddLocation(e.target.value)}
+                            value={selectedAddCountry}
+                            onChange={(e) => {
+                                const country = e.target.value;
+                                const cities = getCitiesForCountry(country);
+                                setSelectedAddCountry(country);
+                                setSelectedAddCity(cities[0] || "");
+                            }}
                             className="px-2 py-1.5 border border-slate-200 rounded-md text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
                         >
-                            {LOCATION_KEYS.map(loc => <option key={loc} value={loc}>{loc}</option>)}
+                            {RATE_CARD_COUNTRIES.map(country => <option key={country} value={country}>{country}</option>)}
                         </select>
-                        <span className="text-xs text-slate-400">Rates shown below are for this location</span>
+                        <label className="text-xs font-semibold text-slate-600 whitespace-nowrap">City:</label>
+                        <select
+                            value={selectedAddCity}
+                            onChange={(e) => setSelectedAddCity(e.target.value)}
+                            className="px-2 py-1.5 border border-slate-200 rounded-md text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                        >
+                            {selectedAddCities.map(city => <option key={city} value={city}>{city}</option>)}
+                        </select>
+                        <span className="text-xs text-slate-400">Rates shown below are for {selectedAddLocation}</span>
                     </div>
                     <div className="relative">
                         <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
@@ -325,8 +366,8 @@ export function ResourceAssignmentTab() {
                                             <td className="p-2 pl-3 font-medium text-slate-800">{r.skill || r.role}</td>
                                             <td className="p-2 text-slate-600">{r.experienceBand || '-'}</td>
                                             <td className="p-2 text-slate-500 text-xs">{r.category}</td>
-                                            <td className={`p-2 pr-3 text-right font-mono group-hover:text-slate-700 ${ctc === 0 ? 'text-slate-300' : 'text-slate-500'}`}>
-                                                {ctc === 0 ? '—' : fmtCurrency(ctc, { compact: true })}
+                                            <td className={`p-2 pr-3 text-right font-mono group-hover:text-slate-700 ${ctc === 0 ? 'text-slate-400' : 'text-slate-500'}`}>
+                                                {fmtCurrency(ctc, { compact: true })}
                                             </td>
                                         </tr>
                                     );
@@ -344,7 +385,7 @@ export function ResourceAssignmentTab() {
                         <thead className="bg-slate-50 text-slate-700 font-semibold border-b">
                             <tr>
                                 <th className="p-3 border-r sticky left-0 bg-slate-50 z-10 min-w-[200px]">Skillset Experience</th>
-                                <th className="p-3 border-r min-w-[150px]">Location</th>
+                                <th className="p-3 border-r min-w-[220px]">Country / City</th>
                                 {visibleMonths.map(month => (
                                     <th key={month} className="p-3 text-center border-r min-w-[80px]">
                                         <div>{month}</div>
@@ -365,6 +406,12 @@ export function ResourceAssignmentTab() {
                             )}
                             {resources.map((row) => {
                                 const rowEditable = canEditRow(row);
+                                const rowLocation = getLocationParts(
+                                    row.locationKey,
+                                    row.country || row.baseLocation,
+                                    row.city || row.deliveryFrom
+                                );
+                                const rowCities = getCitiesForCountry(rowLocation.country);
                                 return (
                                 <tr key={row.id} className="hover:bg-slate-50 transition-colors">
                                     <td className="p-2 px-3 font-medium text-slate-900 border-r sticky left-0 bg-white z-10">
@@ -379,14 +426,28 @@ export function ResourceAssignmentTab() {
                                         </div>
                                     </td>
                                     <td className="p-2 border-r">
-                                        <select
-                                            className="w-full bg-slate-50 border-transparent rounded px-2 py-1 text-slate-700 text-xs focus:bg-white focus:ring-1 focus:ring-slate-200 disabled:cursor-not-allowed"
-                                            value={row.locationKey || 'India + Kolkata'}
-                                            onChange={(e) => updateLocation(row.id, e.target.value)}
-                                            disabled={!rowEditable}
-                                        >
-                                            {LOCATION_KEYS.map(loc => <option key={loc} value={loc}>{loc}</option>)}
-                                        </select>
+                                        <div className="grid grid-cols-2 gap-1">
+                                            <select
+                                                className="w-full bg-slate-50 border-transparent rounded px-2 py-1 text-slate-700 text-xs focus:bg-white focus:ring-1 focus:ring-slate-200 disabled:cursor-not-allowed"
+                                                value={rowLocation.country}
+                                                onChange={(e) => {
+                                                    const country = e.target.value;
+                                                    const cities = getCitiesForCountry(country);
+                                                    updateLocation(row.id, country, cities[0] || "");
+                                                }}
+                                                disabled={!rowEditable}
+                                            >
+                                                {RATE_CARD_COUNTRIES.map(country => <option key={country} value={country}>{country}</option>)}
+                                            </select>
+                                            <select
+                                                className="w-full bg-slate-50 border-transparent rounded px-2 py-1 text-slate-700 text-xs focus:bg-white focus:ring-1 focus:ring-slate-200 disabled:cursor-not-allowed"
+                                                value={rowLocation.city}
+                                                onChange={(e) => updateLocation(row.id, rowLocation.country, e.target.value)}
+                                                disabled={!rowEditable}
+                                            >
+                                                {rowCities.map(city => <option key={city} value={city}>{city}</option>)}
+                                            </select>
+                                        </div>
                                     </td>
                                     {visibleMonths.map(month => (
                                         <td key={month} className="p-1 border-r">
@@ -578,24 +639,47 @@ export function ResourceAssignmentTab() {
                                 />
                             </div>
                             <div className="space-y-1.5">
-                                <label className="text-sm font-semibold text-slate-700">Location</label>
-                                <select
-                                    value={editingResource.locationKey || 'India + Kolkata'}
-                                    onChange={(e) => {
-                                        const newLoc = e.target.value;
-                                        const rc = rateCards.find((rc: any) => rc.code === editingResource.rateCardCode);
-                                        if (rc) {
-                                            const ctc = getCtcForLocation(rc, newLoc);
-                                            const rateCardResult = calculateRateCard({ annualCtc: ctc, monthsPerYear: 12, ...assumptions });
-                                            setEditingResource({ ...editingResource, locationKey: newLoc, annualCTC: ctc, dailyCost: rateCardResult.dailyCost, dailyRate: rateCardResult.dailyCost * (1 + markupPercent / 100) });
-                                        } else {
-                                            setEditingResource({ ...editingResource, locationKey: newLoc });
-                                        }
-                                    }}
-                                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                >
-                                    {LOCATION_KEYS.map(loc => <option key={loc} value={loc}>{loc}</option>)}
-                                </select>
+                                <label className="text-sm font-semibold text-slate-700">Country / City</label>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <select
+                                        value={editingLocation?.country || "India"}
+                                        onChange={(e) => {
+                                            const country = e.target.value;
+                                            const city = getCitiesForCountry(country)[0] || "";
+                                            const newLoc = getLocationKey(country, city);
+                                            const rc = rateCards.find((rc: any) => rc.code === editingResource.rateCardCode);
+                                            if (rc) {
+                                                const ctc = getCtcForLocation(rc, newLoc);
+                                                const rateCardResult = calculateRateCard({ annualCtc: ctc, monthsPerYear: 12, ...assumptions });
+                                                setEditingResource({ ...editingResource, locationKey: newLoc, country, city, baseLocation: country, deliveryFrom: city, annualCTC: ctc, dailyCost: rateCardResult.dailyCost, dailyRate: rateCardResult.dailyCost * (1 + markupPercent / 100) });
+                                            } else {
+                                                setEditingResource({ ...editingResource, locationKey: newLoc, country, city, baseLocation: country, deliveryFrom: city });
+                                            }
+                                        }}
+                                        className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                    >
+                                        {RATE_CARD_COUNTRIES.map(country => <option key={country} value={country}>{country}</option>)}
+                                    </select>
+                                    <select
+                                        value={editingLocation?.city || "Kolkata"}
+                                        onChange={(e) => {
+                                            const country = editingLocation?.country || "India";
+                                            const city = e.target.value;
+                                            const newLoc = getLocationKey(country, city);
+                                            const rc = rateCards.find((rc: any) => rc.code === editingResource.rateCardCode);
+                                            if (rc) {
+                                                const ctc = getCtcForLocation(rc, newLoc);
+                                                const rateCardResult = calculateRateCard({ annualCtc: ctc, monthsPerYear: 12, ...assumptions });
+                                                setEditingResource({ ...editingResource, locationKey: newLoc, country, city, baseLocation: country, deliveryFrom: city, annualCTC: ctc, dailyCost: rateCardResult.dailyCost, dailyRate: rateCardResult.dailyCost * (1 + markupPercent / 100) });
+                                            } else {
+                                                setEditingResource({ ...editingResource, locationKey: newLoc, country, city, baseLocation: country, deliveryFrom: city });
+                                            }
+                                        }}
+                                        className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                    >
+                                        {editingCities.map(city => <option key={city} value={city}>{city}</option>)}
+                                    </select>
+                                </div>
                             </div>
                             <div className="space-y-1.5">
                                 <label className="text-sm font-semibold text-slate-700">Annual CTC (INR)</label>

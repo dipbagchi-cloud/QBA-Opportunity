@@ -250,6 +250,15 @@ def test_sales_owner_sees_presales_tabs_view_only(driver, fixture_data):
     duration_input = first_visible(driver, "input[name='duration']")
     assert duration_input is not None
     assert not duration_input.is_enabled()
+
+    click_visible_button(driver, "Estimation")
+    assert_text_present(driver, "View only.")
+    assert_text_present(driver, "Jul 26 (Days)")
+    assert_text_present(driver, "Aug 26 (Days)")
+    save_buttons = driver.find_elements(By.XPATH, "//button[contains(normalize-space(), 'Save Estimation')]")
+    visible_save_buttons = [button for button in save_buttons if button.is_displayed()]
+    assert visible_save_buttons, "Save Estimation button should be visible in disabled state"
+    assert not visible_save_buttons[0].is_enabled()
     screenshot(driver, "sales-owner-presales-view-only-tabs")
 
 

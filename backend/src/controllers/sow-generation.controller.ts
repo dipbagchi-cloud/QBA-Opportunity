@@ -475,7 +475,7 @@ function buildCommercials(context: any): string {
   content += `| Duration | ${opp.tentativeDuration || '[DURATION]'} ${opp.tentativeDurationUnit || 'months'} |\n`;
 
   if (opp.adjustedEstimatedValue) {
-    content += `| Adjusted Value | ${opp.currency || 'USD'} ${opp.adjustedEstimatedValue} |\n`;
+    content += `| Adjusted Quote Value | ${opp.currency || 'USD'} ${opp.adjustedEstimatedValue} |\n`;
   }
 
   return content;

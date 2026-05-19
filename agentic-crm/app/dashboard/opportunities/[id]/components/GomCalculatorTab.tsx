@@ -58,7 +58,7 @@ export function GomCalculatorTab({
 
     const hasSalesTarget = isReEstimation && salesTargetRevenue > 0;
 
-    const { format: fmtCurrency, symbol: cSym, convert: convertCurrency, currency: selectedCurrency, getRate, getSymbol } = useCurrency();
+    const { format: fmtCurrency, formatExact, symbol: cSym, convert: convertCurrency, currency: selectedCurrency, getRate, getSymbol } = useCurrency();
 
     // Get status icon
     const getStatusIcon = () => {
@@ -67,7 +67,11 @@ export function GomCalculatorTab({
         return <XCircle className="w-5 h-5" />;
     };
 
-    const formatCurrency = (amount: number) => fmtCurrency(amount);
+    const selectedRate = getRate(selectedCurrency) || 1;
+    const toSelectedCurrency = (amountInInr: number) => Math.round((Number(amountInInr) || 0) * selectedRate * 100) / 100;
+    const fromSelectedCurrency = (amount: number) => Math.round(((Number(amount) || 0) / selectedRate) * 100) / 100;
+    const formatCurrency = (amountInInr: number) => formatExact(convertCurrency(amountInInr));
+    const formatBaseCurrency = (amountInInr: number) => `₹${(Number(amountInInr) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
     return (
         <div className="space-y-4">
@@ -447,8 +451,9 @@ export function GomCalculatorTab({
                                     {idx === 0 && <label className="block text-xs font-medium text-slate-700 mb-1">Amount ({cSym})</label>}
                                     <input
                                         type="number"
-                                        value={Math.round(entry.amount * (getRate(selectedCurrency) || 1) * 100) / 100}
-                                        onChange={(e) => { const rate = getRate(selectedCurrency) || 1; const updated = [...travelCosts]; updated[idx] = { ...entry, amount: Math.round((Number(e.target.value) / rate) * 100) / 100 }; setTravelCosts(updated); }}
+                                        key={`travel-amount-${entry.id}-${selectedCurrency}`}
+                                        value={toSelectedCurrency(entry.amount)}
+                                        onChange={(e) => { const updated = [...travelCosts]; updated[idx] = { ...entry, amount: fromSelectedCurrency(Number(e.target.value)) }; setTravelCosts(updated); }}
                                         disabled={readOnly}
                                         placeholder="0"
                                         min="0"
@@ -498,8 +503,9 @@ export function GomCalculatorTab({
                             </label>
                             <input
                                 type="number"
-                                value={Math.round((specialCosts.subcontracting || 0) * (getRate(selectedCurrency) || 1) * 100) / 100 || ''}
-                                onChange={(e) => { const rate = getRate(selectedCurrency) || 1; setSpecialCosts({ ...specialCosts, subcontracting: Math.round((Number(e.target.value) / rate) * 100) / 100 }); }}
+                                key={`subcontracting-${selectedCurrency}`}
+                                value={toSelectedCurrency(specialCosts.subcontracting || 0) || ''}
+                                onChange={(e) => { setSpecialCosts({ ...specialCosts, subcontracting: fromSelectedCurrency(Number(e.target.value)) }); }}
                                 disabled={readOnly}
                                 className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                                 placeholder="0"
@@ -512,8 +518,9 @@ export function GomCalculatorTab({
                             </label>
                             <input
                                 type="number"
-                                value={Math.round((specialCosts.miscExpense || 0) * (getRate(selectedCurrency) || 1) * 100) / 100 || ''}
-                                onChange={(e) => { const rate = getRate(selectedCurrency) || 1; setSpecialCosts({ ...specialCosts, miscExpense: Math.round((Number(e.target.value) / rate) * 100) / 100 }); }}
+                                key={`misc-expense-${selectedCurrency}`}
+                                value={toSelectedCurrency(specialCosts.miscExpense || 0) || ''}
+                                onChange={(e) => { setSpecialCosts({ ...specialCosts, miscExpense: fromSelectedCurrency(Number(e.target.value)) }); }}
                                 disabled={readOnly}
                                 className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                                 placeholder="0"
@@ -526,8 +533,9 @@ export function GomCalculatorTab({
                             </label>
                             <input
                                 type="number"
-                                value={Math.round((specialCosts.specialHwCost || 0) * (getRate(selectedCurrency) || 1) * 100) / 100 || ''}
-                                onChange={(e) => { const rate = getRate(selectedCurrency) || 1; setSpecialCosts({ ...specialCosts, specialHwCost: Math.round((Number(e.target.value) / rate) * 100) / 100 }); }}
+                                key={`special-hw-${selectedCurrency}`}
+                                value={toSelectedCurrency(specialCosts.specialHwCost || 0) || ''}
+                                onChange={(e) => { setSpecialCosts({ ...specialCosts, specialHwCost: fromSelectedCurrency(Number(e.target.value)) }); }}
                                 disabled={readOnly}
                                 className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                                 placeholder="0"
@@ -540,8 +548,9 @@ export function GomCalculatorTab({
                             </label>
                             <input
                                 type="number"
-                                value={Math.round((specialCosts.specialSwCost || 0) * (getRate(selectedCurrency) || 1) * 100) / 100 || ''}
-                                onChange={(e) => { const rate = getRate(selectedCurrency) || 1; setSpecialCosts({ ...specialCosts, specialSwCost: Math.round((Number(e.target.value) / rate) * 100) / 100 }); }}
+                                key={`special-sw-${selectedCurrency}`}
+                                value={toSelectedCurrency(specialCosts.specialSwCost || 0) || ''}
+                                onChange={(e) => { setSpecialCosts({ ...specialCosts, specialSwCost: fromSelectedCurrency(Number(e.target.value)) }); }}
                                 disabled={readOnly}
                                 className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
                                 placeholder="0"
@@ -595,7 +604,7 @@ export function GomCalculatorTab({
                     <div className="bg-white rounded-lg p-3 border border-indigo-200 shadow-sm hover:shadow-md transition-shadow">
                         <div className="text-xs font-medium text-slate-500 uppercase mb-1">Total Revenue</div>
                         <div className="text-lg font-bold text-blue-600 mb-1">
-                            {formatCurrency(convertCurrency(revenue))}
+                            {formatCurrency(revenue)}
                         </div>
                         <div className="text-xs text-slate-500">
                             {fmtCurrency(revenue)}
@@ -606,7 +615,7 @@ export function GomCalculatorTab({
                     <div className="bg-white rounded-lg p-3 border border-indigo-200 shadow-sm hover:shadow-md transition-shadow">
                         <div className="text-xs font-medium text-slate-500 uppercase mb-1">Total Cost</div>
                         <div className="text-lg font-bold text-slate-700 mb-1">
-                            {formatCurrency(convertCurrency(totalCost))}
+                            {formatCurrency(totalCost)}
                         </div>
                         <div className="text-xs text-slate-500">
                             {fmtCurrency(totalCost)}
@@ -617,7 +626,7 @@ export function GomCalculatorTab({
                     <div className="bg-white rounded-lg p-3 border border-indigo-200 shadow-sm hover:shadow-md transition-shadow">
                         <div className="text-xs font-medium text-slate-500 uppercase mb-1">Profit</div>
                         <div className="text-lg font-bold text-purple-600 mb-1">
-                            {formatCurrency(convertCurrency(revenue - totalCost))}
+                            {formatCurrency(revenue - totalCost)}
                         </div>
                         <div className="text-xs text-slate-500">
                             {fmtCurrency(revenue - totalCost)}
@@ -643,29 +652,29 @@ export function GomCalculatorTab({
                         <div className="flex justify-between items-center py-2 border-b border-slate-100">
                             <span className="text-slate-600">Resource Cost:</span>
                             <div className="text-right">
-                                <div className="font-semibold text-slate-900">{formatCurrency(convertCurrency(totalResourceCost))}</div>
-                                <div className="text-xs text-slate-500">{fmtCurrency(totalResourceCost)}</div>
+                                <div className="font-semibold text-slate-900">{formatCurrency(totalResourceCost)}</div>
+                                <div className="text-xs text-slate-500">{formatBaseCurrency(totalResourceCost)}</div>
                             </div>
                         </div>
                         <div className="flex justify-between items-center py-2 border-b border-slate-100">
                             <span className="text-slate-600">Travel & Hospitality Cost:</span>
                             <div className="text-right">
-                                <div className="font-semibold text-slate-900">{formatCurrency(convertCurrency(totalTravelCost))}</div>
-                                <div className="text-xs text-slate-500">{fmtCurrency(totalTravelCost)}</div>
+                                <div className="font-semibold text-slate-900">{formatCurrency(totalTravelCost)}</div>
+                                <div className="text-xs text-slate-500">{formatBaseCurrency(totalTravelCost)}</div>
                             </div>
                         </div>
                         <div className="flex justify-between items-center py-2 border-b border-slate-100">
                             <span className="text-slate-600">Sales Commission:</span>
                             <div className="text-right">
-                                <div className="font-semibold text-slate-900">{formatCurrency(convertCurrency(salesCommissionAmount))}</div>
-                                <div className="text-xs text-slate-500">{fmtCurrency(salesCommissionAmount)}</div>
+                                <div className="font-semibold text-slate-900">{formatCurrency(salesCommissionAmount)}</div>
+                                <div className="text-xs text-slate-500">{formatBaseCurrency(salesCommissionAmount)}</div>
                             </div>
                         </div>
                         <div className="flex justify-between items-center py-2 border-b border-slate-100">
                             <span className="text-slate-600">Pre-Sales Cost:</span>
                             <div className="text-right">
-                                <div className="font-semibold text-slate-900">{formatCurrency(convertCurrency(preSalesCostAmount))}</div>
-                                <div className="text-xs text-slate-500">{fmtCurrency(preSalesCostAmount)}</div>
+                                <div className="font-semibold text-slate-900">{formatCurrency(preSalesCostAmount)}</div>
+                                <div className="text-xs text-slate-500">{formatBaseCurrency(preSalesCostAmount)}</div>
                             </div>
                         </div>
                     </div>
@@ -675,7 +684,7 @@ export function GomCalculatorTab({
                 <div className="mt-4 flex items-center justify-center gap-2 text-xs text-slate-600">
                     <span className="font-medium">Exchange Rate:</span>
                     <span className="px-2 py-1 bg-white rounded border border-indigo-200">
-                        1 INR = {(getRate(selectedCurrency) || 1).toFixed(4)} {selectedCurrency}
+                        1 INR = {selectedRate.toFixed(4)} {selectedCurrency}
                     </span>
                     <span className="text-slate-400">• Live conversion</span>
                 </div>

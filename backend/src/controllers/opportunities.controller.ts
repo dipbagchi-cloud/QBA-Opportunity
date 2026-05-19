@@ -539,8 +539,12 @@ export async function updateOpportunity(req: Request, res: Response) {
                 tentativeDuration: body.tentativeDuration || body.duration,
                 tentativeDurationUnit: body.tentativeDurationUnit || body.durationUnit,
                 pricingModel: body.pricingModel,
-                expectedDayRate: body.expectedDayRate !== undefined && body.expectedDayRate !== '' ? body.expectedDayRate : null,
-                adjustedEstimatedValue: body.adjustedEstimatedValue !== undefined && body.adjustedEstimatedValue !== '' ? body.adjustedEstimatedValue : null,
+                ...(body.expectedDayRate !== undefined ? {
+                    expectedDayRate: body.expectedDayRate !== '' ? body.expectedDayRate : null,
+                } : {}),
+                ...(body.adjustedEstimatedValue !== undefined ? {
+                    adjustedEstimatedValue: body.adjustedEstimatedValue !== '' ? body.adjustedEstimatedValue : null,
+                } : {}),
 
                 // Complex Data
                 presalesData: newPresalesData,

@@ -214,7 +214,9 @@ function PresalesSaveButton({ onAfterSave, viewOnly = false }: { onAfterSave?: (
     const { saveEstimation, isSaving, readOnly, gomPercent } = useOpportunityEstimation();
     const { toast } = useToast();
 
-    if (readOnly) return null;
+    const disabled = isSaving || viewOnly || readOnly;
+
+    if (readOnly && !viewOnly) return null;
 
     const handleSave = async () => {
         if (viewOnly) return;
@@ -231,9 +233,13 @@ function PresalesSaveButton({ onAfterSave, viewOnly = false }: { onAfterSave?: (
         <div className="flex justify-end mb-2">
             <button
                 onClick={handleSave}
-                disabled={isSaving || viewOnly}
-                title={viewOnly ? "Switch to Resource Assignment or GOM Calculator to edit and save." : undefined}
-                className="px-4 py-2 bg-emerald-600 text-white rounded-lg font-semibold text-sm hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-sm"
+                disabled={disabled}
+                title={disabled ? "The Estimation tab is view only. Edit presales inputs in the editable tabs." : undefined}
+                className={`px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2 shadow-sm ${
+                    disabled
+                        ? "bg-slate-200 text-slate-500 cursor-not-allowed"
+                        : "bg-emerald-600 text-white hover:bg-emerald-700"
+                }`}
             >
                 {isSaving ? (
                     <><RefreshCw className="w-4 h-4 animate-spin" /> Saving...</>
@@ -741,9 +747,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 }
 
                 setOpportunityManagerName(data.managerName || "");
-                if (data.adjustedEstimatedValue) {
-                    setAdjustedEstimatedValue(String(data.adjustedEstimatedValue));
-                }
+                setAdjustedEstimatedValue(data.adjustedEstimatedValue != null ? String(data.adjustedEstimatedValue) : "");
                 setDetailedStatus(data.detailedStatus || "");
                 setGomApproved(data.gomApproved === true);
                 setApprovedGomPercent(data.gomApproved === true && data.presalesData?.finalGomPercent != null
@@ -2216,7 +2220,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     )}
                                     {Number(adjustedEstimatedValue) > 0 && (
                                     <div>
-                                        <label className="block text-xs font-semibold text-amber-600 uppercase mb-1">Adjusted Estimated Value</label>
+                                        <label className="block text-xs font-semibold text-amber-600 uppercase mb-1">Adjusted Quote Value</label>
                                         <div className="font-bold text-amber-700">
                                             {cSym}{Number(adjustedEstimatedValue).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
                                             {opportunityCurrency && globalCurrency && opportunityCurrency !== globalCurrency && (
@@ -2722,7 +2726,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             </div>
                             {Number(adjustedEstimatedValue) > 0 && (
                             <div className="bg-amber-50 rounded-lg p-3 border border-amber-200">
-                                <p className="text-xs text-amber-600 mb-1">Adjusted Value</p>
+                                <p className="text-xs text-amber-600 mb-1">Adjusted Quote Value</p>
                                 <p className="font-bold text-amber-700">
                                     {cSym}{Number(adjustedEstimatedValue).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
                                     {opportunityCurrency && globalCurrency && opportunityCurrency !== globalCurrency && (
@@ -3222,7 +3226,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
                         <div className="p-5 space-y-4">
                             <p className="text-sm text-slate-600">
-                                Provide a comment explaining why re-estimation is needed. Optionally provide an adjusted estimated value.
+                                Provide a comment explaining why re-estimation is needed. Optionally provide an adjusted quote value.
                             </p>
 
                             <div className="space-y-1.5">
@@ -3238,7 +3242,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             </div>
 
                             <div className="space-y-1.5">
-                                <label className="block text-sm font-bold text-slate-700">Suggested Re-estimate Value ({cSym})</label>
+                                <label className="block text-sm font-bold text-slate-700">Adjusted Quote Value ({cSym})</label>
                                 <input
                                     type="number"
                                     placeholder="0.00"

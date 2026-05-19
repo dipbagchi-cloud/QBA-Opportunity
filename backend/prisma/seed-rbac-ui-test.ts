@@ -47,6 +47,9 @@ const users = {
 };
 
 async function ensureBaseData() {
+  await prisma.$executeRaw`ALTER TABLE clients ADD COLUMN IF NOT EXISTS "contactPersonEmail" TEXT`;
+  await prisma.$executeRaw`ALTER TABLE clients ADD COLUMN IF NOT EXISTS address TEXT`;
+
   const stages = [
     { name: 'Discovery', order: 1, probability: 10, color: '#6366f1' },
     { name: 'Qualification', order: 2, probability: 30, color: '#8b5cf6' },
@@ -89,15 +92,15 @@ async function ensureBaseData() {
     },
   });
 
-  const client = await prisma.client.upsert({
-    where: { id: 'rbac-ui-test-client' },
-    update: { name: 'RBAC UI Test Client', industry: 'Technology' },
-    create: {
-      id: 'rbac-ui-test-client',
-      name: 'RBAC UI Test Client',
-      industry: 'Technology',
-    },
-  });
+  await prisma.$executeRaw`
+    INSERT INTO clients (id, name, industry, "createdAt", "updatedAt")
+    VALUES ('rbac-ui-test-client', 'RBAC UI Test Client', 'Technology', NOW(), NOW())
+    ON CONFLICT (id) DO UPDATE
+    SET name = EXCLUDED.name,
+        industry = EXCLUDED.industry,
+        "updatedAt" = NOW()
+  `;
+  const client = { id: 'rbac-ui-test-client', name: 'RBAC UI Test Client' };
 
   return { type, team, client };
 }
@@ -261,6 +264,7 @@ async function upsertOpportunity(params: {
   teamId: string;
   gomApproved?: boolean;
   detailedStatus?: string;
+  presalesData?: Record<string, unknown>;
 }) {
   const stage = await prisma.stage.findUniqueOrThrow({ where: { name: params.stageName } });
   const existing = await prisma.opportunity.findFirst({ where: { title: params.title } });
@@ -288,6 +292,7 @@ async function upsertOpportunity(params: {
     currentStage: params.stageName,
     detailedStatus: params.detailedStatus || 'Open',
     gomApproved: params.gomApproved || false,
+    presalesData: params.presalesData as any,
     metadata: { fixture: 'rbac-ui-access-test' },
     clientId: params.clientId,
     ownerId: params.ownerId,
@@ -342,6 +347,37 @@ async function main() {
     teamId: team.id,
     gomApproved: true,
     detailedStatus: 'Presales In Progress',
+    presalesData: {
+      resources: [
+        {
+          id: 'rbac-resource-react-senior',
+          role: 'Senior React Developer',
+          skill: 'React',
+          experienceBand: 'Senior',
+          baseLocation: 'India',
+          deliveryFrom: 'Hyderabad',
+          type: 'Offshore',
+          annualCTC: 2400000,
+          dailyCost: 12000,
+          dailyRate: 18000,
+          monthlyEfforts: { Jul: 12, Aug: 10 },
+          addedBy: createdUsers.presales.name,
+        },
+      ],
+      travelCosts: [],
+      specialCosts: {
+        subcontracting: 0,
+        miscExpense: 0,
+        specialHwCost: 0,
+        specialSwCost: 0,
+      },
+      markupPercent: 50,
+      salesCommissionPercent: 0,
+      preSalesCostPercent: 0,
+      currency: 'INR',
+      effortType: 'QBA',
+      selectedYear: 2026,
+    },
   });
 
   const proposal = await upsertOpportunity({

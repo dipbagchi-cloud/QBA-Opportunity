@@ -203,7 +203,7 @@ export const FIELD_CATALOG: { table: string; icon: string; fields: { key: string
             { key: "opportunity.tentativeEndDate", label: "Tentative End Date", type: "date" },
             { key: "opportunity.pricingModel", label: "Pricing Model", type: "text" },
             { key: "opportunity.expectedDayRate", label: "Expected Day Rate", type: "decimal" },
-            { key: "opportunity.adjustedEstimatedValue", label: "Adjusted Estimated Value", type: "decimal" },
+            { key: "opportunity.adjustedEstimatedValue", label: "Adjusted Quote Value", type: "decimal" },
             { key: "opportunity.currentStage", label: "Current Stage", type: "text" },
             { key: "opportunity.detailedStatus", label: "Detailed Status", type: "text" },
             { key: "opportunity.reEstimateCount", label: "Re-estimate Count", type: "number" },

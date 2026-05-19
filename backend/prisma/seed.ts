@@ -337,7 +337,9 @@ async function main() {
         const rateCardsData: Array<{
             code: string; role: string; skill: string; experienceBand: string;
             masterCtc?: number; mercerCtc?: number; copilot?: number;
-            existingCtc?: number; maxCtc?: number; ctc: number; category: string;
+            existingCtc?: number; maxCtc?: number; ctc: number;
+            ctcHyd?: number; ctcPune?: number; ctcNigeriaLagos?: number; ctcLuxembourg?: number;
+            category: string;
         }> = JSON.parse(fs.readFileSync(rateCardsPath, 'utf-8'));
 
         for (const rc of rateCardsData) {
@@ -347,14 +349,20 @@ async function main() {
                     role: rc.role, skill: rc.skill, experienceBand: rc.experienceBand,
                     masterCtc: rc.masterCtc || 0, mercerCtc: rc.mercerCtc || 0,
                     copilot: rc.copilot || 0, existingCtc: rc.existingCtc || 0,
-                    maxCtc: rc.maxCtc || 0, ctc: rc.ctc || 0, category: rc.category,
+                    maxCtc: rc.maxCtc || 0, ctc: rc.ctc || 0,
+                    ctcHyd: rc.ctcHyd || 0, ctcPune: rc.ctcPune || 0,
+                    ctcNigeriaLagos: rc.ctcNigeriaLagos || 0, ctcLuxembourg: rc.ctcLuxembourg || 0,
+                    category: rc.category,
                 },
                 create: {
                     code: rc.code, role: rc.role, skill: rc.skill,
                     experienceBand: rc.experienceBand,
                     masterCtc: rc.masterCtc || 0, mercerCtc: rc.mercerCtc || 0,
                     copilot: rc.copilot || 0, existingCtc: rc.existingCtc || 0,
-                    maxCtc: rc.maxCtc || 0, ctc: rc.ctc || 0, category: rc.category,
+                    maxCtc: rc.maxCtc || 0, ctc: rc.ctc || 0,
+                    ctcHyd: rc.ctcHyd || 0, ctcPune: rc.ctcPune || 0,
+                    ctcNigeriaLagos: rc.ctcNigeriaLagos || 0, ctcLuxembourg: rc.ctcLuxembourg || 0,
+                    category: rc.category,
                 },
             });
         }
@@ -534,7 +542,7 @@ async function main() {
 <p>The opportunity <strong>{{opportunityTitle}}</strong> for <strong>{{clientName}}</strong> has been sent back for re-estimation.</p>
 <p><strong>Reason:</strong> {{reason}}</p>
 <p><strong>Current Value:</strong> {{currency}} {{value}}</p>
-<p><strong>Suggested Re-estimate Value:</strong> {{adjustedEstimatedValue}}</p>
+<p><strong>Adjusted Quote Value:</strong> {{adjustedEstimatedValue}}</p>
 <p><strong>Re-estimate Count:</strong> {{reEstimateCount}}</p>
 <p><strong>Sent by:</strong> {{updatedBy}}</p>
 <p>Please review the estimation and make necessary adjustments.</p>
