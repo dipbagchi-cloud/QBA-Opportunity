@@ -1636,7 +1636,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
             {/* PIPELINE VIEW (Step 0) */}
             {activeStep === 0 && (() => {
-                const isPipelineEditable = canEditPipeline && opportunityStage < 3 && !isLost && !isStalled && currentStageName !== 'Negotiation';
+                const isPipelineEditable = canEditPipeline && opportunityStage < 3 && !isLost && !isStalled && currentStageName !== 'Negotiation' && currentStageName !== 'Proposal';
                 const isClientCountryEditable = isPipelineEditable && opportunityStage === 0;
                 const disabledClass = !isPipelineEditable ? "bg-slate-50 cursor-not-allowed opacity-70" : "bg-white";
                 return (
@@ -1645,7 +1645,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     {/* ... Existing Pipeline Form Code ... */}
                     <div className="mb-4 flex items-center gap-3">
                         <h2 className="text-base font-bold text-slate-900">Basic Information</h2>
-                        {!isPipelineEditable && !isLost && (
+                        {!isPipelineEditable && !isLost && currentStageName !== 'Proposal' && currentStageName !== 'Negotiation' && (
                             <span className="px-3 py-1 rounded-full bg-slate-100 text-slate-500 text-xs font-semibold border border-slate-200">
                                 Read Only
                             </span>

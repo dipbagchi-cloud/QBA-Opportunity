@@ -116,9 +116,9 @@ export function buildOpportunityAccess(params: {
     viewOnlyReason = 'You have screen access through your role, but only the assigned owner, sales rep, manager, or named presales assignees can edit this opportunity.';
   }
 
-  // Presales content editing requires both: being a named presales assignee AND having
-  // general opportunity edit rights (canEditAssignedOpportunity).
-  const canEditPresalesContent = isAdmin || (isAssignedPresales && canEditAssignedOpportunity);
+  // Presales content editing requires general opportunity edit rights. The specific
+  // presales/estimation permission check is applied in the workflow section below.
+  const canEditPresalesContent = isAdmin || canEditAssignedOpportunity;
 
   return {
     viewOnlyReason,
