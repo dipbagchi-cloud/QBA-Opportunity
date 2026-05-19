@@ -474,7 +474,7 @@ export async function updateOpportunity(req: Request, res: Response) {
                 if (!isAdminRole && activeRoleName !== 'manager' && !isInitialMoveToPresales) {
                     invalidAssignmentEdits.push('Manager');
                 }
-                const managerAllowedStages = new Set(['Qualification', 'Proposal']);
+                const managerAllowedStages = new Set(['Qualification', 'Presales', 'Proposal']);
                 if (!isAdminRole && !isInitialMoveToPresales && !managerAllowedStages.has(previousStageName)) {
                     invalidAssignmentEdits.push('Manager');
                 }
