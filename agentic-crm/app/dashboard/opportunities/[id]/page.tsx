@@ -429,7 +429,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         const visibleTabs = [
             ...(canViewPresales ? ["Project Details", "Schedule", "Resource Assignment"] : []),
             ...(opportunityAccess?.permissions?.gom?.view || opportunityAccess?.permissions?.approvals?.manage ? ["GOM Calculator"] : []),
-            ...(canViewPresales ? ["Estimation"] : []),
+            ...(canViewPresales ? ["View Estimate"] : []),
         ];
         if (!visibleTabs.length) return;
         if (!visibleTabs.includes(activeTab)) {
@@ -2098,8 +2098,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     currentUserName={user?.name || ''}
                 >
                     <GomPercentSync onGomPercentChange={setContextGomPercent} />
-                    {opportunityStage < 2 && (
-                        <PresalesSaveButton viewOnly={activeTab === "Estimation"} onAfterSave={(gomPct) => {
+                    {opportunityStage < 2 && activeTab !== "View Estimate" && (
+                        <PresalesSaveButton onAfterSave={(gomPct) => {
                             if (gomAutoApprovePercent <= 0) return;
                             const gomChangedSinceApproval = approvedGomPercent != null && Math.abs(gomPct - approvedGomPercent) > 0.05;
                             if (gomPct >= gomAutoApprovePercent && !gomApproved) {
@@ -2125,7 +2125,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             {[
                                 ...(canViewPresales ? ["Project Details", "Schedule", "Resource Assignment"] : []),
                                 ...(opportunityAccess?.permissions?.gom?.view || opportunityAccess?.permissions?.approvals?.manage ? ["GOM Calculator"] : []),
-                                ...(canViewPresales ? ["Estimation"] : []),
+                                ...(canViewPresales ? ["View Estimate"] : []),
                             ].map(tab => (
                                 <button
                                     key={tab}
@@ -2629,8 +2629,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             </div>
                         )}
 
-                        {/* TAB CONTENT: Estimation */}
-                        {activeTab === "Estimation" && (
+                        {/* TAB CONTENT: View Estimate */}
+                        {activeTab === "View Estimate" && (
                             <div className="p-5">
                                 <div className="mb-4 px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-xs text-slate-500 font-medium flex items-center gap-2">
                                     <Info className="w-3.5 h-3.5 shrink-0" />
