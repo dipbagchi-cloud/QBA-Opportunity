@@ -478,11 +478,15 @@ export async function updateOpportunity(req: Request, res: Response) {
                 console.error('ASSIGNMENT_DEBUG_FAILED', e);
             }
 
+            // Stage allowlists mirror the AssignmentPane tab-driven gates in page.tsx.
+            // Pipeline tab (step 0) is reachable from Discovery/Qualification/Proposal;
+            // Presales tab (step 1) from Qualification/Proposal; Sales tab (step 2) from Proposal.
+            // Negotiation/Closed/etc. are already blocked above via lockedAssignmentStages.
             if (salesRepChanged) {
                 if (!isAdminRole && activeRoleName !== 'sales') {
                     invalidAssignmentEdits.push('Sales Rep');
                 }
-                const salesRepAllowedStages = new Set(['Discovery', 'Proposal']);
+                const salesRepAllowedStages = new Set(['Discovery', 'Qualification', 'Proposal']);
                 if (!isAdminRole && !salesRepAllowedStages.has(previousStageName)) {
                     invalidAssignmentEdits.push('Sales Rep');
                 }
@@ -492,7 +496,7 @@ export async function updateOpportunity(req: Request, res: Response) {
                 if (!isAdminRole && activeRoleName !== 'manager' && !isInitialMoveToPresales) {
                     invalidAssignmentEdits.push('Manager');
                 }
-                const managerAllowedStages = new Set(['Qualification', 'Presales', 'Proposal']);
+                const managerAllowedStages = new Set(['Qualification', 'Proposal']);
                 if (!isAdminRole && !isInitialMoveToPresales && !managerAllowedStages.has(previousStageName)) {
                     invalidAssignmentEdits.push('Manager');
                 }
@@ -506,7 +510,7 @@ export async function updateOpportunity(req: Request, res: Response) {
                 ) {
                     invalidAssignmentEdits.push('Presales Assignee');
                 }
-                const presalesAllowedStages = new Set(['Discovery', 'Qualification']);
+                const presalesAllowedStages = new Set(['Discovery', 'Qualification', 'Proposal']);
                 if (!isAdminRole && !presalesAllowedStages.has(previousStageName)) {
                     invalidAssignmentEdits.push('Presales Assignee');
                 }
