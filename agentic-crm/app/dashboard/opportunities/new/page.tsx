@@ -181,8 +181,10 @@ export default function NewOpportunityPage() {
     const [showAddClient, setShowAddClient] = useState(false);
     const [newClientName, setNewClientName] = useState("");
     const [newClientContact, setNewClientContact] = useState("");
+    const [newClientEmail, setNewClientEmail] = useState("");
     const [newClientAddress, setNewClientAddress] = useState("");
     const [addingClient, setAddingClient] = useState(false);
+    const [clientFormErrors, setClientFormErrors] = useState<{ name?: string; contact?: string; email?: string }>({});
 
     // Tech dropdown state
     const [techDropdownOpen, setTechDropdownOpen] = useState(false);
@@ -310,15 +312,25 @@ export default function NewOpportunityPage() {
     };
 
     const handleAddClient = async () => {
-        if (!newClientName.trim()) return;
+        const errors: { name?: string; contact?: string; email?: string } = {};
+        if (!newClientName.trim()) errors.name = 'Client name is required.';
+        if (!newClientContact.trim()) errors.contact = 'Contact person is required.';
+        if (newClientEmail.trim()) {
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(newClientEmail.trim())) errors.email = 'Enter a valid email address.';
+        }
+        setClientFormErrors(errors);
+        if (Object.keys(errors).length > 0) return;
+
         setAddingClient(true);
         try {
             const res = await fetch(`${API_URL}/api/admin/clients`, {
                 method: 'POST',
                 headers: getAuthHeaders(),
-                body: JSON.stringify({ 
+                body: JSON.stringify({
                     name: newClientName.trim(),
-                    contactPerson: newClientContact.trim() || undefined,
+                    contactPerson: newClientContact.trim(),
+                    contactPersonEmail: newClientEmail.trim() || undefined,
                     address: newClientAddress.trim() || undefined,
                 }),
             });
@@ -326,8 +338,11 @@ export default function NewOpportunityPage() {
                 const created = await res.json();
                 setClients(prev => [...prev, created]);
                 setFormData(prev => ({ ...prev, clientName: created.name }));
+                setNewClientName("");
                 setNewClientContact("");
+                setNewClientEmail("");
                 setNewClientAddress("");
+                setClientFormErrors({});
                 setShowAddClient(false);
                 toast({ title: "Client Added", description: `${created.name} has been added.` });
             } else {
@@ -827,26 +842,42 @@ export default function NewOpportunityPage() {
                     <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
                         <div className="flex items-center justify-between mb-4">
                             <h3 className="text-lg font-bold text-slate-900">Add New Client</h3>
-                            <button onClick={() => setShowAddClient(false)} className="text-slate-400 hover:text-slate-600">
+                            <button onClick={() => { setShowAddClient(false); setClientFormErrors({}); }} className="text-slate-400 hover:text-slate-600">
                                 <X className="w-5 h-5" />
                             </button>
                         </div>
                         <div className="space-y-3">
-                            <input
-                                type="text"
-                                value={newClientName}
-                                onChange={(e) => setNewClientName(e.target.value)}
-                                placeholder="Client Name *"
-                                className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
-                                onKeyDown={(e) => e.key === 'Enter' && handleAddClient()}
-                            />
-                            <input
-                                type="text"
-                                value={newClientContact}
-                                onChange={(e) => setNewClientContact(e.target.value)}
-                                placeholder="Client Side Contact Person"
-                                className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
-                            />
+                            <div>
+                                <input
+                                    type="text"
+                                    value={newClientName}
+                                    onChange={(e) => { setNewClientName(e.target.value); if (clientFormErrors.name) setClientFormErrors(p => ({ ...p, name: undefined })); }}
+                                    placeholder="Client Name *"
+                                    className={`w-full px-3 py-2.5 bg-white border rounded-md text-sm shadow-sm ${clientFormErrors.name ? 'border-red-400 focus:ring-red-300' : 'border-slate-300'}`}
+                                    onKeyDown={(e) => e.key === 'Enter' && handleAddClient()}
+                                />
+                                {clientFormErrors.name && <p className="mt-1 text-xs text-red-500">{clientFormErrors.name}</p>}
+                            </div>
+                            <div>
+                                <input
+                                    type="text"
+                                    value={newClientContact}
+                                    onChange={(e) => { setNewClientContact(e.target.value); if (clientFormErrors.contact) setClientFormErrors(p => ({ ...p, contact: undefined })); }}
+                                    placeholder="Contact Person *"
+                                    className={`w-full px-3 py-2.5 bg-white border rounded-md text-sm shadow-sm ${clientFormErrors.contact ? 'border-red-400 focus:ring-red-300' : 'border-slate-300'}`}
+                                />
+                                {clientFormErrors.contact && <p className="mt-1 text-xs text-red-500">{clientFormErrors.contact}</p>}
+                            </div>
+                            <div>
+                                <input
+                                    type="email"
+                                    value={newClientEmail}
+                                    onChange={(e) => { setNewClientEmail(e.target.value); if (clientFormErrors.email) setClientFormErrors(p => ({ ...p, email: undefined })); }}
+                                    placeholder="Contact Person Email"
+                                    className={`w-full px-3 py-2.5 bg-white border rounded-md text-sm shadow-sm ${clientFormErrors.email ? 'border-red-400 focus:ring-red-300' : 'border-slate-300'}`}
+                                />
+                                {clientFormErrors.email && <p className="mt-1 text-xs text-red-500">{clientFormErrors.email}</p>}
+                            </div>
                             <input
                                 type="text"
                                 value={newClientAddress}
@@ -856,8 +887,8 @@ export default function NewOpportunityPage() {
                             />
                         </div>
                         <div className="flex justify-end gap-3 mt-4">
-                            <button type="button" onClick={() => setShowAddClient(false)} className="px-4 py-2 bg-white border border-slate-300 rounded-md text-sm font-medium hover:bg-slate-50">Cancel</button>
-                            <button type="button" onClick={handleAddClient} disabled={addingClient || !newClientName.trim()} className="px-4 py-2 bg-indigo-600 text-white rounded-md text-sm font-bold hover:bg-indigo-700 disabled:opacity-50">{addingClient ? 'Adding...' : 'Add Client'}</button>
+                            <button type="button" onClick={() => { setShowAddClient(false); setClientFormErrors({}); }} className="px-4 py-2 bg-white border border-slate-300 rounded-md text-sm font-medium hover:bg-slate-50">Cancel</button>
+                            <button type="button" onClick={handleAddClient} disabled={addingClient} className="px-4 py-2 bg-indigo-600 text-white rounded-md text-sm font-bold hover:bg-indigo-700 disabled:opacity-50">{addingClient ? 'Adding...' : 'Add Client'}</button>
                         </div>
                     </div>
                 </div>

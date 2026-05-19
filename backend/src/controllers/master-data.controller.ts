@@ -194,12 +194,22 @@ export async function listAllClients(req: Request, res: Response) {
 }
 
 export async function createClient(req: Request, res: Response) {
-    const { name, domain, industry, country, contactPerson, address } = req.body;
-    if (!name) { res.status(400).json({ error: 'Client name is required.' }); return; }
-    const existing = await prisma.client.findFirst({ where: { name, isActive: true } });
-    if (existing) { res.status(409).json({ error: `Client "${name}" already exists.` }); return; }
-    const client = await prisma.client.create({ data: { name, domain, industry, country, contactPerson, address } });
-    await auditMasterData('Client', client.id, 'CREATE', req.user!.userId, `Created client: ${name}`);
+    const { name, domain, industry, country, contactPerson, contactPersonEmail, address } = req.body;
+    if (!name?.trim()) { res.status(400).json({ error: 'Client name is required.' }); return; }
+    if (!contactPerson?.trim()) { res.status(400).json({ error: 'Contact person is required.' }); return; }
+    if (contactPersonEmail) {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(contactPersonEmail.trim())) {
+            res.status(400).json({ error: 'Contact person email is not a valid email address.' }); return;
+        }
+    }
+    const existing = await prisma.client.findFirst({ where: { name: name.trim(), isActive: true } });
+    if (existing) { res.status(409).json({ error: `Client "${name.trim()}" already exists.` }); return; }
+    const client = await prisma.client.create({ data: { name: name.trim(), domain, industry, country, contactPerson: contactPerson.trim(), address } as any });
+    if (contactPersonEmail?.trim()) {
+        await (prisma as any).$queryRaw`UPDATE clients SET "contactPersonEmail" = ${contactPersonEmail.trim()} WHERE id = ${client.id}`;
+    }
+    await auditMasterData('Client', client.id, 'CREATE', req.user!.userId, `Created client: ${name.trim()}`);
     res.status(201).json(client);
 }
 

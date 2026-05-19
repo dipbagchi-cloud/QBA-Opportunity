@@ -113,8 +113,9 @@ model Client {
   revenue       Decimal?
   location      String?
   country       String?
-  contactPerson String?
-  address       String?
+  contactPerson      String?
+  contactPersonEmail String?
+  address            String?
   description   String?
   logoUrl       String?
   isActive      Boolean  @default(true)
