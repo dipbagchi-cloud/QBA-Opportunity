@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
     IndianRupee,
@@ -11,6 +11,7 @@ import {
     CheckCircle2,
     Briefcase,
     Loader2,
+    RefreshCw,
 } from "lucide-react";
 import {
     BarChart, Bar, PieChart, Pie, Cell,
@@ -128,30 +129,46 @@ export default function DashboardPage() {
     const [analytics, setAnalytics] = useState<Analytics | null>(null);
     const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
     const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
 
+    const fetchDashboard = useCallback(async (silent = false) => {
+        const headers = getAuthHeaders();
+        if (!silent) setLoading(true);
+        else setRefreshing(true);
+        try {
+            const [analyticsRes, oppsRes] = await Promise.all([
+                fetch(`${API_URL}/api/analytics`, { headers }),
+                fetch(`${API_URL}/api/opportunities?limit=100`, { headers }),
+            ]);
+            if (analyticsRes.ok) setAnalytics(await analyticsRes.json());
+            if (oppsRes.ok) {
+                const oppsJson = await oppsRes.json();
+                // API now returns paginated { data, total, ... } — extract the array
+                setOpportunities(Array.isArray(oppsJson) ? oppsJson : (oppsJson.data ?? []));
+            }
+        } catch (err) {
+            console.error("Dashboard fetch error:", err);
+        } finally {
+            setLoading(false);
+            setRefreshing(false);
+        }
+    }, []);
 
     useEffect(() => {
-        const fetchData = async () => {
-            const headers = getAuthHeaders();
-            try {
-                const [analyticsRes, oppsRes] = await Promise.all([
-                    fetch(`${API_URL}/api/analytics`, { headers }),
-                    fetch(`${API_URL}/api/opportunities?limit=100`, { headers }),
-                ]);
-                if (analyticsRes.ok) setAnalytics(await analyticsRes.json());
-                if (oppsRes.ok) {
-                    const oppsJson = await oppsRes.json();
-                    // API now returns paginated { data, total, ... } — extract the array
-                    setOpportunities(Array.isArray(oppsJson) ? oppsJson : (oppsJson.data ?? []));
-                }
-            } catch (err) {
-                console.error("Dashboard fetch error:", err);
-            } finally {
-                setLoading(false);
-            }
+        fetchDashboard(false);
+    }, [user?.role?.id, fetchDashboard]);
+
+    // Refetch silently when the tab regains focus so insights/charts stay current.
+    useEffect(() => {
+        const onFocus = () => fetchDashboard(true);
+        window.addEventListener('focus', onFocus);
+        const onVis = () => { if (document.visibilityState === 'visible') fetchDashboard(true); };
+        document.addEventListener('visibilitychange', onVis);
+        return () => {
+            window.removeEventListener('focus', onFocus);
+            document.removeEventListener('visibilitychange', onVis);
         };
-        fetchData();
-    }, [user?.role?.id]);
+    }, [fetchDashboard]);
 
     if (loading) {
         return (
@@ -211,11 +228,29 @@ export default function DashboardPage() {
     const revenueData = analytics?.dashboard.revenueProjection || [];
     const ownerData = analytics?.dashboard.countBySalesRep || analytics?.dashboard.countByOwner || [];
     const techRevenueData = analytics?.dashboard.revenueByTech || [];
-    const clientRevenueData = analytics?.dashboard.revenueByClient || [];
     const clientCountData = analytics?.dashboard.countByClient || [];
-    const ownerRevenueData = analytics?.dashboard.revenueBySalesRep || analytics?.dashboard.revenueByOwner || [];
     const projectedRevenue = analytics?.dashboard.projectedRevenue || 0;
     const closedRevenue = analytics?.dashboard.closedRevenue || 0;
+
+    // Recompute revenue-by-X charts directly from the opportunities array so the
+    // charts match the drill-down table. The /api/analytics revenueByClient and
+    // revenueBySalesRep only count Closed Won deals, which made the bar chart
+    // disagree with the all-opportunities listing.
+    const clientRevenueMap: Record<string, number> = {};
+    const salesRepRevenueMap: Record<string, number> = {};
+    opportunities.forEach(o => {
+        const v = Number(o.value) || 0;
+        const c = o.client || 'Unknown';
+        clientRevenueMap[c] = (clientRevenueMap[c] || 0) + v;
+        const rep = o.salesRepName || o.owner || 'Unassigned';
+        salesRepRevenueMap[rep] = (salesRepRevenueMap[rep] || 0) + v;
+    });
+    const clientRevenueData = Object.entries(clientRevenueMap)
+        .map(([name, value]) => ({ name, value }))
+        .sort((a, b) => b.value - a.value);
+    const ownerRevenueData = Object.entries(salesRepRevenueMap)
+        .map(([name, revenue]) => ({ name, revenue }))
+        .sort((a, b) => b.revenue - a.revenue);
 
     // Build tech → project names mapping for tooltip
     const STAGE_GROUP: Record<string, string> = {
@@ -736,6 +771,16 @@ export default function DashboardPage() {
                     <h1 className="text-base font-semibold text-slate-900">Dashboard</h1>
                     <p className="text-slate-400 text-xs">Welcome back{user?.name ? `, ${user.name.split(' ')[0]}` : ''}. Click any card to expand &amp; download.</p>
                 </div>
+                <button
+                    type="button"
+                    onClick={() => fetchDashboard(true)}
+                    disabled={refreshing}
+                    className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium text-slate-600 bg-white border border-slate-200 rounded-md hover:bg-slate-50 disabled:opacity-50"
+                    title="Refresh dashboard data"
+                >
+                    <RefreshCw className={`w-3 h-3 ${refreshing ? 'animate-spin' : ''}`} />
+                    {refreshing ? 'Refreshing…' : 'Refresh'}
+                </button>
             </div>
 
             {/* Stats Grid — tight 7-col, each expandable */}
