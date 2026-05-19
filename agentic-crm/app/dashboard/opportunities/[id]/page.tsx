@@ -2893,70 +2893,6 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                         </div>
                     )}
 
-                    {/* Header Card */}
-                    <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-5">
-                        <div className="flex items-center justify-between mb-4">
-                            <div>
-                                <h2 className="text-base font-bold text-slate-900">Estimation Summary</h2>
-                                <p className="text-xs text-slate-500 mt-1">Review all details before converting to a project or sending back for re-estimation.</p>
-                            </div>
-                            <span className={`px-3 py-1 rounded-full text-xs font-bold border ${isLost
-                                ? 'bg-red-50 text-red-700 border-red-300'
-                                : opportunityStage === 3
-                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
-                                    : currentStageName === 'Negotiation'
-                                        ? 'bg-orange-50 text-orange-700 border-orange-300'
-                                        : 'bg-amber-50 text-amber-700 border-amber-300'
-                            }`}>
-                                {isLost ? (currentStageName === 'Proposal Lost' ? 'Proposal Lost' : 'Closed Lost') : opportunityStage === 3 ? 'SOW Approved' : currentStageName === 'Negotiation' ? 'Under Negotiation' : 'Proposal Submitted'}
-                            </span>
-                        </div>
-
-                        {/* Summary Cards */}
-                        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-2">
-                            <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
-                                <p className="text-xs text-slate-500 mb-1">Client</p>
-                                <p className="font-semibold text-slate-800">{formData.clientName}</p>
-                            </div>
-                            <div className="bg-slate-50 rounded-lg p-4 border border-slate-200">
-                                <p className="text-xs text-slate-500 mb-1">Project</p>
-                                <p className="font-semibold text-slate-800">{formData.projectName}</p>
-                            </div>
-                            <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
-                                <p className="text-xs text-slate-500 mb-1">Duration</p>
-                                <p className="font-semibold text-slate-800">{formData.duration ? `${formData.duration} ${formData.durationUnit || 'months'}` : "N/A"}</p>
-                            </div>
-                            <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
-                                <p className="text-xs text-slate-500 mb-1">Day Rate</p>
-                                <p className="font-semibold text-slate-800">{formData.expectedDayRate || "N/A"}</p>
-                            </div>
-                            <div className="bg-indigo-50 rounded-lg p-3 border border-indigo-200">
-                                <p className="text-xs text-indigo-600 mb-1">Estimated Value</p>
-                                <p className="font-semibold text-indigo-700">
-                                    {cSym}{Number(formData.value).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
-                                    {opportunityCurrency && globalCurrency && opportunityCurrency !== globalCurrency && (
-                                        <span className="text-xs text-slate-500 ml-1">
-                                            ({getSymbol(globalCurrency)}{(Number(formData.value) * getRate(globalCurrency) / getRate(opportunityCurrency)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
-                                        </span>
-                                    )}
-                                </p>
-                            </div>
-                            {Number(adjustedEstimatedValue) > 0 && (
-                            <div className="bg-amber-50 rounded-lg p-3 border border-amber-200">
-                                <p className="text-xs text-amber-600 mb-1">Adjusted Quote Value</p>
-                                <p className="font-bold text-amber-700">
-                                    {cSym}{Number(adjustedEstimatedValue).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
-                                    {opportunityCurrency && globalCurrency && opportunityCurrency !== globalCurrency && (
-                                        <span className="text-xs text-slate-500 ml-1">
-                                            ({getSymbol(globalCurrency)}{(Number(adjustedEstimatedValue) * getRate(globalCurrency) / getRate(opportunityCurrency)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
-                                        </span>
-                                    )}
-                                </p>
-                            </div>
-                            )}
-                        </div>
-                    </div>
-
                     {/* Pipeline Details — Collapsible */}
                     <div className="bg-white rounded-lg shadow-sm border border-slate-200">
                         <button
@@ -3184,6 +3120,70 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 })()}
                             </div>
                         )}
+                    </div>
+
+                    {/* Estimation Summary — moved after Presales/Estimation Details */}
+                    <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-5">
+                        <div className="flex items-center justify-between mb-4">
+                            <div>
+                                <h2 className="text-base font-bold text-slate-900">Estimation Summary</h2>
+                                <p className="text-xs text-slate-500 mt-1">Review all details before converting to a project or sending back for re-estimation.</p>
+                            </div>
+                            <span className={`px-3 py-1 rounded-full text-xs font-bold border ${isLost
+                                ? 'bg-red-50 text-red-700 border-red-300'
+                                : opportunityStage === 3
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                                    : currentStageName === 'Negotiation'
+                                        ? 'bg-orange-50 text-orange-700 border-orange-300'
+                                        : 'bg-amber-50 text-amber-700 border-amber-300'
+                            }`}>
+                                {isLost ? (currentStageName === 'Proposal Lost' ? 'Proposal Lost' : 'Closed Lost') : opportunityStage === 3 ? 'SOW Approved' : currentStageName === 'Negotiation' ? 'Under Negotiation' : 'Proposal Submitted'}
+                            </span>
+                        </div>
+
+                        {/* Summary Cards */}
+                        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-2">
+                            <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
+                                <p className="text-xs text-slate-500 mb-1">Client</p>
+                                <p className="font-semibold text-slate-800">{formData.clientName}</p>
+                            </div>
+                            <div className="bg-slate-50 rounded-lg p-4 border border-slate-200">
+                                <p className="text-xs text-slate-500 mb-1">Project</p>
+                                <p className="font-semibold text-slate-800">{formData.projectName}</p>
+                            </div>
+                            <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
+                                <p className="text-xs text-slate-500 mb-1">Duration</p>
+                                <p className="font-semibold text-slate-800">{formData.duration ? `${formData.duration} ${formData.durationUnit || 'months'}` : "N/A"}</p>
+                            </div>
+                            <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
+                                <p className="text-xs text-slate-500 mb-1">Day Rate</p>
+                                <p className="font-semibold text-slate-800">{formData.expectedDayRate || "N/A"}</p>
+                            </div>
+                            <div className="bg-indigo-50 rounded-lg p-3 border border-indigo-200">
+                                <p className="text-xs text-indigo-600 mb-1">Estimated Value</p>
+                                <p className="font-semibold text-indigo-700">
+                                    {cSym}{Number(formData.value).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                    {opportunityCurrency && globalCurrency && opportunityCurrency !== globalCurrency && (
+                                        <span className="text-xs text-slate-500 ml-1">
+                                            ({getSymbol(globalCurrency)}{(Number(formData.value) * getRate(globalCurrency) / getRate(opportunityCurrency)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
+                                        </span>
+                                    )}
+                                </p>
+                            </div>
+                            {Number(adjustedEstimatedValue) > 0 && (
+                            <div className="bg-amber-50 rounded-lg p-3 border border-amber-200">
+                                <p className="text-xs text-amber-600 mb-1">Adjusted Quote Value</p>
+                                <p className="font-bold text-amber-700">
+                                    {cSym}{Number(adjustedEstimatedValue).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                    {opportunityCurrency && globalCurrency && opportunityCurrency !== globalCurrency && (
+                                        <span className="text-xs text-slate-500 ml-1">
+                                            ({getSymbol(globalCurrency)}{(Number(adjustedEstimatedValue) * getRate(globalCurrency) / getRate(opportunityCurrency)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
+                                        </span>
+                                    )}
+                                </p>
+                            </div>
+                            )}
+                        </div>
                     </div>
                 </div>
             )}
