@@ -1321,6 +1321,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 body: JSON.stringify({ stageName: 'Proposal' })
             });
             if (res.ok) {
+                const updatedData = await res.json().catch(() => ({}));
                 // Update local store only (no second PATCH to avoid duplicate notifications)
                 useOpportunityStore.setState((state) => ({
                     opportunities: state.opportunities.map((opp) =>
@@ -1330,6 +1331,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 setCurrentStageName('Proposal');
                 setActiveStep(2);
                 setOpportunityStage(2);
+                // Sync detailedStatus from backend to clear the re-estimation banner
+                setDetailedStatus(updatedData.detailedStatus || '');
                 toast({ title: "Success", description: "Moved to Sales stage." });
             } else {
                 const err = await res.json().catch(() => ({}));
