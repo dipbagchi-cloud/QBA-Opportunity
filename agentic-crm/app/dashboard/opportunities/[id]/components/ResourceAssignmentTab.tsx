@@ -550,12 +550,12 @@ export function ResourceAssignmentTab() {
 
             {/* Allocation Summary */}
             {durationInDays > 0 && resources.length > 0 && (
-                <div className={`p-4 rounded-lg border-2 ${
+                <div className={`p-4 rounded-lg border border-slate-200 border-l-4 bg-white shadow-sm ${
                     totalAllocatedDays > expectedTotalDays
-                        ? 'bg-red-50 border-red-300'
+                        ? 'border-l-red-500'
                         : totalAllocatedDays === expectedTotalDays
-                        ? 'bg-emerald-50 border-emerald-300'
-                        : 'bg-amber-50 border-amber-300'
+                        ? 'border-l-emerald-500'
+                        : 'border-l-amber-500'
                 }`}>
                     <div className="flex items-center justify-between">
                         <div>
@@ -601,14 +601,14 @@ export function ResourceAssignmentTab() {
                 const hasTarget = target > 0;
                 const over = hasTarget && cost > target;
                 const tone = !hasTarget
-                    ? 'bg-slate-50 border-slate-300'
+                    ? 'border-l-slate-400'
                     : over
-                    ? 'bg-red-50 border-red-300'
+                    ? 'border-l-red-500'
                     : marginPct < 10
-                    ? 'bg-amber-50 border-amber-300'
-                    : 'bg-emerald-50 border-emerald-300';
+                    ? 'border-l-amber-500'
+                    : 'border-l-emerald-500';
                 return (
-                    <div className={`p-4 rounded-lg border-2 ${tone}`}>
+                    <div className={`p-4 rounded-lg border border-slate-200 border-l-4 bg-white shadow-sm ${tone}`}>
                         <div className="flex items-center justify-between">
                             <div>
                                 <h4 className="text-sm font-semibold text-slate-700 mb-1">Cost vs Projected Revenue</h4>

@@ -77,70 +77,76 @@ export function GomCalculatorTab({
         <div className="space-y-4">
             {/* Summary Cards */}
             <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-3">
-                <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg p-3 text-white shadow-lg">
+                <div className="rounded-lg border border-slate-200 border-l-4 border-l-blue-500 bg-white p-3 shadow-sm">
                     <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs font-medium opacity-90">Total Quote</span>
-                        <TrendingUp className="w-4 h-4 opacity-75" />
+                        <span className="text-xs font-semibold text-slate-500">Total Quote</span>
+                        <span className="h-7 w-7 rounded-md bg-blue-50 text-blue-700 flex items-center justify-center">
+                            <TrendingUp className="w-4 h-4" />
+                        </span>
                     </div>
-                    <div className="text-xl font-bold">{fmtCurrency(revenue)}</div>
-                    <div className="text-[10px] opacity-75 mt-0.5">Calculated Quote Price</div>
+                    <div className="text-xl font-bold text-slate-900">{fmtCurrency(revenue)}</div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">Calculated quote price</div>
                 </div>
 
-                <div className="bg-gradient-to-br from-cyan-500 to-cyan-600 rounded-lg p-3 text-white shadow-lg">
+                <div className="rounded-lg border border-slate-200 border-l-4 border-l-cyan-600 bg-white p-3 shadow-sm">
                     <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs font-medium opacity-90">Projected Revenue</span>
-                        <TrendingUp className="w-4 h-4 opacity-75" />
+                        <span className="text-xs font-semibold text-slate-500">Projected Revenue</span>
+                        <span className="h-7 w-7 rounded-md bg-cyan-50 text-cyan-700 flex items-center justify-center">
+                            <DollarSign className="w-4 h-4" />
+                        </span>
                     </div>
-                    <div className="text-xl font-bold">{fmtCurrency(salesTargetRevenue)}</div>
-                    <div className="text-[10px] opacity-75 mt-0.5">Set by Sales (Pipeline)</div>
+                    <div className="text-xl font-bold text-slate-900">{fmtCurrency(salesTargetRevenue)}</div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">Estimated value from Pipeline</div>
                 </div>
 
                 {(() => {
                     const diff = salesTargetRevenue - revenue;
                     const within = diff >= 0;
                     return (
-                        <div className={`bg-gradient-to-br rounded-lg p-3 text-white shadow-lg ${within ? 'from-emerald-500 to-emerald-600' : 'from-rose-500 to-rose-600'}`}>
+                        <div className={`rounded-lg border border-slate-200 border-l-4 bg-white p-3 shadow-sm ${within ? 'border-l-emerald-600' : 'border-l-rose-600'}`}>
                             <div className="flex items-center justify-between mb-1">
-                                <span className="text-xs font-medium opacity-90">Difference</span>
-                                <span className="text-[10px] font-semibold px-1.5 py-0.5 bg-white/20 rounded">
-                                    {within ? 'Within' : 'Over'}
+                                <span className="text-xs font-semibold text-slate-500">Difference</span>
+                                <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${within ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'}`}>
+                                    {within ? 'Available' : 'Over'}
                                 </span>
                             </div>
-                            <div className="text-xl font-bold">{fmtCurrency(Math.abs(diff))}</div>
-                            <div className="text-[10px] opacity-75 mt-0.5">Projected − Quote</div>
+                            <div className="text-xl font-bold text-slate-900">{fmtCurrency(Math.abs(diff))}</div>
+                            <div className="text-[10px] text-slate-500 mt-0.5">Projected - quote</div>
                         </div>
                     );
                 })()}
 
-                <div className="bg-gradient-to-br from-slate-700 to-slate-800 rounded-lg p-3 text-white shadow-lg">
+                <div className="rounded-lg border border-slate-200 border-l-4 border-l-slate-600 bg-white p-3 shadow-sm">
                     <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs font-medium opacity-90">Total Cost</span>
-                        <span className="text-[10px] font-semibold px-1.5 py-0.5 bg-white/20 rounded">
+                        <span className="text-xs font-semibold text-slate-500">Total Cost</span>
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded border bg-slate-50 text-slate-700 border-slate-200">
                             {resources.length} Resources
                         </span>
                     </div>
-                    <div className="text-xl font-bold">{fmtCurrency(totalCost)}</div>
-                    <div className="text-[10px] opacity-75 mt-0.5">Total Estimated Expenses</div>
+                    <div className="text-xl font-bold text-slate-900">{fmtCurrency(totalCost)}</div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">Total estimated expenses</div>
                 </div>
 
-                <div className={`bg-gradient-to-br rounded-lg p-3 text-white shadow-lg ${gomPercent >= 20 ? 'from-green-500 to-green-600' : 'from-red-500 to-red-600'}`}>
+                <div className={`rounded-lg border border-slate-200 border-l-4 bg-white p-3 shadow-sm ${gomPercent >= 20 ? 'border-l-emerald-600' : 'border-l-rose-600'}`}>
                     <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs font-medium opacity-90">GOM %</span>
-                        {getStatusIcon()}
+                        <span className="text-xs font-semibold text-slate-500">GOM %</span>
+                        <span className={`${gomPercent >= 20 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                            {getStatusIcon()}
+                        </span>
                     </div>
-                    <div className="text-xl font-bold">{gomPercent.toFixed(1)}%</div>
-                    <div className="text-[10px] opacity-75 mt-0.5">{gomStatus.text}</div>
+                    <div className="text-xl font-bold text-slate-900">{gomPercent.toFixed(1)}%</div>
+                    <div className={`text-[10px] mt-0.5 font-medium ${gomPercent >= 20 ? 'text-emerald-700' : 'text-rose-700'}`}>{gomStatus.text}</div>
                 </div>
 
-                <div className="bg-gradient-to-br from-purple-500 to-purple-600 rounded-lg p-3 text-white shadow-lg">
+                <div className="rounded-lg border border-slate-200 border-l-4 border-l-indigo-600 bg-white p-3 shadow-sm">
                     <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs font-medium opacity-90">Profit</span>
-                        <span className="text-[10px] font-semibold px-1.5 py-0.5 bg-white/20 rounded">
+                        <span className="text-xs font-semibold text-slate-500">Profit</span>
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded border bg-indigo-50 text-indigo-700 border-indigo-200">
                             {selectedCurrency}
                         </span>
                     </div>
-                    <div className="text-xl font-bold">{fmtCurrency(revenue - totalCost)}</div>
-                    <div className="text-[10px] opacity-75 mt-0.5">Net Margin</div>
+                    <div className="text-xl font-bold text-slate-900">{fmtCurrency(revenue - totalCost)}</div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">Net margin</div>
                 </div>
             </div>
 

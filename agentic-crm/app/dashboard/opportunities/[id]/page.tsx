@@ -1584,6 +1584,14 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         return (val * rateToOpp) / rateFromPre;
     };
 
+    const getPipelineProjectedRevenueBase = () => {
+        const projectedRevenue = Number(adjustedEstimatedValue) > 0
+            ? Number(adjustedEstimatedValue)
+            : Number(formData.value) || 0;
+        const selectedRate = getRate(globalCurrency);
+        return selectedRate > 0 ? projectedRevenue / selectedRate : projectedRevenue;
+    };
+
 
     // Access Control Logic already handled above
 
@@ -2298,11 +2306,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             ? countWorkingDaysInPeriod(formData.tentativeStartDate, Number(formData.duration) || 0, holidays)
                             : durationToWorkingDays(Number(formData.duration) || 0, formData.durationUnit)
                     }
-                    salesTargetRevenue={
-                        Number(adjustedEstimatedValue) > 0 && getRate(globalCurrency) > 0
-                            ? Number(adjustedEstimatedValue) / getRate(globalCurrency)
-                            : Number(adjustedEstimatedValue) || 0
-                    }
+                    salesTargetRevenue={getPipelineProjectedRevenueBase()}
                     isReEstimation={detailedStatus === 'Re-estimation' || detailedStatus === 'Sent for Re-estimate'}
                     initialCurrency={globalCurrency}
                     currentUserName={user?.name || ''}
