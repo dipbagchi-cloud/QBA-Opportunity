@@ -132,7 +132,7 @@ export function buildOpportunityAccess(params: {
     },
     permissions: permissionState,
     workflow: {
-      pipelineEditable: (isAdmin || permissionState.pipeline.edit) && canEditAssignedOpportunity,
+      pipelineEditable: (isAdmin || permissionState.pipeline.edit || permissionState.presales.edit || permissionState.sales.edit || permissionState.approvals.manage) && canEditAssignedOpportunity,
       presalesEditable: (isAdmin || permissionState.presales.edit) && canEditPresalesContent,
       estimationEditable: (isAdmin || permissionState.estimation.manage) && canEditPresalesContent,
       salesEditable: (isAdmin || permissionState.sales.edit) && canEditAssignedOpportunity,
