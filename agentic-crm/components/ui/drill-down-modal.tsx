@@ -34,7 +34,12 @@ function formatCell(value: any, format?: string, currencyFormat?: (v: number, op
     if (value == null) return "";
     if (format === "currency") {
         if (currencyFormat) return currencyFormat(Number(value), { compact: true });
-        return `₹${(Number(value) / 100000).toFixed(2)}L`;
+        const n = Number(value);
+        const abs = Math.abs(n);
+        if (abs >= 1_000_000_000) return `₹${(n / 1_000_000_000).toFixed(2)}B`;
+        if (abs >= 1_000_000)     return `₹${(n / 1_000_000).toFixed(2)}M`;
+        if (abs >= 1_000)         return `₹${(n / 1_000).toFixed(2)}K`;
+        return `₹${n.toFixed(2)}`;
     }
     if (format === "percent") return `${Number(value).toFixed(1)}%`;
     if (format === "number") return String(Number(value));

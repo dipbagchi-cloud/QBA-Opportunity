@@ -106,9 +106,9 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
         const sym = symbol;
         if (opts?.compact) {
             const abs = Math.abs(converted);
-            if (abs >= 10000000) return `${sym}${(converted / 10000000).toFixed(1)}Cr`;
-            if (abs >= 100000) return `${sym}${(converted / 100000).toFixed(1)}L`;
-            if (abs >= 1000) return `${sym}${(converted / 1000).toFixed(1)}K`;
+            if (abs >= 1_000_000_000) return `${sym}${(converted / 1_000_000_000).toFixed(1)}B`;
+            if (abs >= 1_000_000)     return `${sym}${(converted / 1_000_000).toFixed(1)}M`;
+            if (abs >= 1_000)         return `${sym}${(converted / 1_000).toFixed(1)}K`;
         }
         const decimals = opts?.decimals ?? 2;
         return `${sym}${converted.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`;
@@ -119,9 +119,9 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
         const sym = symbol;
         if (opts?.compact) {
             const abs = Math.abs(numAmount);
-            if (abs >= 10000000) return `${sym}${(amount / 10000000).toFixed(1)}Cr`;
-            if (abs >= 100000) return `${sym}${(amount / 100000).toFixed(1)}L`;
-            if (abs >= 1000) return `${sym}${(numAmount / 1000).toFixed(1)}K`;
+            if (abs >= 1_000_000_000) return `${sym}${(numAmount / 1_000_000_000).toFixed(1)}B`;
+            if (abs >= 1_000_000)     return `${sym}${(numAmount / 1_000_000).toFixed(1)}M`;
+            if (abs >= 1_000)         return `${sym}${(numAmount / 1_000).toFixed(1)}K`;
         }
         const decimals = opts?.decimals ?? 2;
         return `${sym}${numAmount.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`;
