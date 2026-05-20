@@ -484,9 +484,15 @@ export async function updateOpportunity(req: Request, res: Response) {
             // Negotiation/Closed/etc. are already blocked above via lockedAssignmentStages.
             // Handoff rule (product spec): a non-admin sales rep / manager may hand off the
             // field ONCE; subsequent reassignments require Admin. Counts live in opp.metadata.
+            // A "handoff" means changing from a real previous assignee to a different one —
+            // the very first assignment (previous value empty) does NOT consume the quota.
             const prevMeta = (previous?.metadata as any) || {};
             const salesRepHandoffsDone = Number(prevMeta.salesRepHandoffs) || 0;
             const managerHandoffsDone = Number(prevMeta.managerHandoffs) || 0;
+            const previousSalesRepName = normalizeAssignment(previous?.salesRepName);
+            const previousManagerName = normalizeAssignment(previous?.managerName);
+            const salesRepIsInitialAssignment = salesRepChanged && previousSalesRepName === '';
+            const managerIsInitialAssignment = managerChanged && previousManagerName === '';
             if (salesRepChanged) {
                 if (!isAdminRole && activeRoleName !== 'sales') {
                     invalidAssignmentEdits.push('Sales Rep');
@@ -495,7 +501,7 @@ export async function updateOpportunity(req: Request, res: Response) {
                 if (!isAdminRole && !salesRepAllowedStages.has(previousStageName)) {
                     invalidAssignmentEdits.push('Sales Rep');
                 }
-                if (!isAdminRole && salesRepHandoffsDone >= 1) {
+                if (!isAdminRole && !salesRepIsInitialAssignment && salesRepHandoffsDone >= 1) {
                     invalidAssignmentEdits.push('Sales Rep (already handed off once — Admin only)');
                 }
             }
@@ -508,7 +514,7 @@ export async function updateOpportunity(req: Request, res: Response) {
                 if (!isAdminRole && !isInitialMoveToPresales && !managerAllowedStages.has(previousStageName)) {
                     invalidAssignmentEdits.push('Manager');
                 }
-                if (!isAdminRole && !isInitialMoveToPresales && managerHandoffsDone >= 1) {
+                if (!isAdminRole && !isInitialMoveToPresales && !managerIsInitialAssignment && managerHandoffsDone >= 1) {
                     invalidAssignmentEdits.push('Manager (already handed off once — Admin only)');
                 }
             }
@@ -606,17 +612,23 @@ export async function updateOpportunity(req: Request, res: Response) {
             };
         }
 
-        // Increment handoff counter when a non-admin actually changes sales rep / manager.
+        // Increment handoff counter when a non-admin actually hands off sales rep / manager
+        // to a different person. Initial assignments (previous value empty) do NOT count,
+        // so the originally assigned person still gets their one allowed reassignment.
         // Admin reassignments are unlimited and don't bump the counter.
-        if (!isAdminRole && (salesRepChanged || managerChanged)) {
+        const hadPreviousSalesRep = normalizeAssignment(previous?.salesRepName) !== '';
+        const hadPreviousManager = normalizeAssignment(previous?.managerName) !== '';
+        const salesRepIsTrueHandoff = salesRepChanged && hadPreviousSalesRep;
+        const managerIsTrueHandoff = managerChanged && hadPreviousManager;
+        if (!isAdminRole && (salesRepIsTrueHandoff || managerIsTrueHandoff)) {
             const baseMeta = metadataUpdate || ((previous?.metadata as any) || {});
             metadataUpdate = { ...baseMeta };
-            if (salesRepChanged) {
+            if (salesRepIsTrueHandoff) {
                 metadataUpdate.salesRepHandoffs = (Number(baseMeta.salesRepHandoffs) || 0) + 1;
                 metadataUpdate.salesRepLastHandoffAt = new Date().toISOString();
                 metadataUpdate.salesRepLastHandoffBy = req.user!.userId;
             }
-            if (managerChanged) {
+            if (managerIsTrueHandoff) {
                 metadataUpdate.managerHandoffs = (Number(baseMeta.managerHandoffs) || 0) + 1;
                 metadataUpdate.managerLastHandoffAt = new Date().toISOString();
                 metadataUpdate.managerLastHandoffBy = req.user!.userId;

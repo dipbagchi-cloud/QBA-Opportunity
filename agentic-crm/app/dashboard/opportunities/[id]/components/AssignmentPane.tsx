@@ -15,6 +15,7 @@ interface AssignmentPaneProps {
     managerUsers: { id: string; name: string; department?: string | null }[];
     onSalesRepChange: (name: string) => void;
     onManagerChange: (name: string) => void;
+    onAssignmentSaved?: (updatedMetadata: any) => void;
 }
 
 type SearchableSelectOption = { value: string; label: string };
@@ -110,8 +111,10 @@ export function AssignmentPane({
     managerUsers,
     onSalesRepChange,
     onManagerChange,
+    onAssignmentSaved,
 }: AssignmentPaneProps) {
     const [saving, setSaving] = useState(false);
+    const [assignmentError, setAssignmentError] = useState<string | null>(null);
     const [addingPresales, setAddingPresales] = useState(false);
     const [query, setQuery] = useState("");
     const [suggestions, setSuggestions] = useState<UserSuggestion[]>([]);
@@ -179,45 +182,69 @@ export function AssignmentPane({
         return () => document.removeEventListener("mousedown", handler);
     }, [addingPresales]);
 
-    const patchAssignment = async (field: string, value: string) => {
+    const patchAssignment = async (field: string, value: string): Promise<boolean> => {
         setSaving(true);
+        setAssignmentError(null);
         try {
             const response = await fetch(`${API_URL}/api/opportunities/${opportunityId}`, {
                 method: "PATCH",
                 headers: getAuthHeaders(),
                 body: JSON.stringify({ [field]: value }),
             });
-            if (!response.ok) throw new Error("Failed to update assignment");
+            if (!response.ok) {
+                let serverMessage = "Failed to update assignment.";
+                try {
+                    const errBody = await response.json();
+                    if (errBody?.error) serverMessage = errBody.error;
+                } catch { /* response had no JSON body */ }
+                setAssignmentError(serverMessage);
+                return false;
+            }
+            const updated = await response.json().catch(() => null);
+            if (updated && onAssignmentSaved) {
+                onAssignmentSaved(updated.metadata || null);
+            }
+            return true;
         } catch (error) {
             console.error("Assignment update failed", error);
+            setAssignmentError("Network error — assignment was not saved.");
+            return false;
         } finally {
             setSaving(false);
         }
     };
 
     const handleSalesRepChange = async (selectedName: string) => {
+        const previous = salesRepName;
         onSalesRepChange(selectedName);
-        await patchAssignment("salesRepName", selectedName);
+        const ok = await patchAssignment("salesRepName", selectedName);
+        if (!ok) onSalesRepChange(previous);
     };
 
     const handleManagerChange = async (selectedName: string) => {
+        const previous = managerName;
         onManagerChange(selectedName);
-        await patchAssignment("managerName", selectedName);
+        const ok = await patchAssignment("managerName", selectedName);
+        if (!ok) onManagerChange(previous);
     };
 
     const handleSelectUser = async (user: UserSuggestion) => {
+        const previousList = presalesNames.join(", ");
         const updated = [...presalesNames, user.name].join(", ");
         setFormData((prev: any) => ({ ...prev, presalesAssignee: updated }));
         setQuery("");
         setSuggestions([]);
         setAddingPresales(false);
-        await patchAssignment("presalesAssigneeName", updated);
+        const ok = await patchAssignment("presalesAssigneeName", updated);
+        if (!ok) setFormData((prev: any) => ({ ...prev, presalesAssignee: previousList }));
     };
 
     const handleRemovePresales = async (name: string) => {
+        const previousList = presalesNames.join(", ");
         const updated = presalesNames.filter((n) => n !== name).join(", ");
         setFormData((prev: any) => ({ ...prev, presalesAssignee: updated }));
-        await patchAssignment("presalesAssigneeName", updated);
+        const ok = await patchAssignment("presalesAssigneeName", updated);
+        if (!ok) setFormData((prev: any) => ({ ...prev, presalesAssignee: previousList }));
     };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -249,6 +276,20 @@ export function AssignmentPane({
                 </div>
                 {saving && <Loader2 className="w-4 h-4 text-slate-400 animate-spin" />}
             </div>
+
+            {assignmentError && (
+                <div className="px-4 py-2 bg-red-50 border-b border-red-200 text-xs text-red-700 flex items-start justify-between gap-2">
+                    <span>{assignmentError}</span>
+                    <button
+                        type="button"
+                        onClick={() => setAssignmentError(null)}
+                        className="text-red-400 hover:text-red-700 shrink-0"
+                        title="Dismiss"
+                    >
+                        <X className="w-3 h-3" />
+                    </button>
+                </div>
+            )}
 
             <div className="p-5 flex-1 overflow-y-auto space-y-5">
                 {/* Sales Person */}

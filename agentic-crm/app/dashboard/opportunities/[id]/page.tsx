@@ -3264,6 +3264,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     managerUsers={managers}
                     onSalesRepChange={(name) => { setFormData(prev => ({...prev, salesRep: name})); }}
                     onManagerChange={(name) => { setOpportunityManagerName(name); }}
+                    onAssignmentSaved={(updatedMetadata) => { setOpportunityMetadata(updatedMetadata); }}
                 />
                 <CommentsPanel opportunityId={id} currentStage={steps[activeStep]} readOnly={!canComment} readOnlyReason={viewOnlyReason} />
                 <AuditLogPane opportunityId={id} />
