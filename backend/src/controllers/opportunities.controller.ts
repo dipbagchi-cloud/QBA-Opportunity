@@ -205,8 +205,13 @@ export async function listOpportunities(req: Request, res: Response) {
                 healthScore: finalHealth,
                 metadata: opp.metadata,
                 quote: (() => {
+                    // Final closure quote — what the salesperson committed to in the
+                    // GOM Calculator. Priority: finalRevenue (post-adjustment quote) →
+                    // totalRevenue → gomSummary.totalRevenue → adjustedEstimatedValue.
                     const pd = opp.presalesData as any;
+                    if (pd?.finalRevenue != null) return Number(pd.finalRevenue);
                     if (pd?.totalRevenue != null) return Number(pd.totalRevenue);
+                    if (pd?.gomSummary?.totalRevenue != null) return Number(pd.gomSummary.totalRevenue);
                     if (opp.adjustedEstimatedValue != null) return Number(opp.adjustedEstimatedValue);
                     return null;
                 })()
