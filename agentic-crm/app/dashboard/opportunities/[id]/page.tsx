@@ -21,6 +21,10 @@ import {
     ChevronDown,
     XCircle,
     AlertTriangle,
+    AlertCircle,
+    CheckCircle,
+    TrendingUp,
+    DollarSign,
     Search,
     Upload,
     Download,
@@ -3087,7 +3091,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     </div>
                                 )}
 
-                                {/* GOM Summary */}
+                                {/* GOM Summary — same 6 tiles shown on the GOM Calculator screen in Presales */}
                                 <h4 className="text-xs font-semibold text-slate-700 mb-2 pt-3 border-t border-slate-100">GOM Summary</h4>
                                 {(() => {
                                     const pd = rawPresalesData || {};
@@ -3095,35 +3099,113 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     const markup = pd.markupPercent || 0;
                                     const commPercent = pd.salesCommissionPercent || 0;
                                     const preSalesPercent = pd.preSalesCostPercent || 0;
-                                    
+
                                     const rev = pd.finalRevenue !== undefined ? pd.finalRevenue : (pd.adjustedEstimatedValue > 0 ? pd.adjustedEstimatedValue : baseCost * (1 + markup / 100));
                                     const comm = rev * (commPercent / 100);
                                     const pre = rev * (preSalesPercent / 100);
-                                    
+
                                     const totalC = pd.finalTotalCost !== undefined ? pd.finalTotalCost : (baseCost + comm + pre);
                                     const gom = pd.finalGomPercent !== undefined ? pd.finalGomPercent : (rev > 0 ? ((rev - totalC) / rev) * 100 : 0);
                                     const profit = pd.finalProfit !== undefined ? pd.finalProfit : (rev - totalC);
 
+                                    // Tiles render in opportunity currency. Presales-side values flow through
+                                    // getPresalesConverted; pipeline projected value is already in opp currency.
+                                    const quoteOpp = getPresalesConverted(rev);
+                                    const totalCostOpp = getPresalesConverted(totalC);
+                                    const profitOpp = getPresalesConverted(profit);
+                                    const projectedOpp = Number(adjustedEstimatedValue) > 0
+                                        ? Number(adjustedEstimatedValue)
+                                        : Number(formData.value) || 0;
+                                    const diffOpp = projectedOpp - quoteOpp;
+                                    const within = diffOpp >= 0;
+                                    const resourceCount = Array.isArray(pd.resources) ? pd.resources.length : 0;
+                                    const fmt = (v: number) => `${cSym}${v.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+
+                                    const gomStatusText = gom >= 30
+                                        ? 'Excellent'
+                                        : gom >= 20
+                                            ? 'Healthy'
+                                            : gom > 0
+                                                ? 'Below target'
+                                                : 'No data';
+                                    const gomIcon = gom >= 30
+                                        ? <CheckCircle className="w-5 h-5" />
+                                        : gom >= 20
+                                            ? <AlertCircle className="w-5 h-5" />
+                                            : <XCircle className="w-5 h-5" />;
+
                                     return (
-                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                                            <div className="bg-blue-50 rounded-lg p-3 border border-blue-200">
-                                                <p className="text-xs text-blue-600 mb-1">Revenue</p>
-                                                <p className="text-sm font-bold text-blue-700">
-                                                    {cSym}{getPresalesConverted(rev).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</p>
+                                        <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-3">
+                                            {/* Total Quote */}
+                                            <div className="rounded-lg border border-slate-200 border-l-4 border-l-blue-500 bg-white p-3 shadow-sm">
+                                                <div className="flex items-center justify-between mb-1">
+                                                    <span className="text-xs font-semibold text-slate-500">Total Quote</span>
+                                                    <span className="h-7 w-7 rounded-md bg-blue-50 text-blue-700 flex items-center justify-center">
+                                                        <TrendingUp className="w-4 h-4" />
+                                                    </span>
+                                                </div>
+                                                <div className="text-xl font-bold text-slate-900">{fmt(quoteOpp)}</div>
+                                                <div className="text-[10px] text-slate-500 mt-0.5">Calculated quote price</div>
                                             </div>
-                                            <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
-                                                <p className="text-xs text-slate-500 mb-1">Total Cost</p>
-                                                <p className="text-sm font-bold text-slate-700">
-                                                    {cSym}{getPresalesConverted(totalC).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</p>
+
+                                            {/* Projected Revenue */}
+                                            <div className="rounded-lg border border-slate-200 border-l-4 border-l-cyan-600 bg-white p-3 shadow-sm">
+                                                <div className="flex items-center justify-between mb-1">
+                                                    <span className="text-xs font-semibold text-slate-500">Projected Revenue</span>
+                                                    <span className="h-7 w-7 rounded-md bg-cyan-50 text-cyan-700 flex items-center justify-center">
+                                                        <DollarSign className="w-4 h-4" />
+                                                    </span>
+                                                </div>
+                                                <div className="text-xl font-bold text-slate-900">{fmt(projectedOpp)}</div>
+                                                <div className="text-[10px] text-slate-500 mt-0.5">Estimated value from Pipeline</div>
                                             </div>
-                                            <div className={`rounded-lg p-3 border ${gom >= 20 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
-                                                <p className="text-xs text-slate-500 mb-1">GOM %</p>
-                                                <p className={`text-sm font-bold ${gom >= 20 ? 'text-green-700' : 'text-red-700'}`}>{gom.toFixed(1)}%</p>
+
+                                            {/* Difference */}
+                                            <div className={`rounded-lg border border-slate-200 border-l-4 bg-white p-3 shadow-sm ${within ? 'border-l-emerald-600' : 'border-l-rose-600'}`}>
+                                                <div className="flex items-center justify-between mb-1">
+                                                    <span className="text-xs font-semibold text-slate-500">Difference</span>
+                                                    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${within ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'}`}>
+                                                        {within ? 'Available' : 'Over'}
+                                                    </span>
+                                                </div>
+                                                <div className="text-xl font-bold text-slate-900">{fmt(Math.abs(diffOpp))}</div>
+                                                <div className="text-[10px] text-slate-500 mt-0.5">Projected - quote</div>
                                             </div>
-                                            <div className="bg-purple-50 rounded-lg p-3 border border-purple-200">
-                                                <p className="text-xs text-purple-600 mb-1">Profit</p>
-                                                <p className="text-sm font-bold text-purple-700">
-                                                    {cSym}{getPresalesConverted(profit).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</p>
+
+                                            {/* Total Cost */}
+                                            <div className="rounded-lg border border-slate-200 border-l-4 border-l-slate-600 bg-white p-3 shadow-sm">
+                                                <div className="flex items-center justify-between mb-1">
+                                                    <span className="text-xs font-semibold text-slate-500">Total Cost</span>
+                                                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded border bg-slate-50 text-slate-700 border-slate-200">
+                                                        {resourceCount} Resources
+                                                    </span>
+                                                </div>
+                                                <div className="text-xl font-bold text-slate-900">{fmt(totalCostOpp)}</div>
+                                                <div className="text-[10px] text-slate-500 mt-0.5">Total estimated expenses</div>
+                                            </div>
+
+                                            {/* GOM % */}
+                                            <div className={`rounded-lg border border-slate-200 border-l-4 bg-white p-3 shadow-sm ${gom >= 20 ? 'border-l-emerald-600' : 'border-l-rose-600'}`}>
+                                                <div className="flex items-center justify-between mb-1">
+                                                    <span className="text-xs font-semibold text-slate-500">GOM %</span>
+                                                    <span className={`${gom >= 20 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                                                        {gomIcon}
+                                                    </span>
+                                                </div>
+                                                <div className="text-xl font-bold text-slate-900">{gom.toFixed(1)}%</div>
+                                                <div className={`text-[10px] mt-0.5 font-medium ${gom >= 20 ? 'text-emerald-700' : 'text-rose-700'}`}>{gomStatusText}</div>
+                                            </div>
+
+                                            {/* Profit */}
+                                            <div className="rounded-lg border border-slate-200 border-l-4 border-l-indigo-600 bg-white p-3 shadow-sm">
+                                                <div className="flex items-center justify-between mb-1">
+                                                    <span className="text-xs font-semibold text-slate-500">Profit</span>
+                                                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded border bg-indigo-50 text-indigo-700 border-indigo-200">
+                                                        {opportunityCurrency}
+                                                    </span>
+                                                </div>
+                                                <div className="text-xl font-bold text-slate-900">{fmt(profitOpp)}</div>
+                                                <div className="text-[10px] text-slate-500 mt-0.5">Net margin</div>
                                             </div>
                                         </div>
                                     );
