@@ -1836,7 +1836,12 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
             {/* PIPELINE VIEW (Step 0) */}
             {activeStep === 0 && (() => {
-                const isPipelineEditable = canEditPipeline && opportunityStage < 3 && !isLost && !isStalled && currentStageName !== 'Negotiation' && currentStageName !== 'Proposal';
+                // D2 rule: Pipeline tab stays editable through Pipeline, Presales, and Sales
+                // stages — it only freezes once the proposal is sent to the client
+                // (Negotiation onwards) or the opportunity is Closed/Lost/On Hold.
+                // Client name, country, and region freeze the moment the opportunity
+                // moves OUT of Pipeline (stage > 0).
+                const isPipelineEditable = canEditPipeline && opportunityStage < 3 && !isLost && !isStalled && currentStageName !== 'Negotiation';
                 const isClientCountryEditable = isPipelineEditable && opportunityStage === 0;
                 const hasAssignmentEdit = canEditSalesRepAssignment || canEditManagerAssignment || canEditPresalesAssignment;
                 const managerOptions = managers.map(m => ({ value: m.name, label: `${m.name}${m.department ? ` (${m.department})` : ''}` }));

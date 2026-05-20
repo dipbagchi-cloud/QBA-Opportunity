@@ -427,6 +427,29 @@ export async function updateOpportunity(req: Request, res: Response) {
             });
         }
 
+        // D2 rule enforcement: Client / Country / Region freeze the moment the
+        // opportunity moves out of Pipeline (Discovery). Compare by value so a
+        // full PATCH body resending unchanged values is not rejected.
+        const prevStageNameForRule = previous?.stage?.name || previous?.currentStage || '';
+        const isInDiscovery = prevStageNameForRule === 'Discovery' || prevStageNameForRule === '';
+        const isAdminActor = (req.user!.permissions || []).includes('*')
+            || (req.user!.roleName || '').trim().toLowerCase() === 'admin';
+        const normalize = (v: unknown) => String(v ?? '').trim();
+        const valueChanged = (next: unknown, prev: unknown) =>
+            next !== undefined && normalize(next) !== normalize(prev);
+
+        if (!isAdminActor && !isInDiscovery) {
+            const frozen: string[] = [];
+            if (valueChanged(body.clientName, previous?.client?.name)) frozen.push('Client');
+            if (valueChanged(body.country, previous?.country)) frozen.push('Country');
+            if (valueChanged(body.region, previous?.region)) frozen.push('Region');
+            if (frozen.length > 0) {
+                return res.status(403).json({
+                    error: `${frozen.join(', ')} cannot be changed after the opportunity moves out of Pipeline.`,
+                });
+            }
+        }
+
         // Handle Client update if name changed
         let clientId = body.clientId;
         if (body.clientName) {
