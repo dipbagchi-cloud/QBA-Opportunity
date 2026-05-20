@@ -1288,7 +1288,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 const data = await res.json();
                 if (data.pendingApproval) {
                     setGomPendingApproval({ id: data.approvalId, requester: '', reviewer: data.reviewer, reason: '' });
-                    toast({ title: "GOM Approval Requested", description: `Approval request sent to ${data.reviewer || 'your reporting manager'}.` });
+                    toast({ title: "GOM Approval Requested", description: `Approval request sent to ${data.reviewer || 'the assigned manager'}.` });
                 } else {
                     setGomApproved(data.gomApproved);
                     setApprovedGomPercent(data.gomApproved ? contextGomPercent : null);
@@ -1296,7 +1296,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     toast({ title: data.gomApproved ? "GOM Approved" : "GOM Approval Revoked", description: data.gomApproved ? "GOM has been approved. You can now move to Sales." : "GOM approval has been revoked." });
                 }
             } else {
-                toast({ title: "Error", description: "Failed to update GOM approval." });
+                const data = await res.json().catch(() => null);
+                toast({ title: "Error", description: data?.error || "Failed to update GOM approval." });
             }
         } catch (e) {
             console.error(e);

@@ -1005,13 +1005,26 @@ export async function approveGom(req: Request, res: Response) {
             return res.json({ gomApproved: true });
         }
 
-        // GOM% below threshold — create approval request to reporting manager
-        const requester = await prisma.user.findUnique({ where: { id: req.user!.userId }, select: { id: true, name: true, reportingManagerName: true } });
-        let reviewerId: string | null = null;
-        if (requester?.reportingManagerName) {
-            const manager = await prisma.user.findFirst({ where: { name: requester.reportingManagerName, isActive: true } });
-            reviewerId = manager?.id || null;
+        // GOM% below threshold — create approval request for the opportunity's assigned manager.
+        const requester = await prisma.user.findUnique({ where: { id: req.user!.userId }, select: { id: true, name: true } });
+        const assignedManagerName = (opportunity.managerName || '').trim();
+        if (!assignedManagerName) {
+            return res.status(400).json({ error: 'No manager is assigned to this opportunity. Assign a manager before requesting GOM approval.' });
         }
+
+        const assignedManager = await prisma.user.findFirst({
+            where: {
+                isActive: true,
+                name: { equals: assignedManagerName, mode: 'insensitive' },
+            },
+            select: { id: true, email: true, name: true },
+        });
+
+        if (!assignedManager) {
+            return res.status(400).json({ error: `Assigned manager "${assignedManagerName}" was not found as an active CRM user.` });
+        }
+
+        const reviewerId = assignedManager.id;
 
         // Cancel any existing pending GOM approval for this opportunity
         await prisma.approvalRequest.updateMany({
@@ -1030,34 +1043,32 @@ export async function approveGom(req: Request, res: Response) {
             },
         });
 
-        await prisma.auditLog.create({ data: { entity: 'Opportunity', entityId: id, action: 'GOM_APPROVAL_REQUESTED', userId: req.user!.userId, changes: `GOM Approval requested at ${gomPercent?.toFixed(1) || '?'}%. Sent to ${requester?.reportingManagerName || 'unassigned manager'}` } });
+        await prisma.auditLog.create({ data: { entity: 'Opportunity', entityId: id, action: 'GOM_APPROVAL_REQUESTED', userId: req.user!.userId, changes: `GOM Approval requested at ${gomPercent?.toFixed(1) || '?'}%. Sent to assigned manager ${assignedManager.name}` } });
 
-        // Notify manager via in-app notification + email
-        if (reviewerId) {
-            const opp = await prisma.opportunity.findUnique({ where: { id }, select: { title: true } });
-            const manager = await prisma.user.findUnique({ where: { id: reviewerId }, select: { email: true, name: true } });
-            await prisma.notification.create({
-                data: {
-                    type: 'gom_approval_requested',
-                    title: `GOM Approval Required: ${opp?.title || id}`,
-                    message: `${requester?.name || 'A team member'} has requested GOM approval. GOM is ${gomPercent?.toFixed(1) || '?'}% (below ${autoApproveThreshold}% threshold).`,
-                    link: `/dashboard/opportunities/${id}`,
-                    userId: reviewerId,
-                },
-            });
-            if (manager?.email) {
-                await sendNotificationEmail('gom_approval_requested', manager.email, manager.name || 'Manager', {
-                    opportunityTitle: opp?.title || id,
-                    requesterName: requester?.name || 'A team member',
-                    gomPercent: `${gomPercent?.toFixed(1) || '?'}%`,
-                    threshold: `${autoApproveThreshold}%`,
-                    opportunityId: id,
-                    opportunityLink: `${process.env.FRONTEND_URL || 'https://qcrm.qbadvisory.com'}/dashboard/opportunities/${id}`,
-                }).catch(() => {});
-            }
+        // Notify assigned manager via in-app notification + email.
+        const opp = await prisma.opportunity.findUnique({ where: { id }, select: { title: true } });
+        await prisma.notification.create({
+            data: {
+                type: 'gom_approval_requested',
+                title: `GOM Approval Required: ${opp?.title || id}`,
+                message: `${requester?.name || 'A team member'} has requested GOM approval. GOM is ${gomPercent?.toFixed(1) || '?'}% (below ${autoApproveThreshold}% threshold). Please open the opportunity to approve or reject the request.`,
+                link: `/dashboard/opportunities/${id}`,
+                userId: reviewerId,
+            },
+        });
+        if (assignedManager.email) {
+            await sendNotificationEmail('gom_approval_requested', assignedManager.email, assignedManager.name || 'Manager', {
+                opportunityTitle: opp?.title || id,
+                requesterName: requester?.name || 'A team member',
+                gomPercent: `${gomPercent?.toFixed(1) || '?'}%`,
+                threshold: `${autoApproveThreshold}%`,
+                opportunityId: id,
+                opportunityLink: `${process.env.FRONTEND_URL || 'https://qcrm.qbadvisory.com'}/dashboard/opportunities/${id}`,
+                actionRequired: 'Please open the opportunity and approve or reject the GOM request.',
+            }).catch(() => {});
         }
 
-        res.json({ gomApproved: false, pendingApproval: true, approvalId: approval.id, reviewer: requester?.reportingManagerName || null });
+        res.json({ gomApproved: false, pendingApproval: true, approvalId: approval.id, reviewer: assignedManager.name });
     } catch (error) {
         console.error("Approve GOM Error:", error);
         res.status(500).json({ error: 'Failed to update GOM approval' });
