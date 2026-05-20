@@ -55,6 +55,10 @@ import {
   createProjectType,
   updateProjectType,
   deleteProjectType,
+  listAllProjectRoles,
+  createProjectRole,
+  updateProjectRole,
+  deleteProjectRole,
 } from '../controllers/master-data.controller';
 import {
   listAuditLogs,
@@ -186,6 +190,13 @@ router.get('/project-types', authorize(PERMISSIONS.METADATA_MANAGE), listAllProj
 router.post('/project-types', authorize(PERMISSIONS.METADATA_MANAGE), createProjectType);
 router.patch('/project-types/:id', authorize(PERMISSIONS.METADATA_MANAGE), updateProjectType);
 router.delete('/project-types/:id', authorize(PERMISSIONS.METADATA_MANAGE), deleteProjectType);
+
+// Project role management (requires metadata:manage) — lookup feeds the
+// Resource Estimation tab's Project Role dropdown.
+router.get('/project-roles', authorize(PERMISSIONS.METADATA_MANAGE), listAllProjectRoles);
+router.post('/project-roles', authorize(PERMISSIONS.METADATA_MANAGE), createProjectRole);
+router.patch('/project-roles/:id', authorize(PERMISSIONS.METADATA_MANAGE), updateProjectRole);
+router.delete('/project-roles/:id', authorize(PERMISSIONS.METADATA_MANAGE), deleteProjectRole);
 
 // Budget assumptions (GET: any authenticated user, PUT: requires settings:manage)
 router.get('/budget-assumptions', getBudgetAssumptions);

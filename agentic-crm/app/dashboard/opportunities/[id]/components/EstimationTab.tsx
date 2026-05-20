@@ -68,6 +68,7 @@ export function EstimationTab() {
             return {
                 role: resource.role,
                 skill: resource.skill,
+                projectRole: resource.projectRole,
                 experienceBand: resource.experienceBand,
                 allocatedDays: monthlyDays
             };
@@ -90,6 +91,7 @@ export function EstimationTab() {
             return {
                 role: resource.role,
                 skill: resource.skill,
+                projectRole: resource.projectRole,
                 experienceBand: resource.experienceBand,
                 costs: monthlyCost
             };
@@ -226,6 +228,7 @@ export function EstimationTab() {
                         <thead className="bg-slate-100 text-slate-700 font-medium sticky top-0 z-10 shadow-sm">
                             <tr>
                                 <th className="p-2 border-r border-b w-64 min-w-[200px] bg-slate-100 sticky left-0 z-20 shadow-[1px_0_0_0_rgba(0,0,0,0.05)]">Resource Skill Set</th>
+                                <th className="p-2 border-r border-b min-w-[140px] bg-slate-100">Project Role</th>
                                 {months.map(m => <th key={m} className="p-2 text-center w-24 min-w-[80px] border-r border-b bg-slate-100">{DateFormat(m)} (Days)</th>)}
                             </tr>
                         </thead>
@@ -237,6 +240,9 @@ export function EstimationTab() {
                                         <div className="text-[10px] text-slate-500 font-normal truncate mt-0.5">
                                             {row.skill || '-'} | {row.experienceBand || '-'} Exp
                                         </div>
+                                    </td>
+                                    <td className="p-1 px-2 border-r text-slate-700 text-[11px]">
+                                        <div className="truncate" title={row.projectRole || ''}>{row.projectRole || '-'}</div>
                                     </td>
                                     {months.map(m => (
                                         <td key={m} className="p-1 px-2 text-center border-r text-slate-600 font-mono text-[11px]">
@@ -260,6 +266,7 @@ export function EstimationTab() {
                         <thead className="bg-slate-100 text-slate-700 font-medium sticky top-0 z-10 shadow-sm">
                             <tr>
                                 <th className="p-2 border-r border-b w-64 min-w-[200px] bg-slate-100 sticky left-0 z-20 shadow-[1px_0_0_0_rgba(0,0,0,0.05)]">Resource Skill Set</th>
+                                <th className="p-2 border-r border-b min-w-[140px] bg-slate-100">Project Role</th>
                                 {months.map(m => <th key={m} className="p-2 text-right w-24 min-w-[90px] border-r border-b font-mono bg-slate-100">{DateFormat(m)}</th>)}
                                 <th className="p-2 text-right font-bold w-24 border-b bg-slate-100">Total</th>
                             </tr>
@@ -275,6 +282,9 @@ export function EstimationTab() {
                                             <div className="text-[10px] text-slate-500 font-normal truncate mt-0.5">
                                                 {row.skill || '-'} | {row.experienceBand || '-'} Exp
                                             </div>
+                                        </td>
+                                        <td className="p-1 px-2 border-r text-slate-700 text-[11px]">
+                                            <div className="truncate" title={row.projectRole || ''}>{row.projectRole || '-'}</div>
                                         </td>
                                         {months.map(m => (
                                             <td key={m} className="p-1 px-2 text-right border-r text-slate-600 font-mono text-[11px]">

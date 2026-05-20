@@ -55,6 +55,7 @@ export type SettingsTabKey =
   | "technologies"
   | "pricingmodels"
   | "projecttypes"
+  | "projectroles"
   | "auditlog"
   | "emailtemplates"
   | "notificationrules"
@@ -75,6 +76,7 @@ const SETTINGS_TAB_PERMISSION_RULES: Partial<Record<SettingsTabKey, string[]>> =
   technologies: ["metadata:manage"],
   pricingmodels: ["metadata:manage"],
   projecttypes: ["metadata:manage"],
+  projectroles: ["metadata:manage"],
   holidays: ["settings:manage"],
   auditlog: ["auditlogs:view"],
   emailtemplates: ["settings:manage"],

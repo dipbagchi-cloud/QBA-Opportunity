@@ -452,13 +452,15 @@ function buildTechnologyStack(context: any): string {
 
 function buildResourcePlan(context: any): string {
   const presales = context.presales;
-  if (!presales?.resourceLines || presales.resourceLines.length === 0) {
+  const resources = presales?.resourceLines || presales?.resources || [];
+  if (resources.length === 0) {
     return '[RESOURCE PLAN TO BE DEFINED - Presales estimation required]';
   }
 
-  let content = '| Role | Location | Duration | Monthly Effort |\n|------|----------|----------|----------------|\n';
-  for (const line of presales.resourceLines) {
-    content += `| ${line.role || line.designation || '[Role]'} | ${line.location || 'Offshore'} | ${line.months || '[TBD]'} months | ${line.effortPerMonth || line.effort || '[TBD]'} |\n`;
+  let content = '| Resource Skill Set | Project Role | Location | Duration | Monthly Effort |\n|--------------------|--------------|----------|----------|----------------|\n';
+  for (const line of resources) {
+    const location = line.location || line.locationKey || [line.country, line.city].filter(Boolean).join(' / ') || line.type || 'Offshore';
+    content += `| ${line.role || line.designation || line.skill || '[Role]'} | ${line.projectRole || '[TBD]'} | ${location} | ${line.months || '[TBD]'} months | ${line.effortPerMonth || line.effort || '[TBD]'} |\n`;
   }
 
   return content;
@@ -553,7 +555,8 @@ function buildDataPrompt(dependencies: string[], context: any): string {
     if (resources.length > 0) {
       presalesText += `Total Resources: ${resources.length}\n`;
       resources.forEach((r: any, i: number) => {
-        presalesText += `- Resource ${i + 1}: ${r.role || r.designation || 'N/A'}, Location: ${r.location || 'Offshore'}, Months: ${r.months || 'N/A'}\n`;
+        const projectRole = r.projectRole ? `, Project Role: ${r.projectRole}` : '';
+        presalesText += `- Resource ${i + 1}: ${r.role || r.designation || r.skill || 'N/A'}${projectRole}, Location: ${r.location || r.locationKey || r.type || 'Offshore'}, Months: ${r.months || 'N/A'}\n`;
       });
     }
     if (presales.gomPercent) presalesText += `GOM%: ${presales.gomPercent}%\n`;

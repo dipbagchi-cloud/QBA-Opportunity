@@ -66,6 +66,7 @@ export type ResourceMonth = {
 export type ResourceLine = {
     id: string;
     role: string;
+    projectRole?: string;
     location: "Offshore" | "Onsite";
     dailyRate: number; // Revenue
     dailyCost: number; // Cost

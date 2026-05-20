@@ -9,6 +9,7 @@ import { useCurrency } from "@/components/providers/currency-provider";
 interface ResourceRow {
     id: string;
     role: string;
+    projectRole?: string;   // separate dropdown — chosen from admin "Project Roles" lookup (PM, Tech Lead, BA, …)
     country?: string;
     city?: string;
     locationKey?: string;   // e.g. "India + Kolkata" — drives rate lookup
@@ -388,6 +389,7 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
             return {
                 id: resource.id,
                 role: resource.role,
+                projectRole: resource.projectRole,
                 location: resource.type,
                 dailyRate: resource.dailyRate,
                 // Use the loaded daily cost (includes overhead: DM, Bench, Leave, Growth, Increment)

@@ -270,6 +270,16 @@ model ProjectType {
   @@map("project_types")
 }
 
+model ProjectRole {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("project_roles")
+}
+
 // ============================================================================
 // EMAIL TEMPLATES (Admin-configurable notification emails)
 // ============================================================================

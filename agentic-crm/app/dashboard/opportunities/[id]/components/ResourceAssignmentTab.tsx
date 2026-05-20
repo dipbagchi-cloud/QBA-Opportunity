@@ -13,6 +13,7 @@ import {
 import { useOpportunityEstimation, ResourceRow } from "../context/OpportunityEstimationContext";
 import { calculateRateCard } from "@/lib/gom-calculator";
 import { useCurrency } from "@/components/providers/currency-provider";
+import { API_URL, getAuthHeaders } from "@/lib/api";
 
 const ALL_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -51,9 +52,22 @@ export function ResourceAssignmentTab() {
         [selectedAddCountry, selectedAddCity]
     );
 
+    const [projectRoles, setProjectRoles] = useState<{ id: string; name: string }[]>([]);
+
     useEffect(() => {
         fetchRateCards().then(setRateCards).catch(() => setRateCards([]));
     }, []);
+
+    useEffect(() => {
+        fetch(`${API_URL}/api/master/project-roles`, { headers: getAuthHeaders() })
+            .then((r) => (r.ok ? r.json() : []))
+            .then((data) => setProjectRoles(Array.isArray(data) ? data : []))
+            .catch(() => setProjectRoles([]));
+    }, []);
+
+    const setRowProjectRole = (id: string, value: string) => {
+        setResources(resources.map((r) => (r.id === id ? { ...r, projectRole: value } : r)));
+    };
 
     // Compute visible months based on start/end dates — only scheduled months are shown/editable
     const visibleMonths = useMemo(() => {
@@ -387,6 +401,7 @@ export function ResourceAssignmentTab() {
                         <thead className="bg-slate-50 text-slate-700 font-semibold border-b">
                             <tr>
                                 <th className="p-3 border-r sticky left-0 bg-slate-50 z-10 min-w-[200px]">Skillset Experience</th>
+                                <th className="p-3 border-r min-w-[160px]">Project Role</th>
                                 <th className="p-3 border-r min-w-[220px]">Country / City</th>
                                 {visibleMonths.map(month => (
                                     <th key={month} className="p-3 text-center border-r min-w-[80px]">
@@ -401,7 +416,7 @@ export function ResourceAssignmentTab() {
                         <tbody className="divide-y divide-slate-100">
                             {resources.length === 0 && (
                                 <tr>
-                                    <td colSpan={visibleMonths.length + 4} className="p-6 text-center text-slate-400 italic">
+                                    <td colSpan={visibleMonths.length + (readOnly ? 4 : 5)} className="p-6 text-center text-slate-400 italic">
                                         {readOnly ? "No resources assigned." : 'No resources assigned. Click "Add Resource" to begin.'}
                                     </td>
                                 </tr>
@@ -426,6 +441,25 @@ export function ResourceAssignmentTab() {
                                                 </span>
                                             )}
                                         </div>
+                                    </td>
+                                    <td className="p-2 border-r">
+                                        {rowEditable ? (
+                                            <select
+                                                className="w-full bg-slate-50 border-transparent rounded px-2 py-1 text-slate-700 text-xs focus:bg-white focus:ring-1 focus:ring-slate-200"
+                                                value={row.projectRole || ''}
+                                                onChange={(e) => setRowProjectRole(row.id, e.target.value)}
+                                            >
+                                                <option value="">— Select role —</option>
+                                                {row.projectRole && !projectRoles.some(pr => pr.name === row.projectRole) && (
+                                                    <option value={row.projectRole}>{row.projectRole} (inactive)</option>
+                                                )}
+                                                {projectRoles.map(pr => (
+                                                    <option key={pr.id} value={pr.name}>{pr.name}</option>
+                                                ))}
+                                            </select>
+                                        ) : (
+                                            <span className="text-xs text-slate-700">{row.projectRole || <span className="text-slate-400 italic">—</span>}</span>
+                                        )}
                                     </td>
                                     <td className="p-2 border-r">
                                         <div className="grid grid-cols-2 gap-1">
@@ -528,6 +562,7 @@ export function ResourceAssignmentTab() {
                             {resources.length > 0 && (
                                 <tr className="bg-slate-100 font-semibold border-t-2 border-slate-300">
                                     <td className="p-2 px-3 border-r sticky left-0 bg-slate-100 z-10">Total Days</td>
+                                    <td className="p-2 border-r"></td>
                                     <td className="p-2 border-r"></td>
                                     {visibleMonths.map(month => (
                                         <td key={month} className="p-2 text-center border-r text-slate-900">
@@ -663,6 +698,22 @@ export function ResourceAssignmentTab() {
                                     onChange={(e) => setEditingResource({ ...editingResource, skill: e.target.value, role: e.target.value })}
                                     className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                 />
+                            </div>
+                            <div className="space-y-1.5">
+                                <label className="text-sm font-semibold text-slate-700">Project Role</label>
+                                <select
+                                    value={editingResource.projectRole || ''}
+                                    onChange={(e) => setEditingResource({ ...editingResource, projectRole: e.target.value })}
+                                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                >
+                                    <option value="">— Select role —</option>
+                                    {editingResource.projectRole && !projectRoles.some(pr => pr.name === editingResource.projectRole) && (
+                                        <option value={editingResource.projectRole}>{editingResource.projectRole} (inactive)</option>
+                                    )}
+                                    {projectRoles.map(pr => (
+                                        <option key={pr.id} value={pr.name}>{pr.name}</option>
+                                    ))}
+                                </select>
                             </div>
                             <div className="space-y-1.5">
                                 <label className="text-sm font-semibold text-slate-700">Experience Band</label>

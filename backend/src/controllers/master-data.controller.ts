@@ -601,6 +601,55 @@ export async function deleteProjectType(req: Request, res: Response) {
     res.json({ message: 'Project type deactivated.' });
 }
 
+// ── Project Roles (lookup used by the Resource Estimation tab) ──
+export async function listProjectRoles(req: Request, res: Response) {
+    const roles = await (prisma as any).projectRole.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } });
+    res.json(roles);
+}
+
+export async function listAllProjectRoles(req: Request, res: Response) {
+    const roles = await (prisma as any).projectRole.findMany({ orderBy: { name: 'asc' } });
+    res.json(roles);
+}
+
+export async function createProjectRole(req: Request, res: Response) {
+    const { name } = req.body;
+    if (!name) { res.status(400).json({ error: 'Project role name is required.' }); return; }
+    const existing = await (prisma as any).projectRole.findFirst({ where: { name, isActive: true } });
+    if (existing) { res.status(409).json({ error: `Project role "${name}" already exists.` }); return; }
+    const role = await (prisma as any).projectRole.create({ data: { name } });
+    await auditMasterData('ProjectRole', role.id, 'CREATE', req.user!.userId, `Created project role: ${name}`);
+    res.status(201).json(role);
+}
+
+export async function updateProjectRole(req: Request, res: Response) {
+    const { id } = req.params;
+    const { name, isActive } = req.body;
+    const existing = await (prisma as any).projectRole.findUnique({ where: { id } });
+    if (!existing) { res.status(404).json({ error: 'Project role not found.' }); return; }
+
+    if (isActive !== undefined && !name) {
+        const role = await (prisma as any).projectRole.update({ where: { id }, data: { isActive } });
+        await auditMasterData('ProjectRole', id, 'UPDATE', req.user!.userId, `${isActive ? 'Activated' : 'Deactivated'} project role: ${existing.name}`);
+        res.json(role);
+        return;
+    }
+
+    await (prisma as any).projectRole.update({ where: { id }, data: { isActive: false } });
+    const newRole = await (prisma as any).projectRole.create({ data: { name: name ?? existing.name } });
+    await auditMasterData('ProjectRole', newRole.id, 'UPDATE', req.user!.userId, `Updated project role (versioned): "${existing.name}" → "${name ?? existing.name}"`);
+    res.json(newRole);
+}
+
+export async function deleteProjectRole(req: Request, res: Response) {
+    const { id } = req.params;
+    const existing = await (prisma as any).projectRole.findUnique({ where: { id } });
+    if (!existing) { res.status(404).json({ error: 'Project role not found.' }); return; }
+    await (prisma as any).projectRole.update({ where: { id }, data: { isActive: false } });
+    await auditMasterData('ProjectRole', id, 'DELETE', req.user!.userId, `Deactivated project role: ${existing.name}`);
+    res.json({ message: 'Project role deactivated.' });
+}
+
 // ── Salespersons (only users with the Sales role) ──
 export async function listSalespersons(req: Request, res: Response) {
     const users = await prisma.user.findMany({

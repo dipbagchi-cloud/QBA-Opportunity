@@ -9,6 +9,7 @@ import {
     listTechnologies,
     listPricingModels,
     listProjectTypes,
+    listProjectRoles,
     listSalespersons,
     listDepartments,
     listManagersByDepartment,
@@ -29,6 +30,7 @@ router.post('/validate-countries', validateCountries);
 router.get('/technologies', listTechnologies);
 router.get('/pricing-models', listPricingModels);
 router.get('/project-types', listProjectTypes);
+router.get('/project-roles', listProjectRoles);
 router.get('/salespersons', listSalespersons);
 router.get('/departments', listDepartments);
 router.get('/managers', listManagersByDepartment);
