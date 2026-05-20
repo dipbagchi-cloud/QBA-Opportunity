@@ -790,17 +790,45 @@ export async function resolveCalculatedFields(opportunityId: string): Promise<Re
     calc['opportunity.actualCloseDate'] = opp.actualCloseDate ? fmtDate(new Date(opp.actualCloseDate)) : '';
 
     // ── GOM profitability from presalesData
+    // The "proposed value" sent to the client is the FINAL quote price the salesperson
+    // committed to in the GOM Calculator — not the original Pipeline estimate. Field
+    // priority: finalRevenue (post-adjustment quote) → gomSummary.totalRevenue (pre-
+    // adjustment calculated revenue) → adjustedEstimatedValue → opportunity.value.
     if (opp.presalesData && typeof opp.presalesData === 'object' && !Array.isArray(opp.presalesData)) {
       const pData = opp.presalesData as any;
-      calc['calc:gomPercent'] = pData.gomPercent != null
-        ? `${Number(pData.gomPercent).toFixed(1)}%`
-        : 'N/A';
-      calc['calc:totalRevenue'] = pData.totalRevenue != null ? fmtMoney(currency, Number(pData.totalRevenue)) : 'N/A';
-      calc['calc:totalCost'] = pData.totalCost != null ? fmtMoney(currency, Number(pData.totalCost)) : 'N/A';
-      calc['calc:gomAbsolute'] = pData.gomFull != null ? fmtMoney(currency, Number(pData.gomFull)) : 'N/A';
+      const finalGomPercent = pData.finalGomPercent != null ? Number(pData.finalGomPercent) : (pData.gomPercent != null ? Number(pData.gomPercent) : null);
+      calc['calc:gomPercent'] = finalGomPercent != null ? `${finalGomPercent.toFixed(1)}%` : 'N/A';
+
+      const proposedRevenueRaw = pData.finalRevenue != null
+        ? Number(pData.finalRevenue)
+        : (pData.totalRevenue != null
+            ? Number(pData.totalRevenue)
+            : (pData.gomSummary?.totalRevenue != null
+                ? Number(pData.gomSummary.totalRevenue)
+                : (opp.adjustedEstimatedValue != null
+                    ? Number(opp.adjustedEstimatedValue)
+                    : (opp.value != null ? Number(opp.value) : null))));
+      const proposedValueFormatted = proposedRevenueRaw != null ? fmtMoney(currency, proposedRevenueRaw) : 'N/A';
+      calc['calc:totalRevenue'] = proposedValueFormatted;
+      calc['calc:proposedValue'] = proposedValueFormatted;
+
+      const totalCostRaw = pData.finalTotalCost != null
+        ? Number(pData.finalTotalCost)
+        : (pData.totalCost != null
+            ? Number(pData.totalCost)
+            : (pData.gomSummary?.totalCost != null ? Number(pData.gomSummary.totalCost) : null));
+      calc['calc:totalCost'] = totalCostRaw != null ? fmtMoney(currency, totalCostRaw) : 'N/A';
+
+      const gomAbsoluteRaw = pData.finalProfit != null
+        ? Number(pData.finalProfit)
+        : (pData.gomFull != null
+            ? Number(pData.gomFull)
+            : (proposedRevenueRaw != null && totalCostRaw != null ? proposedRevenueRaw - totalCostRaw : null));
+      calc['calc:gomAbsolute'] = gomAbsoluteRaw != null ? fmtMoney(currency, gomAbsoluteRaw) : 'N/A';
     } else {
       calc['calc:gomPercent'] = 'N/A';
-      calc['calc:totalRevenue'] = 'N/A';
+      calc['calc:totalRevenue'] = opp.value != null ? fmtMoney(currency, Number(opp.value)) : 'N/A';
+      calc['calc:proposedValue'] = opp.value != null ? fmtMoney(currency, Number(opp.value)) : 'N/A';
       calc['calc:totalCost'] = 'N/A';
       calc['calc:gomAbsolute'] = 'N/A';
     }

@@ -527,7 +527,7 @@ async function main() {
 <h2 style="color:#4f46e5">Proposal Sent to Client</h2>
 <p>Hi {{recipientName}},</p>
 <p>The proposal for opportunity <strong>{{opportunityTitle}}</strong> has been sent to the client <strong>{{clientName}}</strong>.</p>
-<p><strong>Proposed Value:</strong> {{currency}} {{value}}</p>
+<p><strong>Proposed Value:</strong> {{calc:proposedValue}}</p>
 <p><strong>Sales Rep:</strong> {{salesRepName}}</p>
 <p style="color:#64748b;font-size:12px;margin-top:24px">This is an automated notification from Q-CRM.</p>
 </div>`,
