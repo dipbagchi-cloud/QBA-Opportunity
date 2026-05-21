@@ -1635,6 +1635,19 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         return selectedRate > 0 ? projectedRevenue / selectedRate : projectedRevenue;
     };
 
+    // Final committed quote from the GOM Calculator, in opportunity currency.
+    // Priority chain mirrors the back-end calc:proposedValue resolver so that
+    // every surface (list column, list tooltip, Estimation Summary, SOW Approved,
+    // proposal-sent email) shows the same number.
+    const getFinalQuoteValue = (): number => {
+        const pd = rawPresalesData as any;
+        if (pd?.finalRevenue != null) return getPresalesConverted(Number(pd.finalRevenue));
+        if (pd?.totalRevenue != null) return getPresalesConverted(Number(pd.totalRevenue));
+        if (pd?.gomSummary?.totalRevenue != null) return getPresalesConverted(Number(pd.gomSummary.totalRevenue));
+        if (Number(adjustedEstimatedValue) > 0) return Number(adjustedEstimatedValue);
+        return Number(formData.value) || 0;
+    };
+
 
     // Access Control Logic already handled above
 
@@ -3266,14 +3279,21 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 <p className="font-semibold text-slate-800">{formData.expectedDayRate || "N/A"}</p>
                             </div>
                             <div className="bg-indigo-50 rounded-lg p-3 border border-indigo-200">
-                                <p className="text-xs text-indigo-600 mb-1">Estimated Value</p>
+                                <p className="text-xs text-indigo-600 mb-1">Final Quote Price</p>
                                 <p className="font-semibold text-indigo-700">
-                                    {cSym}{Number(formData.value).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
-                                    {opportunityCurrency && globalCurrency && opportunityCurrency !== globalCurrency && (
-                                        <span className="text-xs text-slate-500 ml-1">
-                                            ({getSymbol(globalCurrency)}{(Number(formData.value) * getRate(globalCurrency) / getRate(opportunityCurrency)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
-                                        </span>
-                                    )}
+                                    {(() => {
+                                        const finalQuote = getFinalQuoteValue();
+                                        return (
+                                            <>
+                                                {cSym}{finalQuote.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                                {opportunityCurrency && globalCurrency && opportunityCurrency !== globalCurrency && (
+                                                    <span className="text-xs text-slate-500 ml-1">
+                                                        ({getSymbol(globalCurrency)}{(finalQuote * getRate(globalCurrency) / getRate(opportunityCurrency)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
+                                                    </span>
+                                                )}
+                                            </>
+                                        );
+                                    })()}
                                 </p>
                             </div>
                             {Number(adjustedEstimatedValue) > 0 && detailedStatus !== 'Re-estimation' && detailedStatus !== 'Sent for Re-estimate' && (
@@ -3319,14 +3339,21 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 <p className="font-semibold text-sm text-slate-800">{formData.projectName}</p>
                             </div>
                             <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
-                                <p className="text-xs text-slate-500 mb-1">Value</p>
+                                <p className="text-xs text-slate-500 mb-1">Final Quote Price</p>
                                 <p className="font-semibold text-sm text-slate-800">
-                                    {cSym}{Number(formData.value).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
-                                    {opportunityCurrency && globalCurrency && opportunityCurrency !== globalCurrency && (
-                                        <span className="text-xs text-slate-500 ml-1">
-                                            ({getSymbol(globalCurrency)}{(Number(formData.value) * getRate(globalCurrency) / getRate(opportunityCurrency)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
-                                        </span>
-                                    )}
+                                    {(() => {
+                                        const finalQuote = getFinalQuoteValue();
+                                        return (
+                                            <>
+                                                {cSym}{finalQuote.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                                {opportunityCurrency && globalCurrency && opportunityCurrency !== globalCurrency && (
+                                                    <span className="text-xs text-slate-500 ml-1">
+                                                        ({getSymbol(globalCurrency)}{(finalQuote * getRate(globalCurrency) / getRate(opportunityCurrency)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
+                                                    </span>
+                                                )}
+                                            </>
+                                        );
+                                    })()}
                                 </p>
                             </div>
                             <div className="bg-emerald-50 rounded-lg p-3 border border-emerald-200">

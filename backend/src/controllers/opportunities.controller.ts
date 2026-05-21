@@ -600,7 +600,20 @@ export async function updateOpportunity(req: Request, res: Response) {
                 // When presales submits to sales: first time = 'Estimation Submitted', subsequent = 'Re-estimation Submitted'
                 if (newStageName === 'Proposal') {
                     if (!previous?.gomApproved) {
-                        return res.status(400).json({ error: 'GOM must be approved by the assigned manager before moving to Sales.' });
+                        // Auto-approve when the final GOM% is at/above the configured
+                        // threshold (mirrors the frontend banner + Move-to-Sales gate so
+                        // server and UI cannot disagree). Persist gomApproved=true so
+                        // downstream reads see a consistent state.
+                        const presalesData = previous?.presalesData as any;
+                        const finalGomPercent: number | undefined = presalesData?.finalGomPercent;
+                        const config = await prisma.systemConfig.findUnique({ where: { key: 'budget_assumptions' } });
+                        const assumptions = (config?.value as any) || {};
+                        const autoApproveThreshold: number = assumptions.gomAutoApprovePercent || assumptions.marginPercent || 35;
+                        const autoApproved = finalGomPercent != null && finalGomPercent >= autoApproveThreshold;
+                        if (!autoApproved) {
+                            return res.status(400).json({ error: `GOM is below the ${autoApproveThreshold}% auto-approve threshold. Request manager approval before moving to Sales.` });
+                        }
+                        stageUpdate.gomApproved = true;
                     }
                     const reEstCount = (previous as any)?.reEstimateCount || 0;
                     stageUpdate.detailedStatus = reEstCount > 0 ? 'Re-estimation Submitted' : 'Estimation Submitted';

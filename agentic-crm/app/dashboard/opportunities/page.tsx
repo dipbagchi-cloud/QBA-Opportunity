@@ -438,7 +438,13 @@ export default function OpportunitiesPage() {
                                 ) : (
                                     sortedOpportunities.map((opp) => (
                                         <tr key={opp.id} className="hover:bg-slate-50/80 transition-colors group"
-                                        title={`${opp.name}\nClient: ${opp.client}\nOwner: ${opp.owner}\nStage: ${opp.stage}\nEstimated Value: ${(typeof opp.value === 'number' ? opp.value : Number(opp.value) || 0).toLocaleString()}\nQuote: ${(opp as any).quote != null ? Number((opp as any).quote).toLocaleString() : 'N/A'}\nProbability: ${opp.probability}%\nSales Rep: ${opp.salesRepName || 'N/A'}\nManager: ${opp.managerName || 'N/A'}\nHealth: ${opp.healthScore ?? 'N/A'}/100\nStatus: ${opp.status}\nLast Activity: ${opp.lastActivity}\nCreated: ${opp.createdAt || 'N/A'}\nExpected Close: ${opp.expectedCloseDate || 'N/A'}\nStart Date: ${opp.tentativeStartDate || 'N/A'}\nEnd Date: ${opp.tentativeEndDate || 'N/A'}`}
+                                        title={(() => {
+                                            const oppCurrSym = getSymbol((opp as any).currency || globalCurrency);
+                                            const fmt = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+                                            const valNum = typeof opp.value === 'number' ? opp.value : Number(opp.value) || 0;
+                                            const quoteNum = (opp as any).quote != null ? Number((opp as any).quote) : null;
+                                            return `${opp.name}\nClient: ${opp.client}\nOwner: ${opp.owner}\nStage: ${opp.stage}\nEstimated Value: ${oppCurrSym}${fmt(valNum)}\nQuote: ${quoteNum != null ? `${oppCurrSym}${fmt(quoteNum)}` : 'N/A'}\nProbability: ${opp.probability}%\nSales Rep: ${opp.salesRepName || 'N/A'}\nManager: ${opp.managerName || 'N/A'}\nHealth: ${opp.healthScore ?? 'N/A'}/100\nStatus: ${opp.status}\nLast Activity: ${opp.lastActivity}\nCreated: ${opp.createdAt || 'N/A'}\nExpected Close: ${opp.expectedCloseDate || 'N/A'}\nStart Date: ${opp.tentativeStartDate || 'N/A'}\nEnd Date: ${opp.tentativeEndDate || 'N/A'}`;
+                                        })()}
                                         >
                                             <td className="py-2.5 px-4">
                                                 <div className="flex items-center gap-2">
