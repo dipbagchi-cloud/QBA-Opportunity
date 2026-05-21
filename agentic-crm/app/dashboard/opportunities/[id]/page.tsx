@@ -1504,7 +1504,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     };
 
     if (isLoading) return (
-        <div className="max-w-[1400px] mx-auto space-y-4 animate-pulse" style={{ minHeight: '100vh' }}>
+        <div className="w-full space-y-4 animate-pulse" style={{ minHeight: '100vh' }}>
             {/* Header skeleton */}
             <div className="flex items-center justify-between">
                 <div className="h-6 w-64 bg-slate-200 rounded" />
@@ -1623,7 +1623,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
     return (
         <div
-            className="max-w-[1400px] mx-auto space-y-4 relative transition-opacity duration-300"
+            className="w-full space-y-4 relative transition-opacity duration-300"
             style={{ opacity: dataReady ? 1 : 0, minHeight: '100vh' }}
         >
             {/* Header with Actions */}
@@ -1759,7 +1759,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     <RefreshCw className="w-4 h-4 flex-shrink-0 text-amber-500" />
                     <div>
                         <span className="font-semibold text-sm">Sent for Re-estimation</span>
-                        <span className="text-xs ml-2 text-amber-600">— This opportunity was sent back for re-estimation by the Sales team</span>
+                        <span className="text-xs ml-2 text-amber-600">{'-'} This opportunity was sent back for re-estimation by the Sales team</span>
                     </div>
                 </div>
             )}
@@ -1768,7 +1768,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     <Check className="w-4 h-4 flex-shrink-0 text-indigo-500" />
                     <div>
                         <span className="font-semibold text-sm">Estimation Submitted</span>
-                        <span className="text-xs ml-2 text-indigo-600">— Estimation has been submitted to the Sales team for review</span>
+                        <span className="text-xs ml-2 text-indigo-600">{'-'} Estimation has been submitted to the Sales team for review</span>
                     </div>
                 </div>
             )}
@@ -1777,7 +1777,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     <Check className="w-4 h-4 flex-shrink-0 text-purple-500" />
                     <div>
                         <span className="font-semibold text-sm">Re-estimation Submitted</span>
-                        <span className="text-xs ml-2 text-purple-600">— Updated re-estimation has been submitted to Sales</span>
+                        <span className="text-xs ml-2 text-purple-600">{'-'} Updated re-estimation has been submitted to Sales</span>
                     </div>
                 </div>
             )}
@@ -2349,12 +2349,12 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     <div className="bg-white rounded-lg shadow-sm border border-slate-200">
                         {isLost && (
                             <div className="mx-4 mt-3 px-3 py-1.5 bg-red-50 border border-red-200 rounded-md text-xs text-red-700 font-medium">
-                                {currentStageName === 'Proposal Lost' ? 'Proposal Lost' : 'Closed Lost'} — All fields are read-only.
+                                {currentStageName === 'Proposal Lost' ? 'Proposal Lost' : 'Closed Lost'} - All fields are read-only.
                             </div>
                         )}
                         {!isLost && opportunityStage >= 2 && (
                             <div className="mx-4 mt-3 px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-md text-xs text-amber-700 font-medium">
-                                {opportunityStage === 3 ? 'SOW Approved' : currentStageName === 'Negotiation' ? 'Under Negotiation' : currentStageName || 'Sales'} — All fields are read-only.
+                                {opportunityStage === 3 ? 'SOW Approved' : currentStageName === 'Negotiation' ? 'Under Negotiation' : currentStageName || 'Sales'} - All fields are read-only.
                             </div>
                         )}
                         {/* Inner Tabs */}
@@ -2394,7 +2394,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     </div>
                                     <div>
                                         <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Country</label>
-                                        <div className="font-semibold text-slate-800">{formData.country || <span className="text-slate-400">—</span>}</div>
+                                        <div className="font-semibold text-slate-800">{formData.country || <span className="text-slate-400">-</span>}</div>
                                     </div>
                                     <div>
                                         <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Region</label>
@@ -2415,7 +2415,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     <div>
                                         <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Proposal Due Date</label>
                                         <div className="font-semibold text-slate-800 flex items-center gap-2">
-                                            {presalesForm.proposalDueDate || <span className="text-slate-400">—</span>}
+                                            {presalesForm.proposalDueDate || <span className="text-slate-400">-</span>}
                                         </div>
                                     </div>
                                     <div>
@@ -2424,7 +2424,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     </div>
                                     <div>
                                         <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Manager</label>
-                                        <div className="font-semibold text-slate-800">{opportunityManagerName || <span className="text-slate-400">—</span>}</div>
+                                        <div className="font-semibold text-slate-800">{opportunityManagerName || <span className="text-slate-400">-</span>}</div>
                                     </div>
 
                                     <div>
@@ -2871,7 +2871,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             <div className="p-5">
                                 <div className="mb-4 px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-xs text-slate-500 font-medium flex items-center gap-2">
                                     <Info className="w-3.5 h-3.5 shrink-0" />
-                                    View only — This tab shows a read-only summary of the estimation. To make changes, use the Resource Assignment or GOM Calculator tabs.
+                                    View only - This tab shows a read-only summary of the estimation. To make changes, use the Resource Assignment or GOM Calculator tabs.
                                 </div>
                                 <EstimationTab />
                             </div>
@@ -2907,7 +2907,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 <XCircle className="w-4 h-4 text-red-600" />
                             </div>
                             <div>
-                                <h3 className="font-bold text-red-800 text-sm">Opportunity Closed — {currentStageName === 'Proposal Lost' ? 'Proposal Lost' : 'Lost'}</h3>
+                                <h3 className="font-bold text-red-800 text-sm">Opportunity Closed - {currentStageName === 'Proposal Lost' ? 'Proposal Lost' : 'Lost'}</h3>
                                 <p className="text-sm text-red-700 mt-1"><span className="font-semibold">Remarks:</span> {lostRemarks || 'No remarks provided.'}</p>
                             </div>
                         </div>
@@ -3042,8 +3042,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                                     <tbody>
                                                         {tc.map((entry: any, i: number) => (
                                                             <tr key={entry.id || i} className="border-t border-slate-100">
-                                                                <td className="px-3 py-1.5 text-slate-700">{entry.category || "—"}</td>
-                                                                <td className="px-3 py-1.5 text-slate-600">{entry.description || "—"}</td>
+                                                                <td className="px-3 py-1.5 text-slate-700">{entry.category || "-"}</td>
+                                                                <td className="px-3 py-1.5 text-slate-600">{entry.description || "-"}</td>
                                                                 <td className="px-3 py-1.5 text-right font-medium text-slate-800">{cSym}{getPresalesConverted(Number(entry.amount) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                                                             </tr>
                                                         ))}
@@ -3408,7 +3408,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             <div className="space-y-1.5">
                                 <label className="block text-sm font-bold text-slate-700">Manager *</label>
                                 {isLoadingManagers ? (
-                                    <div className="text-xs text-slate-400 py-2">Loading managers…</div>
+                                    <div className="text-xs text-slate-400 py-2">Loading managers...</div>
                                 ) : (
                                     <select
                                         required
@@ -3494,7 +3494,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                         <div className="p-5 space-y-4">
                             <p className="text-sm text-slate-600">
                                 {lostModalType === 'Proposal Lost'
-                                    ? 'Mark this opportunity as Proposal Lost — the proposal was not accepted. Please provide a reason.'
+                                    ? 'Mark this opportunity as Proposal Lost - the proposal was not accepted. Please provide a reason.'
                                     : 'Are you sure you want to mark this opportunity as lost? This action will close the opportunity.'}
                             </p>
 
