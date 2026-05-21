@@ -89,19 +89,31 @@ export function GomCalculatorTab({
                     <div className="text-[10px] text-slate-500 mt-0.5">Calculated quote price</div>
                 </div>
 
-                <div className="rounded-lg border border-slate-200 border-l-4 border-l-cyan-600 bg-white p-3 shadow-sm">
-                    <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs font-semibold text-slate-500">Projected Revenue</span>
-                        <span className="h-7 w-7 rounded-md bg-cyan-50 text-cyan-700 flex items-center justify-center">
-                            <DollarSign className="w-4 h-4" />
-                        </span>
-                    </div>
-                    <div className="text-xl font-bold text-slate-900">{fmtCurrency(salesTargetRevenue)}</div>
-                    <div className="text-[10px] text-slate-500 mt-0.5">Estimated value from Pipeline</div>
-                </div>
+                {/* Projected Revenue tile.
+                    During re-estimation, Sales sends a suggested revenue along with the
+                    send-back request. From that point on the suggested figure is what
+                    Presales is being asked to hit, so the tile (and the Difference tile
+                    that follows) compare against the suggestion. Outside re-estimation
+                    we keep showing the original Pipeline estimate. */}
+                {(() => {
+                    const projectedRevenue = hasSuggestedRevenue ? reEstimateSuggestedRevenue : salesTargetRevenue;
+                    return (
+                        <div className="rounded-lg border border-slate-200 border-l-4 border-l-cyan-600 bg-white p-3 shadow-sm">
+                            <div className="flex items-center justify-between mb-1">
+                                <span className="text-xs font-semibold text-slate-500">Projected Revenue</span>
+                                <span className="h-7 w-7 rounded-md bg-cyan-50 text-cyan-700 flex items-center justify-center">
+                                    <DollarSign className="w-4 h-4" />
+                                </span>
+                            </div>
+                            <div className="text-xl font-bold text-slate-900">{fmtCurrency(projectedRevenue)}</div>
+                            <div className="text-[10px] text-slate-500 mt-0.5">{hasSuggestedRevenue ? 'Suggested revenue from Sales (re-estimation)' : 'Estimated value from Pipeline'}</div>
+                        </div>
+                    );
+                })()}
 
                 {(() => {
-                    const diff = salesTargetRevenue - revenue;
+                    const projectedRevenue = hasSuggestedRevenue ? reEstimateSuggestedRevenue : salesTargetRevenue;
+                    const diff = projectedRevenue - revenue;
                     const within = diff >= 0;
                     return (
                         <div className={`rounded-lg border border-slate-200 border-l-4 bg-white p-3 shadow-sm ${within ? 'border-l-emerald-600' : 'border-l-rose-600'}`}>
