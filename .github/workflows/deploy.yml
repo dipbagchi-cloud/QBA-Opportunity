@@ -29,7 +29,7 @@ jobs:
           script_stop: true
           command_timeout: 20m
           script: |
-            set -e
+            set -eo pipefail
             APP_DIR=/home/azureuser/app
             ECO=$APP_DIR/ecosystem.config.js
             cd $APP_DIR
@@ -47,8 +47,8 @@ jobs:
             npm ci 2>&1 | tail -5
             # Postinstall already runs prisma generate; this is belt + braces.
             npx prisma generate 2>&1 | tail -3
-            # Compile TS so the dist/ that PM2 launches is fresh.
-            npx tsc 2>&1 | tail -5
+            # Compile TS — show full output so errors are visible in CI logs.
+            npx tsc
 
             echo "=== Restart backend safely ==="
             bash $APP_DIR/scripts/pm2-safe-restart.sh qcrm-backend 3001 $ECO
@@ -82,7 +82,7 @@ jobs:
           script_stop: true
           command_timeout: 20m
           script: |
-            set -e
+            set -eo pipefail
             APP_DIR=/home/azureuser/uat
             ECO=$APP_DIR/ecosystem.config.js
             cd $APP_DIR
@@ -98,7 +98,7 @@ jobs:
             cd $APP_DIR/backend
             npm ci 2>&1 | tail -5
             npx prisma generate 2>&1 | tail -3
-            npx tsc 2>&1 | tail -5
+            npx tsc
 
             echo "=== Restart UAT backend safely ==="
             bash $APP_DIR/scripts/pm2-safe-restart.sh qcrm-uat-backend 3003 $ECO
@@ -130,7 +130,7 @@ jobs:
           script_stop: true
           command_timeout: 20m
           script: |
-            set -e
+            set -eo pipefail
             APP_DIR=/home/azureuser/qa
             ECO=$APP_DIR/ecosystem.config.js
             cd $APP_DIR
@@ -146,7 +146,7 @@ jobs:
             cd $APP_DIR/backend
             npm ci 2>&1 | tail -5
             npx prisma generate 2>&1 | tail -3
-            npx tsc 2>&1 | tail -5
+            npx tsc
 
             echo "=== Restart QA backend safely ==="
             bash $APP_DIR/scripts/pm2-safe-restart.sh qcrm-qa-backend 3005 $ECO
