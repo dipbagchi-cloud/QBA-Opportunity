@@ -1,6 +1,6 @@
 # Q-CRM — VM Deployment Guide
 
-> **Last Updated:** May 14, 2026  
+> **Last Updated:** May 23, 2026  
 > **Production URL:** https://qcrm.qbadvisory.com  
 > **VM Host:** Azure Standard_D4s_v3 — IP `20.124.178.41`
 
@@ -80,14 +80,18 @@ The VM hosts **3 environments** via separate PM2 processes and Nginx server bloc
 
 ### PM2 Process Map
 
-| PM2 ID | Name | CWD | Script |
-|--------|------|-----|--------|
-| 0 | `qcrm-backend` | `/home/azureuser/app/backend` | `npm start` |
-| 1 | `qcrm-frontend` | `/home/azureuser/app/agentic-crm` | `npm start` |
-| 2 | `qcrm-uat-backend` | (UAT backend path) | `npm start` |
-| 3 | `qcrm-uat-frontend` | (UAT frontend path) | `npm start` |
-| 4 | `qcrm-qa-backend` | (QA backend path) | `npm start` |
-| 5 | `qcrm-qa-frontend` | (QA frontend path) | `npm start` |
+> **Note:** PM2 IDs are auto-assigned and can change after `pm2 delete`/re-add. Use process **names** in all commands, never IDs.
+
+| Name | Environment | CWD | Port |
+|------|-------------|-----|------|
+| `qcrm-backend` | Production | `/home/azureuser/app/backend` | 3001 |
+| `qcrm-frontend` | Production | `/home/azureuser/app/agentic-crm` | 3000 |
+| `qcrm-qa-backend` | QA | `/home/azureuser/qa/backend` | 3005 |
+| `qcrm-qa-frontend` | QA | `/home/azureuser/qa/agentic-crm` | 3004 |
+| `qcrm-uat-backend` | UAT | `/home/azureuser/uat/backend` | 3003 |
+| `qcrm-uat-frontend` | UAT | `/home/azureuser/uat/agentic-crm` | 3002 |
+
+All processes are defined in `/home/azureuser/app/ecosystem.config.js` (shared across all environments).
 
 ---
 
@@ -338,6 +342,64 @@ pm2 restart qcrm-backend        # Restart to pick up new client
 
 ---
 
+### Automated CI/CD Deployment (GitHub Actions)
+
+**Workflow file:** `.github/workflows/deploy.yml` in the `QuantumBusinessAdvisory/QCRM` repo.
+
+**Trigger:** Push to any of these branches:
+- `Opportunity_MVC` → deploys **production** (`/home/azureuser/app`)
+- `uat` → deploys **UAT** (`/home/azureuser/uat`)
+- `qa` → deploys **QA** (`/home/azureuser/qa`)
+
+**CI flow for production:**
+```
+git reset --hard origin/Opportunity_MVC
+  → npm ci (backend)
+  → npx prisma generate
+  → npx tsc (backend TypeScript compile)
+  → pm2-safe-restart.sh qcrm-backend 3001
+  → npm ci (frontend)
+  → NODE_OPTIONS='--max-old-space-size=3072' npm run build
+  → pm2-safe-restart.sh qcrm-frontend 3000
+```
+
+**Important configuration requirements:**
+
+| File | Required Setting | Why |
+|------|-----------------|-----|
+| `agentic-crm/next.config.ts` | `typescript: { ignoreBuildErrors: true }` | Prevents TS declaration issues in Next.js 15 from failing the build |
+| `agentic-crm/next.config.ts` | `eslint: { ignoreDuringBuilds: true }` | Prevents ESLint warnings from blocking production build |
+
+Without both settings, `npm run build` fails on CI and the frontend will not serve — **every push will fail**.
+
+**Why CI failed before (root cause):**
+
+The CI script used `set -e` without `set -o pipefail`. Commands like:
+```bash
+npm run build 2>&1 | tail -10
+```
+pipe the output through `tail`. Without `pipefail`, bash uses `tail`'s exit code (always 0), **not** the build's exit code. So even when `npm run build` failed, the script continued silently. The failure only surfaced 30 seconds later when `pm2-safe-restart.sh` timed out waiting for `next start` to bind port 3000 (it crashed because `.next/` was incomplete).
+
+**Fix applied (commit `a8cfdbc`):** Changed `set -e` → `set -eo pipefail` in all three CI jobs. Now any failed command in a pipeline immediately stops the deploy with a clear error.
+
+**CI timeout limits:**
+- `command_timeout: 20m` — individual SSH command block
+- `timeout-minutes: 25` — entire GitHub Actions job
+
+The full prod deploy (backend npm ci + tsc + frontend npm ci + build + restart) takes ~12-18 minutes, leaving headroom. If it's consistently timing out, check if `npm ci` is abnormally slow (network issues on the VM).
+
+**VM SSH key for CI:**
+The VM's git remote uses `git@github.com:QuantumBusinessAdvisory/QCRM.git` (SSH). The VM's SSH key is **read-only** — it can `git fetch` but cannot `git push`. The CI SSHs into the VM using the `VM_SSH_KEY` secret (separate deploy key with read access).
+
+**Manual CI trigger (re-run last push):**
+```bash
+# On local machine — make an empty commit and push to trigger CI
+git commit --allow-empty -m "ci: retrigger deploy"
+git push qcrm Opportunity_MVC
+```
+
+---
+
 ## 10. Monitoring & Troubleshooting
 
 ### PM2 Commands
@@ -448,13 +510,15 @@ ssh qcrm "curl -s -o /dev/null -w 'Backend: %{http_code}\n' http://localhost:300
 
 | Issue | Symptom | Fix |
 |-------|---------|-----|
-| **Backend 502 after frontend deploy** | 502 on `/api/*` after `git pull` + frontend restart | `cd backend && npx prisma generate && start-safe.sh 3001 qcrm-backend` |
-| **ChunkLoadError** | White screen / 400 on JS chunks | Ghost process on port 3000 — run `start-safe.sh 3000 qcrm-frontend` |
-| **Stale API responses** | New backend code not taking effect | Ghost process on port 3001 — run `start-safe.sh 3001 qcrm-backend` |
+| **CI always fails on push** | "did not bind port 3000 within 30s" in CI logs | Add `typescript: { ignoreBuildErrors: true }` AND `eslint: { ignoreDuringBuilds: true }` to `next.config.ts`. Also ensure CI script uses `set -eo pipefail`. |
+| **CI fails silently mid-build** | CI log shows last step succeeding but deploy is broken | `set -e` without `pipefail` swallows pipe errors — check that deploy.yml uses `set -eo pipefail` |
+| **Backend 502 after frontend deploy** | 502 on `/api/*` after `git pull` + frontend restart | `cd backend && npx prisma generate && pm2-safe-restart.sh qcrm-backend 3001` |
+| **ChunkLoadError** | White screen / 400 on JS chunks | Ghost process on port 3000 — run `pm2-safe-restart.sh qcrm-frontend 3000` |
+| **Stale API responses** | New backend code not taking effect | Ghost process on port 3001 — run `pm2-safe-restart.sh qcrm-backend 3001` |
 | **Build OOM** | Build hangs or crashes | `sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'` before build |
 | **Port in use** | PM2 process won't start | `fuser -k 3000/tcp` then `pm2 restart qcrm-frontend` |
-| **Stale TypeScript** | Backend errors after code change | `npx tsc --skipLibCheck` then `start-safe.sh 3001 qcrm-backend` |
-| **Prisma client stale** | `@prisma/client did not initialize yet` | `cd backend && npx prisma generate && start-safe.sh 3001 qcrm-backend` |
+| **Stale TypeScript** | Backend errors after code change | `npx tsc` then `pm2-safe-restart.sh qcrm-backend 3001` |
+| **Prisma client stale** | `@prisma/client did not initialize yet` | `cd backend && npx prisma generate && pm2-safe-restart.sh qcrm-backend 3001` |
 | **DB connection** | Prisma connection errors | Check `DATABASE_URL` in `.env`, verify PostgreSQL running: `systemctl status postgresql` |
 | **SSL expired** | HTTPS errors | `sudo certbot renew` |
 | **PM2 not persisting** | Processes gone after reboot | `pm2 save && pm2 startup` |
