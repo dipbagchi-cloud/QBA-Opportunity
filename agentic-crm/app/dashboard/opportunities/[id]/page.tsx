@@ -1378,13 +1378,17 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 body: JSON.stringify({ stageName: 'Negotiation' })
             });
             if (res.ok) {
-                // Update local store only (no second PATCH to avoid duplicate notifications)
+                // Update local store only (no second PATCH to avoid duplicate notifications).
+                // Clear detailedStatus so any lingering "Estimation Submitted" /
+                // "Re-estimation Submitted" / "Sent for Re-estimate" banner disappears
+                // without requiring a page reload.
                 useOpportunityStore.setState((state) => ({
                     opportunities: state.opportunities.map((opp) =>
-                        opp.id === id ? { ...opp, stage: 'Negotiation' } : opp
+                        opp.id === id ? { ...opp, stage: 'Negotiation', detailedStatus: '' } : opp
                     ),
                 }));
                 setCurrentStageName('Negotiation');
+                setDetailedStatus('');
                 toast({ title: "Success", description: "Proposal sent. Opportunity moved to Negotiation." });
             } else {
                 toast({ title: "Error", description: "Failed to update stage." });

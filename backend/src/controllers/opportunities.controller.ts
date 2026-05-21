@@ -590,6 +590,14 @@ export async function updateOpportunity(req: Request, res: Response) {
                     stageUpdate.detailedStatus = 'Sent for Re-estimate';
                     stageUpdate.gomApproved = false; // Reset GOM approval on re-estimate
                 }
+                // When Sales sends the proposal to the client (Proposal -> Negotiation),
+                // clear any lingering presales-cycle detailedStatus so the
+                // "Sent for Re-estimate" / "Estimation Submitted" /
+                // "Re-estimation Submitted" banners disappear. The
+                // "Under Negotiation" indicator comes from the stage name.
+                if (newStageName === 'Negotiation') {
+                    stageUpdate.detailedStatus = null;
+                }
                 // When presales submits to sales: first time = 'Estimation Submitted', subsequent = 'Re-estimation Submitted'
                 if (newStageName === 'Proposal') {
                     // Allow if manually approved OR if GOM% meets the auto-approve threshold
