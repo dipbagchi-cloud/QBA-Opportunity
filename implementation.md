@@ -1886,6 +1886,32 @@ The `SettingsTabKey` union and `SETTINGS_TAB_PERMISSION_RULES` map in `agentic-c
 
 ---
 
+### 21.18 May 21 Release — Deployment Status
+
+All May 21, 2026 changes (§ 21.11 – 21.17) ship together as commit **`50622b1`** on branch `Opportunity_MVC`. The branch was fast-forwarded into `qa` and `uat`, and pushed to both git remotes (`origin` → dipbagchi-cloud/QBA-Opportunity, `qcrm` → QuantumBusinessAdvisory/QCRM).
+
+**GitHub Actions deploy** (`.github/workflows/deploy.yml`) triggered on the push and ran the standard sequence per environment:
+
+1. `git reset --hard origin/<branch>` on the VM working tree
+2. `npm ci --omit=dev` in `backend/`
+3. `pm2 restart qcrm-<env>-backend --update-env`
+4. `npm ci` in `agentic-crm/`
+5. `pm2 stop qcrm-<env>-frontend`
+6. `NODE_OPTIONS='--max-old-space-size=3072' npm run build`
+7. `pm2 start qcrm-<env>-frontend --update-env`
+
+**Live state (verified post-deploy):**
+
+| Env | Git HEAD | Frontend | Backend | `project_roles` rows |
+|---|---|---|---|---|
+| Production | `50622b1` | 200 / 307 | online | 17 (15 seeded + 2 custom) |
+| QA | `50622b1` | 200 / 307 | online | 15 |
+| UAT | `50622b1` | 200 / 307 | online | 15 |
+
+**Known deploy quirk (mitigation in `memory/deployment_process.md`):** the `pm2 stop` → `npm run build` → `pm2 start` step in the workflow does not release ports cleanly on this VM. Next.js child processes hold 3000/3002/3004 past the parent's SIGTERM, causing the freshly-spawned child to die on `EADDRINUSE` and PM2 to report "online" while the actual server is dead. Post-deploy verification therefore requires the stop → `fuser -k -9 <port>/tcp` × 2 → `pm2 start` cycle. CI does not yet automate this — it is documented as the manual finalization step.
+
+---
+
 ---
 
 ### 21.3 Mark as Lost — Pipeline Stage
