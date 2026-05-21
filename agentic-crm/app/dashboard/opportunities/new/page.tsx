@@ -319,9 +319,11 @@ export default function NewOpportunityPage() {
         const errors: { name?: string; contact?: string; email?: string } = {};
         if (!newClientName.trim()) errors.name = 'Client name is required.';
         if (!newClientContact.trim()) errors.contact = 'Contact person is required.';
-        if (newClientEmail.trim()) {
-            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-            if (!emailRegex.test(newClientEmail.trim())) errors.email = 'Enter a valid email address.';
+        if (!newClientEmail.trim()) {
+            errors.email = 'Contact person email is required.';
+        } else {
+            const emailRegex = /^[a-zA-Z0-9]+([._][a-zA-Z0-9]+)*@[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$/;
+            if (!emailRegex.test(newClientEmail.trim())) errors.email = 'Enter a valid email (e.g. xxx_yyy@aaa.com, xxx.yyy@aaa.com, aaa@xxx.com).';
         }
         setClientFormErrors(errors);
         if (Object.keys(errors).length > 0) return;
@@ -878,7 +880,7 @@ export default function NewOpportunityPage() {
                                     type="email"
                                     value={newClientEmail}
                                     onChange={(e) => { setNewClientEmail(e.target.value); if (clientFormErrors.email) setClientFormErrors(p => ({ ...p, email: undefined })); }}
-                                    placeholder="Contact Person Email"
+                                    placeholder="Contact Person Email *"
                                     className={`w-full px-3 py-2.5 bg-white border rounded-md text-sm shadow-sm ${clientFormErrors.email ? 'border-red-400 focus:ring-red-300' : 'border-slate-300'}`}
                                 />
                                 {clientFormErrors.email && <p className="mt-1 text-xs text-red-500">{clientFormErrors.email}</p>}
