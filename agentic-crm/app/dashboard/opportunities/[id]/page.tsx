@@ -1048,7 +1048,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         if (!newClientEmail.trim()) {
             errors.email = 'Contact person email is required.';
         } else {
-            const emailRegex = /^[a-zA-Z0-9]+([._][a-zA-Z0-9]+)*@[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$/;
+            const emailRegex = /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/;
             if (!emailRegex.test(newClientEmail.trim())) errors.email = 'Enter a valid email (e.g. xxx_yyy@aaa.com, xxx.yyy@aaa.com, aaa@xxx.com).';
         }
         setClientFormErrors(errors);
@@ -3684,9 +3684,15 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             </div>
                             <div>
                                 <input
-                                    type="email"
+                                    type="text"
                                     value={newClientEmail}
                                     onChange={(e) => { setNewClientEmail(e.target.value); if (clientFormErrors.email) setClientFormErrors(p => ({ ...p, email: undefined })); }}
+                                    onBlur={() => {
+                                        const v = newClientEmail.trim();
+                                        if (!v) { setClientFormErrors(p => ({ ...p, email: 'Contact person email is required.' })); return; }
+                                        const emailRegex = /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/;
+                                        if (!emailRegex.test(v)) setClientFormErrors(p => ({ ...p, email: 'Enter a valid email (e.g. xxx_yyy@aaa.com, xxx.yyy@aaa.com, aaa@xxx.com).' }));
+                                    }}
                                     placeholder="Contact Person Email *"
                                     className={`w-full px-3 py-2.5 bg-white border rounded-md text-sm shadow-sm ${clientFormErrors.email ? 'border-red-400' : 'border-slate-300'}`}
                                 />
