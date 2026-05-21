@@ -361,6 +361,12 @@ function GomPercentSync({ onGomPercentChange }: { onGomPercentChange: (pct: numb
     return null;
 }
 
+function RevenueSync({ onRevenueChange }: { onRevenueChange: (rev: number) => void }) {
+    const { revenue } = useOpportunityEstimation();
+    useEffect(() => { onRevenueChange(revenue); }, [revenue, onRevenueChange]);
+    return null;
+}
+
 export default function OpportunityDetailsPage({ params }: { params: Promise<{ id: string }> }) {
     const router = useRouter();
     const { currency: globalCurrency, getSymbol, getRate, setCurrency } = useCurrency();
@@ -585,8 +591,9 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const [reEstimateComment, setReEstimateComment] = useState("");
     const [detailedStatus, setDetailedStatus] = useState<string>("");
 
-    // GOM percent from estimation context (for threshold check)
+    // GOM percent and revenue from estimation context
     const [contextGomPercent, setContextGomPercent] = useState(0);
+    const [contextRevenue, setContextRevenue] = useState(0);
     const [minGomPercent, setMinGomPercent] = useState(0);
     const [gomAutoApprovePercent, setGomAutoApprovePercent] = useState(0);
     const [gomApproved, setGomApproved] = useState(false);
@@ -1396,10 +1403,16 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         toast({ title: "Processing", description: "Sending proposal..." });
         setIsSaving(true);
         try {
+            // Include the current GOM-calculated revenue so the notification email
+            // always reflects the final quote price, not the pipeline estimate.
+            const patchBody: any = { stageName: 'Negotiation' };
+            if (contextRevenue > 0) {
+                patchBody.presalesData = { finalRevenue: contextRevenue };
+            }
             const res = await fetch(`${API_URL}/api/opportunities/${id}`, {
                 method: 'PATCH',
                 headers: getAuthHeaders(),
-                body: JSON.stringify({ stageName: 'Negotiation' })
+                body: JSON.stringify(patchBody)
             });
             if (res.ok) {
                 // Update local store only (no second PATCH to avoid duplicate notifications).
@@ -2382,6 +2395,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     currentUserName={user?.name || ''}
                 >
                     <GomPercentSync onGomPercentChange={setContextGomPercent} />
+                    <RevenueSync onRevenueChange={setContextRevenue} />
                     {opportunityStage < 2 && activeTab !== "View Estimate" && (
                         <PresalesSaveButton />
                     )}
