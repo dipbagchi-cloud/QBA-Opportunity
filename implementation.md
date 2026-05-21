@@ -1,6 +1,6 @@
 # Q-CRM — Detailed Functional Implementation Reference
 
-> **Last Updated:** May 14, 2026  
+> **Last Updated:** May 21, 2026  
 > **Production:** https://qcrm.qbadvisory.com  
 > **Stack:** Next.js 15 (frontend) · Express.js + TypeScript (backend) · PostgreSQL + Prisma (database)
 
@@ -1661,25 +1661,230 @@ Both `new/page.tsx` and `[id]/page.tsx`:
 
 ---
 
-### 21.2 Opportunity Edit — Stage-Based Lock
+### 21.2 Opportunity Edit — Stage-Based Lock (D2 rule, updated 2026-05-21)
 
-**Objective:** Prevent editing of basic opportunity information once the opportunity has been moved to **Proposal** or **Negotiation** stage, preserving data integrity during the sales process.
+**Objective:** Pipeline-tab fields must remain editable through Pipeline, Presales, **and Sales (Proposal)** stages — they freeze only once the proposal is sent to the client (Negotiation onwards) or the opp is Closed / Lost / On Hold. Client, Country, and Region freeze the moment the opportunity moves out of Pipeline.
+
+**Earlier behavior (now removed):** The previous implementation also blocked edits during the `Proposal` stage. This contradicted the product spec — once the salesperson commits to the proposal value the Pipeline form is still legitimately editable until the proposal is actually sent to the client.
 
 **File:** `agentic-crm/app/dashboard/opportunities/[id]/page.tsx`
 
-**Logic:** The `isPipelineEditable` constant inside the Pipeline view IIFE was updated to include stage name checks:
+**Logic:**
 
 ```typescript
 const isPipelineEditable =
-    hasEditAccess &&
+    canEditPipeline &&
     opportunityStage < 3 &&
     !isLost &&
     !isStalled &&
-    currentStageName !== 'Proposal' &&
     currentStageName !== 'Negotiation';
+const isClientCountryEditable = isPipelineEditable && opportunityStage === 0;
 ```
 
-When `isPipelineEditable` is `false`, all form inputs render with `disabled` prop and the Save button is hidden. A "Read Only" badge appears next to the section title.
+`isPipelineEditable` gates every Pipeline-tab field plus the Save button. `isClientCountryEditable` is a tighter gate that also requires the opp to still be in Discovery — it disables the Client Name, Country, and Region selects once the opp moves to Qualification or later.
+
+**Allowed editors:** Assigned Sales Rep, assigned Manager, named Presales assignees, and Owner (plus Admin). Resolved via the existing `opportunity-access.ts` `pipelineEditable` workflow flag, which requires both an edit-permission role AND direct assignment.
+
+**Backend enforcement:** `backend/src/controllers/opportunities.controller.ts` `updateOpportunity` rejects a non-admin PATCH that *changes* `clientName`, `country`, or `region` when the opportunity has moved past Discovery, returning 403 with the offending field names. The comparison is value-based so a full-form PATCH that re-sends unchanged values is not rejected.
+
+---
+
+### 21.11 One-Handoff Reassignment Rule (Sales Rep & Manager)
+
+**Objective:** The originally assigned Sales Rep / Manager can hand the opportunity off to a different person **exactly once**. After that, only Admin can reassign that field.
+
+**Persistence:** Counters live on `opportunity.metadata` as `salesRepHandoffs` and `managerHandoffs` (plus matching `*LastHandoffAt` / `*LastHandoffBy` audit fields).
+
+**Backend** (`backend/src/controllers/opportunities.controller.ts` `updateOpportunity`):
+
+1. **Detection** — `salesRepChanged` / `managerChanged` flags compare normalized submitted vs previous values.
+2. **True-handoff vs initial-assignment** — a change with an empty previous value (i.e., the very first time the field is being set) is **not** a handoff and does not consume the quota. The increment block uses:
+   ```typescript
+   const hadPreviousSalesRep = normalizeAssignment(previous?.salesRepName) !== '';
+   const hadPreviousManager  = normalizeAssignment(previous?.managerName)  !== '';
+   const salesRepIsTrueHandoff = salesRepChanged && hadPreviousSalesRep;
+   const managerIsTrueHandoff  = managerChanged  && hadPreviousManager;
+   ```
+3. **Block check** — for non-admin actors, when the change is a true handoff AND the counter is already ≥ 1, the request is rejected with `"Sales Rep (already handed off once — Admin only)"` / `"Manager (already handed off once — Admin only)"`.
+4. **Increment** — runs only for non-admin true handoffs; admin reassignments are unlimited and do not bump the counter.
+
+**Frontend lock** (`agentic-crm/app/dashboard/opportunities/[id]/page.tsx`):
+
+```typescript
+const salesRepHandoffsDone = Number(opportunityMetadata?.salesRepHandoffs) || 0;
+const managerHandoffsDone  = Number(opportunityMetadata?.managerHandoffs)  || 0;
+const salesRepHandoffLock = !isActiveAdmin && salesRepHandoffsDone >= 1;
+const managerHandoffLock  = !isActiveAdmin && managerHandoffsDone  >= 1;
+const canEditSalesRepAssignment = !baseAssignmentLock && !salesRepHandoffLock && (isActiveAdmin || activeRoleName === "sales")   && (activeStep === 0 || activeStep === 2);
+const canEditManagerAssignment  = !baseAssignmentLock && !managerHandoffLock  && (isActiveAdmin || activeRoleName === "manager") && (activeStep === 1 || activeStep === 2);
+```
+
+**UX feedback** (`AssignmentPane.tsx`):
+
+- `patchAssignment` now reads the server response. On 403/500 it shows an inline red banner with the server error and rolls back the optimistic UI change.
+- On success it calls `onAssignmentSaved(updatedMetadata)`; the parent updates `opportunityMetadata` so the dropdown lock kicks in immediately without a page reload.
+
+---
+
+### 21.12 Sales-Tab GOM Summary — Tile Parity with GOM Calculator
+
+**Objective:** The "Presales / Estimation Details" panel on the Sales page now shows the **same six summary tiles** as the GOM Calculator screen in Presales, so Sales sees an identical at-a-glance breakdown.
+
+**File:** `agentic-crm/app/dashboard/opportunities/[id]/page.tsx` (GOM Summary block inside the Sales panel)
+
+**Tiles (in order):**
+
+| # | Tile | Source | Border / Icon |
+|---|------|--------|----------------|
+| 1 | Total Quote | `getPresalesConverted(rev)` | blue `border-l-blue-500`, `TrendingUp` |
+| 2 | Projected Revenue | `adjustedEstimatedValue` or `formData.value` | cyan `border-l-cyan-600`, `DollarSign` |
+| 3 | Difference | `projectedOpp − quoteOpp` (absolute) | emerald if `≥0` (`Available`), rose otherwise (`Over`) |
+| 4 | Total Cost | `getPresalesConverted(totalC)` + resource count badge | slate `border-l-slate-600` |
+| 5 | GOM % | `pd.finalGomPercent` (fallback `(rev − totalC) / rev × 100`) | emerald if `≥20`, rose otherwise, with `CheckCircle` / `AlertCircle` / `XCircle` |
+| 6 | Profit | `getPresalesConverted(profit)` | indigo `border-l-indigo-600`, opportunity-currency badge |
+
+All amounts render in the opportunity currency via the existing `getPresalesConverted` helper; the projected value comes from Pipeline (already in opp currency, no conversion).
+
+---
+
+### 21.13 Proposal-Sent Email — Use Final Quote, Not Pipeline Estimate
+
+**Problem:** The "Proposal Sent to Client" email (`eventKey = sent_to_client`) was rendering the original Pipeline step-1 estimate (`opportunity.value`) as the **Proposed Value**, not the final committed quote from the GOM Calculator. Symptom on UAT: an opportunity with a 400,000 INR pipeline estimate and a 1,012,050 INR final quote emailed "Proposed Value: 400,000".
+
+**Root cause:** Two layered issues:
+
+1. **Template variable** — the `email_templates.body` row used `{{value}}` (or `{{calc:totalRevenue}}` on prod) which mapped to either `opportunity.value` or `presalesData.totalRevenue`. The GOM Calculator actually persists the closing quote as `presalesData.finalRevenue`; `totalRevenue` was only populated in `gomSummary` (pre-adjustment).
+2. **Resolver fallback** — `resolveCalculatedFields` only looked at `pData.totalRevenue` and otherwise returned `'N/A'`.
+
+**Fix** (`backend/src/lib/notification-engine.ts` `resolveCalculatedFields`):
+
+```typescript
+const proposedRevenueRaw = pData.finalRevenue ?? pData.totalRevenue
+    ?? pData.gomSummary?.totalRevenue
+    ?? opp.adjustedEstimatedValue
+    ?? opp.value;
+```
+
+The resolver now exposes:
+- `calc:proposedValue` — the proposed quote, with the priority chain above
+- `calc:totalRevenue` — mirrors the same value (kept for back-compat with prod template)
+- `calc:totalCost` — `pData.finalTotalCost → pData.totalCost → gomSummary.totalCost`
+- `calc:gomAbsolute` — `pData.finalProfit → pData.gomFull → revenue − totalCost`
+- `calc:gomPercent` — `pData.finalGomPercent → pData.gomPercent`
+
+**Live template update:** The `email_templates` row for `sent_to_client` was updated across all three databases (`agentic_crm`, `agentic_crm_qa`, `agentic_crm_uat`) to use `{{calc:proposedValue}}` in place of `{{value}}` / `{{calc:totalRevenue}}`. The seed file in `backend/prisma/seed.ts` was also updated so new installs ship the corrected template.
+
+---
+
+### 21.14 Opportunities List — `Quote` Column Resolution
+
+**Problem:** The Quote column (and the row tooltip) on `/dashboard/opportunities` showed `—` / `N/A` for Closed-Won deals even though the GOM Calculator clearly held a final quote price.
+
+**Cause:** The `listOpportunities` controller only checked `presalesData.totalRevenue → adjustedEstimatedValue`, which misses the `finalRevenue` field that the GOM Calculator actually writes.
+
+**Fix** (`backend/src/controllers/opportunities.controller.ts`):
+
+```typescript
+quote: (() => {
+    const pd = opp.presalesData as any;
+    if (pd?.finalRevenue              != null) return Number(pd.finalRevenue);
+    if (pd?.totalRevenue              != null) return Number(pd.totalRevenue);
+    if (pd?.gomSummary?.totalRevenue  != null) return Number(pd.gomSummary.totalRevenue);
+    if (opp.adjustedEstimatedValue    != null) return Number(opp.adjustedEstimatedValue);
+    return null;
+})()
+```
+
+The front-end column at `agentic-crm/app/dashboard/opportunities/page.tsx` already converts that value into the global currency via the `metadata.exchangeRatesSnapshot` so no UI change was needed.
+
+---
+
+### 21.15 Resource Estimation — Project Role Lookup (in progress)
+
+**Objective:** Each resource line in the Resource Estimation tab now carries a separate **Project Role** (PM, Tech Lead, BA, etc.) chosen from a new admin-managed master-data lookup, alongside the existing rate-card derived "role / skill / experience band" data.
+
+**Database** (`backend/prisma/schema.prisma`):
+
+```prisma
+model ProjectRole {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("project_roles")
+}
+```
+
+Migration applied across `agentic_crm` / `agentic_crm_qa` / `agentic_crm_uat` via `backend/prisma/migrations/manual_project_roles.sql` (idempotent — `CREATE TABLE IF NOT EXISTS`, `ON CONFLICT (name) DO NOTHING`). 15 default roles seeded: Project Manager, Tech Lead, Architect, Solution Architect, Senior Developer, Developer, Junior Developer, QA Engineer, Business Analyst, Scrum Master, DevOps Engineer, UX Designer, Functional Consultant, Technical Consultant, Database Administrator.
+
+**Backend API** (`backend/src/controllers/master-data.controller.ts`):
+
+| Function | Wired through |
+|---|---|
+| `listProjectRoles` | `GET /api/master/project-roles` (any authenticated user — used by the resource dropdown) |
+| `listAllProjectRoles` | `GET /api/admin/project-roles` (requires `metadata:manage`) |
+| `createProjectRole` | `POST /api/admin/project-roles` |
+| `updateProjectRole` | `PATCH /api/admin/project-roles/:id` (toggle active OR rename via soft-versioning, same pattern as Project Types) |
+| `deleteProjectRole` | `DELETE /api/admin/project-roles/:id` (soft delete — sets `isActive = false`) |
+
+Every CRUD action writes a `ProjectRole` audit-log entry via `auditMasterData`.
+
+**Admin UI** (`agentic-crm/app/dashboard/settings/page.tsx`):
+
+A new "Project Roles" tab appears under the Master Data group, gated by `metadata:manage`. It reuses the generic `<MasterDataTab entity="project-roles" label="Project Role" />` component — same UX as Project Types / Technologies (search, sort, show inactive toggle, soft-version on rename).
+
+The `SettingsTabKey` union and `SETTINGS_TAB_PERMISSION_RULES` map in `agentic-crm/lib/access-control.ts` were both extended with the `projectroles` key.
+
+**Resource Estimation tab** (`agentic-crm/app/dashboard/opportunities/[id]/components/ResourceAssignmentTab.tsx`):
+
+- New column "Project Role" between "Skillset Experience" and "Country / City".
+- Per-row `<select>` populated from `GET /api/master/project-roles`. Stored on each `ResourceRow` as `projectRole?: string` (added to the `ResourceRow` interface in `OpportunityEstimationContext.tsx`). Persists alongside the rest of the resource data inside `opportunity.presalesData.resources`.
+- If a saved `projectRole` no longer exists in the active master list, it is preserved and shown as `"<name> (inactive)"` so historical estimates are never silently mutated.
+- The Edit Resource modal also exposes the Project Role dropdown.
+
+**Read-only views** (`EstimationTab.tsx`): the View-Estimate grids ("Resource Allocation (Days)" and "Salary Cost") show the chosen Project Role alongside the skill / experience band in the resource cell.
+
+**Out of scope (this iteration):** Mobile app (`q-crm-mobile/`) resource list.
+
+---
+
+### 21.16 GOM Approval — Route to Assigned Manager (not Reporting Manager)
+
+**Objective:** When a non-admin requester submits a GOM approval request (because the calculated GOM% falls below the auto-approve threshold), the request must be routed to the **opportunity's assigned manager** rather than the requester's HR-tree reporting manager.
+
+**Earlier behavior:** `approveGom` looked up `requester.reportingManagerName` and tried to find that user. If the requester had no reporting manager, `reviewerId` stayed `null` and the approval request was created with no reviewer — meaning no one was notified and the approval silently went into a void state.
+
+**New behavior** (`backend/src/controllers/opportunities.controller.ts` `approveGom`):
+
+1. Reads `opportunity.managerName`.
+2. If empty → returns **400** with `"No manager is assigned to this opportunity. Assign a manager before requesting GOM approval."`
+3. Looks up the active user whose `name` matches (case-insensitive). If no such active user → returns **400** with `"Assigned manager \"{name}\" was not found as an active CRM user."`
+4. Otherwise creates the `ApprovalRequest` with `reviewerId = assignedManager.id`, writes a GOM_APPROVAL_REQUESTED audit entry referencing the assigned manager, and sends both an in-app notification and the `gom_approval_requested` email to the assigned manager.
+
+**Side-effect:** Pre-existing pending GOM_APPROVAL requests for the same opportunity are still bulk-updated to `Cancelled` before the new one is created, so the reviewer always sees a single active request.
+
+---
+
+### 21.17 Opportunity Detail Page — Layout & Encoding Hardening
+
+**Two related fixes** to `agentic-crm/app/dashboard/opportunities/[id]/page.tsx`:
+
+**Layout — full-viewport content.** The page wrapper previously used `max-w-[1400px] mx-auto`, which left empty space on wider screens / zoomed-out views. Both the loading skeleton wrapper and the main render wrapper now use `w-full space-y-4` so content fills the available viewport. Skeleton and post-load layout are identical to avoid jumps.
+
+**Encoding — ASCII-safe glyphs in visible text.** All Unicode em-dashes (`—`, U+2014) and horizontal-ellipsis (`…`, U+2026) inside visible UI text were replaced with their ASCII equivalents (`-` and `...`). Some examples:
+
+| Before | After |
+|---|---|
+| `Sent for Re-estimation — This opportunity was sent back…` | `Sent for Re-estimation - This opportunity was sent back…` |
+| `Estimation Submitted — Estimation has been submitted…` | `Estimation Submitted - Estimation has been submitted…` |
+| `… — All fields are read-only.` | `… - All fields are read-only.` |
+| `{formData.country \|\| <span>—</span>}` | `{formData.country \|\| <span>-</span>}` |
+
+**Why:** The PowerShell-on-Windows → SSH-to-Azure-VM deployment path corrupts non-ASCII characters during file transfer, producing `â€"` mojibake in production. Restricting visible strings to ASCII removes that failure mode for this page. The constraint is intentionally scoped to the most-edited file rather than enforced globally.
+
+---
 
 ---
 
