@@ -154,7 +154,11 @@ export function GomCalculatorTab({
             {/* GOM Approval */}
             {(() => {
                 const belowThreshold = gomThreshold > 0 && gomPercent < gomThreshold;
-                const effectivelyApproved = gomApproved;
+                // Treat threshold-met as effectively approved (mirrors the bottom GOM
+                // Status panel and what the back-end uses to allow Move to Sales).
+                // Manual gomApproved still wins for sub-threshold cases.
+                const autoApproved = isLoaded && gomPercent > 0 && !belowThreshold;
+                const effectivelyApproved = gomApproved || autoApproved;
                 const hasPending = !!pendingApproval;
                 const gomChangedSinceApproval = approvedGomPercent != null && Math.abs(gomPercent - approvedGomPercent) > 0.05;
                 const showConflict = isLoaded && gomApproved && gomChangedSinceApproval && belowThreshold;

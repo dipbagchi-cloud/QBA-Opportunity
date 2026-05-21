@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
 import { BudgetAssumptions, ResourceLine, OtherCost, GomResult, calculateProjectGom, calculateRateCard } from "@/lib/gom-calculator";
 import { DEFAULT_ASSUMPTIONS } from "../components/AssumptionsView";
 import { apiClient, API_URL, getAuthHeaders } from "@/lib/api";
@@ -98,10 +98,14 @@ interface OpportunityEstimationContextType {
     // Who is currently logged in (used to scope resource editing to own rows)
     currentUserName: string;
 
-    // Revenue target set by sales (used as locked revenue when isReEstimation=true)
+    // Original pipeline revenue reference.
     salesTargetRevenue: number;
 
-    // Whether this opportunity is in re-estimation mode (sales sent back with a target revenue)
+    // Suggested revenue entered by sales when sending back for re-estimation.
+    // This is displayed as guidance only and must not drive the calculated quote.
+    reEstimateSuggestedRevenue: number;
+
+    // Whether this opportunity is in re-estimation mode.
     isReEstimation: boolean;
 
     // Date range for calendar columns
@@ -113,7 +117,7 @@ interface OpportunityEstimationContextType {
 
 const OpportunityEstimationContext = createContext<OpportunityEstimationContextType | undefined>(undefined);
 
-export function OpportunityEstimationProvider({ children, opportunityId, readOnly = false, startDate = '', endDate = '', durationInDays = 0, salesTargetRevenue = 0, isReEstimation = false, initialCurrency = "INR", currentUserName = "" }: { children: ReactNode; opportunityId?: string; readOnly?: boolean; startDate?: string; endDate?: string; durationInDays?: number; salesTargetRevenue?: number; isReEstimation?: boolean; initialCurrency?: string; currentUserName?: string }) {
+export function OpportunityEstimationProvider({ children, opportunityId, readOnly = false, startDate = '', endDate = '', durationInDays = 0, salesTargetRevenue = 0, reEstimateSuggestedRevenue = 0, isReEstimation = false, initialCurrency = "INR", currentUserName = "" }: { children: ReactNode; opportunityId?: string; readOnly?: boolean; startDate?: string; endDate?: string; durationInDays?: number; salesTargetRevenue?: number; reEstimateSuggestedRevenue?: number; isReEstimation?: boolean; initialCurrency?: string; currentUserName?: string }) {
     // State
     const [assumptions, setAssumptions] = useState<BudgetAssumptions>(DEFAULT_ASSUMPTIONS);
     const [resources, setResources] = useState<ResourceRow[]>([]);
@@ -507,20 +511,7 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
             setGomPercent(gom);
             setGomSummary(null);
         }
-    }, [resources, totalTravelCost, specialCosts, markupPercent, salesCommissionPercent, preSalesCostPercent, assumptions, selectedYear, months, startDate, isReEstimation, salesTargetRevenue]);
-
-    // On re-estimation load, auto-set markup so that revenue matches the sales target.
-    // Guarded by a ref so it fires at most once per page load.
-    const markupAutoCalculatedRef = useRef(false);
-    useEffect(() => {
-        if (!isLoaded || !isReEstimation || salesTargetRevenue <= 0) return;
-        if (markupAutoCalculatedRef.current) return;
-        const baseCost = gomSummary ? gomSummary.totalCost : totalTravelCost + totalSpecCost;
-        if (baseCost <= 0) return;
-        markupAutoCalculatedRef.current = true;
-        const suggestedMarkup = Math.max(0, (salesTargetRevenue / baseCost - 1) * 100);
-        setMarkupPercent(Math.round(suggestedMarkup * 10) / 10);
-    }, [isLoaded, isReEstimation, salesTargetRevenue, gomSummary, totalTravelCost, totalSpecCost, setMarkupPercent]);
+    }, [resources, totalTravelCost, specialCosts, markupPercent, salesCommissionPercent, preSalesCostPercent, assumptions, selectedYear, months, startDate]);
 
     // Determine GOM status
     const getGomStatus = () => {
@@ -568,6 +559,7 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
         readOnly,
         currentUserName,
         salesTargetRevenue,
+        reEstimateSuggestedRevenue,
         isReEstimation,
         startDate,
         endDate,

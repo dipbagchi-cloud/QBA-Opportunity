@@ -1610,7 +1610,11 @@ async function execReestimate(params: any, ctx: UserContext): Promise<ActionResu
         reEstimateCount: { increment: 1 }, detailedStatus: 'Sent for Re-estimate', gomApproved: false,
     };
     if (params.adjustedValue && Number(params.adjustedValue) > 0) {
-        update.adjustedEstimatedValue = Number(params.adjustedValue);
+        update.presalesData = {
+            ...(((opp as any).presalesData as any) || {}),
+            reEstimateSuggestedRevenue: Number(params.adjustedValue),
+            reEstimateComment: comment,
+        };
     }
 
     await prisma.opportunity.update({ where: { id: opp.id }, data: update });

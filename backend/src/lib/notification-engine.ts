@@ -792,8 +792,8 @@ export async function resolveCalculatedFields(opportunityId: string): Promise<Re
     // ── GOM profitability from presalesData
     // The "proposed value" sent to the client is the FINAL quote price the salesperson
     // committed to in the GOM Calculator — not the original Pipeline estimate. Field
-    // priority: finalRevenue (post-adjustment quote) → gomSummary.totalRevenue (pre-
-    // adjustment calculated revenue) → adjustedEstimatedValue → opportunity.value.
+    // priority: finalRevenue (committed quote) → gomSummary.totalRevenue
+    // (calculated revenue) → opportunity.value. Re-estimate suggestions do not override revenue.
     if (opp.presalesData && typeof opp.presalesData === 'object' && !Array.isArray(opp.presalesData)) {
       const pData = opp.presalesData as any;
       const finalGomPercent = pData.finalGomPercent != null ? Number(pData.finalGomPercent) : (pData.gomPercent != null ? Number(pData.gomPercent) : null);
@@ -805,9 +805,7 @@ export async function resolveCalculatedFields(opportunityId: string): Promise<Re
             ? Number(pData.totalRevenue)
             : (pData.gomSummary?.totalRevenue != null
                 ? Number(pData.gomSummary.totalRevenue)
-                : (opp.adjustedEstimatedValue != null
-                    ? Number(opp.adjustedEstimatedValue)
-                    : (opp.value != null ? Number(opp.value) : null))));
+                : (opp.value != null ? Number(opp.value) : null)));
       const proposedValueFormatted = proposedRevenueRaw != null ? fmtMoney(currency, proposedRevenueRaw) : 'N/A';
       calc['calc:totalRevenue'] = proposedValueFormatted;
       calc['calc:proposedValue'] = proposedValueFormatted;

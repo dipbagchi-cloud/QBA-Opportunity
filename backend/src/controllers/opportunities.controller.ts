@@ -206,13 +206,12 @@ export async function listOpportunities(req: Request, res: Response) {
                 metadata: opp.metadata,
                 quote: (() => {
                     // Final closure quote — what the salesperson committed to in the
-                    // GOM Calculator. Priority: finalRevenue (post-adjustment quote) →
-                    // totalRevenue → gomSummary.totalRevenue → adjustedEstimatedValue.
+                    // GOM Calculator. Priority: finalRevenue (committed quote) →
+                    // totalRevenue → gomSummary.totalRevenue.
                     const pd = opp.presalesData as any;
                     if (pd?.finalRevenue != null) return Number(pd.finalRevenue);
                     if (pd?.totalRevenue != null) return Number(pd.totalRevenue);
                     if (pd?.gomSummary?.totalRevenue != null) return Number(pd.gomSummary.totalRevenue);
-                    if (opp.adjustedEstimatedValue != null) return Number(opp.adjustedEstimatedValue);
                     return null;
                 })()
             };
@@ -600,19 +599,8 @@ export async function updateOpportunity(req: Request, res: Response) {
                 }
                 // When presales submits to sales: first time = 'Estimation Submitted', subsequent = 'Re-estimation Submitted'
                 if (newStageName === 'Proposal') {
-                    // Allow if manually approved OR if GOM% meets the auto-approve threshold
                     if (!previous?.gomApproved) {
-                        const presalesData = previous?.presalesData as any;
-                        const finalGomPercent: number | undefined = presalesData?.finalGomPercent;
-                        const config = await prisma.systemConfig.findUnique({ where: { key: 'budget_assumptions' } });
-                        const assumptions = (config?.value as any) || {};
-                        const autoApproveThreshold: number = assumptions.gomAutoApprovePercent || assumptions.marginPercent || 35;
-                        const autoApproved = finalGomPercent != null && finalGomPercent >= autoApproveThreshold;
-                        if (!autoApproved) {
-                            return res.status(400).json({ error: 'GOM must be approved before moving to Sales.' });
-                        }
-                        // Persist auto-approval so future checks remain consistent
-                        stageUpdate.gomApproved = true;
+                        return res.status(400).json({ error: 'GOM must be approved by the assigned manager before moving to Sales.' });
                     }
                     const reEstCount = (previous as any)?.reEstimateCount || 0;
                     stageUpdate.detailedStatus = reEstCount > 0 ? 'Re-estimation Submitted' : 'Estimation Submitted';
@@ -843,7 +831,7 @@ export async function updateOpportunity(req: Request, res: Response) {
             managerName: (updatedOpp as any).managerName || '',
             updatedBy: previous?.owner?.name || 'System',
             comment: body.reEstimateComment || body.presalesData?.comments || body.salesData?.notes || '',
-            adjustedEstimatedValue: body.adjustedEstimatedValue ? String(body.adjustedEstimatedValue) : '',
+            adjustedEstimatedValue: body.adjustedEstimatedValue ? String(body.adjustedEstimatedValue) : (body.presalesData?.reEstimateSuggestedRevenue ? String(body.presalesData.reEstimateSuggestedRevenue) : ''),
             ownerName: previous?.owner?.name || '',
             ownerEmail: previous?.owner?.email || '',
             value: updatedOpp.value != null ? Number(updatedOpp.value).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '',
@@ -892,7 +880,7 @@ export async function updateOpportunity(req: Request, res: Response) {
                 region: updatedOpp.region || undefined,
                 technology: updatedOpp.technology || undefined,
                 comment: body.reEstimateComment || body.presalesData?.comments || body.salesData?.notes || undefined,
-                adjustedEstimatedValue: body.adjustedEstimatedValue ? String(body.adjustedEstimatedValue) : undefined,
+                adjustedEstimatedValue: body.adjustedEstimatedValue ? String(body.adjustedEstimatedValue) : (body.presalesData?.reEstimateSuggestedRevenue ? String(body.presalesData.reEstimateSuggestedRevenue) : undefined),
                 reEstimateCount: (updatedOpp as any).reEstimateCount || 0,
             });
         }
@@ -1001,19 +989,22 @@ export async function approveGom(req: Request, res: Response) {
             });
         }
 
-        // Get auto-approve threshold from budget assumptions
+        // Get the configured threshold for request context and notification copy.
         const config = await prisma.systemConfig.findUnique({ where: { key: 'budget_assumptions' } });
         const assumptions = (config?.value as any) || {};
         const autoApproveThreshold = assumptions.gomAutoApprovePercent || assumptions.marginPercent || 35;
 
-        // If GOM% >= threshold (or threshold not set), auto-approve directly
-        if (autoApproveThreshold <= 0 || (gomPercent !== undefined && gomPercent >= autoApproveThreshold)) {
-            const updated = await prisma.opportunity.update({ where: { id }, data: { gomApproved: true } });
-            await prisma.auditLog.create({ data: { entity: 'Opportunity', entityId: id, action: 'GOM_APPROVED', userId: req.user!.userId, changes: `GOM Auto-Approved at ${gomPercent?.toFixed(1) || '?'}%` } });
+        if (access.workflow.gomApprovalManageable) {
+            await prisma.approvalRequest.updateMany({
+                where: { opportunityId: id, type: 'GOM_APPROVAL', status: 'Pending' },
+                data: { status: 'Cancelled' },
+            });
+            await prisma.opportunity.update({ where: { id }, data: { gomApproved: true } });
+            await prisma.auditLog.create({ data: { entity: 'Opportunity', entityId: id, action: 'GOM_APPROVED', userId: req.user!.userId, changes: `GOM Approved at ${gomPercent?.toFixed(1) || '?'}%` } });
             return res.json({ gomApproved: true });
         }
 
-        // GOM% below threshold — create approval request for the opportunity's assigned manager.
+        // Create an approval request for the opportunity's assigned manager.
         const requester = await prisma.user.findUnique({ where: { id: req.user!.userId }, select: { id: true, name: true } });
         const assignedManagerName = (opportunity.managerName || '').trim();
         if (!assignedManagerName) {
@@ -1043,7 +1034,7 @@ export async function approveGom(req: Request, res: Response) {
         const approval = await prisma.approvalRequest.create({
             data: {
                 type: 'GOM_APPROVAL',
-                reason: `GOM is ${gomPercent?.toFixed(1) || '?'}% (below auto-approve threshold of ${autoApproveThreshold}%)`,
+                reason: `GOM is ${gomPercent?.toFixed(1) || '?'}%${autoApproveThreshold > 0 ? ` (approval threshold ${autoApproveThreshold}%)` : ''}`,
                 status: 'Pending',
                 opportunityId: id,
                 requesterId: req.user!.userId,
@@ -1059,7 +1050,7 @@ export async function approveGom(req: Request, res: Response) {
             data: {
                 type: 'gom_approval_requested',
                 title: `GOM Approval Required: ${opp?.title || id}`,
-                message: `${requester?.name || 'A team member'} has requested GOM approval. GOM is ${gomPercent?.toFixed(1) || '?'}% (below ${autoApproveThreshold}% threshold). Please open the opportunity to approve or reject the request.`,
+                message: `${requester?.name || 'A team member'} has requested GOM approval. GOM is ${gomPercent?.toFixed(1) || '?'}%${autoApproveThreshold > 0 ? ` (approval threshold ${autoApproveThreshold}%)` : ''}. Please open the opportunity to approve or reject the request.`,
                 link: `/dashboard/opportunities/${id}`,
                 userId: reviewerId,
             },

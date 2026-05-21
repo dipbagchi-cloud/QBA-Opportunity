@@ -579,6 +579,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     // Re-estimate modal state
     const [showReestimateModal, setShowReestimateModal] = useState(false);
     const [adjustedEstimatedValue, setAdjustedEstimatedValue] = useState<string>("");
+    const [reEstimateSuggestedRevenue, setReEstimateSuggestedRevenue] = useState<string>("");
     const [reEstimateComment, setReEstimateComment] = useState("");
     const [detailedStatus, setDetailedStatus] = useState<string>("");
 
@@ -920,6 +921,11 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 setOpportunityManagerName(data.managerName || "");
                 setPresalesForm(prev => ({ ...prev, managerName: data.managerName || "" }));
                 setAdjustedEstimatedValue(data.adjustedEstimatedValue != null ? String(data.adjustedEstimatedValue) : "");
+                const savedSuggestedRevenue = data.presalesData?.reEstimateSuggestedRevenue ?? data.presalesData?.suggestedRevenue;
+                const legacyReEstimateValue = (data.detailedStatus === 'Sent for Re-estimate' || data.detailedStatus === 'Re-estimation') && data.adjustedEstimatedValue != null
+                    ? data.adjustedEstimatedValue
+                    : "";
+                setReEstimateSuggestedRevenue(savedSuggestedRevenue != null ? String(savedSuggestedRevenue) : String(legacyReEstimateValue || ""));
                 setDetailedStatus(data.detailedStatus || "");
                 setGomApproved(data.gomApproved === true);
                 setApprovedGomPercent(data.gomApproved === true && data.presalesData?.finalGomPercent != null
@@ -1324,10 +1330,12 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     };
 
     const handleMoveToSales = async () => {
-        // GOM is effectively approved when flagged by manager OR when above the auto-approve threshold
+        // GOM is effectively approved when flagged by manager OR when at/above the
+        // auto-approve threshold. Mirrors the top banner and bottom Status panel
+        // so the gate doesn't contradict what the UI shows.
         const effectivelyGomApproved = gomApproved || (gomAutoApprovePercent > 0 && contextGomPercent >= gomAutoApprovePercent);
         if (!effectivelyGomApproved) {
-            toast({ title: "GOM Not Approved", description: "GOM must be approved before moving to Sales. Please approve the GOM in the GOM Calculator tab." });
+            toast({ title: "GOM Not Approved", description: "GOM is below the auto-approve threshold. Request manager approval in the GOM Calculator tab." });
             return;
         }
         // Check GOM threshold if configured
@@ -1411,10 +1419,17 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         }
         setIsSaving(true);
         try {
-            const payload: any = { stageName: 'Qualification', detailedStatus: 'Re-estimation', status: 're-estimation', reEstimateComment: reEstimateComment.trim() };
-            if (adjustedEstimatedValue && Number(adjustedEstimatedValue) > 0) {
-                payload.adjustedEstimatedValue = Number(adjustedEstimatedValue);
-            }
+            const suggestedRevenue = Number(reEstimateSuggestedRevenue) > 0 ? Number(reEstimateSuggestedRevenue) : null;
+            const payload: any = {
+                stageName: 'Qualification',
+                detailedStatus: 'Re-estimation',
+                status: 're-estimation',
+                reEstimateComment: reEstimateComment.trim(),
+                presalesData: {
+                    reEstimateComment: reEstimateComment.trim(),
+                    reEstimateSuggestedRevenue: suggestedRevenue,
+                },
+            };
             const res = await fetch(`${API_URL}/api/opportunities/${id}`, {
                 method: 'PATCH',
                 headers: getAuthHeaders(),
@@ -1615,9 +1630,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     };
 
     const getPipelineProjectedRevenueBase = () => {
-        const projectedRevenue = Number(adjustedEstimatedValue) > 0
-            ? Number(adjustedEstimatedValue)
-            : Number(formData.value) || 0;
+        const projectedRevenue = Number(formData.value) || 0;
         const selectedRate = getRate(globalCurrency);
         return selectedRate > 0 ? projectedRevenue / selectedRate : projectedRevenue;
     };
@@ -2334,21 +2347,14 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             : durationToWorkingDays(Number(formData.duration) || 0, formData.durationUnit)
                     }
                     salesTargetRevenue={getPipelineProjectedRevenueBase()}
+                    reEstimateSuggestedRevenue={Number(reEstimateSuggestedRevenue) > 0 ? Number(reEstimateSuggestedRevenue) / (getRate(globalCurrency) || 1) : 0}
                     isReEstimation={detailedStatus === 'Re-estimation' || detailedStatus === 'Sent for Re-estimate'}
                     initialCurrency={globalCurrency}
                     currentUserName={user?.name || ''}
                 >
                     <GomPercentSync onGomPercentChange={setContextGomPercent} />
                     {opportunityStage < 2 && activeTab !== "View Estimate" && (
-                        <PresalesSaveButton onAfterSave={(gomPct) => {
-                            if (gomAutoApprovePercent <= 0) return;
-                            const gomChangedSinceApproval = approvedGomPercent != null && Math.abs(gomPct - approvedGomPercent) > 0.05;
-                            if (gomPct >= gomAutoApprovePercent && !gomApproved) {
-                                handleApproveGom(true);
-                            } else if (gomPct < gomAutoApprovePercent && gomApproved && gomChangedSinceApproval) {
-                                handleApproveGom(false);
-                            }
-                        }} />
+                        <PresalesSaveButton />
                     )}
                     <div className="bg-white rounded-lg shadow-sm border border-slate-200">
                         {isLost && (
@@ -2459,7 +2465,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                         </div>
                                     </div>
                                     )}
-                                    {Number(adjustedEstimatedValue) > 0 && (
+                                    {Number(adjustedEstimatedValue) > 0 && detailedStatus !== 'Re-estimation' && detailedStatus !== 'Sent for Re-estimate' && (
                                     <div>
                                         <label className="block text-xs font-semibold text-amber-600 uppercase mb-1">Adjusted Quote Value</label>
                                         <div className="font-bold text-amber-700">
@@ -3110,7 +3116,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     const commPercent = pd.salesCommissionPercent || 0;
                                     const preSalesPercent = pd.preSalesCostPercent || 0;
 
-                                    const rev = pd.finalRevenue !== undefined ? pd.finalRevenue : (pd.adjustedEstimatedValue > 0 ? pd.adjustedEstimatedValue : baseCost * (1 + markup / 100));
+                                    const rev = pd.finalRevenue !== undefined ? pd.finalRevenue : baseCost * (1 + markup / 100);
                                     const comm = rev * (commPercent / 100);
                                     const pre = rev * (preSalesPercent / 100);
 
@@ -3123,9 +3129,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     const quoteOpp = getPresalesConverted(rev);
                                     const totalCostOpp = getPresalesConverted(totalC);
                                     const profitOpp = getPresalesConverted(profit);
-                                    const projectedOpp = Number(adjustedEstimatedValue) > 0
-                                        ? Number(adjustedEstimatedValue)
-                                        : Number(formData.value) || 0;
+                                    const projectedOpp = Number(formData.value) || 0;
                                     const diffOpp = projectedOpp - quoteOpp;
                                     const within = diffOpp >= 0;
                                     const resourceCount = Array.isArray(pd.resources) ? pd.resources.length : 0;
@@ -3272,7 +3276,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     )}
                                 </p>
                             </div>
-                            {Number(adjustedEstimatedValue) > 0 && (
+                            {Number(adjustedEstimatedValue) > 0 && detailedStatus !== 'Re-estimation' && detailedStatus !== 'Sent for Re-estimate' && (
                             <div className="bg-amber-50 rounded-lg p-3 border border-amber-200">
                                 <p className="text-xs text-amber-600 mb-1">Adjusted Quote Value</p>
                                 <p className="font-bold text-amber-700">
@@ -3554,7 +3558,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
                         <div className="p-5 space-y-4">
                             <p className="text-sm text-slate-600">
-                                Provide a comment explaining why re-estimation is needed. Optionally provide an adjusted quote value.
+                                Provide a comment explaining why re-estimation is needed. Optionally provide a suggested revenue for Presales to reference.
                             </p>
 
                             <div className="space-y-1.5">
@@ -3570,15 +3574,15 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             </div>
 
                             <div className="space-y-1.5">
-                                <label className="block text-sm font-bold text-slate-700">Adjusted Quote Value ({cSym})</label>
+                                <label className="block text-sm font-bold text-slate-700">Suggested Revenue ({cSym})</label>
                                 <input
                                     type="number"
                                     placeholder="0.00"
-                                    value={adjustedEstimatedValue}
-                                    onChange={(e) => setAdjustedEstimatedValue(e.target.value)}
+                                    value={reEstimateSuggestedRevenue}
+                                    onChange={(e) => setReEstimateSuggestedRevenue(e.target.value)}
                                     className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-amber-500/30 focus:border-amber-400"
                                 />
-                                <p className="text-[10px] text-slate-400">Leave empty to keep the current estimated value</p>
+                                <p className="text-[10px] text-slate-400">Shown only as a suggestion in Presales; it does not change the opportunity revenue or quote.</p>
                             </div>
 
                             <div className="pt-4 flex justify-between gap-3 border-t border-slate-50">
