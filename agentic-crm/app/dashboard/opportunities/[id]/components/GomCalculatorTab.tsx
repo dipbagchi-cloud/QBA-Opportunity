@@ -51,12 +51,13 @@ export function GomCalculatorTab({
         resources,
         readOnly,
         salesTargetRevenue,
+        reEstimateSuggestedRevenue,
         isReEstimation,
         specialCosts,
         setSpecialCosts
     } = useOpportunityEstimation();
 
-    const hasSalesTarget = isReEstimation && salesTargetRevenue > 0;
+    const hasSuggestedRevenue = isReEstimation && reEstimateSuggestedRevenue > 0;
 
     const { format: fmtCurrency, formatExact, symbol: cSym, convert: convertCurrency, currency: selectedCurrency, getRate, getSymbol } = useCurrency();
 
@@ -153,9 +154,7 @@ export function GomCalculatorTab({
             {/* GOM Approval */}
             {(() => {
                 const belowThreshold = gomThreshold > 0 && gomPercent < gomThreshold;
-                // GOM at or above threshold is automatically approved — no manual flag needed
-                const autoApproved = isLoaded && gomPercent > 0 && !belowThreshold;
-                const effectivelyApproved = gomApproved || autoApproved;
+                const effectivelyApproved = gomApproved;
                 const hasPending = !!pendingApproval;
                 const gomChangedSinceApproval = approvedGomPercent != null && Math.abs(gomPercent - approvedGomPercent) > 0.05;
                 const showConflict = isLoaded && gomApproved && gomChangedSinceApproval && belowThreshold;
@@ -177,14 +176,14 @@ export function GomCalculatorTab({
                 const subtitle = showConflict
                     ? `GOM is ${gomPercent.toFixed(1)}% (below threshold). Estimation has changed since approval. Consider revoking.`
                     : effectivelyApproved
-                    ? autoApproved && !gomApproved
-                        ? `GOM is ${gomPercent.toFixed(1)}% - above the ${gomThreshold}% threshold. This opportunity can be moved to Sales.`
-                        : 'This opportunity can be moved to Sales.'
+                    ? 'This opportunity can be moved to Sales.'
                     : hasPending
                     ? `Awaiting review${pendingApproval!.reviewer ? ` by ${pendingApproval!.reviewer}` : ''}. GOM is ${gomPercent.toFixed(1)}%.`
                     : belowThreshold && !isManagerOrAdmin
                     ? `GOM is ${gomPercent.toFixed(1)}% (below ${gomThreshold}% threshold). Request manager approval to proceed.`
-                    : `GOM is ${gomPercent.toFixed(1)}% (below ${gomThreshold}% threshold). Approve to allow progression to Sales.`;
+                    : !isManagerOrAdmin
+                    ? `GOM is ${gomPercent.toFixed(1)}%. Request manager approval to proceed.`
+                    : `GOM is ${gomPercent.toFixed(1)}%. Approve to allow progression to Sales.`;
 
                 return (
                     <div className={`rounded-lg border-2 p-4 flex items-start justify-between gap-4 ${bgClass}`}>
@@ -201,8 +200,8 @@ export function GomCalculatorTab({
                             </div>
                         </div>
 
-                        {/* Manager/Admin: approve/revoke only needed when below threshold */}
-                        {canManagerApprove && onApproveGom && !autoApproved && (
+                        {/* Manager/Admin: approve or revoke GOM approval */}
+                        {canManagerApprove && onApproveGom && (
                             <div className="flex items-center gap-2 shrink-0">
                                 {hasPending && onReviewGomApproval && (
                                     <>
@@ -233,13 +232,13 @@ export function GomCalculatorTab({
                             </div>
                         )}
 
-                        {/* Presales/Sales: Request Approval only when below threshold */}
-                        {canRequestApproval && belowThreshold && !hasPending && onApproveGom && (
+                        {/* Presales/Sales: request manager approval */}
+                        {canRequestApproval && !gomApproved && !hasPending && onApproveGom && (
                             <button
                                 onClick={() => onApproveGom(true)}
                                 className="px-4 py-2 rounded-md text-sm font-bold bg-blue-600 text-white hover:bg-blue-700 shadow-sm transition-colors shrink-0"
                             >
-                                Request Approval
+                                Request GOM Approval
                             </button>
                         )}
                     </div>
@@ -253,10 +252,10 @@ export function GomCalculatorTab({
                     <h3 className="text-base font-bold text-slate-800 mb-4">GOM Configuration</h3>
 
                     <div className="space-y-3">
-                        {/* Sales target banner (re-estimation reference) */}
-                        {hasSalesTarget && (() => {
-                            const diff = revenue - salesTargetRevenue;
-                            const pctDiff = salesTargetRevenue > 0 ? Math.abs(diff / salesTargetRevenue) * 100 : 0;
+                        {/* Suggested revenue banner (re-estimation reference only) */}
+                        {hasSuggestedRevenue && (() => {
+                            const diff = revenue - reEstimateSuggestedRevenue;
+                            const pctDiff = reEstimateSuggestedRevenue > 0 ? Math.abs(diff / reEstimateSuggestedRevenue) * 100 : 0;
                             const isMatch = pctDiff < 0.5;
                             const isAbove = diff > 0;
                             const bg = isMatch ? 'bg-green-50 border-green-300' : isAbove ? 'bg-blue-50 border-blue-300' : 'bg-amber-50 border-amber-300';
@@ -266,12 +265,12 @@ export function GomCalculatorTab({
                                 <div className={`flex items-start gap-2 px-3 py-2 rounded-md border ${bg}`}>
                                     <TrendingUp className={`w-4 h-4 shrink-0 mt-0.5 ${ic}`} />
                                     <div className={`text-xs space-y-0.5 ${tx}`}>
-                                        <div className="font-semibold">Sales target: {fmtCurrency(salesTargetRevenue)}</div>
+                                        <div className="font-semibold">Suggested revenue: {fmtCurrency(reEstimateSuggestedRevenue)}</div>
                                         {revenue > 0 && (
                                             <div className="font-normal opacity-90">
                                                 {isMatch
-                                                    ? `Current revenue matches the sales target.`
-                                                    : `Current revenue ${fmtCurrency(revenue)} is ${pctDiff.toFixed(1)}% (${fmtCurrency(Math.abs(diff))}) ${isAbove ? 'above' : 'below'} target${!isAbove ? ' — adjust markup to close the gap' : ''}.`
+                                                    ? `Current revenue matches the suggestion.`
+                                                    : `Current revenue ${fmtCurrency(revenue)} is ${pctDiff.toFixed(1)}% (${fmtCurrency(Math.abs(diff))}) ${isAbove ? 'above' : 'below'} the suggestion.`
                                                 }
                                             </div>
                                         )}
@@ -353,13 +352,6 @@ export function GomCalculatorTab({
                                 </div>
                             )}
 
-                            {gomSummary?.totalCost != null && (
-                                <div className="flex justify-between items-center text-sm">
-                                    <span className="text-slate-600">Budget Assumptions:</span>
-                                    <span className="font-semibold text-slate-900">{fmtCurrency(gomSummary.totalCost - totalResourceCost - totalTravelCost - totalSpecCost)}</span>
-                                </div>
-                            )}
-
                             <div className="flex justify-between items-center text-sm">
                                 <span className="text-slate-600">Sales Commission:</span>
                                 <span className="font-semibold text-slate-900">{fmtCurrency(salesCommissionAmount)}</span>
@@ -369,6 +361,13 @@ export function GomCalculatorTab({
                                 <span className="text-slate-600">Pre-Sales Cost:</span>
                                 <span className="font-semibold text-slate-900">{fmtCurrency(preSalesCostAmount)}</span>
                             </div>
+
+                            {gomSummary?.totalCost != null && (
+                                <div className="flex justify-between items-center text-sm">
+                                    <span className="text-slate-600">Budget Assumptions:</span>
+                                    <span className="font-semibold text-slate-900">{fmtCurrency(gomSummary.totalCost - totalResourceCost - totalTravelCost - totalSpecCost)}</span>
+                                </div>
+                            )}
 
                             <div className="border-t border-slate-300 pt-2 mt-2">
                                 <div className="flex justify-between items-center text-sm font-bold">
