@@ -1886,6 +1886,70 @@ The `SettingsTabKey` union and `SETTINGS_TAB_PERMISSION_RULES` map in `agentic-c
 
 ---
 
+### 21.19 Backend Stability — Prisma Auto-Generate, PM2 Restart Policy, Safe-Restart
+
+**Symptom we kept hitting.** The Express backend on each environment crash-looped for thousands of restarts after every deploy (3,904 / 2,158 / 1,916 on prod / QA / UAT in one session), with `pm2 list` showing "online" while no process was actually bound to ports 3001 / 3003 / 3005. The browser would see backend 502s, and any subsequent PM2 restart from CI couldn't recover the state without manual `fuser -k -9` intervention.
+
+**Two coupled root causes:**
+
+1. **Prisma client wiped on every `npm ci`.** The CI workflow ran `npm ci --omit=dev` after `git reset --hard`, which fully repopulates `node_modules/` from the lockfile *but does not regenerate the `node_modules/.prisma/client/` runtime code* (that code is produced from `schema.prisma` by `prisma generate`, not pulled from the registry). When PM2 then restarted the backend, `require('@prisma/client')` threw `"@prisma/client did not initialize yet. Please run prisma generate"` and the process exited. PM2 dutifully respawned, hit the same error, and the loop continued until I manually `ssh`d in and ran `npx prisma generate`.
+2. **`pm2 restart` does not release ports cleanly on this VM.** Express / Next.js children hold their port for several seconds after SIGTERM. The next PM2 spawn lands on `EADDRINUSE` and dies before binding, while the orphan continues to own the port. PM2 keeps reporting "online" because the wrapper is alive even though the worker died on bind.
+
+**Fix — three layers:**
+
+#### Layer 1 — Prisma client always regenerates after install
+
+`backend/package.json` now has a `postinstall` script:
+
+```json
+"postinstall": "prisma generate || echo 'prisma generate skipped (schema/CLI not yet available)'"
+```
+
+This makes any `npm ci` / `npm install` invocation transparently regenerate the client. The `|| echo` guard keeps the install from failing during edge cases where the schema isn't on disk yet (initial bootstrap). `prisma` is kept in `devDependencies` so the lockfile stays valid; the CI workflow correspondingly drops the `--omit=dev` flag so the `prisma` CLI is present at install time.
+
+The CI workflow also runs `npx prisma generate` explicitly after `npm ci` as defense in depth, so a future tooling change that disables postinstall doesn't silently re-break the backend.
+
+#### Layer 2 — PM2 restart policy (`ecosystem.config.js`)
+
+A new `ecosystem.config.js` at repo root declares all six PM2 apps (prod / QA / UAT × backend / frontend) with explicit crash-policy settings:
+
+| Setting | Value | Reason |
+|---|---|---|
+| `min_uptime` | `20s` | Crashes before 20 s count as "fast restarts" toward `max_restarts` |
+| `max_restarts` | `10` | After 10 fast crashes PM2 marks the process **errored** and stops bouncing it — prevents the 4,000-restart loops |
+| `restart_delay` | `3000` ms | Wait between restart attempts so the VM isn't pinned |
+| `kill_timeout` | `8000` ms | Grace period from SIGTERM to SIGKILL so Next.js / Express can release their port cleanly |
+| `listen_timeout` | `15000` ms | How long PM2 waits for the new process to come up |
+| `max_memory_restart` | `600M` (backend) / `1G` (frontend) | Recycles on slow leaks before the kernel OOM-kills |
+| `autorestart` | `true` | Always come back from a clean exit / crash |
+
+Deploys use `pm2 startOrReload ecosystem.config.js --only <name> --update-env`, which preserves the entry's PID counters when applying new config and creates the entry on first run.
+
+#### Layer 3 — `scripts/pm2-safe-restart.sh`
+
+A reusable wrapper that always does **stop → `fuser -k -9 <port>/tcp` (×2 with sleeps) → `pm2 startOrReload`**, then polls for up to 30 s waiting for the new process to actually bind the port. Fails loudly with the last 20 lines of error log if it doesn't. The CI workflow now calls this for every backend and frontend restart instead of bare `pm2 restart`.
+
+Signature: `pm2-safe-restart.sh <pm2-name> <port> [ecosystem-config-path]`. Lives at `scripts/pm2-safe-restart.sh` and is `chmod +x`'d by the CI step right after `git reset --hard`.
+
+#### VM reboot survival
+
+The Azure VM has `pm2-azureuser.service` enabled in systemd (verified), so the PM2 daemon starts on boot and resurrects every process from `~/.pm2/dump.pm2`. `pm2 save` is invoked by `pm2-safe-restart.sh` after a successful bind so the dump always reflects the current healthy layout. No `pm2 startup` action needed.
+
+#### Net effect
+
+- A normal deploy: code pulled → `npm ci` repopulates `node_modules` → `postinstall` regenerates Prisma → `tsc` compiles → safe-restart cleanly stops, kills ghost owners, and starts via the ecosystem config → poll until the port is bound.
+- An unrecoverable crash (e.g., DB password rotated, schema file deleted): PM2 retries 10 times with 3 s delays, then halts with `errored` status. The next `pm2 restart` (manual or CI) brings it back. No more silent 4,000-restart loops on the VM.
+
+**Files added / touched in this layer:**
+
+- `backend/package.json` — postinstall hook
+- `ecosystem.config.js` — PM2 policy for all six processes
+- `scripts/pm2-safe-restart.sh` — port-aware safe restart
+- `.github/workflows/deploy.yml` — drops `--omit=dev`, adds `npx prisma generate`, adds `npx tsc` for prod backend (which previously had no compile step), uses safe-restart for both backend and frontend
+- `.gitattributes` — forces LF line endings on `.sh` / `.yml` files so a Windows checkout doesn't push CRLF that breaks bash on the VM
+
+---
+
 ### 21.18 May 21 Release — Deployment Status
 
 All May 21, 2026 changes (§ 21.11 – 21.17) ship together as commit **`50622b1`** on branch `Opportunity_MVC`. The branch was fast-forwarded into `qa` and `uat`, and pushed to both git remotes (`origin` → dipbagchi-cloud/QBA-Opportunity, `qcrm` → QuantumBusinessAdvisory/QCRM).

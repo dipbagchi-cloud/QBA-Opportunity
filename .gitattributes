@@ -1,0 +1,6 @@
+# Shell scripts and YAML must have LF line endings so they execute correctly
+# on the Azure VM after a Windows checkout pushes them up.
+*.sh             text eol=lf
+*.yml            text eol=lf
+*.yaml           text eol=lf
+ecosystem.config.js text eol=lf

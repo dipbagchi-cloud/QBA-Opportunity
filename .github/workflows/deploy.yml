@@ -7,11 +7,17 @@ on:
       - uat
       - qa
 
+# Cancel in-flight deploys for the same branch when a new push lands —
+# we don't want two deploys fighting over PM2 / ports.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   deploy-production:
     if: github.ref == 'refs/heads/Opportunity_MVC'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
       - name: Deploy Production
@@ -21,45 +27,50 @@ jobs:
           username: ${{ secrets.VM_USER }}
           key: ${{ secrets.VM_SSH_KEY }}
           script_stop: true
-          command_timeout: 15m
+          command_timeout: 20m
           script: |
             set -e
-            cd /home/azureuser/app
+            APP_DIR=/home/azureuser/app
+            ECO=$APP_DIR/ecosystem.config.js
+            cd $APP_DIR
 
-            echo "=== Pulling latest code ==="
+            echo "=== Pull latest code ==="
             git fetch origin Opportunity_MVC
             git checkout Opportunity_MVC
             git reset --hard origin/Opportunity_MVC
 
-            echo "=== Installing backend dependencies ==="
-            cd /home/azureuser/app/backend
-            npm ci --omit=dev 2>&1 | tail -5
+            chmod +x scripts/pm2-safe-restart.sh
 
-            echo "=== Restarting backend ==="
-            pm2 restart qcrm-backend --update-env
-            sleep 3
-            pm2 status qcrm-backend --no-color | head -10
-
-            echo "=== Installing frontend dependencies ==="
-            cd /home/azureuser/app/agentic-crm
+            echo "=== Backend: install + generate + compile ==="
+            cd $APP_DIR/backend
+            # Install ALL deps (need prisma CLI from devDependencies)
             npm ci 2>&1 | tail -5
+            # Postinstall already runs prisma generate; this is belt + braces.
+            npx prisma generate 2>&1 | tail -3
+            # Compile TS so the dist/ that PM2 launches is fresh.
+            npx tsc 2>&1 | tail -5
 
-            echo "=== Building frontend ==="
-            pm2 stop qcrm-frontend || true
-            sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'
-            NODE_OPTIONS='--max-old-space-size=3072' npm run build 2>&1 | tail -20
+            echo "=== Restart backend safely ==="
+            bash $APP_DIR/scripts/pm2-safe-restart.sh qcrm-backend 3001 $ECO
 
-            echo "=== Starting frontend ==="
-            pm2 start qcrm-frontend --update-env
-            sleep 3
-            pm2 status --no-color | head -10
+            echo "=== Frontend: install + build ==="
+            cd $APP_DIR/agentic-crm
+            npm ci 2>&1 | tail -5
+            # Build first, THEN swap the process — avoids leaving the site
+            # down for the duration of `next build` (~3 min).
+            sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches' || true
+            NODE_OPTIONS='--max-old-space-size=3072' npm run build 2>&1 | tail -10
+
+            echo "=== Restart frontend safely ==="
+            bash $APP_DIR/scripts/pm2-safe-restart.sh qcrm-frontend 3000 $ECO
 
             echo "=== Production deployment complete ==="
+            pm2 list | grep -E 'qcrm-(backend|frontend)\b' || true
 
   deploy-uat:
     if: github.ref == 'refs/heads/uat'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
       - name: Deploy UAT
@@ -69,48 +80,45 @@ jobs:
           username: ${{ secrets.VM_USER }}
           key: ${{ secrets.VM_SSH_KEY }}
           script_stop: true
-          command_timeout: 15m
+          command_timeout: 20m
           script: |
             set -e
-            cd /home/azureuser/uat
+            APP_DIR=/home/azureuser/uat
+            ECO=$APP_DIR/ecosystem.config.js
+            cd $APP_DIR
 
-            echo "=== Pulling latest UAT code ==="
+            echo "=== Pull latest UAT code ==="
             git fetch origin uat
             git checkout uat
             git reset --hard origin/uat
 
-            echo "=== Installing backend dependencies ==="
-            cd /home/azureuser/uat/backend
-            npm ci --omit=dev 2>&1 | tail -5
+            chmod +x scripts/pm2-safe-restart.sh
 
-            echo "=== Compiling backend ==="
+            echo "=== Backend: install + generate + compile ==="
+            cd $APP_DIR/backend
+            npm ci 2>&1 | tail -5
+            npx prisma generate 2>&1 | tail -3
             npx tsc 2>&1 | tail -5
 
-            echo "=== Restarting UAT backend ==="
-            pm2 restart qcrm-uat-backend --update-env
-            sleep 3
-            pm2 status qcrm-uat-backend --no-color | head -10
+            echo "=== Restart UAT backend safely ==="
+            bash $APP_DIR/scripts/pm2-safe-restart.sh qcrm-uat-backend 3003 $ECO
 
-            echo "=== Installing frontend dependencies ==="
-            cd /home/azureuser/uat/agentic-crm
+            echo "=== Frontend: install + build ==="
+            cd $APP_DIR/agentic-crm
             npm ci 2>&1 | tail -5
+            sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches' || true
+            NEXT_PUBLIC_API_URL='https://uat-qcrm.qbadvisory.com' NODE_OPTIONS='--max-old-space-size=3072' npm run build 2>&1 | tail -10
 
-            echo "=== Building UAT frontend ==="
-            pm2 stop qcrm-uat-frontend || true
-            sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'
-            NODE_OPTIONS='--max-old-space-size=3072' npm run build 2>&1 | tail -20
-
-            echo "=== Starting UAT frontend ==="
-            pm2 start qcrm-uat-frontend --update-env
-            sleep 3
-            pm2 status --no-color | head -10
+            echo "=== Restart UAT frontend safely ==="
+            bash $APP_DIR/scripts/pm2-safe-restart.sh qcrm-uat-frontend 3002 $ECO
 
             echo "=== UAT deployment complete ==="
+            pm2 list | grep -E 'qcrm-uat-' || true
 
   deploy-qa:
     if: github.ref == 'refs/heads/qa'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
       - name: Deploy QA
@@ -120,40 +128,37 @@ jobs:
           username: ${{ secrets.VM_USER }}
           key: ${{ secrets.VM_SSH_KEY }}
           script_stop: true
-          command_timeout: 15m
+          command_timeout: 20m
           script: |
             set -e
-            cd /home/azureuser/qa
+            APP_DIR=/home/azureuser/qa
+            ECO=$APP_DIR/ecosystem.config.js
+            cd $APP_DIR
 
-            echo "=== Pulling latest QA code ==="
+            echo "=== Pull latest QA code ==="
             git fetch origin qa
             git checkout qa
             git reset --hard origin/qa
 
-            echo "=== Installing backend dependencies ==="
-            cd /home/azureuser/qa/backend
-            npm ci --omit=dev 2>&1 | tail -5
+            chmod +x scripts/pm2-safe-restart.sh
 
-            echo "=== Compiling backend ==="
+            echo "=== Backend: install + generate + compile ==="
+            cd $APP_DIR/backend
+            npm ci 2>&1 | tail -5
+            npx prisma generate 2>&1 | tail -3
             npx tsc 2>&1 | tail -5
 
-            echo "=== Restarting QA backend ==="
-            pm2 restart qcrm-qa-backend --update-env
-            sleep 3
-            pm2 status qcrm-qa-backend --no-color | head -10
+            echo "=== Restart QA backend safely ==="
+            bash $APP_DIR/scripts/pm2-safe-restart.sh qcrm-qa-backend 3005 $ECO
 
-            echo "=== Installing frontend dependencies ==="
-            cd /home/azureuser/qa/agentic-crm
+            echo "=== Frontend: install + build ==="
+            cd $APP_DIR/agentic-crm
             npm ci 2>&1 | tail -5
+            sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches' || true
+            NEXT_PUBLIC_API_URL='https://qa-qcrm.qbadvisory.com' NODE_OPTIONS='--max-old-space-size=3072' npm run build 2>&1 | tail -10
 
-            echo "=== Building QA frontend ==="
-            pm2 stop qcrm-qa-frontend || true
-            sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'
-            NODE_OPTIONS='--max-old-space-size=3072' npm run build 2>&1 | tail -20
-
-            echo "=== Starting QA frontend ==="
-            pm2 start qcrm-qa-frontend --update-env
-            sleep 3
-            pm2 status --no-color | head -10
+            echo "=== Restart QA frontend safely ==="
+            bash $APP_DIR/scripts/pm2-safe-restart.sh qcrm-qa-frontend 3004 $ECO
 
             echo "=== QA deployment complete ==="
+            pm2 list | grep -E 'qcrm-qa-' || true
