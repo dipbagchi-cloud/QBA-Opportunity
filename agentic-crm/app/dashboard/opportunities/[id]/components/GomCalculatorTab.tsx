@@ -52,12 +52,16 @@ export function GomCalculatorTab({
         readOnly,
         salesTargetRevenue,
         reEstimateSuggestedRevenue,
-        isReEstimation,
         specialCosts,
         setSpecialCosts
     } = useOpportunityEstimation();
 
-    const hasSuggestedRevenue = isReEstimation && reEstimateSuggestedRevenue > 0;
+    // Whenever Sales has supplied an Adjusted Quote Value (via Send-Back for
+    // Re-estimation), that figure becomes the active Projected Revenue target
+    // — even after Presales submits the re-estimation and the stage moves on.
+    // We no longer gate this on isReEstimation, otherwise the suggestion
+    // disappears the moment the stage flips to Proposal/Sales.
+    const hasSuggestedRevenue = reEstimateSuggestedRevenue > 0;
 
     const { format: fmtCurrency, formatExact, symbol: cSym, convert: convertCurrency, currency: selectedCurrency, getRate, getSymbol } = useCurrency();
 
@@ -106,7 +110,7 @@ export function GomCalculatorTab({
                                 </span>
                             </div>
                             <div className="text-xl font-bold text-slate-900">{fmtCurrency(projectedRevenue)}</div>
-                            <div className="text-[10px] text-slate-500 mt-0.5">{hasSuggestedRevenue ? 'Suggested revenue from Sales (re-estimation)' : 'Estimated value from Pipeline'}</div>
+                            <div className="text-[10px] text-slate-500 mt-0.5">{hasSuggestedRevenue ? 'Suggested Quote by Sales' : 'Estimated value from Pipeline'}</div>
                         </div>
                     );
                 })()}
