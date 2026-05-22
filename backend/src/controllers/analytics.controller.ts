@@ -29,12 +29,29 @@ function getStageProbability(stageName: string): number {
     }
 }
 
-// Helper to calculate revenue based on status logic
-function getRevenue(opp: any) {
+const PIPELINE_STAGE_NAMES = new Set(['Discovery', 'Pipeline']);
+
+// Helper to calculate revenue in INR base currency.
+// Stage rules:
+//   - Pipeline/Discovery → raw opp.value converted from opp.currency to INR base.
+//   - Presales/Sales/Closed Won → latest committed quote from presalesData (already
+//     stored in INR base by the estimation context). Falls back to value conversion.
+function getRevenue(opp: any, ratesToBase: Record<string, number>): number {
     const val = Number(opp.value) || 0;
+    const cur = opp.currency || 'INR';
+    const rateInrToCur = cur === 'INR' ? 1 : (ratesToBase[cur] || 0);
+    const valInBase = rateInrToCur > 0 ? val / rateInrToCur : val;
+
+    const stageName = opp.stage?.name || opp.currentStage || 'Pipeline';
+    if (PIPELINE_STAGE_NAMES.has(stageName)) {
+        return valInBase;
+    }
+
     const presales = typeof opp.presalesData === 'string' ? JSON.parse(opp.presalesData) : opp.presalesData;
     const sales = typeof opp.salesData === 'string' ? JSON.parse(opp.salesData) : opp.salesData;
-    return sales?.finalQuote || presales?.projectedQuote || val;
+    const quote = sales?.finalQuote ?? presales?.finalRevenue ?? presales?.totalRevenue ?? presales?.gomSummary?.totalRevenue ?? presales?.projectedQuote;
+    if (quote != null && Number(quote) > 0) return Number(quote);
+    return valInBase;
 }
 
 // GET /api/analytics
@@ -43,6 +60,13 @@ export async function getAnalytics(req: Request, res: Response) {
         const opportunities = await prisma.opportunity.findMany({
             include: { client: true, owner: true, type: true, stage: true }
         });
+
+        // Currency rate snapshot (code -> rateToBase, i.e. 1 INR = rate <code>)
+        const activeRates = await prisma.currencyRate.findMany({ where: { isActive: true } });
+        const ratesToBase: Record<string, number> = activeRates.reduce((acc, r) => {
+            acc[r.code] = Number(r.rateToBase) || 0;
+            return acc;
+        }, {} as Record<string, number>);
 
         // 1. Opportunity Dashboard Data
         const revenueByMonth: any = {};
@@ -58,7 +82,7 @@ export async function getAnalytics(req: Request, res: Response) {
         const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
         opportunities.forEach(opp => {
-            const rev = getRevenue(opp);
+            const rev = getRevenue(opp, ratesToBase);
             const stageName = opp.stage?.name || opp.currentStage || 'Pipeline';
             const groupName = STAGE_GROUP[stageName] || stageName;
 
@@ -188,13 +212,13 @@ export async function getAnalytics(req: Request, res: Response) {
         const closedOpps = wonOpps.length + lostOpps.length;
         const conversionRate = closedOpps > 0 ? (wonOpps.length / closedOpps) * 100 : 0;
 
-        const pipelineValue = activeOpps.reduce((sum, o) => sum + getRevenue(o), 0);
+        const pipelineValue = activeOpps.reduce((sum, o) => sum + getRevenue(o, ratesToBase), 0);
         const avgDealValue = activeOpps.length > 0 ? pipelineValue / activeOpps.length : 0;
 
         // Weighted pipeline value (probability × value)
         const weightedPipeline = activeOpps.reduce((sum, o) => {
             const prob = getStageProbability(o.stage?.name || o.currentStage || 'Pipeline');
-            return sum + (getRevenue(o) * prob / 100);
+            return sum + (getRevenue(o, ratesToBase) * prob / 100);
         }, 0);
 
         // 5. Pre-Sales Metrics
@@ -229,9 +253,9 @@ export async function getAnalytics(req: Request, res: Response) {
         const avgTimeToClose = closedCount > 0 ? totalDays / closedCount : 0;
 
         // Total revenue computations
-        const projectedRevenue = activeOpps.reduce((sum, o) => sum + getRevenue(o), 0);
-        const closedRevenue = wonOpps.reduce((sum, o) => sum + getRevenue(o), 0);
-        const lostRevenue = lostOpps.reduce((sum, o) => sum + getRevenue(o), 0);
+        const projectedRevenue = activeOpps.reduce((sum, o) => sum + getRevenue(o, ratesToBase), 0);
+        const closedRevenue = wonOpps.reduce((sum, o) => sum + getRevenue(o, ratesToBase), 0);
+        const lostRevenue = lostOpps.reduce((sum, o) => sum + getRevenue(o, ratesToBase), 0);
         const wonRevenue = closedRevenue;
         const totalOpportunities = opportunities.length;
         const winRate = closedOpps > 0 ? (wonOpps.length / closedOpps) * 100 : 0;
@@ -252,7 +276,7 @@ export async function getAnalytics(req: Request, res: Response) {
             const stageName = o.stage?.name || o.currentStage || 'Pipeline';
             if (!pipelineStages[stageName]) pipelineStages[stageName] = { stage: stageName, count: 0, value: 0 };
             pipelineStages[stageName].count += 1;
-            pipelineStages[stageName].value += getRevenue(o);
+            pipelineStages[stageName].value += getRevenue(o, ratesToBase);
         });
         const stageBreakdown = Object.values(pipelineStages).map(s => ({ stage: s.stage, name: s.stage, count: s.count, value: s.value }));
 
@@ -262,7 +286,7 @@ export async function getAnalytics(req: Request, res: Response) {
             const region = o.region || 'Unknown';
             if (!regionMap[region]) regionMap[region] = { name: region, count: 0, value: 0 };
             regionMap[region].count += 1;
-            regionMap[region].value += getRevenue(o);
+            regionMap[region].value += getRevenue(o, ratesToBase);
         });
         const byRegion = Object.values(regionMap);
 
@@ -272,7 +296,7 @@ export async function getAnalytics(req: Request, res: Response) {
             const owner = o.salesRepName || o.owner?.name || 'Unassigned';
             if (!salesOwnerMap[owner]) salesOwnerMap[owner] = { name: owner, count: 0, value: 0 };
             salesOwnerMap[owner].count += 1;
-            salesOwnerMap[owner].value += getRevenue(o);
+            salesOwnerMap[owner].value += getRevenue(o, ratesToBase);
         });
         const bySalesOwner = Object.values(salesOwnerMap);
 
@@ -282,7 +306,7 @@ export async function getAnalytics(req: Request, res: Response) {
             const owner = o.salesRepName || o.owner?.name || 'Unassigned';
             if (!salesByOwner[owner]) salesByOwner[owner] = { name: owner, wonRevenue: 0, wonCount: 0, lostCount: 0 };
             const sn = o.stage?.name || o.currentStage;
-            if (sn === 'Closed Won') { salesByOwner[owner].wonRevenue += getRevenue(o); salesByOwner[owner].wonCount += 1; }
+            if (sn === 'Closed Won') { salesByOwner[owner].wonRevenue += getRevenue(o, ratesToBase); salesByOwner[owner].wonCount += 1; }
             else { salesByOwner[owner].lostCount += 1; }
         });
         const salesBySalesOwner = Object.values(salesByOwner);
@@ -335,7 +359,7 @@ export async function getAnalytics(req: Request, res: Response) {
             const sn = o.stage?.name || o.currentStage || '';
             if (sn === 'Closed Won') {
                 managerStats[mgr].wonCount += 1;
-                managerStats[mgr].totalRevenue += getRevenue(o);
+                managerStats[mgr].totalRevenue += getRevenue(o, ratesToBase);
             } else if (sn === 'Closed Lost' || sn === 'Proposal Lost') {
                 managerStats[mgr].lostCount += 1;
             }

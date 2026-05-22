@@ -319,9 +319,11 @@ export default function NewOpportunityPage() {
         const errors: { name?: string; contact?: string; email?: string } = {};
         if (!newClientName.trim()) errors.name = 'Client name is required.';
         if (!newClientContact.trim()) errors.contact = 'Contact person is required.';
-        if (newClientEmail.trim()) {
-            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-            if (!emailRegex.test(newClientEmail.trim())) errors.email = 'Enter a valid email address.';
+        if (!newClientEmail.trim()) {
+            errors.email = 'Contact person email is required.';
+        } else {
+            const emailRegex = /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/;
+            if (!emailRegex.test(newClientEmail.trim())) errors.email = 'Enter a valid email (e.g. xxx_yyy@aaa.com, xxx.yyy@aaa.com, aaa@xxx.com).';
         }
         setClientFormErrors(errors);
         if (Object.keys(errors).length > 0) return;
@@ -377,8 +379,24 @@ export default function NewOpportunityPage() {
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
 
-        if (!formData.technology || formData.technology.trim() === "") {
-            toast({ title: "Validation Error", description: "Technology is required." });
+        const missing: string[] = [];
+        if (!formData.clientName) missing.push("Client Name");
+        if (!formData.country) missing.push("Country");
+        if (!formData.region) missing.push("Region");
+        if (!formData.projectType) missing.push("Project Type");
+        if (!formData.projectName || !formData.projectName.trim()) missing.push("Project Name");
+        if (!formData.salesRep) missing.push("Sales Representative");
+        if (!formData.technology || !formData.technology.trim()) missing.push("Technology");
+        if (!formData.tentativeStartDate) missing.push("Tentative Start Date");
+        if (!formData.pricingModel) missing.push("Pricing Model");
+        if (formData.projectType === 'Staffing' && (!formData.expectedDayRate || Number(formData.expectedDayRate) <= 0)) missing.push("Expected Day Rate");
+        if (!formData.description || !formData.description.trim()) missing.push("Description");
+
+        if (missing.length > 0) {
+            toast({
+                title: "Required fields missing",
+                description: `Please provide: ${missing.join(", ")}.`,
+            });
             return;
         }
 
@@ -875,10 +893,16 @@ export default function NewOpportunityPage() {
                             </div>
                             <div>
                                 <input
-                                    type="email"
+                                    type="text"
                                     value={newClientEmail}
                                     onChange={(e) => { setNewClientEmail(e.target.value); if (clientFormErrors.email) setClientFormErrors(p => ({ ...p, email: undefined })); }}
-                                    placeholder="Contact Person Email"
+                                    onBlur={() => {
+                                        const v = newClientEmail.trim();
+                                        if (!v) { setClientFormErrors(p => ({ ...p, email: 'Contact person email is required.' })); return; }
+                                        const emailRegex = /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/;
+                                        if (!emailRegex.test(v)) setClientFormErrors(p => ({ ...p, email: 'Enter a valid email (e.g. xxx_yyy@aaa.com, xxx.yyy@aaa.com, aaa@xxx.com).' }));
+                                    }}
+                                    placeholder="Contact Person Email *"
                                     className={`w-full px-3 py-2.5 bg-white border rounded-md text-sm shadow-sm ${clientFormErrors.email ? 'border-red-400 focus:ring-red-300' : 'border-slate-300'}`}
                                 />
                                 {clientFormErrors.email && <p className="mt-1 text-xs text-red-500">{clientFormErrors.email}</p>}

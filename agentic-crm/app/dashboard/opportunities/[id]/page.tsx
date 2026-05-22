@@ -361,6 +361,12 @@ function GomPercentSync({ onGomPercentChange }: { onGomPercentChange: (pct: numb
     return null;
 }
 
+function RevenueSync({ onRevenueChange }: { onRevenueChange: (rev: number) => void }) {
+    const { revenue } = useOpportunityEstimation();
+    useEffect(() => { onRevenueChange(revenue); }, [revenue, onRevenueChange]);
+    return null;
+}
+
 export default function OpportunityDetailsPage({ params }: { params: Promise<{ id: string }> }) {
     const router = useRouter();
     const { currency: globalCurrency, getSymbol, getRate, setCurrency } = useCurrency();
@@ -461,8 +467,10 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const [showAddClient, setShowAddClient] = useState(false);
     const [newClientName, setNewClientName] = useState("");
     const [newClientContact, setNewClientContact] = useState("");
+    const [newClientEmail, setNewClientEmail] = useState("");
     const [newClientAddress, setNewClientAddress] = useState("");
     const [addingClient, setAddingClient] = useState(false);
+    const [clientFormErrors, setClientFormErrors] = useState<{ name?: string; contact?: string; email?: string }>({});
 
     // Presales Modal State (Modal for transition)
     const [presalesForm, setPresalesForm] = useState({
@@ -583,8 +591,9 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const [reEstimateComment, setReEstimateComment] = useState("");
     const [detailedStatus, setDetailedStatus] = useState<string>("");
 
-    // GOM percent from estimation context (for threshold check)
+    // GOM percent and revenue from estimation context
     const [contextGomPercent, setContextGomPercent] = useState(0);
+    const [contextRevenue, setContextRevenue] = useState(0);
     const [minGomPercent, setMinGomPercent] = useState(0);
     const [gomAutoApprovePercent, setGomAutoApprovePercent] = useState(0);
     const [gomApproved, setGomApproved] = useState(false);
@@ -1040,7 +1049,18 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
     // Add Client handler
     const handleAddClient = async () => {
-        if (!newClientName.trim()) return;
+        const errors: { name?: string; contact?: string; email?: string } = {};
+        if (!newClientName.trim()) errors.name = 'Client name is required.';
+        if (!newClientContact.trim()) errors.contact = 'Contact person is required.';
+        if (!newClientEmail.trim()) {
+            errors.email = 'Contact person email is required.';
+        } else {
+            const emailRegex = /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/;
+            if (!emailRegex.test(newClientEmail.trim())) errors.email = 'Enter a valid email (e.g. xxx_yyy@aaa.com, xxx.yyy@aaa.com, aaa@xxx.com).';
+        }
+        setClientFormErrors(errors);
+        if (Object.keys(errors).length > 0) return;
+
         setAddingClient(true);
         try {
             const res = await fetch(`${API_URL}/api/admin/clients`, {
@@ -1048,7 +1068,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 headers: getAuthHeaders(),
                 body: JSON.stringify({
                     name: newClientName.trim(),
-                    contactPerson: newClientContact.trim() || undefined,
+                    contactPerson: newClientContact.trim(),
+                    contactPersonEmail: newClientEmail.trim(),
                     address: newClientAddress.trim() || undefined,
                 }),
             });
@@ -1058,7 +1079,9 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 setFormData(prev => ({ ...prev, clientName: created.name }));
                 setNewClientName("");
                 setNewClientContact("");
+                setNewClientEmail("");
                 setNewClientAddress("");
+                setClientFormErrors({});
                 setShowAddClient(false);
                 toast({ title: "Client Added", description: `${created.name} has been added.` });
             } else {
@@ -1380,10 +1403,16 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         toast({ title: "Processing", description: "Sending proposal..." });
         setIsSaving(true);
         try {
+            // Include the current GOM-calculated revenue so the notification email
+            // always reflects the final quote price, not the pipeline estimate.
+            const patchBody: any = { stageName: 'Negotiation' };
+            if (contextRevenue > 0) {
+                patchBody.presalesData = { finalRevenue: contextRevenue };
+            }
             const res = await fetch(`${API_URL}/api/opportunities/${id}`, {
                 method: 'PATCH',
                 headers: getAuthHeaders(),
-                body: JSON.stringify({ stageName: 'Negotiation' })
+                body: JSON.stringify(patchBody)
             });
             if (res.ok) {
                 // Update local store only (no second PATCH to avoid duplicate notifications).
@@ -2366,6 +2395,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     currentUserName={user?.name || ''}
                 >
                     <GomPercentSync onGomPercentChange={setContextGomPercent} />
+                    <RevenueSync onRevenueChange={setContextRevenue} />
                     {opportunityStage < 2 && activeTab !== "View Estimate" && (
                         <PresalesSaveButton />
                     )}
@@ -3640,26 +3670,48 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
                         <div className="flex items-center justify-between mb-4">
                             <h3 className="text-lg font-bold text-slate-900">Add New Client</h3>
-                            <button onClick={() => setShowAddClient(false)} className="text-slate-400 hover:text-slate-600">
+                            <button onClick={() => { setShowAddClient(false); setClientFormErrors({}); }} className="text-slate-400 hover:text-slate-600">
                                 <X className="w-5 h-5" />
                             </button>
                         </div>
                         <div className="space-y-3">
-                            <input
-                                type="text"
-                                value={newClientName}
-                                onChange={(e) => setNewClientName(e.target.value)}
-                                placeholder="Client Name *"
-                                className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
-                                onKeyDown={(e) => e.key === 'Enter' && handleAddClient()}
-                            />
-                            <input
-                                type="text"
-                                value={newClientContact}
-                                onChange={(e) => setNewClientContact(e.target.value)}
-                                placeholder="Client Side Contact Person"
-                                className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
-                            />
+                            <div>
+                                <input
+                                    type="text"
+                                    value={newClientName}
+                                    onChange={(e) => { setNewClientName(e.target.value); if (clientFormErrors.name) setClientFormErrors(p => ({ ...p, name: undefined })); }}
+                                    placeholder="Client Name *"
+                                    className={`w-full px-3 py-2.5 bg-white border rounded-md text-sm shadow-sm ${clientFormErrors.name ? 'border-red-400' : 'border-slate-300'}`}
+                                    onKeyDown={(e) => e.key === 'Enter' && handleAddClient()}
+                                />
+                                {clientFormErrors.name && <p className="mt-1 text-xs text-red-500">{clientFormErrors.name}</p>}
+                            </div>
+                            <div>
+                                <input
+                                    type="text"
+                                    value={newClientContact}
+                                    onChange={(e) => { setNewClientContact(e.target.value); if (clientFormErrors.contact) setClientFormErrors(p => ({ ...p, contact: undefined })); }}
+                                    placeholder="Contact Person *"
+                                    className={`w-full px-3 py-2.5 bg-white border rounded-md text-sm shadow-sm ${clientFormErrors.contact ? 'border-red-400' : 'border-slate-300'}`}
+                                />
+                                {clientFormErrors.contact && <p className="mt-1 text-xs text-red-500">{clientFormErrors.contact}</p>}
+                            </div>
+                            <div>
+                                <input
+                                    type="text"
+                                    value={newClientEmail}
+                                    onChange={(e) => { setNewClientEmail(e.target.value); if (clientFormErrors.email) setClientFormErrors(p => ({ ...p, email: undefined })); }}
+                                    onBlur={() => {
+                                        const v = newClientEmail.trim();
+                                        if (!v) { setClientFormErrors(p => ({ ...p, email: 'Contact person email is required.' })); return; }
+                                        const emailRegex = /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/;
+                                        if (!emailRegex.test(v)) setClientFormErrors(p => ({ ...p, email: 'Enter a valid email (e.g. xxx_yyy@aaa.com, xxx.yyy@aaa.com, aaa@xxx.com).' }));
+                                    }}
+                                    placeholder="Contact Person Email *"
+                                    className={`w-full px-3 py-2.5 bg-white border rounded-md text-sm shadow-sm ${clientFormErrors.email ? 'border-red-400' : 'border-slate-300'}`}
+                                />
+                                {clientFormErrors.email && <p className="mt-1 text-xs text-red-500">{clientFormErrors.email}</p>}
+                            </div>
                             <input
                                 type="text"
                                 value={newClientAddress}
@@ -3669,8 +3721,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             />
                         </div>
                         <div className="flex justify-end gap-3 mt-4">
-                            <button type="button" onClick={() => setShowAddClient(false)} className="px-4 py-2 bg-white border border-slate-300 rounded-md text-sm font-medium hover:bg-slate-50">Cancel</button>
-                            <button type="button" onClick={handleAddClient} disabled={addingClient || !newClientName.trim()} className="px-4 py-2 bg-indigo-600 text-white rounded-md text-sm font-bold hover:bg-indigo-700 disabled:opacity-50">{addingClient ? 'Adding...' : 'Add Client'}</button>
+                            <button type="button" onClick={() => { setShowAddClient(false); setClientFormErrors({}); }} className="px-4 py-2 bg-white border border-slate-300 rounded-md text-sm font-medium hover:bg-slate-50">Cancel</button>
+                            <button type="button" onClick={handleAddClient} disabled={addingClient} className="px-4 py-2 bg-indigo-600 text-white rounded-md text-sm font-bold hover:bg-indigo-700 disabled:opacity-50">{addingClient ? 'Adding...' : 'Add Client'}</button>
                         </div>
                     </div>
                 </div>
