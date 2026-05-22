@@ -929,7 +929,10 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
                 setOpportunityManagerName(data.managerName || "");
                 setPresalesForm(prev => ({ ...prev, managerName: data.managerName || "" }));
-                setAdjustedEstimatedValue(data.adjustedEstimatedValue != null ? String(data.adjustedEstimatedValue) : "");
+                const persistedAdjusted = data.adjustedEstimatedValue
+                    ?? data.presalesData?.reEstimateSuggestedRevenue
+                    ?? data.presalesData?.suggestedRevenue;
+                setAdjustedEstimatedValue(persistedAdjusted != null ? String(persistedAdjusted) : "");
                 const savedSuggestedRevenue = data.presalesData?.reEstimateSuggestedRevenue ?? data.presalesData?.suggestedRevenue;
                 const legacyReEstimateValue = (data.detailedStatus === 'Sent for Re-estimate' || data.detailedStatus === 'Re-estimation') && data.adjustedEstimatedValue != null
                     ? data.adjustedEstimatedValue
@@ -1454,6 +1457,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 detailedStatus: 'Re-estimation',
                 status: 're-estimation',
                 reEstimateComment: reEstimateComment.trim(),
+                adjustedEstimatedValue: suggestedRevenue != null ? String(suggestedRevenue) : '',
                 presalesData: {
                     reEstimateComment: reEstimateComment.trim(),
                     reEstimateSuggestedRevenue: suggestedRevenue,
@@ -1473,6 +1477,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 setShowReestimateModal(false);
                 setReEstimateComment("");
                 setDetailedStatus('Re-estimation');
+                if (suggestedRevenue != null) setAdjustedEstimatedValue(String(suggestedRevenue));
                 toast({ title: "Success", description: "Sent back for re-estimation." });
                 // Update local store only (no second PATCH to avoid duplicate notifications)
                 useOpportunityStore.setState((state) => ({
@@ -2508,9 +2513,9 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                         </div>
                                     </div>
                                     )}
-                                    {Number(adjustedEstimatedValue) > 0 && detailedStatus !== 'Re-estimation' && detailedStatus !== 'Sent for Re-estimate' && (
+                                    {Number(adjustedEstimatedValue) > 0 && (
                                     <div>
-                                        <label className="block text-xs font-semibold text-amber-600 uppercase mb-1">Adjusted Quote Value</label>
+                                        <label className="block text-xs font-semibold text-amber-600 uppercase mb-1">Adjusted Quote Value (Sales Suggested)</label>
                                         <div className="font-bold text-amber-700">
                                             {cSym}{Number(adjustedEstimatedValue).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
                                             {opportunityCurrency && globalCurrency && opportunityCurrency !== globalCurrency && (
@@ -3326,9 +3331,9 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     })()}
                                 </p>
                             </div>
-                            {Number(adjustedEstimatedValue) > 0 && detailedStatus !== 'Re-estimation' && detailedStatus !== 'Sent for Re-estimate' && (
+                            {Number(adjustedEstimatedValue) > 0 && (
                             <div className="bg-amber-50 rounded-lg p-3 border border-amber-200">
-                                <p className="text-xs text-amber-600 mb-1">Adjusted Quote Value</p>
+                                <p className="text-xs text-amber-600 mb-1">Adjusted Quote Value (Sales Suggested)</p>
                                 <p className="font-bold text-amber-700">
                                     {cSym}{Number(adjustedEstimatedValue).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
                                     {opportunityCurrency && globalCurrency && opportunityCurrency !== globalCurrency && (
