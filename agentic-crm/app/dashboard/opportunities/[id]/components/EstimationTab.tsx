@@ -16,8 +16,6 @@ export function EstimationTab() {
         resources,
         gomSummary,
         months,
-        currency,
-        setCurrency,
         revenue,
         gomPercent,
         totalCost: contextTotalCost,
@@ -29,12 +27,13 @@ export function EstimationTab() {
         selectedYear,
     } = useOpportunityEstimation();
 
-    const { currencies, getRate, getSymbol, currency: globalCurrency } = useCurrency();
+    const { getRate, getSymbol, currency: globalCurrency } = useCurrency();
 
     const convert = (valInInr: number) => {
-        const targetCurrency = exchangeRatesSnapshot ? currency : globalCurrency;
+        const targetCurrency = globalCurrency;
         if (targetCurrency === "INR") return valInInr;
-        const rate = exchangeRatesSnapshot ? exchangeRatesSnapshot[targetCurrency] : getRate(targetCurrency);
+        const snapshotRate = exchangeRatesSnapshot?.[targetCurrency];
+        const rate = snapshotRate && snapshotRate > 0 ? snapshotRate : getRate(targetCurrency);
         return rate > 0 ? valInInr * rate : valInInr;
     };
 
@@ -42,7 +41,7 @@ export function EstimationTab() {
         if (!isCurrency) return val.toFixed(2);
         return new Intl.NumberFormat('en-US', {
             style: 'currency',
-            currency: exchangeRatesSnapshot ? currency : globalCurrency,
+            currency: globalCurrency,
             maximumFractionDigits: 0
         }).format(val);
     };
@@ -209,7 +208,7 @@ export function EstimationTab() {
                 </div>
 
                 <div className="flex items-center gap-4 bg-white/10 p-2 rounded-lg backdrop-blur-sm">
-                    <span className="text-sm font-medium px-2 text-white/80">Currency: <span className="font-bold text-white">{currency} ({getSymbol(currency)})</span></span>
+                    <span className="text-sm font-medium px-2 text-white/80">Currency: <span className="font-bold text-white">{globalCurrency} ({getSymbol(globalCurrency)})</span></span>
                 </div>
             </div>
 
@@ -259,7 +258,7 @@ export function EstimationTab() {
             {/* Grid 2: Salary Cost */}
             <div className="border rounded-lg bg-white shadow-sm overflow-hidden flex flex-col max-h-[500px]">
                 <div className="bg-slate-50 p-3 border-b bg-cyan-50/50 sticky top-0 z-20">
-                    <h3 className="font-semibold text-slate-800 text-sm">2. Salary Cost for Billed hours ({exchangeRatesSnapshot ? currency : globalCurrency})</h3>
+                    <h3 className="font-semibold text-slate-800 text-sm">2. Salary Cost for Billed hours ({globalCurrency})</h3>
                 </div>
                 <div className="overflow-auto flex-1">
                     <table className="w-full text-xs text-left border-collapse">
@@ -305,7 +304,7 @@ export function EstimationTab() {
             {/* Grid 3: GOM Summary */}
             <div className="border rounded-lg bg-white shadow-sm overflow-hidden">
                 <div className="bg-slate-50 p-3 border-b bg-green-50/50">
-                    <h3 className="font-semibold text-slate-800 text-sm">3. GOM Analysis ({exchangeRatesSnapshot ? currency : globalCurrency})</h3>
+                    <h3 className="font-semibold text-slate-800 text-sm">3. GOM Analysis ({globalCurrency})</h3>
                 </div>
                 <div className="overflow-x-auto">
                     <table className="w-full text-xs text-left">

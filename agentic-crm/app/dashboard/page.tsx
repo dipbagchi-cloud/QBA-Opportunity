@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import {
     IndianRupee,
@@ -106,6 +106,8 @@ interface Opportunity {
     name: string;
     client: string;
     value: number;
+    currency?: string;
+    quote?: number | null;
     stage: string;
     currentStage: string;
     probability: number;
@@ -125,11 +127,29 @@ interface Opportunity {
 export default function DashboardPage() {
     const { user } = useAuthStore();
     const router = useRouter();
-    const { format: fmtCurrency, symbol: cSym, convert: convertCurrency } = useCurrency();
+    const { format: fmtCurrency, symbol: cSym, convert: convertCurrency, getRate } = useCurrency();
     const [analytics, setAnalytics] = useState<Analytics | null>(null);
-    const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
+    const [rawOpportunities, setRawOpportunities] = useState<Opportunity[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
+
+    const PRESALES_SALES_STAGES = ['Qualification', 'Presales', 'Proposal', 'Sales', 'Negotiation'];
+    const CLOSED_WON_STAGES = ['Closed Won', 'Closed-Won', 'Delivered'];
+
+    const opportunities = useMemo(() => {
+        return rawOpportunities.map(o => {
+            const cur = o.currency || 'INR';
+            const rate = getRate(cur);
+            const rawValueInBase = cur === 'INR' || !rate ? Number(o.value) || 0 : (Number(o.value) || 0) / rate;
+            const quoteInBase = o.quote != null ? Number(o.quote) : null;
+
+            let displayValue = rawValueInBase;
+            if (CLOSED_WON_STAGES.includes(o.currentStage) || PRESALES_SALES_STAGES.includes(o.currentStage)) {
+                if (quoteInBase != null && quoteInBase > 0) displayValue = quoteInBase;
+            }
+            return { ...o, value: displayValue };
+        });
+    }, [rawOpportunities, getRate]);
 
     const fetchDashboard = useCallback(async (silent = false) => {
         const headers = getAuthHeaders();
@@ -144,7 +164,7 @@ export default function DashboardPage() {
             if (oppsRes.ok) {
                 const oppsJson = await oppsRes.json();
                 // API now returns paginated { data, total, ... } — extract the array
-                setOpportunities(Array.isArray(oppsJson) ? oppsJson : (oppsJson.data ?? []));
+                setRawOpportunities(Array.isArray(oppsJson) ? oppsJson : (oppsJson.data ?? []));
             }
         } catch (err) {
             console.error("Dashboard fetch error:", err);
