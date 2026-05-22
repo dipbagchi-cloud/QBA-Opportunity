@@ -3177,7 +3177,13 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     const quoteOpp = getPresalesConverted(rev);
                                     const totalCostOpp = getPresalesConverted(totalC);
                                     const profitOpp = getPresalesConverted(profit);
-                                    const projectedOpp = Number(formData.value) || 0;
+                                    // Mirror the GOM Calculator tab: when Sales has supplied an
+                                    // Adjusted Quote Value (via Send-Back for Re-estimation), that
+                                    // figure becomes the active Projected Revenue target — even
+                                    // after the stage moves on past Qualification.
+                                    const adjustedNum = Number(adjustedEstimatedValue) || 0;
+                                    const hasSuggested = adjustedNum > 0;
+                                    const projectedOpp = hasSuggested ? adjustedNum : (Number(formData.value) || 0);
                                     const diffOpp = projectedOpp - quoteOpp;
                                     const within = diffOpp >= 0;
                                     const resourceCount = Array.isArray(pd.resources) ? pd.resources.length : 0;
@@ -3219,7 +3225,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                                     </span>
                                                 </div>
                                                 <div className="text-xl font-bold text-slate-900">{fmt(projectedOpp)}</div>
-                                                <div className="text-[10px] text-slate-500 mt-0.5">Estimated value from Pipeline</div>
+                                                <div className="text-[10px] text-slate-500 mt-0.5">{hasSuggested ? 'Suggested Quote by Sales' : 'Estimated value from Pipeline'}</div>
                                             </div>
 
                                             {/* Difference */}
