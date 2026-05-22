@@ -379,8 +379,24 @@ export default function NewOpportunityPage() {
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
 
-        if (!formData.technology || formData.technology.trim() === "") {
-            toast({ title: "Validation Error", description: "Technology is required." });
+        const missing: string[] = [];
+        if (!formData.clientName) missing.push("Client Name");
+        if (!formData.country) missing.push("Country");
+        if (!formData.region) missing.push("Region");
+        if (!formData.projectType) missing.push("Project Type");
+        if (!formData.projectName || !formData.projectName.trim()) missing.push("Project Name");
+        if (!formData.salesRep) missing.push("Sales Representative");
+        if (!formData.technology || !formData.technology.trim()) missing.push("Technology");
+        if (!formData.tentativeStartDate) missing.push("Tentative Start Date");
+        if (!formData.pricingModel) missing.push("Pricing Model");
+        if (formData.projectType === 'Staffing' && (!formData.expectedDayRate || Number(formData.expectedDayRate) <= 0)) missing.push("Expected Day Rate");
+        if (!formData.description || !formData.description.trim()) missing.push("Description");
+
+        if (missing.length > 0) {
+            toast({
+                title: "Required fields missing",
+                description: `Please provide: ${missing.join(", ")}.`,
+            });
             return;
         }
 
