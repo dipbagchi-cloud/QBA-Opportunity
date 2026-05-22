@@ -137,6 +137,9 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
     const [isSaving, setIsSaving] = useState(false);
     const [isLoaded, setIsLoaded] = useState(false);
     const [exchangeRatesSnapshot, setExchangeRatesSnapshot] = useState<Record<string, number> | undefined>();
+    const [savedFinalRevenue, setSavedFinalRevenue] = useState<number | null>(null);
+    const [savedFinalTotalCost, setSavedFinalTotalCost] = useState<number | null>(null);
+    const [savedFinalGomPercent, setSavedFinalGomPercent] = useState<number | null>(null);
     const { getRate, loaded: ratesLoaded } = useCurrency();
     // Track the currency that special/travel cost values were entered in.
     // This ensures conversions stay stable when the user switches display currency.
@@ -257,6 +260,14 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
                     if (saved.currency) setDataCurrency(saved.currency);
                     if (saved.effortType) setEffortType(saved.effortType);
                     if (saved.selectedYear) setSelectedYear(saved.selectedYear);
+                    // Snapshot the committed final numbers so read-only consumers
+                    // (GOM Calculator on Project / Closed-Won pages, etc.) can
+                    // surface the exact figures every other view uses, instead
+                    // of a stale live recomputation drifting after assumptions
+                    // / rate cards change.
+                    if (saved.finalRevenue != null) setSavedFinalRevenue(Number(saved.finalRevenue));
+                    if (saved.finalTotalCost != null) setSavedFinalTotalCost(Number(saved.finalTotalCost));
+                    if (saved.finalGomPercent != null) setSavedFinalGomPercent(Number(saved.finalGomPercent));
                 }
                 if (opp.metadata && typeof opp.metadata === "object" && !Array.isArray(opp.metadata) && opp.metadata.exchangeRatesSnapshot) {
                     setExchangeRatesSnapshot(opp.metadata.exchangeRatesSnapshot as Record<string, number>);
@@ -512,6 +523,16 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
             setGomSummary(null);
         }
     }, [resources, totalTravelCost, specialCosts, markupPercent, salesCommissionPercent, preSalesCostPercent, assumptions, selectedYear, months, startDate]);
+
+    // Override the live recalculation with the saved committed figures whenever
+    // the opportunity is in a read-only state. Keeps GOM Calculator tiles in
+    // lockstep with Project Details / list view / proposal email.
+    useEffect(() => {
+        if (!readOnly) return;
+        if (savedFinalRevenue != null) setRevenue(savedFinalRevenue);
+        if (savedFinalTotalCost != null) setTotalCost(savedFinalTotalCost);
+        if (savedFinalGomPercent != null) setGomPercent(savedFinalGomPercent);
+    }, [readOnly, savedFinalRevenue, savedFinalTotalCost, savedFinalGomPercent, resources, totalTravelCost, specialCosts, markupPercent, salesCommissionPercent, preSalesCostPercent, assumptions]);
 
     // Determine GOM status
     const getGomStatus = () => {
