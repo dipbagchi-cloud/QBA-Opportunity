@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { sendNotificationEmail } from '../lib/email';
-import { evaluateStageChangeRules, evaluateDataConditionRules, evaluateOpportunityCreatedRules, evaluateAssignmentChangeRules, resolveCalculatedFields } from '../lib/notification-engine';
+import { evaluateStageChangeRules, evaluateDataConditionRules, evaluateOpportunityCreatedRules, evaluateAssignmentChangeRules, evaluateOpportunityChangeNotice, resolveCalculatedFields } from '../lib/notification-engine';
 import { calculateOpportunityProbability } from '../lib/opportunity-probability';
 import { buildOpportunityAccess } from '../lib/opportunity-access';
 import path from 'path';
@@ -355,6 +355,8 @@ export async function createOpportunity(req: Request, res: Response) {
                 ownerName: creator?.name || '',
                 ownerEmail: creator?.email || '',
                 salesRepName: (newOpp as any).salesRepName || creator?.name || '',
+                managerName: (newOpp as any).managerName || '',
+                presalesAssigneeName: (newOpp as any).presalesAssigneeName || '',
                 createdByName: creator?.name || '',
                 value: newOpp.value != null ? Number(newOpp.value) : null,
                 currency: newOpp.currency || 'INR',
@@ -803,6 +805,49 @@ export async function updateOpportunity(req: Request, res: Response) {
                     changes: changes.join('; '),
                 },
             });
+        }
+
+        // ── Change-notice email (fire-and-forget) ──
+        // When an opportunity has already moved past Discovery (Pipeline) and
+        // someone edits pipeline/sales/presales fields *without* changing the
+        // stage, send a "what changed" email to the assigned manager + presales
+        // with the sales person in CC. Pure stage changes are covered by
+        // evaluateStageChangeRules; pure assignment changes by
+        // evaluateAssignmentChangeRules — so we filter those rows out here to
+        // avoid sending duplicate information.
+        const prevStageNameForNotice = previous?.stage?.name || previous?.currentStage || '';
+        const stageDidChange = !!newStageName && newStageName !== prevStageNameForNotice;
+        const isPastDiscovery = prevStageNameForNotice !== '' && prevStageNameForNotice !== 'Discovery';
+        if (!stageDidChange && isPastDiscovery && changes.length > 0) {
+            const noticeChanges = changes.filter(c =>
+                !c.startsWith('Stage changed') &&
+                !c.startsWith('Sales Rep changed') &&
+                !c.startsWith('Manager changed') &&
+                !c.startsWith('Presales Assignee changed')
+            );
+            if (noticeChanges.length > 0) {
+                const actorName = previous?.owner?.name || req.user?.email || 'A team member';
+                // Resolve the real actor name (the user making the edit), not the owner.
+                try {
+                    const actor = await prisma.user.findUnique({
+                        where: { id: req.user!.userId },
+                        select: { name: true, email: true },
+                    });
+                    evaluateOpportunityChangeNotice({
+                        opportunityId: id,
+                        opportunityTitle: updatedOpp.title,
+                        clientName: previous?.client?.name || '',
+                        stageName: prevStageNameForNotice,
+                        changes: noticeChanges,
+                        updatedByUserId: req.user!.userId,
+                        updatedByName: actor?.name || actor?.email || actorName,
+                        value: updatedOpp.value != null ? Number(updatedOpp.value) : null,
+                        currency: updatedOpp.currency || 'USD',
+                    });
+                } catch (noticeErr) {
+                    console.error('[opportunity_change_notice] dispatch failed:', noticeErr);
+                }
+            }
         }
 
         // Dedicated audit entries for special stage transitions

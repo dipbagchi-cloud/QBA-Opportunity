@@ -1,5 +1,5 @@
 import { prisma } from './prisma';
-import { sendNotificationEmail } from './email';
+import { sendNotificationEmail, sendRawEmail } from './email';
 import { calculateOpportunityProbability } from './opportunity-probability';
 
 // Roles that are "global" - all users with these roles get notified regardless of assignment
@@ -28,35 +28,13 @@ async function resolveAssignedRecipients(
   });
   if (!opp) return [];
 
-  // Collect assigned user IDs per role from the opportunity
-  const assignedUserIds = new Set<string>();
-  const assignedNames: string[] = [];
-
-  // Owner is always the Sales person
-  if (opp.owner) {
-    assignedUserIds.add(opp.owner.id);
-  }
-
-  // Collect names of assigned people for lookup
-  if (opp.salesRepName) assignedNames.push(opp.salesRepName);
-  if (opp.managerName) assignedNames.push(opp.managerName);
-  if (opp.presalesAssigneeName) assignedNames.push(opp.presalesAssigneeName);
-
-  // Look up user IDs by name for non-owner assigned users
-  if (assignedNames.length > 0) {
-    const namedUsers = await prisma.user.findMany({
-      where: { name: { in: assignedNames }, isActive: true },
-      select: { id: true },
-    });
-    namedUsers.forEach(u => assignedUserIds.add(u.id));
-  }
-
   // Split roles into global (Admin) and opportunity-scoped
   const globalRoles = recipientRoles.filter(r => GLOBAL_ROLES.includes(r));
   const scopedRoles = recipientRoles.filter(r => !GLOBAL_ROLES.includes(r));
 
-  // Fetch global role users (all users with Admin role etc.)
   let allRecipients: { id: string; email: string; name: string; muteNotification: boolean; roles: { name: string }[] }[] = [];
+
+  // Global roles (Admin etc.) — all active users with that role get notified
   if (globalRoles.length > 0) {
     const globalUsers = await prisma.user.findMany({
       where: { isActive: true, roles: { some: { name: { in: globalRoles } } } },
@@ -65,21 +43,52 @@ async function resolveAssignedRecipients(
     allRecipients.push(...globalUsers);
   }
 
-  // Fetch scoped role users - only those assigned to this opportunity
-  if (scopedRoles.length > 0 && assignedUserIds.size > 0) {
-    const scopedUsers = await prisma.user.findMany({
-      where: {
-        isActive: true,
-        id: { in: Array.from(assignedUserIds) },
-        roles: { some: { name: { in: scopedRoles } } },
-      },
-      select: { id: true, email: true, name: true, muteNotification: true, roles: { select: { name: true } } },
-    });
-    scopedUsers.forEach(u => {
-      if (!allRecipients.find(r => r.id === u.id)) {
-        allRecipients.push(u);
+  // Scoped roles map to opportunity assignment SLOTS — not any user with the
+  // matching role. This prevents the salesperson (who may also carry a
+  // Manager/Presales role) from being addressed as the assigned manager when
+  // a different person is in the manager slot.
+  //   role 'Sales'    → owner OR user matching salesRepName
+  //   role 'Manager'  → user matching managerName
+  //   role 'Presales' → user matching presalesAssigneeName
+  if (scopedRoles.length > 0) {
+    const slotNames = new Set<string>();
+    const slotIds = new Set<string>();
+    for (const role of scopedRoles) {
+      if (role === 'Sales') {
+        if (opp.owner) slotIds.add(opp.owner.id);
+        if (opp.salesRepName) slotNames.add(opp.salesRepName);
+      } else if (role === 'Manager') {
+        if (opp.managerName) slotNames.add(opp.managerName);
+      } else if (role === 'Presales') {
+        if (opp.presalesAssigneeName) slotNames.add(opp.presalesAssigneeName);
       }
-    });
+    }
+
+    if (slotNames.size > 0) {
+      // Case-insensitive name match — assignment-field strings ("Kunjana Roy")
+      // are user-entered and don't always match the User.name casing exactly.
+      // A case-sensitive `in:` query silently drops them.
+      const namedUsers = await prisma.user.findMany({
+        where: {
+          isActive: true,
+          OR: Array.from(slotNames).map(n => ({ name: { equals: n, mode: 'insensitive' as const } })),
+        },
+        select: { id: true },
+      });
+      namedUsers.forEach(u => slotIds.add(u.id));
+    }
+
+    if (slotIds.size > 0) {
+      const slotUsers = await prisma.user.findMany({
+        where: { isActive: true, id: { in: Array.from(slotIds) } },
+        select: { id: true, email: true, name: true, muteNotification: true, roles: { select: { name: true } } },
+      });
+      slotUsers.forEach(u => {
+        if (!allRecipients.find(r => r.id === u.id)) {
+          allRecipients.push(u);
+        }
+      });
+    }
   }
 
   // Apply per-user filtering from rule if present
@@ -124,6 +133,8 @@ interface OpportunityCreatedContext {
   ownerName: string;
   ownerEmail: string;
   salesRepName: string;
+  managerName?: string;
+  presalesAssigneeName?: string;
   createdByName: string;
   value?: number | null;
   currency?: string;
@@ -194,6 +205,10 @@ export async function evaluateOpportunityCreatedRules(ctx: OpportunityCreatedCon
         ownerEmail: ctx.ownerEmail,
         salesRep: ctx.salesRepName,
         salesRepName: ctx.salesRepName,
+        manager: ctx.managerName || '',
+        managerName: ctx.managerName || '',
+        presales: ctx.presalesAssigneeName || '',
+        presalesAssigneeName: ctx.presalesAssigneeName || '',
         createdBy: ctx.createdByName,
         updatedBy: ctx.createdByName,
         value: ctx.value != null ? fmtNum(Number(ctx.value)) : '',
@@ -299,6 +314,7 @@ export async function evaluateStageChangeRules(ctx: StageChangeContext): Promise
 
       // Get recipient users based on roles
       const recipientRoles = (rule.recipientRoles as string[]) || [];
+      const recipientRolesCc = ((rule as any).recipientRolesCc as string[]) || [];
       const channels = (rule.channels as string[]) || [];
 
       if (recipientRoles.length === 0 || channels.length === 0) continue;
@@ -306,7 +322,12 @@ export async function evaluateStageChangeRules(ctx: StageChangeContext): Promise
       const recipientUsers = rule.recipientUsers as Record<string, string[]> | null;
 
       // Only notify assigned users per role (Admin gets all)
-      const recipients = await resolveAssignedRecipients(ctx.opportunityId, recipientRoles, recipientUsers);
+      const toUsers = await resolveAssignedRecipients(ctx.opportunityId, recipientRoles, recipientUsers);
+      let ccUsers = recipientRolesCc.length > 0
+        ? await resolveAssignedRecipients(ctx.opportunityId, recipientRolesCc, recipientUsers)
+        : [];
+      // Exclude users already in To list from CC
+      ccUsers = ccUsers.filter(u => !toUsers.find(t => t.id === u.id));
 
       // Template variables for message rendering
       const _stageCurrency = ctx.currency || 'USD';
@@ -358,9 +379,9 @@ export async function evaluateStageChangeRules(ctx: StageChangeContext): Promise
         ? renderTemplate(rule.messageTemplate, variables)
         : `Opportunity "${ctx.opportunityTitle}" moved from ${ctx.previousStage} to ${ctx.newStage}`;
 
-      for (const user of recipients) {
-        // In-app notification
-        if (channels.includes('in_app')) {
+      // In-app notifications: one per user (To + CC combined)
+      if (channels.includes('in_app')) {
+        for (const user of [...toUsers, ...ccUsers]) {
           await prisma.notification.create({
             data: {
               type: 'stage_change',
@@ -371,14 +392,19 @@ export async function evaluateStageChangeRules(ctx: StageChangeContext): Promise
             },
           });
         }
+      }
 
-        // Email notification (respects muteNotification)
-        if (channels.includes('email') && rule.emailTemplateKey) {
-          sendNotificationEmail(rule.emailTemplateKey, user.email, user.name, variables);
+      // Email: single message with all To recipients + CC recipients
+      if (channels.includes('email') && rule.emailTemplateKey) {
+        const toEmails = toUsers.filter(u => !u.muteNotification).map(u => u.email);
+        const ccEmails = ccUsers.filter(u => !u.muteNotification).map(u => u.email);
+        if (toEmails.length > 0 || ccEmails.length > 0) {
+          const primaryName = toUsers[0]?.name || ccUsers[0]?.name || 'Recipient';
+          sendNotificationEmail(rule.emailTemplateKey, toEmails, primaryName, variables, ccEmails);
         }
       }
 
-      console.log(`[NotificationEngine] Rule "${rule.name}" matched: ${ctx.previousStage} → ${ctx.newStage}, notified ${recipients.length} users via [${channels.join(', ')}]`);
+      console.log(`[NotificationEngine] Rule "${rule.name}" matched: ${ctx.previousStage} → ${ctx.newStage}, notified ${toUsers.length} To + ${ccUsers.length} CC via [${channels.join(', ')}]`);
     }
   } catch (error) {
     console.error('[NotificationEngine] Error evaluating stage change rules:', error);
@@ -433,10 +459,12 @@ export async function evaluateAssignmentChangeRules(ctx: AssignmentChangeContext
     const matched = rules.filter(r => !r.toStage || r.toStage === ctx.field);
 
     // Look up the newly-assigned user so we can email them directly even when
-    // no NotificationRule explicitly targets their role.
+    // no NotificationRule explicitly targets their role. Case-insensitive
+    // because the assignment-field string is user-entered and doesn't always
+    // match the User.name casing exactly.
     const newAssignee = ctx.newValue
       ? await prisma.user.findFirst({
-          where: { name: ctx.newValue, isActive: true },
+          where: { isActive: true, name: { equals: ctx.newValue, mode: 'insensitive' } },
           select: { id: true, email: true, name: true, muteNotification: true, roles: { select: { name: true } } },
         })
       : null;
@@ -499,21 +527,27 @@ export async function evaluateAssignmentChangeRules(ctx: AssignmentChangeContext
 
     for (const rule of matched) {
       const recipientRoles = (rule.recipientRoles as string[]) || [];
+      const recipientRolesCc = ((rule as any).recipientRolesCc as string[]) || [];
       const channels = (rule.channels as string[]) || [];
       if (channels.length === 0) continue;
 
       const recipientUsers = rule.recipientUsers as Record<string, string[]> | null;
-      const roleRecipients = recipientRoles.length > 0
+      const toUsers = recipientRoles.length > 0
         ? await resolveAssignedRecipients(ctx.opportunityId, recipientRoles, recipientUsers)
         : [];
 
-      // Always include the new assignee (deduped) so they're notified even if
-      // their role isn't currently in recipientRoles for this rule.
-      const combined = [...roleRecipients];
-      if (newAssignee && !combined.find(u => u.id === newAssignee.id)) {
-        combined.push(newAssignee);
+      // Always include the new assignee in To (deduped) so they're notified
+      // even if their role isn't currently in recipientRoles for this rule.
+      if (newAssignee && !toUsers.find(u => u.id === newAssignee.id)) {
+        toUsers.push(newAssignee);
       }
-      if (combined.length === 0) continue;
+
+      let ccUsers = recipientRolesCc.length > 0
+        ? await resolveAssignedRecipients(ctx.opportunityId, recipientRolesCc, recipientUsers)
+        : [];
+      ccUsers = ccUsers.filter(u => !toUsers.find(t => t.id === u.id));
+
+      if (toUsers.length === 0 && ccUsers.length === 0) continue;
 
       const title = rule.titleTemplate
         ? renderTemplate(rule.titleTemplate, variables)
@@ -522,8 +556,8 @@ export async function evaluateAssignmentChangeRules(ctx: AssignmentChangeContext
         ? renderTemplate(rule.messageTemplate, variables)
         : `${ctx.updatedByName} set ${fieldLabel[ctx.field]} of "${ctx.opportunityTitle}" to ${ctx.newValue || '(unassigned)'}.`;
 
-      for (const user of combined) {
-        if (channels.includes('in_app')) {
+      if (channels.includes('in_app')) {
+        for (const user of [...toUsers, ...ccUsers]) {
           await prisma.notification.create({
             data: {
               type: 'assignment_change',
@@ -534,15 +568,169 @@ export async function evaluateAssignmentChangeRules(ctx: AssignmentChangeContext
             },
           });
         }
-        if (channels.includes('email') && !user.muteNotification) {
-          const templateKey = rule.emailTemplateKey || ASSIGNMENT_DEFAULT_TEMPLATE[ctx.field];
-          sendNotificationEmail(templateKey, user.email, user.name, variables);
+      }
+      if (channels.includes('email')) {
+        const templateKey = rule.emailTemplateKey || ASSIGNMENT_DEFAULT_TEMPLATE[ctx.field];
+        const toEmails = toUsers.filter(u => !u.muteNotification).map(u => u.email);
+        const ccEmails = ccUsers.filter(u => !u.muteNotification).map(u => u.email);
+        if (toEmails.length > 0 || ccEmails.length > 0) {
+          const primaryName = toUsers[0]?.name || ccUsers[0]?.name || 'Recipient';
+          sendNotificationEmail(templateKey, toEmails, primaryName, variables, ccEmails);
         }
       }
-      console.log(`[NotificationEngine] assignment_change rule "${rule.name}" (${ctx.field}): notified ${combined.length} users via [${channels.join(', ')}]`);
+      console.log(`[NotificationEngine] assignment_change rule "${rule.name}" (${ctx.field}): notified ${toUsers.length} To + ${ccUsers.length} CC via [${channels.join(', ')}]`);
     }
   } catch (error) {
     console.error('[NotificationEngine] Error evaluating assignment_change rules:', error);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Opportunity change notice — fired when pipeline/sales/presales      */
+/* fields are edited on an opportunity that has already moved past     */
+/* Discovery. Stage transitions and assignment changes are handled by  */
+/* their own evaluators; this covers everything else (description,     */
+/* value, region, technology, pricing model, presalesData, salesData…).*/
+/* Recipients:                                                          */
+/*   To: assigned manager (offshore) + assigned presales (if any)      */
+/*   Cc: salesperson (opp owner + named sales rep)                     */
+/* The actor (the user making the change) is excluded from both lists  */
+/* so they don't get a copy of their own edit.                         */
+/* ------------------------------------------------------------------ */
+
+interface OpportunityChangeNoticeContext {
+  opportunityId: string;
+  opportunityTitle: string;
+  clientName: string;
+  stageName: string;
+  changes: string[];
+  updatedByUserId: string;
+  updatedByName: string;
+  value?: number | null;
+  currency?: string;
+}
+
+async function resolveUserByName(name: string | null | undefined) {
+  const trimmed = (name || '').trim();
+  if (!trimmed) return null;
+  return prisma.user.findFirst({
+    where: { isActive: true, name: { equals: trimmed, mode: 'insensitive' } },
+    select: { id: true, email: true, name: true, muteNotification: true },
+  });
+}
+
+export async function evaluateOpportunityChangeNotice(
+  ctx: OpportunityChangeNoticeContext
+): Promise<void> {
+  try {
+    if (!ctx.changes || ctx.changes.length === 0) return;
+
+    const opp = await prisma.opportunity.findUnique({
+      where: { id: ctx.opportunityId },
+      select: {
+        ownerId: true,
+        owner: { select: { id: true, email: true, name: true, muteNotification: true } },
+        salesRepName: true,
+        managerName: true,
+        presalesAssigneeName: true,
+      },
+    });
+    if (!opp) return;
+
+    // Resolve To: manager + all presales assignees (comma-separated)
+    const toUsers: { id: string; email: string; name: string }[] = [];
+    const managerUser = await resolveUserByName(opp.managerName);
+    if (managerUser && !managerUser.muteNotification) {
+      toUsers.push({ id: managerUser.id, email: managerUser.email, name: managerUser.name });
+    }
+    const presalesNames = (opp.presalesAssigneeName || '')
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean);
+    for (const pname of presalesNames) {
+      const pUser = await resolveUserByName(pname);
+      if (pUser && !pUser.muteNotification && !toUsers.find(u => u.id === pUser.id)) {
+        toUsers.push({ id: pUser.id, email: pUser.email, name: pUser.name });
+      }
+    }
+
+    // Resolve Cc: owner (creator/salesperson) + named sales rep, deduped vs To
+    const ccUsers: { id: string; email: string; name: string }[] = [];
+    if (opp.owner && !opp.owner.muteNotification) {
+      ccUsers.push({ id: opp.owner.id, email: opp.owner.email, name: opp.owner.name });
+    }
+    const salesRepUser = await resolveUserByName(opp.salesRepName);
+    if (salesRepUser
+      && !salesRepUser.muteNotification
+      && !ccUsers.find(u => u.id === salesRepUser.id)) {
+      ccUsers.push({ id: salesRepUser.id, email: salesRepUser.email, name: salesRepUser.name });
+    }
+
+    // Exclude the actor from both lists — they made the change, no self-notify
+    const actorId = ctx.updatedByUserId;
+    const toFiltered = toUsers.filter(u => u.id !== actorId);
+    const ccFiltered = ccUsers
+      .filter(u => u.id !== actorId)
+      .filter(u => !toFiltered.find(t => t.id === u.id));
+
+    if (toFiltered.length === 0 && ccFiltered.length === 0) {
+      console.log(`[NotificationEngine] change_notice: no eligible recipients for opp ${ctx.opportunityId} — skipping`);
+      return;
+    }
+
+    const currency = ctx.currency || 'USD';
+    const valueStr = ctx.value != null ? `${currency} ${fmtNum(Number(ctx.value))}` : '';
+    const oppLink = `${process.env.FRONTEND_URL || 'https://qcrm.qbadvisory.com'}/dashboard/opportunities/${ctx.opportunityId}`;
+
+    const escape = (s: string) => String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    const changesHtml = `<ul style="margin:8px 0 0 0;padding-left:20px;font-size:14px;line-height:1.6">${
+      ctx.changes.map(c => `<li>${escape(c)}</li>`).join('')
+    }</ul>`;
+
+    const subject = `Q-CRM: Update on "${ctx.opportunityTitle}" (${ctx.stageName})`;
+    const html = `<div style="font-family:Arial,sans-serif;max-width:640px;margin:0 auto;padding:20px">
+<h2 style="color:#4f46e5;margin:0 0 16px">Opportunity Updated</h2>
+<p><strong>${escape(ctx.updatedByName)}</strong> updated the following opportunity that is currently in <strong>${escape(ctx.stageName)}</strong>:</p>
+<table style="width:100%;border-collapse:collapse;margin:16px 0;font-size:14px">
+<tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;width:35%"><strong>Title</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">${escape(ctx.opportunityTitle)}</td></tr>
+<tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Client</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">${escape(ctx.clientName)}</td></tr>
+<tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Stage</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">${escape(ctx.stageName)}</td></tr>
+${valueStr ? `<tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Value</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">${escape(valueStr)}</td></tr>` : ''}
+<tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Updated by</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">${escape(ctx.updatedByName)}</td></tr>
+</table>
+<h3 style="font-size:15px;margin:16px 0 4px 0;color:#1f2937">Changes</h3>
+${changesHtml}
+<p style="margin-top:20px"><a href="${oppLink}" style="background:#4f46e5;color:#fff;padding:10px 20px;text-decoration:none;border-radius:6px;display:inline-block">View Opportunity</a></p>
+<p style="color:#64748b;font-size:12px;margin-top:24px">This is an automated notification from Q-CRM. Sales (in CC) has updated pipeline/sales details on an opportunity that is no longer in the Pipeline stage.</p>
+</div>`;
+
+    await sendRawEmail(
+      toFiltered.map(u => u.email),
+      ccFiltered.map(u => u.email),
+      subject,
+      html,
+      'change_notice'
+    );
+
+    // In-app notification for each To + Cc recipient
+    for (const user of [...toFiltered, ...ccFiltered]) {
+      await prisma.notification.create({
+        data: {
+          type: 'opportunity_change_notice',
+          title: `Update on "${ctx.opportunityTitle}"`,
+          message: `${ctx.updatedByName} updated ${ctx.changes.length} field(s): ${ctx.changes.slice(0, 3).join('; ')}${ctx.changes.length > 3 ? '…' : ''}`,
+          link: `/dashboard/opportunities/${ctx.opportunityId}`,
+          userId: user.id,
+        },
+      });
+    }
+
+    console.log(`[NotificationEngine] change_notice for opp ${ctx.opportunityId}: To=${toFiltered.length} Cc=${ccFiltered.length}, ${ctx.changes.length} change(s)`);
+  } catch (error) {
+    console.error('[NotificationEngine] Error sending opportunity change notice:', error);
   }
 }
 
@@ -585,12 +773,17 @@ export async function evaluateDataConditionRules(opportunity: {
       if (!allMatch) continue;
 
       const recipientRoles = (rule.recipientRoles as string[]) || [];
+      const recipientRolesCc = ((rule as any).recipientRolesCc as string[]) || [];
       const channels = (rule.channels as string[]) || [];
 
       const recipientUsers = rule.recipientUsers as Record<string, string[]> | null;
 
       // Only notify assigned users per role (Admin gets all)
-      const recipients = await resolveAssignedRecipients(opportunity.id, recipientRoles, recipientUsers);
+      const toUsers = await resolveAssignedRecipients(opportunity.id, recipientRoles, recipientUsers);
+      let ccUsers = recipientRolesCc.length > 0
+        ? await resolveAssignedRecipients(opportunity.id, recipientRolesCc, recipientUsers)
+        : [];
+      ccUsers = ccUsers.filter(u => !toUsers.find(t => t.id === u.id));
 
       const _dataCurrency = (opportunity as any).currency || 'USD';
       const variables: Record<string, string> = {
@@ -632,8 +825,8 @@ export async function evaluateDataConditionRules(opportunity: {
         ? renderTemplate(rule.messageTemplate, variables)
         : `Opportunity "${opportunity.title}" matched condition rule "${rule.name}"`;
 
-      for (const user of recipients) {
-        if (channels.includes('in_app')) {
+      if (channels.includes('in_app')) {
+        for (const user of [...toUsers, ...ccUsers]) {
           await prisma.notification.create({
             data: {
               type: 'data_condition',
@@ -644,14 +837,19 @@ export async function evaluateDataConditionRules(opportunity: {
             },
           });
         }
+      }
 
-        if (channels.includes('email') && rule.emailTemplateKey) {
-          sendNotificationEmail(rule.emailTemplateKey, user.email, user.name, variables);
+      if (channels.includes('email') && rule.emailTemplateKey) {
+        const toEmails = toUsers.filter(u => !u.muteNotification).map(u => u.email);
+        const ccEmails = ccUsers.filter(u => !u.muteNotification).map(u => u.email);
+        if (toEmails.length > 0 || ccEmails.length > 0) {
+          const primaryName = toUsers[0]?.name || ccUsers[0]?.name || 'Recipient';
+          sendNotificationEmail(rule.emailTemplateKey, toEmails, primaryName, variables, ccEmails);
         }
       }
 
-      if (recipients.length > 0) {
-        console.log(`[NotificationEngine] Data condition rule "${rule.name}" matched for "${opportunity.title}", notified ${recipients.length} users`);
+      if (toUsers.length > 0 || ccUsers.length > 0) {
+        console.log(`[NotificationEngine] Data condition rule "${rule.name}" matched for "${opportunity.title}", notified ${toUsers.length} To + ${ccUsers.length} CC`);
       }
     }
   } catch (error) {
@@ -799,29 +997,50 @@ export async function resolveCalculatedFields(opportunityId: string): Promise<Re
       const finalGomPercent = pData.finalGomPercent != null ? Number(pData.finalGomPercent) : (pData.gomPercent != null ? Number(pData.gomPercent) : null);
       calc['calc:gomPercent'] = finalGomPercent != null ? `${finalGomPercent.toFixed(1)}%` : 'N/A';
 
-      const proposedRevenueRaw = pData.finalRevenue != null
+      // presalesData amounts are stored in pData.currency (typically INR base) — convert
+      // to the opportunity's display currency before formatting, so the email shows
+      // "USD 7,000" instead of "USD 670,371" when the opp is USD but GOM was saved in INR.
+      const presalesCurr = (pData.currency as string) || currency;
+      const ratesSnapshot = (opp as any).metadata?.exchangeRatesSnapshot as Record<string, number> | undefined;
+      const toOppCurrency = (val: number): number => {
+        if (presalesCurr === currency) return val;
+        const rateToOpp = ratesSnapshot?.[currency];
+        const rateFromPre = ratesSnapshot?.[presalesCurr];
+        if (rateToOpp && rateFromPre) return (val * rateToOpp) / rateFromPre;
+        return val;
+      };
+
+      const proposedRevenueRawSrc = pData.finalRevenue != null
         ? Number(pData.finalRevenue)
         : (pData.totalRevenue != null
             ? Number(pData.totalRevenue)
             : (pData.gomSummary?.totalRevenue != null
                 ? Number(pData.gomSummary.totalRevenue)
-                : (opp.value != null ? Number(opp.value) : null)));
+                : null));
+      // opp.value is already in opportunity currency — don't convert it.
+      const proposedRevenueRaw = proposedRevenueRawSrc != null
+        ? toOppCurrency(proposedRevenueRawSrc)
+        : (opp.value != null ? Number(opp.value) : null);
       const proposedValueFormatted = proposedRevenueRaw != null ? fmtMoney(currency, proposedRevenueRaw) : 'N/A';
       calc['calc:totalRevenue'] = proposedValueFormatted;
       calc['calc:proposedValue'] = proposedValueFormatted;
 
-      const totalCostRaw = pData.finalTotalCost != null
+      const totalCostRawSrc = pData.finalTotalCost != null
         ? Number(pData.finalTotalCost)
         : (pData.totalCost != null
             ? Number(pData.totalCost)
             : (pData.gomSummary?.totalCost != null ? Number(pData.gomSummary.totalCost) : null));
+      const totalCostRaw = totalCostRawSrc != null ? toOppCurrency(totalCostRawSrc) : null;
       calc['calc:totalCost'] = totalCostRaw != null ? fmtMoney(currency, totalCostRaw) : 'N/A';
 
-      const gomAbsoluteRaw = pData.finalProfit != null
+      const gomAbsoluteRawSrc = pData.finalProfit != null
         ? Number(pData.finalProfit)
         : (pData.gomFull != null
             ? Number(pData.gomFull)
-            : (proposedRevenueRaw != null && totalCostRaw != null ? proposedRevenueRaw - totalCostRaw : null));
+            : null);
+      const gomAbsoluteRaw = gomAbsoluteRawSrc != null
+        ? toOppCurrency(gomAbsoluteRawSrc)
+        : (proposedRevenueRaw != null && totalCostRaw != null ? proposedRevenueRaw - totalCostRaw : null);
       calc['calc:gomAbsolute'] = gomAbsoluteRaw != null ? fmtMoney(currency, gomAbsoluteRaw) : 'N/A';
     } else {
       calc['calc:gomPercent'] = 'N/A';

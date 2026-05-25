@@ -41,7 +41,7 @@ const rules = [
     triggerType: 'stage_change',
     toStage: 'Qualification',
     recipientRoles: ['Manager', 'Presales'],
-    recipientRolesCc: ['Admin'],
+    recipientRolesCc: ['Admin', 'Sales'],
     channels: ['in_app', 'email'],
     emailTemplateKey: 'moved_to_presales',
     titleTemplate: 'Presales Assignment: {{opportunityTitle}}',

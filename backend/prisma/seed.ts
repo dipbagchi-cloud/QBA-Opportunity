@@ -600,6 +600,8 @@ async function main() {
 <tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Tentative Start</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">{{tentativeStartDate}}</td></tr>
 <tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Duration</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">{{tentativeDuration}}</td></tr>
 <tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Sales Rep</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">{{salesRepName}}</td></tr>
+<tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Manager (Offshore)</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">{{managerName}}</td></tr>
+<tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Presales</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">{{presalesAssigneeName}}</td></tr>
 <tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Created By</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">{{createdBy}}</td></tr>
 </table>
 <p><strong>Description:</strong></p>
