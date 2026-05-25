@@ -439,11 +439,29 @@ export default function OpportunitiesPage() {
                                     sortedOpportunities.map((opp) => (
                                         <tr key={opp.id} className="hover:bg-slate-50/80 transition-colors group"
                                         title={(() => {
-                                            const oppCurrSym = getSymbol((opp as any).currency || globalCurrency);
+                                            const oppCurr = (opp as any).currency || globalCurrency;
+                                            const oppCurrSym = getSymbol(oppCurr);
+                                            const globalSym = getSymbol(globalCurrency);
                                             const fmt = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+                                            const rates = (opp as any).metadata?.exchangeRatesSnapshot;
+                                            const toGlobal = (v: number) => {
+                                                if (oppCurr === globalCurrency) return v;
+                                                if (rates && rates[oppCurr] && rates[globalCurrency]) return (v * rates[globalCurrency]) / rates[oppCurr];
+                                                const rOpp = getRate(oppCurr), rGlob = getRate(globalCurrency);
+                                                if (rOpp && rGlob) return (v * rGlob) / rOpp;
+                                                return v;
+                                            };
                                             const valNum = typeof opp.value === 'number' ? opp.value : Number(opp.value) || 0;
                                             const quoteNum = (opp as any).quote != null ? Number((opp as any).quote) : null;
-                                            return `${opp.name}\nClient: ${opp.client}\nOwner: ${opp.owner}\nStage: ${opp.stage}\nEstimated Value: ${oppCurrSym}${fmt(valNum)}\nQuote: ${quoteNum != null ? `${oppCurrSym}${fmt(quoteNum)}` : 'N/A'}\nProbability: ${opp.probability}%\nSales Rep: ${opp.salesRepName || 'N/A'}\nManager: ${opp.managerName || 'N/A'}\nHealth: ${opp.healthScore ?? 'N/A'}/100\nStatus: ${opp.status}\nLast Activity: ${opp.lastActivity}\nCreated: ${opp.createdAt || 'N/A'}\nExpected Close: ${opp.expectedCloseDate || 'N/A'}\nStart Date: ${opp.tentativeStartDate || 'N/A'}\nEnd Date: ${opp.tentativeEndDate || 'N/A'}`;
+                                            const valDisplay = oppCurr === globalCurrency
+                                                ? `${globalSym}${fmt(valNum)}`
+                                                : `${globalSym}${fmt(toGlobal(valNum))} (${oppCurrSym}${fmt(valNum)})`;
+                                            const quoteDisplay = quoteNum == null
+                                                ? 'N/A'
+                                                : oppCurr === globalCurrency
+                                                    ? `${globalSym}${fmt(quoteNum)}`
+                                                    : `${globalSym}${fmt(toGlobal(quoteNum))} (${oppCurrSym}${fmt(quoteNum)})`;
+                                            return `${opp.name}\nClient: ${opp.client}\nOwner: ${opp.owner}\nStage: ${opp.stage}\nEstimated Value: ${valDisplay}\nQuote: ${quoteDisplay}\nProbability: ${opp.probability}%\nSales Rep: ${opp.salesRepName || 'N/A'}\nManager: ${opp.managerName || 'N/A'}\nHealth: ${opp.healthScore ?? 'N/A'}/100\nStatus: ${opp.status}\nLast Activity: ${opp.lastActivity}\nCreated: ${opp.createdAt || 'N/A'}\nExpected Close: ${opp.expectedCloseDate || 'N/A'}\nStart Date: ${opp.tentativeStartDate || 'N/A'}\nEnd Date: ${opp.tentativeEndDate || 'N/A'}`;
                                         })()}
                                         >
                                             <td className="py-2.5 px-4">

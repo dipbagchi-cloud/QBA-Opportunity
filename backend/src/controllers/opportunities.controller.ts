@@ -207,12 +207,27 @@ export async function listOpportunities(req: Request, res: Response) {
                 quote: (() => {
                     // Final closure quote — what the salesperson committed to in the
                     // GOM Calculator. Priority: finalRevenue (committed quote) →
-                    // totalRevenue → gomSummary.totalRevenue.
+                    // totalRevenue → gomSummary.totalRevenue. presalesData is stored
+                    // in its own currency (typically INR); convert to the
+                    // opportunity's currency so the column/tooltip render correctly.
                     const pd = opp.presalesData as any;
-                    if (pd?.finalRevenue != null) return Number(pd.finalRevenue);
-                    if (pd?.totalRevenue != null) return Number(pd.totalRevenue);
-                    if (pd?.gomSummary?.totalRevenue != null) return Number(pd.gomSummary.totalRevenue);
-                    return null;
+                    let raw: number | null = null;
+                    if (pd?.finalRevenue != null) raw = Number(pd.finalRevenue);
+                    else if (pd?.totalRevenue != null) raw = Number(pd.totalRevenue);
+                    else if (pd?.gomSummary?.totalRevenue != null) raw = Number(pd.gomSummary.totalRevenue);
+                    if (raw == null) return null;
+
+                    const oppCurr = opp.currency || 'INR';
+                    const presalesCurr = pd?.currency || oppCurr;
+                    if (presalesCurr === oppCurr) return raw;
+
+                    const snapshot = (opp.metadata as any)?.exchangeRatesSnapshot as Record<string, number> | undefined;
+                    const rateToOpp = snapshot?.[oppCurr];
+                    const rateFromPre = snapshot?.[presalesCurr];
+                    if (rateToOpp && rateFromPre) {
+                        return (raw * rateToOpp) / rateFromPre;
+                    }
+                    return raw;
                 })()
             };
         });
