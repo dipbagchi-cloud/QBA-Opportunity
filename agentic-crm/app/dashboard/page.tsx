@@ -140,8 +140,13 @@ export default function DashboardPage() {
         return rawOpportunities.map(o => {
             const cur = o.currency || 'INR';
             const rate = getRate(cur);
-            const rawValueInBase = cur === 'INR' || !rate ? Number(o.value) || 0 : (Number(o.value) || 0) / rate;
-            const quoteInBase = o.quote != null ? Number(o.quote) : null;
+            const toBase = (n: number) => (cur === 'INR' || !rate ? n : n / rate);
+            const rawValueInBase = toBase(Number(o.value) || 0);
+            // Backend returns o.quote already converted to the opportunity's currency
+            // (see opportunities.controller.ts), so apply the same INR-base conversion
+            // we do for o.value — otherwise drill-down treats a GBP quote as if it
+            // were INR and shows ~1/rate of the real value.
+            const quoteInBase = o.quote != null ? toBase(Number(o.quote)) : null;
 
             let displayValue = rawValueInBase;
             if (CLOSED_WON_STAGES.includes(o.currentStage) || PRESALES_SALES_STAGES.includes(o.currentStage)) {
@@ -832,6 +837,112 @@ export default function DashboardPage() {
                     </ExpandableCard>
                 ))}
             </div>
+
+            {/* Pending Actions for the logged-in user (Admins see all open opps) */}
+            {user?.name && (() => {
+                const CLOSED = ['Closed Won', 'Closed-Won', 'Closed Lost', 'Proposal Lost', 'Delivered'];
+                const isAdmin = !!user?.role?.permissions?.includes('*') || user?.role?.name?.toLowerCase() === 'admin';
+                const myPending = opportunities.filter(o => {
+                    if (CLOSED.includes(o.currentStage)) return false;
+                    if (isAdmin) return true;
+                    return o.owner === user.name || o.salesRepName === user.name || o.managerName === user.name;
+                });
+                const actionForStage = (s: string) => {
+                    if (s === 'Pipeline' || s === 'Discovery') return 'Qualify & assign presales';
+                    if (s === 'Qualification' || s === 'Presales') return 'Complete presales estimation';
+                    if (s === 'Proposal' || s === 'Sales') return 'Prepare or send quote';
+                    if (s === 'Negotiation') return 'Close negotiation';
+                    return 'Review';
+                };
+                const fmtDate = (d?: string) => {
+                    if (!d) return '—';
+                    const dt = new Date(d);
+                    if (isNaN(dt.getTime())) return '—';
+                    return dt.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: '2-digit' });
+                };
+                const today = new Date(); today.setHours(0, 0, 0, 0);
+                const dueClass = (d?: string) => {
+                    if (!d) return 'text-slate-500';
+                    const dt = new Date(d); if (isNaN(dt.getTime())) return 'text-slate-500';
+                    const diffDays = Math.ceil((dt.getTime() - today.getTime()) / 86400000);
+                    if (diffDays < 0) return 'text-red-600 font-semibold';
+                    if (diffDays <= 7) return 'text-amber-600 font-semibold';
+                    return 'text-slate-600';
+                };
+                const ownerFor = (o: Opportunity) => {
+                    const parts: string[] = [];
+                    if (o.salesRepName) parts.push(`Sales: ${o.salesRepName}`);
+                    else if (o.owner) parts.push(`Owner: ${o.owner}`);
+                    if (o.managerName) parts.push(`Mgr: ${o.managerName}`);
+                    return parts.join(' · ') || 'Unassigned';
+                };
+                // Sort: overdue first, then soonest due, then stalled
+                const sorted = [...myPending].sort((a, b) => {
+                    const da = a.expectedCloseDate ? new Date(a.expectedCloseDate).getTime() : Number.MAX_SAFE_INTEGER;
+                    const db = b.expectedCloseDate ? new Date(b.expectedCloseDate).getTime() : Number.MAX_SAFE_INTEGER;
+                    if (da !== db) return da - db;
+                    return (b.daysInStage || 0) - (a.daysInStage || 0);
+                });
+                return (
+                    <div className="bg-white rounded-lg border border-slate-100 px-3 py-2.5">
+                        <div className="flex items-center gap-1.5 mb-2">
+                            <Clock className="w-3.5 h-3.5 text-amber-600" />
+                            <h3 className="text-xs font-semibold text-slate-800">
+                                {isAdmin ? 'All Pending Actions' : 'Your Pending Actions'}
+                            </h3>
+                            <span className="ml-1 text-[10px] text-slate-400">
+                                {sorted.length} {sorted.length === 1 ? 'item' : 'items'}
+                            </span>
+                        </div>
+                        {sorted.length === 0 ? (
+                            <div className="text-[11px] text-slate-400 py-2">No pending actions.</div>
+                        ) : (
+                            <div className="overflow-x-auto max-h-72 overflow-y-auto">
+                                <table className="w-full text-[11px]">
+                                    <thead className="text-[10px] text-slate-400 uppercase tracking-wide bg-slate-50 sticky top-0">
+                                        <tr>
+                                            <th className="text-left px-2 py-1.5 font-medium">Opportunity</th>
+                                            <th className="text-left px-2 py-1.5 font-medium">Stage</th>
+                                            <th className="text-left px-2 py-1.5 font-medium">Action Needed</th>
+                                            <th className="text-left px-2 py-1.5 font-medium">Owner / Assignee</th>
+                                            <th className="text-left px-2 py-1.5 font-medium">Due</th>
+                                            <th className="text-left px-2 py-1.5 font-medium">Days in Stage</th>
+                                            <th className="text-right px-2 py-1.5 font-medium">Value</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                        {sorted.map(o => (
+                                            <tr
+                                                key={o.id}
+                                                onClick={() => router.push(`/dashboard/opportunities/${o.id}`)}
+                                                className="cursor-pointer hover:bg-slate-50"
+                                            >
+                                                <td className="px-2 py-1.5">
+                                                    <div className="font-medium text-slate-800 truncate max-w-[180px]" title={o.name}>{o.name}</div>
+                                                    <div className="text-[10px] text-slate-400 truncate max-w-[180px]" title={o.client}>{o.client}</div>
+                                                </td>
+                                                <td className="px-2 py-1.5">
+                                                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-semibold border ${STAGE_COLORS[o.currentStage] || 'bg-slate-50 text-slate-600 border-slate-200'}`}>
+                                                        {STAGE_DISPLAY[o.currentStage] || o.currentStage}
+                                                    </span>
+                                                </td>
+                                                <td className="px-2 py-1.5 text-slate-700">{actionForStage(o.currentStage)}</td>
+                                                <td className="px-2 py-1.5 text-slate-600 truncate max-w-[160px]" title={ownerFor(o)}>{ownerFor(o)}</td>
+                                                <td className={`px-2 py-1.5 ${dueClass(o.expectedCloseDate)}`}>{fmtDate(o.expectedCloseDate)}</td>
+                                                <td className="px-2 py-1.5 text-slate-600">
+                                                    {o.daysInStage ?? 0}d
+                                                    {o.isStalled && <span className="ml-1 text-[9px] text-red-600 font-semibold">STALLED</span>}
+                                                </td>
+                                                <td className="px-2 py-1.5 text-right text-slate-700 font-medium">{fmtCurrency(o.value, { compact: true })}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+                    </div>
+                );
+            })()}
 
             {/* Row 1: Revenue chart + Stage pie */}
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-2">
