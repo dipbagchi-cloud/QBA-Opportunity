@@ -92,6 +92,15 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
     const [ownerFilter, setOwnerFilter] = useState("");
     const [salesRepFilter, setSalesRepFilter] = useState("");
     const [presalesFilter, setPresalesFilter] = useState("");
+    // Attribute filters
+    const [clientFilter, setClientFilter] = useState("");
+    const [countryFilter, setCountryFilter] = useState("");
+    const [regionFilter, setRegionFilter] = useState("");
+    const [technologyFilter, setTechnologyFilter] = useState("");
+    const [projectTypeFilter, setProjectTypeFilter] = useState("");
+    const [fundingTypeFilter, setFundingTypeFilter] = useState("");
+    const [pricingModelFilter, setPricingModelFilter] = useState("");
+    const [departmentFilter, setDepartmentFilter] = useState("");
 
     // Currency context for formatting
     let currencyFormat: ((v: number, opts?: any) => string) | undefined;
@@ -99,6 +108,24 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
 
     const dateKey = config.dateKey || "expectedCloseDate";
     const valueKey = config.valueKey || "value";
+
+    // Resolve a usable date for a row: try the configured dateKey, then
+    // common fallbacks ("actualCloseDate" for closed deals, then "createdAt").
+    // This lets every opportunity-driven tile render a monthly distribution
+    // without each caller having to override dateKey.
+    const resolveRowDate = useCallback((row: Record<string, any>): Date | null => {
+        const candidates = [dateKey, "actualCloseDate", "expectedCloseDate", "createdAt"];
+        const seen = new Set<string>();
+        for (const key of candidates) {
+            if (!key || seen.has(key)) continue;
+            seen.add(key);
+            const raw = row[key];
+            if (!raw) continue;
+            const d = new Date(raw);
+            if (!isNaN(d.getTime())) return d;
+        }
+        return null;
+    }, [dateKey]);
 
     // Unique values for role filter dropdowns
     const uniqueOwners = useMemo(() => {
@@ -122,11 +149,66 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
         return Array.from(s).sort();
     }, [config.data]);
 
-    const hasRoleFilters = uniqueOwners.length > 0 || uniqueSalesReps.length > 0 || uniquePresales.length > 0;
+    const uniqueClients = useMemo(() => {
+        const s = new Set<string>();
+        config.data.forEach(r => { const v = r.client; if (v) s.add(String(v)); });
+        return Array.from(s).sort();
+    }, [config.data]);
 
-    // Apply role filters first — used by every section below
+    const uniqueCountries = useMemo(() => {
+        const s = new Set<string>();
+        config.data.forEach(r => { const v = r.country; if (v) s.add(String(v)); });
+        return Array.from(s).sort();
+    }, [config.data]);
+
+    const uniqueRegions = useMemo(() => {
+        const s = new Set<string>();
+        config.data.forEach(r => { const v = r.region; if (v) s.add(String(v)); });
+        return Array.from(s).sort();
+    }, [config.data]);
+
+    // Technology is a CSV per row — split into individual tokens
+    const uniqueTechnologies = useMemo(() => {
+        const s = new Set<string>();
+        config.data.forEach(r => {
+            const v = r.technology;
+            if (v) String(v).split(",").map(t => t.trim()).filter(Boolean).forEach(t => s.add(t));
+        });
+        return Array.from(s).sort();
+    }, [config.data]);
+
+    const uniqueProjectTypes = useMemo(() => {
+        const s = new Set<string>();
+        config.data.forEach(r => { const v = r.projectType; if (v) s.add(String(v)); });
+        return Array.from(s).sort();
+    }, [config.data]);
+
+    const uniqueFundingTypes = useMemo(() => {
+        const s = new Set<string>();
+        config.data.forEach(r => { const v = r.fundingType; if (v) s.add(String(v)); });
+        return Array.from(s).sort();
+    }, [config.data]);
+
+    const uniquePricingModels = useMemo(() => {
+        const s = new Set<string>();
+        config.data.forEach(r => { const v = r.pricingModel; if (v) s.add(String(v)); });
+        return Array.from(s).sort();
+    }, [config.data]);
+
+    const uniqueDepartments = useMemo(() => {
+        const s = new Set<string>();
+        config.data.forEach(r => { const v = r.department; if (v) s.add(String(v)); });
+        return Array.from(s).sort();
+    }, [config.data]);
+
+    const hasRoleFilters =
+        uniqueOwners.length > 0 || uniqueSalesReps.length > 0 || uniquePresales.length > 0 ||
+        uniqueClients.length > 0 || uniqueCountries.length > 0 || uniqueRegions.length > 0 || uniqueTechnologies.length > 0 ||
+        uniqueProjectTypes.length > 0 || uniqueFundingTypes.length > 0 || uniquePricingModels.length > 0 || uniqueDepartments.length > 0;
+
+    // Apply role + attribute filters first — used by every section below
     const roleFiltered = useMemo(() => {
-        if (!ownerFilter && !salesRepFilter && !presalesFilter) return config.data;
+        if (!ownerFilter && !salesRepFilter && !presalesFilter && !clientFilter && !countryFilter && !regionFilter && !technologyFilter && !projectTypeFilter && !fundingTypeFilter && !pricingModelFilter && !departmentFilter) return config.data;
         return config.data.filter(r => {
             if (ownerFilter && r.owner !== ownerFilter) return false;
             if (salesRepFilter && r.salesRepName !== salesRepFilter) return false;
@@ -134,16 +216,83 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
                 const names = String(r.presalesAssigneeName || "").split(",").map(p => p.trim()).filter(Boolean);
                 if (!names.includes(presalesFilter)) return false;
             }
+            if (clientFilter && r.client !== clientFilter) return false;
+            if (countryFilter && r.country !== countryFilter) return false;
+            if (regionFilter && r.region !== regionFilter) return false;
+            if (technologyFilter) {
+                const techs = String(r.technology || "").split(",").map(t => t.trim()).filter(Boolean);
+                if (!techs.includes(technologyFilter)) return false;
+            }
+            if (projectTypeFilter && r.projectType !== projectTypeFilter) return false;
+            if (fundingTypeFilter && r.fundingType !== fundingTypeFilter) return false;
+            if (pricingModelFilter && r.pricingModel !== pricingModelFilter) return false;
+            if (departmentFilter && r.department !== departmentFilter) return false;
             return true;
         });
-    }, [config.data, ownerFilter, salesRepFilter, presalesFilter]);
+    }, [config.data, ownerFilter, salesRepFilter, presalesFilter, clientFilter, countryFilter, regionFilter, technologyFilter, projectTypeFilter, fundingTypeFilter, pricingModelFilter, departmentFilter]);
 
-    // Monthly buckets — next 12 months from current month
+    // Monthly buckets — adaptive 12-month window
+    //
+    // Primary source: each row's `monthlyRevenue` map ({ "YYYY-MM": revenue })
+    // built from the GOM Calculator's monthlyData. Rows that contribute revenue
+    // to a month bump that month's deal count by 1.
+    //
+    // Fallback: if no row has monthlyRevenue, bucket by date (expectedCloseDate /
+    // actualCloseDate fallback chain) — useful for tiles whose data isn't tied
+    // to a GOM sheet.
     const monthlyData = useMemo(() => {
+        // Collect all unique month keys that actually have GOM revenue
+        const gomMonthKeys = new Set<string>();
+        roleFiltered.forEach(r => {
+            const mr = (r as any).monthlyRevenue as Record<string, number> | undefined;
+            if (!mr) return;
+            for (const [k, v] of Object.entries(mr)) {
+                if (Number(v) > 0) gomMonthKeys.add(k);
+            }
+        });
+        const useGom = gomMonthKeys.size > 0;
+
+        // Pick a 12-month window
         const now = new Date(); now.setDate(1); now.setHours(0, 0, 0, 0);
+        let windowStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+        if (useGom) {
+            // Center the window on the GOM data range
+            const sorted = Array.from(gomMonthKeys).sort();
+            const [minY, minM] = sorted[0].split("-").map(Number);
+            const [maxY, maxM] = sorted[sorted.length - 1].split("-").map(Number);
+            const minDate = new Date(minY, minM - 1, 1);
+            const maxDate = new Date(maxY, maxM - 1, 1);
+            const elevenAhead = new Date(now.getFullYear(), now.getMonth() + 11, 1);
+            if (maxDate < now) {
+                windowStart = new Date(maxDate.getFullYear(), maxDate.getMonth() - 11, 1);
+            } else if (minDate > elevenAhead) {
+                windowStart = new Date(minDate.getFullYear(), minDate.getMonth(), 1);
+            } else if (minDate > now) {
+                windowStart = new Date(minDate.getFullYear(), minDate.getMonth(), 1);
+            }
+        } else {
+            // Date fallback path — same adaptive logic against resolved row dates
+            const dates = roleFiltered
+                .map(r => resolveRowDate(r))
+                .filter((d): d is Date => d != null);
+            if (dates.length > 0) {
+                const maxTs = Math.max(...dates.map(d => d.getTime()));
+                const minTs = Math.min(...dates.map(d => d.getTime()));
+                const maxDate = new Date(maxTs); maxDate.setDate(1);
+                const minDate = new Date(minTs); minDate.setDate(1);
+                const elevenAhead = new Date(now.getFullYear(), now.getMonth() + 11, 1);
+                if (maxDate < now) {
+                    windowStart = new Date(maxDate.getFullYear(), maxDate.getMonth() - 11, 1);
+                } else if (minDate > elevenAhead) {
+                    windowStart = new Date(minDate.getFullYear(), minDate.getMonth(), 1);
+                }
+            }
+        }
+
         const buckets: { key: string; label: string; count: number; value: number }[] = [];
         for (let i = 0; i < 12; i++) {
-            const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+            const d = new Date(windowStart.getFullYear(), windowStart.getMonth() + i, 1);
             buckets.push({
                 key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`,
                 label: d.toLocaleDateString(undefined, { month: "short", year: "2-digit" }),
@@ -152,26 +301,50 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
             });
         }
         const idx = new Map(buckets.map((b, i) => [b.key, i]));
-        roleFiltered.forEach(r => {
-            const raw = r[dateKey];
-            if (!raw) return;
-            const d = new Date(raw);
-            if (isNaN(d.getTime())) return;
-            const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-            const i = idx.get(key);
-            if (i != null) {
-                buckets[i].count += 1;
-                buckets[i].value += Number(r[valueKey]) || 0;
-            }
-        });
+
+        if (useGom) {
+            roleFiltered.forEach(r => {
+                const mr = (r as any).monthlyRevenue as Record<string, number> | undefined;
+                if (!mr) return;
+                const touched = new Set<number>();
+                for (const [k, v] of Object.entries(mr)) {
+                    const i = idx.get(k);
+                    if (i != null && Number(v) > 0) {
+                        buckets[i].value += Number(v);
+                        touched.add(i);
+                    }
+                }
+                // Count a deal once per bucket it contributes revenue to
+                touched.forEach(i => { buckets[i].count += 1; });
+            });
+        } else {
+            roleFiltered.forEach(r => {
+                const d = resolveRowDate(r);
+                if (!d) return;
+                const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+                const i = idx.get(key);
+                if (i != null) {
+                    buckets[i].count += 1;
+                    buckets[i].value += Number(r[valueKey]) || 0;
+                }
+            });
+        }
         return buckets;
-    }, [roleFiltered, dateKey, valueKey]);
+    }, [roleFiltered, valueKey, resolveRowDate]);
 
     const monthlyTotals = useMemo(() => {
         return monthlyData.reduce((acc, b) => ({ count: acc.count + b.count, value: acc.value + b.value }), { count: 0, value: 0 });
     }, [monthlyData]);
 
-    const hasMonthlyData = monthlyTotals.count > 0;
+    // Show monthly section if rows have GOM monthly revenue OR any usable date
+    const hasAnyDates = useMemo(() => {
+        const hasGom = roleFiltered.some(r => {
+            const mr = (r as any).monthlyRevenue as Record<string, number> | undefined;
+            return mr && Object.values(mr).some(v => Number(v) > 0);
+        });
+        if (hasGom) return true;
+        return roleFiltered.some(r => resolveRowDate(r) != null);
+    }, [roleFiltered, resolveRowDate]);
 
     // Search & filter — operates on roleFiltered so detail list reflects role filters
     const filteredData = useMemo(() => {
@@ -216,7 +389,7 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
     }, [sortedData, page, pageSize]);
 
     // Reset page when search/filter changes
-    useEffect(() => { setPage(1); }, [search, filterCol, filterVal, pageSize, ownerFilter, salesRepFilter, presalesFilter]);
+    useEffect(() => { setPage(1); }, [search, filterCol, filterVal, pageSize, ownerFilter, salesRepFilter, presalesFilter, clientFilter, countryFilter, regionFilter, technologyFilter, projectTypeFilter, fundingTypeFilter, pricingModelFilter, departmentFilter]);
 
     const handleSort = (key: string) => {
         if (sortKey === key) {
@@ -290,9 +463,93 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
                                 {uniquePresales.map(p => <option key={p} value={p}>Presales: {p}</option>)}
                             </select>
                         )}
-                        {(ownerFilter || salesRepFilter || presalesFilter) && (
+                        {uniqueClients.length > 0 && (
+                            <select
+                                value={clientFilter}
+                                onChange={e => setClientFilter(e.target.value)}
+                                className="px-2 py-1 text-xs border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                            >
+                                <option value="">Client: All</option>
+                                {uniqueClients.map(c => <option key={c} value={c}>Client: {c}</option>)}
+                            </select>
+                        )}
+                        {uniqueCountries.length > 0 && (
+                            <select
+                                value={countryFilter}
+                                onChange={e => setCountryFilter(e.target.value)}
+                                className="px-2 py-1 text-xs border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                            >
+                                <option value="">Country: All</option>
+                                {uniqueCountries.map(c => <option key={c} value={c}>Country: {c}</option>)}
+                            </select>
+                        )}
+                        {uniqueRegions.length > 0 && (
+                            <select
+                                value={regionFilter}
+                                onChange={e => setRegionFilter(e.target.value)}
+                                className="px-2 py-1 text-xs border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                            >
+                                <option value="">Region: All</option>
+                                {uniqueRegions.map(r => <option key={r} value={r}>Region: {r}</option>)}
+                            </select>
+                        )}
+                        {uniqueTechnologies.length > 0 && (
+                            <select
+                                value={technologyFilter}
+                                onChange={e => setTechnologyFilter(e.target.value)}
+                                className="px-2 py-1 text-xs border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                            >
+                                <option value="">Technology: All</option>
+                                {uniqueTechnologies.map(t => <option key={t} value={t}>Tech: {t}</option>)}
+                            </select>
+                        )}
+                        {uniqueProjectTypes.length > 0 && (
+                            <select
+                                value={projectTypeFilter}
+                                onChange={e => setProjectTypeFilter(e.target.value)}
+                                className="px-2 py-1 text-xs border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                            >
+                                <option value="">Project Type: All</option>
+                                {uniqueProjectTypes.map(p => <option key={p} value={p}>Project: {p}</option>)}
+                            </select>
+                        )}
+                        {uniqueFundingTypes.length > 0 && (
+                            <select
+                                value={fundingTypeFilter}
+                                onChange={e => setFundingTypeFilter(e.target.value)}
+                                className="px-2 py-1 text-xs border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                            >
+                                <option value="">Funding Type: All</option>
+                                {uniqueFundingTypes.map(f => <option key={f} value={f}>Funding: {f}</option>)}
+                            </select>
+                        )}
+                        {uniquePricingModels.length > 0 && (
+                            <select
+                                value={pricingModelFilter}
+                                onChange={e => setPricingModelFilter(e.target.value)}
+                                className="px-2 py-1 text-xs border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                            >
+                                <option value="">Pricing Model: All</option>
+                                {uniquePricingModels.map(p => <option key={p} value={p}>Pricing: {p}</option>)}
+                            </select>
+                        )}
+                        {uniqueDepartments.length > 0 && (
+                            <select
+                                value={departmentFilter}
+                                onChange={e => setDepartmentFilter(e.target.value)}
+                                className="px-2 py-1 text-xs border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                            >
+                                <option value="">Department: All</option>
+                                {uniqueDepartments.map(d => <option key={d} value={d}>Dept: {d}</option>)}
+                            </select>
+                        )}
+                        {(ownerFilter || salesRepFilter || presalesFilter || clientFilter || countryFilter || regionFilter || technologyFilter || projectTypeFilter || fundingTypeFilter || pricingModelFilter || departmentFilter) && (
                             <button
-                                onClick={() => { setOwnerFilter(""); setSalesRepFilter(""); setPresalesFilter(""); }}
+                                onClick={() => {
+                                    setOwnerFilter(""); setSalesRepFilter(""); setPresalesFilter("");
+                                    setClientFilter(""); setCountryFilter(""); setRegionFilter(""); setTechnologyFilter("");
+                                    setProjectTypeFilter(""); setFundingTypeFilter(""); setPricingModelFilter(""); setDepartmentFilter("");
+                                }}
                                 className="text-[10px] text-red-500 hover:text-red-700 underline"
                             >
                                 Clear all
@@ -307,13 +564,15 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
                 {/* Body — Monthly visual + Monthly breakdown + Detail list */}
                 <div className="flex-1 overflow-auto px-5 py-3 space-y-4">
                     {/* Section 1: Monthly Distribution Visual */}
-                    {hasMonthlyData && (
+                    {hasAnyDates && (
                         <section className="bg-white border border-slate-200 rounded-lg p-3">
                             <div className="flex items-center gap-1.5 mb-2">
                                 <Calendar className="w-3.5 h-3.5 text-indigo-500" />
-                                <h3 className="text-xs font-semibold text-slate-800">Monthly Distribution — Next 12 Months</h3>
+                                <h3 className="text-xs font-semibold text-slate-800">
+                                    Monthly Distribution — {monthlyData[0]?.label} to {monthlyData[11]?.label}
+                                </h3>
                                 <span className="ml-auto text-[10px] text-slate-400">
-                                    {monthlyTotals.count} deals · {formatCell(monthlyTotals.value, "currency", currencyFormat)} projected
+                                    {monthlyTotals.count} deals · {formatCell(monthlyTotals.value, "currency", currencyFormat)} in window
                                 </span>
                             </div>
                             <div className="h-[220px] w-full">
@@ -355,7 +614,7 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
                     )}
 
                     {/* Section 2: Monthly Breakdown List */}
-                    {hasMonthlyData && (
+                    {hasAnyDates && (
                         <section className="bg-white border border-slate-200 rounded-lg p-3">
                             <h3 className="text-xs font-semibold text-slate-800 mb-2">Monthly Breakdown</h3>
                             <div className="overflow-x-auto">
@@ -477,7 +736,7 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
                                     {pagedData.length === 0 && (
                                         <tr>
                                             <td colSpan={config.columns.length + 1} className="py-8 text-center text-slate-400">
-                                                {search || filterVal || ownerFilter || salesRepFilter || presalesFilter ? "No matching results" : "No data available"}
+                                                {search || filterVal || ownerFilter || salesRepFilter || presalesFilter || clientFilter || countryFilter || regionFilter || technologyFilter || projectTypeFilter || fundingTypeFilter || pricingModelFilter || departmentFilter ? "No matching results" : "No data available"}
                                             </td>
                                         </tr>
                                     )}

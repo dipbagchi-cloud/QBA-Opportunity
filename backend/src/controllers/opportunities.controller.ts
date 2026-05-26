@@ -195,6 +195,11 @@ export async function listOpportunities(req: Request, res: Response) {
                 description: opp.description,
                 technology: opp.technology || '',
                 region: opp.region || '',
+                country: (opp as any).country || '',
+                projectType: (opp as any).projectType || '',
+                fundingType: (opp as any).fundingType || '',
+                pricingModel: (opp as any).pricingModel || '',
+                department: (opp.owner as any)?.department || '',
                 expectedCloseDate: opp.expectedCloseDate ? new Date(opp.expectedCloseDate).toISOString().slice(0, 10) : '',
                 actualCloseDate: opp.actualCloseDate ? new Date(opp.actualCloseDate).toISOString().slice(0, 10) : '',
                 tentativeStartDate: opp.tentativeStartDate ? new Date(opp.tentativeStartDate).toISOString().slice(0, 10) : '',
@@ -228,6 +233,42 @@ export async function listOpportunities(req: Request, res: Response) {
                         return (raw * rateToOpp) / rateFromPre;
                     }
                     return raw;
+                })(),
+                monthlyRevenue: (() => {
+                    // Per-month revenue breakdown from the GOM Calculator
+                    // (presalesData.gomSummary.monthlyData). Keys are "YYYY-MM",
+                    // values are converted to the opportunity's currency so the
+                    // dashboard can sum across deals in a single base unit.
+                    const pd = opp.presalesData as any;
+                    const monthly = pd?.gomSummary?.monthlyData as Record<string, { revenue?: number }> | undefined;
+                    if (!monthly || typeof monthly !== 'object') return {} as Record<string, number>;
+
+                    const oppCurr = opp.currency || 'INR';
+                    const presalesCurr = pd?.currency || oppCurr;
+                    let factor = 1;
+                    if (presalesCurr !== oppCurr) {
+                        const snapshot = (opp.metadata as any)?.exchangeRatesSnapshot as Record<string, number> | undefined;
+                        const rateToOpp = snapshot?.[oppCurr];
+                        const rateFromPre = snapshot?.[presalesCurr];
+                        if (rateToOpp && rateFromPre) {
+                            factor = rateToOpp / rateFromPre;
+                        }
+                    }
+
+                    // If the GOM has a committed quote that differs from the
+                    // calculated totalRevenue (because the salesperson adjusted
+                    // the markup at submission), scale each month so the per-
+                    // month sum matches the committed quote.
+                    const calculatedTotal = Number(pd?.gomSummary?.totalRevenue) || 0;
+                    const committed = pd?.finalRevenue != null ? Number(pd.finalRevenue) : calculatedTotal;
+                    const scale = calculatedTotal > 0 && committed > 0 ? committed / calculatedTotal : 1;
+
+                    const out: Record<string, number> = {};
+                    for (const [monthKey, data] of Object.entries(monthly)) {
+                        const rev = Number(data?.revenue) || 0;
+                        if (rev > 0) out[monthKey] = rev * factor * scale;
+                    }
+                    return out;
                 })()
             };
         });
@@ -567,6 +608,7 @@ export async function updateOpportunity(req: Request, res: Response) {
                 if (
                     !isAdminRole &&
                     activeRoleName !== 'presales' &&
+                    activeRoleName !== 'sales' &&
                     !(activeRoleName === 'manager' && access.assignment.isManager)
                 ) {
                     invalidAssignmentEdits.push('Presales Assignee');
@@ -808,17 +850,22 @@ export async function updateOpportunity(req: Request, res: Response) {
         }
 
         // ── Change-notice email (fire-and-forget) ──
-        // When an opportunity has already moved past Discovery (Pipeline) and
-        // someone edits pipeline/sales/presales fields *without* changing the
-        // stage, send a "what changed" email to the assigned manager + presales
-        // with the sales person in CC. Pure stage changes are covered by
-        // evaluateStageChangeRules; pure assignment changes by
-        // evaluateAssignmentChangeRules — so we filter those rows out here to
-        // avoid sending duplicate information.
+        // When SALES edits pipeline fields on an opportunity that has already
+        // moved past Discovery (Pipeline) WITHOUT changing the stage, notify the
+        // assigned manager + presales with the salesperson in CC, listing what
+        // changed. Pure stage changes are covered by evaluateStageChangeRules;
+        // pure assignment changes by evaluateAssignmentChangeRules — those rows
+        // are filtered out below.
+        // Gated to actor role = Sales/Admin so Presales saving GOM and Manager
+        // edits don't spam manager/presales with notifications about their own
+        // workflow (they already have other signals for that).
+        const actorRole = (req.user?.roleName || '').trim().toLowerCase();
+        const actorIsSalesOrAdmin = actorRole === 'sales' || actorRole === 'admin'
+            || (req.user?.permissions || []).includes('*');
         const prevStageNameForNotice = previous?.stage?.name || previous?.currentStage || '';
         const stageDidChange = !!newStageName && newStageName !== prevStageNameForNotice;
         const isPastDiscovery = prevStageNameForNotice !== '' && prevStageNameForNotice !== 'Discovery';
-        if (!stageDidChange && isPastDiscovery && changes.length > 0) {
+        if (actorIsSalesOrAdmin && !stageDidChange && isPastDiscovery && changes.length > 0) {
             const noticeChanges = changes.filter(c =>
                 !c.startsWith('Stage changed') &&
                 !c.startsWith('Sales Rep changed') &&

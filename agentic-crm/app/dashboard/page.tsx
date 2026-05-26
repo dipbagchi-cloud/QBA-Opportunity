@@ -115,13 +115,18 @@ interface Opportunity {
     owner: string;
     salesRepName?: string;
     managerName?: string;
+    presalesAssigneeName?: string;
     technology?: string;
     region?: string;
+    country?: string;
     expectedCloseDate?: string;
+    actualCloseDate?: string;
+    createdAt?: string;
     status: string;
     healthScore: number;
     daysInStage: number;
     isStalled: boolean;
+    monthlyRevenue?: Record<string, number>;
 }
 
 export default function DashboardPage() {
@@ -152,7 +157,14 @@ export default function DashboardPage() {
             if (CLOSED_WON_STAGES.includes(o.currentStage) || PRESALES_SALES_STAGES.includes(o.currentStage)) {
                 if (quoteInBase != null && quoteInBase > 0) displayValue = quoteInBase;
             }
-            return { ...o, value: displayValue };
+
+            const monthlyRevenueInBase = o.monthlyRevenue
+                ? Object.fromEntries(
+                    Object.entries(o.monthlyRevenue).map(([k, v]) => [k, toBase(Number(v) || 0)])
+                )
+                : undefined;
+
+            return { ...o, value: displayValue, monthlyRevenue: monthlyRevenueInBase };
         });
     }, [rawOpportunities, getRate]);
 
