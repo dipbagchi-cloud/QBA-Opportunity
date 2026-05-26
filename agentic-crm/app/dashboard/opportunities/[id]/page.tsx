@@ -552,7 +552,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
     // Sales view collapsible sections
     const [salesPipelineOpen, setSalesPipelineOpen] = useState(false);
-    const [salesPresalesOpen, setSalesPresalesOpen] = useState(false);
+    const [salesPresalesOpen, setSalesPresalesOpen] = useState(true);
 
     // Mark as Lost state
     const [showLostModal, setShowLostModal] = useState(false);
