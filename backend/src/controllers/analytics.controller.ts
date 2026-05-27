@@ -50,7 +50,18 @@ function getRevenue(opp: any, ratesToBase: Record<string, number>): number {
     const presales = typeof opp.presalesData === 'string' ? JSON.parse(opp.presalesData) : opp.presalesData;
     const sales = typeof opp.salesData === 'string' ? JSON.parse(opp.salesData) : opp.salesData;
     const quote = sales?.finalQuote ?? presales?.finalRevenue ?? presales?.totalRevenue ?? presales?.gomSummary?.totalRevenue ?? presales?.projectedQuote;
-    if (quote != null && Number(quote) > 0) return Number(quote);
+    if (quote != null && Number(quote) > 0) {
+        // Quote is stored in the presalesData's own currency (typically INR);
+        // normalize to INR-base so it sums consistently with valInBase across
+        // opportunities of different currencies. Without this conversion, an
+        // opportunity in EUR with a EUR-denominated quote was being summed
+        // against INR-base values, producing the figure mismatch users saw in
+        // dashboard panels vs. row-level numbers.
+        const presalesCur = presales?.currency || cur;
+        const rateInrToPresalesCur = presalesCur === 'INR' ? 1 : (ratesToBase[presalesCur] || 0);
+        const quoteInBase = rateInrToPresalesCur > 0 ? Number(quote) / rateInrToPresalesCur : Number(quote);
+        return quoteInBase;
+    }
     return valInBase;
 }
 

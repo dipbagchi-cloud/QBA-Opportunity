@@ -22,6 +22,7 @@ const PERMISSION_CATEGORIES = [
         permissions: [
             { key: "pipeline:view", label: "View" },
             { key: "pipeline:write", label: "Create / Edit" },
+            { key: "opportunities:edit-all", label: "Edit Any Open Opportunity (assignment bypass; closed deals stay read-only)" },
         ],
     },
     {

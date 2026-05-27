@@ -290,3 +290,107 @@ export async function sendNotificationEmail(
     return false;
   }
 }
+
+/**
+ * Send a one-off email with an inline subject/body (no template lookup).
+ * Used for events like opportunity_change_notice where the body is composed
+ * dynamically from a change-list. Honours muteNotification and EMAIL_TEST_OVERRIDE.
+ */
+export async function sendRawEmail(
+  to: string[],
+  cc: string[],
+  subject: string,
+  htmlBody: string,
+  logTag: string = 'raw'
+): Promise<boolean> {
+  try {
+    const toList = (to || []).filter(Boolean);
+    const ccList = (cc || []).filter(Boolean);
+    if (toList.length === 0 && ccList.length === 0) {
+      console.log(`[Email:${logTag}] No recipients — skipping.`);
+      return false;
+    }
+    const originalToLabel = toList.join(',');
+
+    const testOverride = (process.env.EMAIL_TEST_OVERRIDE || '').trim();
+    const isOverride = testOverride.length > 0;
+
+    let actualTo: string[];
+    let actualCc: string[];
+    if (isOverride) {
+      actualTo = [testOverride];
+      actualCc = [];
+    } else {
+      const allEmails = [...toList, ...ccList];
+      const muteRows = allEmails.length > 0
+        ? await prisma.user.findMany({
+            where: { email: { in: allEmails } },
+            select: { email: true, muteNotification: true },
+          })
+        : [];
+      const mutedSet = new Set(muteRows.filter(r => r.muteNotification).map(r => r.email.toLowerCase()));
+      actualTo = toList.filter(e => !mutedSet.has(e.toLowerCase()));
+      actualCc = ccList.filter(e => !mutedSet.has(e.toLowerCase()));
+      if (actualTo.length === 0 && actualCc.length === 0) {
+        console.log(`[Email:${logTag}] All recipients muted — skipping.`);
+        return false;
+      }
+    }
+
+    // Auto-prepend "Dear <To recipient names>,"
+    const toUserRows = actualTo.length > 0
+      ? await prisma.user.findMany({
+          where: { email: { in: actualTo, mode: 'insensitive' } },
+          select: { email: true, name: true },
+        })
+      : [];
+    const nameMap = new Map(toUserRows.map(u => [u.email.toLowerCase(), u.name]));
+    const recipientNames = actualTo
+      .map(e => nameMap.get(e.toLowerCase()) || e.split('@')[0])
+      .join(', ');
+    const greetingHtml = `<p style="margin:0 0 12px 0;">Dear ${recipientNames},</p>`;
+    const finalHtml = greetingHtml + htmlBody;
+
+    let finalSubject = subject;
+    if (isOverride) {
+      finalSubject = `[TEST→${originalToLabel}${ccList.length > 0 ? ` cc:${ccList.join(',')}` : ''}] ${subject}`;
+    }
+
+    if (USE_GRAPH_API) {
+      const token = await getGraphAccessToken();
+      const graphUrl = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(FROM_EMAIL)}/sendMail`;
+      const response = await fetch(graphUrl, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: {
+            subject: finalSubject,
+            body: { contentType: 'HTML', content: finalHtml },
+            toRecipients: actualTo.map(a => ({ emailAddress: { address: a } })),
+            ccRecipients: actualCc.map(a => ({ emailAddress: { address: a } })),
+            from: { emailAddress: { name: FROM_NAME, address: FROM_EMAIL } },
+          },
+          saveToSentItems: false,
+        }),
+      });
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Graph API sendMail failed: ${response.status} ${errorText}`);
+      }
+    } else {
+      await transporter!.sendMail({
+        from: `"${FROM_NAME}" <${FROM_EMAIL}>`,
+        to: actualTo.join(', '),
+        cc: actualCc.length > 0 ? actualCc.join(', ') : undefined,
+        subject: finalSubject,
+        html: finalHtml,
+      });
+    }
+
+    console.log(`[Email:${logTag}] Sent to [${actualTo.join(',')}]${actualCc.length > 0 ? ` cc:[${actualCc.join(',')}]` : ''}${isOverride ? ` (orig to:${originalToLabel})` : ''} via ${USE_GRAPH_API ? 'Graph API' : 'SMTP'}`);
+    return true;
+  } catch (error) {
+    console.error(`[Email:${logTag}] Failed:`, error);
+    return false;
+  }
+}

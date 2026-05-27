@@ -16,7 +16,20 @@ type OpportunityLike = {
   salesRepName?: string | null;
   managerName?: string | null;
   presalesAssigneeName?: string | null;
+  stage?: { name?: string | null } | null;
+  currentStage?: string | null;
 };
+
+// Opportunities in any of these stages are read-only for everyone except
+// Admin (wildcard). The opportunities:edit-all permission does NOT bypass
+// this lock — once a deal is won, lost, or delivered, the record is frozen.
+const CLOSED_STAGE_NAMES = new Set<string>([
+  'Closed Won',
+  'Closed-Won',
+  'Closed Lost',
+  'Proposal Lost',
+  'Delivered',
+]);
 
 type PendingApprovalLike = {
   reviewerId?: string | null;
@@ -90,6 +103,15 @@ export function buildOpportunityAccess(params: {
 
   const isAdmin = permissions.includes(WILDCARD);
 
+  // Stage check — closed deals (Won / Lost / Delivered) freeze for non-admin users.
+  const stageName = opportunity.stage?.name || opportunity.currentStage || '';
+  const isClosedStage = CLOSED_STAGE_NAMES.has(stageName);
+
+  // Roles holding opportunities:edit-all (e.g. Management) get assignment-
+  // bypass on any open opportunity. Admins always bypass regardless of stage.
+  const hasEditAllPermission = hasPermission(permissions, PERMISSIONS.OPPORTUNITIES_EDIT_ALL);
+  const editAllActive = hasEditAllPermission && !isClosedStage;
+
   const isOwner = !!currentUser && opportunity.ownerId === currentUser.id;
   const isSalesRep = !!currentUserName && normalizeName(opportunity.salesRepName) === currentUserName;
   const isManager = !!currentUserName && normalizeName(opportunity.managerName) === currentUserName;
@@ -104,8 +126,11 @@ export function buildOpportunityAccess(params: {
     permissionState.approvals.manage ||
     permissionState.sow.edit;
 
-  // Admin (wildcard *) bypasses assignment check — they can edit any opportunity
-  const canEditAssignedOpportunity = isAdmin || (isDirectlyAssigned && hasWorkflowEditPermission);
+  // Admin (wildcard *) always bypasses. edit-all holders bypass for open deals.
+  const canEditAssignedOpportunity =
+    isAdmin ||
+    editAllActive ||
+    (isDirectlyAssigned && hasWorkflowEditPermission);
   const canReviewPendingGom =
     (isAdmin || permissionState.approvals.manage) &&
     !!pendingApproval &&
@@ -113,12 +138,17 @@ export function buildOpportunityAccess(params: {
 
   let viewOnlyReason: string | null = null;
   if (!canEditAssignedOpportunity && hasWorkflowEditPermission) {
-    viewOnlyReason = 'You have screen access through your role, but only the assigned owner, sales rep, manager, or named presales assignees can edit this opportunity.';
+    if (hasEditAllPermission && isClosedStage) {
+      viewOnlyReason = 'This opportunity is closed and is read-only.';
+    } else {
+      viewOnlyReason = 'You have screen access through your role, but only the assigned owner, sales rep, manager, or named presales assignees can edit this opportunity.';
+    }
   }
 
   // Presales content editing requires both: being a named presales assignee AND having
-  // general opportunity edit rights (canEditAssignedOpportunity).
-  const canEditPresalesContent = isAdmin || (isAssignedPresales && canEditAssignedOpportunity);
+  // general opportunity edit rights (canEditAssignedOpportunity). edit-all holders
+  // also qualify — they act like admin on any open opportunity.
+  const canEditPresalesContent = isAdmin || editAllActive || (isAssignedPresales && canEditAssignedOpportunity);
 
   return {
     viewOnlyReason,
@@ -132,20 +162,20 @@ export function buildOpportunityAccess(params: {
     },
     permissions: permissionState,
     workflow: {
-      pipelineEditable: (isAdmin || permissionState.pipeline.edit || permissionState.presales.edit || permissionState.sales.edit || permissionState.approvals.manage) && canEditAssignedOpportunity,
-      presalesEditable: (isAdmin || permissionState.presales.edit) && canEditPresalesContent,
-      estimationEditable: (isAdmin || permissionState.estimation.manage) && canEditPresalesContent,
-      salesEditable: (isAdmin || permissionState.sales.edit) && canEditAssignedOpportunity,
+      pipelineEditable: (isAdmin || editAllActive || permissionState.pipeline.edit || permissionState.presales.edit || permissionState.sales.edit || permissionState.approvals.manage) && canEditAssignedOpportunity,
+      presalesEditable: (isAdmin || editAllActive || permissionState.presales.edit) && canEditPresalesContent,
+      estimationEditable: (isAdmin || editAllActive || permissionState.estimation.manage) && canEditPresalesContent,
+      salesEditable: (isAdmin || editAllActive || permissionState.sales.edit) && canEditAssignedOpportunity,
       gomRequestAllowed:
-        (isAdmin || permissionState.pipeline.edit || permissionState.presales.edit || permissionState.sales.edit) &&
+        (isAdmin || editAllActive || permissionState.pipeline.edit || permissionState.presales.edit || permissionState.sales.edit) &&
         canEditAssignedOpportunity,
-      gomApprovalManageable: (isAdmin || permissionState.approvals.manage) && canEditAssignedOpportunity,
+      gomApprovalManageable: (isAdmin || editAllActive || permissionState.approvals.manage) && canEditAssignedOpportunity,
       gomApprovalReviewable: canReviewPendingGom,
       commentsWritable: canEditAssignedOpportunity,
       attachmentsEditable: canEditAssignedOpportunity,
       projectDetailsEditable:
-        (isAdmin || permissionState.pipeline.edit || permissionState.presales.edit) && canEditAssignedOpportunity,
-      sowEditable: (isAdmin || permissionState.sow.edit) && canEditAssignedOpportunity,
+        (isAdmin || editAllActive || permissionState.pipeline.edit || permissionState.presales.edit) && canEditAssignedOpportunity,
+      sowEditable: (isAdmin || editAllActive || permissionState.sow.edit) && canEditAssignedOpportunity,
     },
   };
 }

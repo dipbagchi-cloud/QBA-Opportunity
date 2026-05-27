@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { sendNotificationEmail } from '../lib/email';
-import { evaluateStageChangeRules, evaluateDataConditionRules, evaluateOpportunityCreatedRules, evaluateAssignmentChangeRules, resolveCalculatedFields } from '../lib/notification-engine';
+import { evaluateStageChangeRules, evaluateDataConditionRules, evaluateOpportunityCreatedRules, evaluateAssignmentChangeRules, evaluateOpportunityChangeNotice, resolveCalculatedFields } from '../lib/notification-engine';
 import { calculateOpportunityProbability } from '../lib/opportunity-probability';
 import { buildOpportunityAccess } from '../lib/opportunity-access';
 import path from 'path';
@@ -9,7 +9,7 @@ import fs from 'fs';
 
 async function resolveOpportunityAccess(
     authUser: NonNullable<Request['user']>,
-    opportunity: { ownerId: string; salesRepName?: string | null; managerName?: string | null; presalesAssigneeName?: string | null },
+    opportunity: { ownerId: string; salesRepName?: string | null; managerName?: string | null; presalesAssigneeName?: string | null; stage?: { name?: string | null } | null; currentStage?: string | null },
     pendingApproval?: { reviewerId?: string | null } | null
 ) {
     const currentUser = await prisma.user.findUnique({
@@ -195,6 +195,11 @@ export async function listOpportunities(req: Request, res: Response) {
                 description: opp.description,
                 technology: opp.technology || '',
                 region: opp.region || '',
+                country: (opp as any).country || '',
+                projectType: (opp as any).projectType || '',
+                fundingType: (opp as any).fundingType || '',
+                pricingModel: (opp as any).pricingModel || '',
+                department: (opp.owner as any)?.department || '',
                 expectedCloseDate: opp.expectedCloseDate ? new Date(opp.expectedCloseDate).toISOString().slice(0, 10) : '',
                 actualCloseDate: opp.actualCloseDate ? new Date(opp.actualCloseDate).toISOString().slice(0, 10) : '',
                 tentativeStartDate: opp.tentativeStartDate ? new Date(opp.tentativeStartDate).toISOString().slice(0, 10) : '',
@@ -228,6 +233,42 @@ export async function listOpportunities(req: Request, res: Response) {
                         return (raw * rateToOpp) / rateFromPre;
                     }
                     return raw;
+                })(),
+                monthlyRevenue: (() => {
+                    // Per-month revenue breakdown from the GOM Calculator
+                    // (presalesData.gomSummary.monthlyData). Keys are "YYYY-MM",
+                    // values are converted to the opportunity's currency so the
+                    // dashboard can sum across deals in a single base unit.
+                    const pd = opp.presalesData as any;
+                    const monthly = pd?.gomSummary?.monthlyData as Record<string, { revenue?: number }> | undefined;
+                    if (!monthly || typeof monthly !== 'object') return {} as Record<string, number>;
+
+                    const oppCurr = opp.currency || 'INR';
+                    const presalesCurr = pd?.currency || oppCurr;
+                    let factor = 1;
+                    if (presalesCurr !== oppCurr) {
+                        const snapshot = (opp.metadata as any)?.exchangeRatesSnapshot as Record<string, number> | undefined;
+                        const rateToOpp = snapshot?.[oppCurr];
+                        const rateFromPre = snapshot?.[presalesCurr];
+                        if (rateToOpp && rateFromPre) {
+                            factor = rateToOpp / rateFromPre;
+                        }
+                    }
+
+                    // If the GOM has a committed quote that differs from the
+                    // calculated totalRevenue (because the salesperson adjusted
+                    // the markup at submission), scale each month so the per-
+                    // month sum matches the committed quote.
+                    const calculatedTotal = Number(pd?.gomSummary?.totalRevenue) || 0;
+                    const committed = pd?.finalRevenue != null ? Number(pd.finalRevenue) : calculatedTotal;
+                    const scale = calculatedTotal > 0 && committed > 0 ? committed / calculatedTotal : 1;
+
+                    const out: Record<string, number> = {};
+                    for (const [monthKey, data] of Object.entries(monthly)) {
+                        const rev = Number(data?.revenue) || 0;
+                        if (rev > 0) out[monthKey] = rev * factor * scale;
+                    }
+                    return out;
                 })()
             };
         });
@@ -249,6 +290,17 @@ export async function listOpportunities(req: Request, res: Response) {
 export async function createOpportunity(req: Request, res: Response) {
     try {
         const body = req.body;
+
+        // Opportunity Close Date must be before the Tentative Start Date.
+        // (When no start date is supplied yet, the close date is allowed and the
+        //  constraint will be re-checked on the next update.)
+        if (body.expectedCloseDate && body.tentativeStartDate) {
+            const close = new Date(body.expectedCloseDate);
+            const start = new Date(body.tentativeStartDate);
+            if (!isNaN(close.getTime()) && !isNaN(start.getTime()) && close.getTime() >= start.getTime()) {
+                return res.status(400).json({ error: 'Opportunity Close Date must be before the Tentative Start Date.' });
+            }
+        }
 
         const defaultType = await prisma.opportunityType.findFirst();
         const discoveryStage = await prisma.stage.findFirst({ where: { name: 'Discovery' } });
@@ -315,6 +367,18 @@ export async function createOpportunity(req: Request, res: Response) {
                 tentativeDuration: body.tentativeDuration,
                 tentativeDurationUnit: body.tentativeDurationUnit,
                 tentativeEndDate: body.tentativeEndDate ? new Date(body.tentativeEndDate) : undefined,
+                expectedCloseDate: (() => {
+                    // Explicit value wins (must be before start date — validated below).
+                    if (body.expectedCloseDate) return new Date(body.expectedCloseDate);
+                    // Otherwise default to 2 days before tentativeStartDate, matching the
+                    // seed rule used for existing rows.
+                    if (body.tentativeStartDate) {
+                        const d = new Date(body.tentativeStartDate);
+                        d.setDate(d.getDate() - 2);
+                        return d;
+                    }
+                    return undefined;
+                })(),
                 pricingModel: body.pricingModel,
                 expectedDayRate: body.expectedDayRate !== undefined && body.expectedDayRate !== '' ? body.expectedDayRate : null,
                 salesRepName: body.salesRepName,
@@ -355,6 +419,8 @@ export async function createOpportunity(req: Request, res: Response) {
                 ownerName: creator?.name || '',
                 ownerEmail: creator?.email || '',
                 salesRepName: (newOpp as any).salesRepName || creator?.name || '',
+                managerName: (newOpp as any).managerName || '',
+                presalesAssigneeName: (newOpp as any).presalesAssigneeName || '',
                 createdByName: creator?.name || '',
                 value: newOpp.value != null ? Number(newOpp.value) : null,
                 currency: newOpp.currency || 'INR',
@@ -464,6 +530,32 @@ export async function updateOpportunity(req: Request, res: Response) {
             }
         }
 
+        // Opportunity Close Date is editable only until the proposal is submitted
+        // (stage moves to Proposal / Sales / Negotiation / Closed). The freeze
+        // applies to non-admin actors; admins can correct it at any stage.
+        const SUBMITTED_STAGES = new Set(['Proposal', 'Sales', 'Negotiation', 'Closed Won', 'Closed-Won', 'Closed Lost', 'Proposal Lost', 'Delivered']);
+        const proposalSubmitted = SUBMITTED_STAGES.has(prevStageNameForRule);
+        if (body.expectedCloseDate !== undefined) {
+            const incoming = body.expectedCloseDate ? new Date(body.expectedCloseDate) : null;
+            const prevClose = previous?.expectedCloseDate ? new Date(previous.expectedCloseDate) : null;
+            const changed = (incoming?.getTime() || 0) !== (prevClose?.getTime() || 0);
+            if (changed && proposalSubmitted && !isAdminActor) {
+                return res.status(403).json({
+                    error: 'Opportunity Close Date is locked once the proposal has been submitted.',
+                });
+            }
+            // Must be strictly before the (incoming or stored) Tentative Start Date.
+            if (incoming) {
+                const startSource = body.tentativeStartDate !== undefined ? body.tentativeStartDate : previous?.tentativeStartDate;
+                const start = startSource ? new Date(startSource) : null;
+                if (start && !isNaN(start.getTime()) && incoming.getTime() >= start.getTime()) {
+                    return res.status(400).json({
+                        error: 'Opportunity Close Date must be before the Tentative Start Date.',
+                    });
+                }
+            }
+        }
+
         // Handle Client update if name changed
         let clientId = body.clientId;
         if (body.clientName) {
@@ -565,6 +657,7 @@ export async function updateOpportunity(req: Request, res: Response) {
                 if (
                     !isAdminRole &&
                     activeRoleName !== 'presales' &&
+                    activeRoleName !== 'sales' &&
                     !(activeRoleName === 'manager' && access.assignment.isManager)
                 ) {
                     invalidAssignmentEdits.push('Presales Assignee');
@@ -714,6 +807,9 @@ export async function updateOpportunity(req: Request, res: Response) {
                 presalesAssigneeName: body.presalesAssigneeName,
                 tentativeStartDate: body.tentativeStartDate ? new Date(body.tentativeStartDate) : undefined,
                 tentativeEndDate: body.tentativeEndDate ? new Date(body.tentativeEndDate) : undefined,
+                expectedCloseDate: body.expectedCloseDate !== undefined
+                    ? (body.expectedCloseDate ? new Date(body.expectedCloseDate) : null)
+                    : undefined,
                 tentativeDuration: body.tentativeDuration || body.duration,
                 tentativeDurationUnit: body.tentativeDurationUnit || body.durationUnit,
                 pricingModel: body.pricingModel,
@@ -803,6 +899,54 @@ export async function updateOpportunity(req: Request, res: Response) {
                     changes: changes.join('; '),
                 },
             });
+        }
+
+        // ── Change-notice email (fire-and-forget) ──
+        // When SALES edits pipeline fields on an opportunity that has already
+        // moved past Discovery (Pipeline) WITHOUT changing the stage, notify the
+        // assigned manager + presales with the salesperson in CC, listing what
+        // changed. Pure stage changes are covered by evaluateStageChangeRules;
+        // pure assignment changes by evaluateAssignmentChangeRules — those rows
+        // are filtered out below.
+        // Gated to actor role = Sales/Admin so Presales saving GOM and Manager
+        // edits don't spam manager/presales with notifications about their own
+        // workflow (they already have other signals for that).
+        const actorRole = (req.user?.roleName || '').trim().toLowerCase();
+        const actorIsSalesOrAdmin = actorRole === 'sales' || actorRole === 'admin'
+            || (req.user?.permissions || []).includes('*');
+        const prevStageNameForNotice = previous?.stage?.name || previous?.currentStage || '';
+        const stageDidChange = !!newStageName && newStageName !== prevStageNameForNotice;
+        const isPastDiscovery = prevStageNameForNotice !== '' && prevStageNameForNotice !== 'Discovery';
+        if (actorIsSalesOrAdmin && !stageDidChange && isPastDiscovery && changes.length > 0) {
+            const noticeChanges = changes.filter(c =>
+                !c.startsWith('Stage changed') &&
+                !c.startsWith('Sales Rep changed') &&
+                !c.startsWith('Manager changed') &&
+                !c.startsWith('Presales Assignee changed')
+            );
+            if (noticeChanges.length > 0) {
+                const actorName = previous?.owner?.name || req.user?.email || 'A team member';
+                // Resolve the real actor name (the user making the edit), not the owner.
+                try {
+                    const actor = await prisma.user.findUnique({
+                        where: { id: req.user!.userId },
+                        select: { name: true, email: true },
+                    });
+                    evaluateOpportunityChangeNotice({
+                        opportunityId: id,
+                        opportunityTitle: updatedOpp.title,
+                        clientName: previous?.client?.name || '',
+                        stageName: prevStageNameForNotice,
+                        changes: noticeChanges,
+                        updatedByUserId: req.user!.userId,
+                        updatedByName: actor?.name || actor?.email || actorName,
+                        value: updatedOpp.value != null ? Number(updatedOpp.value) : null,
+                        currency: updatedOpp.currency || 'USD',
+                    });
+                } catch (noticeErr) {
+                    console.error('[opportunity_change_notice] dispatch failed:', noticeErr);
+                }
+            }
         }
 
         // Dedicated audit entries for special stage transitions
@@ -991,6 +1135,7 @@ export async function approveGom(req: Request, res: Response) {
                 managerName: true,
                 presalesAssigneeName: true,
                 gomApproved: true,
+                currentStage: true,
             },
         });
         if (!opportunity) {
@@ -1124,7 +1269,7 @@ export async function reviewGomApproval(req: Request, res: Response) {
         const { approved, comments } = req.body;
         const opportunity = await prisma.opportunity.findUnique({
             where: { id },
-            select: { ownerId: true, salesRepName: true, managerName: true, presalesAssigneeName: true },
+            select: { ownerId: true, salesRepName: true, managerName: true, presalesAssigneeName: true, currentStage: true },
         });
         if (!opportunity) return res.status(404).json({ error: 'Opportunity not found' });
 
@@ -1305,7 +1450,7 @@ export async function addComment(req: Request, res: Response) {
         }
         const opportunity = await prisma.opportunity.findUnique({
             where: { id },
-            select: { ownerId: true, salesRepName: true, managerName: true, presalesAssigneeName: true },
+            select: { ownerId: true, salesRepName: true, managerName: true, presalesAssigneeName: true, currentStage: true },
         });
         if (!opportunity) {
             return res.status(404).json({ error: 'Opportunity not found' });
@@ -1366,7 +1511,7 @@ export async function uploadAttachment(req: Request, res: Response) {
 
         const opp = await prisma.opportunity.findUnique({
             where: { id },
-            select: { ownerId: true, salesRepName: true, managerName: true, presalesAssigneeName: true },
+            select: { ownerId: true, salesRepName: true, managerName: true, presalesAssigneeName: true, currentStage: true },
         });
         if (!opp) return res.status(404).json({ error: 'Opportunity not found' });
         const access = await resolveOpportunityAccess(req.user!, opp);
@@ -1427,7 +1572,7 @@ export async function deleteAttachment(req: Request, res: Response) {
         const { id, attachmentId } = req.params;
         const opp = await prisma.opportunity.findUnique({
             where: { id },
-            select: { ownerId: true, salesRepName: true, managerName: true, presalesAssigneeName: true },
+            select: { ownerId: true, salesRepName: true, managerName: true, presalesAssigneeName: true, currentStage: true },
         });
         if (!opp) return res.status(404).json({ error: 'Opportunity not found' });
         const access = await resolveOpportunityAccess(req.user!, opp);

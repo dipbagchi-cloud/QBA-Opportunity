@@ -115,13 +115,18 @@ interface Opportunity {
     owner: string;
     salesRepName?: string;
     managerName?: string;
+    presalesAssigneeName?: string;
     technology?: string;
     region?: string;
+    country?: string;
     expectedCloseDate?: string;
+    actualCloseDate?: string;
+    createdAt?: string;
     status: string;
     healthScore: number;
     daysInStage: number;
     isStalled: boolean;
+    monthlyRevenue?: Record<string, number>;
 }
 
 export default function DashboardPage() {
@@ -140,14 +145,26 @@ export default function DashboardPage() {
         return rawOpportunities.map(o => {
             const cur = o.currency || 'INR';
             const rate = getRate(cur);
-            const rawValueInBase = cur === 'INR' || !rate ? Number(o.value) || 0 : (Number(o.value) || 0) / rate;
-            const quoteInBase = o.quote != null ? Number(o.quote) : null;
+            const toBase = (n: number) => (cur === 'INR' || !rate ? n : n / rate);
+            const rawValueInBase = toBase(Number(o.value) || 0);
+            // Backend returns o.quote already converted to the opportunity's currency
+            // (see opportunities.controller.ts), so apply the same INR-base conversion
+            // we do for o.value — otherwise drill-down treats a GBP quote as if it
+            // were INR and shows ~1/rate of the real value.
+            const quoteInBase = o.quote != null ? toBase(Number(o.quote)) : null;
 
             let displayValue = rawValueInBase;
             if (CLOSED_WON_STAGES.includes(o.currentStage) || PRESALES_SALES_STAGES.includes(o.currentStage)) {
                 if (quoteInBase != null && quoteInBase > 0) displayValue = quoteInBase;
             }
-            return { ...o, value: displayValue };
+
+            const monthlyRevenueInBase = o.monthlyRevenue
+                ? Object.fromEntries(
+                    Object.entries(o.monthlyRevenue).map(([k, v]) => [k, toBase(Number(v) || 0)])
+                )
+                : undefined;
+
+            return { ...o, value: displayValue, monthlyRevenue: monthlyRevenueInBase };
         });
     }, [rawOpportunities, getRate]);
 
@@ -217,7 +234,7 @@ export default function DashboardPage() {
     // High-value deals progressing well
     const highValueHealthy = healthyDeals.filter(d => d.value > 0).sort((a, b) => b.value - a.value);
     highValueHealthy.slice(0, 1).forEach(d => {
-        insights.push({ text: `'${d.name}' (${d.client}) is progressing well — ${fmtCurrency(d.value, { compact: true })} at ${d.probability}% probability.`, type: "success" });
+        insights.push({ text: `'${d.name}' (${d.client}) is progressing well — ${fmtCurrency(d.value)} at ${d.probability}% probability.`, type: "success" });
     });
 
     // Critical deals needing attention
@@ -232,7 +249,7 @@ export default function DashboardPage() {
 
     // Summary insights
     if (pipeline && pipeline.totalOpps > 0 && insights.length < 5) {
-        insights.push({ text: `Pipeline has ${pipeline.totalOpps} opportunities worth ${fmtCurrency(pipeline.pipelineValue || 0, { compact: true })} total.`, type: "neutral" });
+        insights.push({ text: `Pipeline has ${pipeline.totalOpps} opportunities worth ${fmtCurrency(pipeline.pipelineValue || 0)} total.`, type: "neutral" });
     }
 
     if (sales && sales.wonCount > 0 && insights.length < 5) {
@@ -321,7 +338,7 @@ export default function DashboardPage() {
                 <p className="text-xs font-bold text-slate-800 mb-1">{category}</p>
                 {payload.map((entry: any, i: number) => (
                     <p key={i} className="text-xs text-purple-600 font-semibold">
-                        {entry.name || entry.dataKey}: {isCurrency ? fmtCurrency(entry.value, { compact: true }) : entry.value}
+                        {entry.name || entry.dataKey}: {isCurrency ? fmtCurrency(entry.value) : entry.value}
                     </p>
                 ))}
                 {projects.length > 0 && (
@@ -360,7 +377,7 @@ export default function DashboardPage() {
     const stats = [
         {
             title: "Projected Revenue",
-            value: fmtCurrency(projectedRevenue, { compact: true }),
+            value: fmtCurrency(projectedRevenue),
             subtitle: `${pipeline?.totalOpps || 0} opportunities`,
             icon: IndianRupee,
             iconBg: "bg-indigo-100",
@@ -368,7 +385,7 @@ export default function DashboardPage() {
         },
         {
             title: "Closed Revenue",
-            value: fmtCurrency(closedRevenue, { compact: true }),
+            value: fmtCurrency(closedRevenue),
             subtitle: `${sales?.wonCount || 0} deals won`,
             icon: CheckCircle2,
             iconBg: "bg-emerald-100",
@@ -384,8 +401,8 @@ export default function DashboardPage() {
         },
         {
             title: "Pipeline Value",
-            value: fmtCurrency(pipeline?.pipelineValue || 0, { compact: true }),
-            subtitle: `Avg ${fmtCurrency(pipeline?.avgDealValue || 0, { compact: true })} per deal`,
+            value: fmtCurrency(pipeline?.pipelineValue || 0),
+            subtitle: `Avg ${fmtCurrency(pipeline?.avgDealValue || 0)} per deal`,
             icon: Target,
             iconBg: "bg-amber-100",
             iconColor: "text-amber-600",
@@ -436,8 +453,8 @@ export default function DashboardPage() {
                 <BarChart data={revenueData} barSize={20}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                     <XAxis dataKey="name" tick={{ fill: '#64748b', fontSize: 11 }} />
-                    <YAxis tickFormatter={(v) => fmtCurrency(v, { compact: true })} tick={{ fill: '#64748b', fontSize: 11 }} />
-                    <Tooltip formatter={(v: number) => [fmtCurrency(v, { compact: true }), undefined]} />
+                    <YAxis tickFormatter={(v) => fmtCurrency(v)} tick={{ fill: '#64748b', fontSize: 11 }} />
+                    <Tooltip formatter={(v: number) => [fmtCurrency(v), undefined]} />
                     <Legend />
                     <Bar dataKey="proposed" name="Proposed" fill="#6366f1" radius={[3, 3, 0, 0]} />
                     <Bar dataKey="actual" name="Won" fill="#10b981" radius={[3, 3, 0, 0]} />
@@ -519,7 +536,7 @@ export default function DashboardPage() {
             <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={techRevenueData} layout="vertical" margin={{ left: 10, right: 20 }} barSize={14}>
                     <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
-                    <XAxis type="number" tickFormatter={(v) => fmtCurrency(v, { compact: true })} tick={{ fill: '#64748b', fontSize: 11 }} />
+                    <XAxis type="number" tickFormatter={(v) => fmtCurrency(v)} tick={{ fill: '#64748b', fontSize: 11 }} />
                     <YAxis type="category" dataKey="name" tick={{ fill: '#64748b', fontSize: 11 }} width={100} />
                     <Tooltip content={<TechRevTooltip />} />
                     <Bar dataKey="value" fill="#8b5cf6" radius={[0, 3, 3, 0]} />
@@ -543,7 +560,7 @@ export default function DashboardPage() {
             <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={clientRevenueData} layout="vertical" margin={{ left: 10, right: 20 }} barSize={14}>
                     <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
-                    <XAxis type="number" tickFormatter={(v) => fmtCurrency(v, { compact: true })} tick={{ fill: '#64748b', fontSize: 11 }} />
+                    <XAxis type="number" tickFormatter={(v) => fmtCurrency(v)} tick={{ fill: '#64748b', fontSize: 11 }} />
                     <YAxis type="category" dataKey="name" tick={{ fill: '#64748b', fontSize: 11 }} width={120} />
                     <Tooltip content={<ClientRevTooltip />} />
                     <Bar dataKey="value" name="Revenue" fill="#ec4899" radius={[0, 3, 3, 0]} />
@@ -567,7 +584,7 @@ export default function DashboardPage() {
             <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={ownerRevenueData} layout="vertical" margin={{ left: 10, right: 20 }} barSize={14}>
                     <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
-                    <XAxis type="number" tickFormatter={(v) => fmtCurrency(v, { compact: true })} tick={{ fill: '#64748b', fontSize: 11 }} />
+                    <XAxis type="number" tickFormatter={(v) => fmtCurrency(v)} tick={{ fill: '#64748b', fontSize: 11 }} />
                     <YAxis type="category" dataKey="name" tick={{ fill: '#64748b', fontSize: 11 }} width={120} />
                     <Tooltip content={<SalesRepRevTooltip />} />
                     <Bar dataKey="revenue" name="Revenue" fill="#0ea5e9" radius={[0, 3, 3, 0]} />
@@ -647,7 +664,7 @@ export default function DashboardPage() {
         { key: 'probability',        label: 'Probability',     format: 'percent' },
         { key: 'tentativeStartDate', label: 'Est. Start',      format: 'text' },
         { key: 'tentativeEndDate',   label: 'Est. End',        format: 'text' },
-        { key: 'expectedCloseDate',  label: 'Expected Close',  format: 'text' },
+        { key: 'expectedCloseDate',  label: 'Opportunity Close Date',  format: 'text' },
         { key: 'technology',         label: 'Technology',      format: 'text' },
         { key: 'region',             label: 'Region',          format: 'text' },
         { key: 'owner',              label: 'Owner',           format: 'text' },
@@ -692,7 +709,7 @@ export default function DashboardPage() {
                 { key: "value", label: "Value", format: "currency" },
                 { key: "currentStage", label: "Stage", format: "text" },
                 { key: "probability", label: "Probability", format: "percent" },
-                { key: "expectedCloseDate", label: "Expected Close", format: "text" },
+                { key: "expectedCloseDate", label: "Opportunity Close Date", format: "text" },
                 { key: "owner", label: "Owner", format: "text" },
                 { key: "salesRepName", label: "Sales Rep", format: "text" },
             ],
@@ -705,6 +722,8 @@ export default function DashboardPage() {
                 { key: "client", label: "Client", format: "text" },
                 { key: "value", label: "Value", format: "currency" },
                 { key: "currentStage", label: "Stage", format: "text" },
+                { key: "expectedCloseDate", label: "Opportunity Close Date", format: "text" },
+                { key: "actualCloseDate", label: "Actual Close", format: "text" },
                 { key: "owner", label: "Owner", format: "text" },
                 { key: "salesRepName", label: "Sales Rep", format: "text" },
                 { key: "technology", label: "Technology", format: "text" },
@@ -722,6 +741,7 @@ export default function DashboardPage() {
                 { key: "value", label: "Value", format: "currency" },
                 { key: "currentStage", label: "Stage", format: "text" },
                 { key: "status", label: "Health", format: "text" },
+                { key: "expectedCloseDate", label: "Opportunity Close Date", format: "text" },
                 { key: "owner", label: "Owner", format: "text" },
                 { key: "salesRepName", label: "Sales Rep", format: "text" },
                 { key: "technology", label: "Technology", format: "text" },
@@ -738,7 +758,7 @@ export default function DashboardPage() {
                 { key: "currentStage", label: "Stage", format: "text" },
                 { key: "probability", label: "Probability", format: "percent" },
                 { key: "owner", label: "Owner", format: "text" },
-                { key: "expectedCloseDate", label: "Expected Close", format: "text" },
+                { key: "expectedCloseDate", label: "Opportunity Close Date", format: "text" },
             ],
             data: opportunities.filter(o => {
                 const s = o.currentStage;
@@ -752,6 +772,8 @@ export default function DashboardPage() {
                 { key: "client", label: "Client", format: "text" },
                 { key: "value", label: "Value", format: "currency" },
                 { key: "currentStage", label: "Stage", format: "text" },
+                { key: "expectedCloseDate", label: "Opportunity Close Date", format: "text" },
+                { key: "actualCloseDate", label: "Actual Close", format: "text" },
                 { key: "owner", label: "Owner", format: "text" },
                 { key: "salesRepName", label: "Sales Rep", format: "text" },
                 { key: "technology", label: "Technology", format: "text" },
@@ -785,17 +807,17 @@ export default function DashboardPage() {
     ];
 
     return (
-        <div className="space-y-3 animate-in fade-in duration-500">
+        <div className="space-y-2 animate-in fade-in duration-500">
             <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-base font-semibold text-slate-900">Dashboard</h1>
-                    <p className="text-slate-400 text-xs">Welcome back{user?.name ? `, ${user.name.split(' ')[0]}` : ''}. Click any card to expand &amp; download.</p>
-                </div>
+                <h1 className="text-sm font-semibold text-slate-900">
+                    Dashboard
+                    {user?.name && <span className="ml-2 text-[11px] font-normal text-slate-400">Welcome back, {user.name.split(' ')[0]}</span>}
+                </h1>
                 <button
                     type="button"
                     onClick={() => fetchDashboard(true)}
                     disabled={refreshing}
-                    className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium text-slate-600 bg-white border border-slate-200 rounded-md hover:bg-slate-50 disabled:opacity-50"
+                    className="flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium text-slate-600 bg-white border border-slate-200 rounded-md hover:bg-slate-50 disabled:opacity-50"
                     title="Refresh dashboard data"
                 >
                     <RefreshCw className={`w-3 h-3 ${refreshing ? 'animate-spin' : ''}`} />
@@ -804,50 +826,156 @@ export default function DashboardPage() {
             </div>
 
             {/* Stats Grid — tight 7-col, each expandable */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-1.5">
                 {stats.map((stat, idx) => (
-                    <ExpandableCard key={idx} drillConfig={statDrills[idx]} className="bg-white rounded-lg px-3 py-2.5 border border-slate-100 hover:border-slate-200 transition-colors">
-                        <div className="flex items-center gap-1.5 mb-1">
-                            <div className={`p-1 rounded ${stat.iconBg}`}>
-                                <stat.icon className={`w-3 h-3 ${stat.iconColor}`} />
+                    <ExpandableCard key={idx} drillConfig={statDrills[idx]} className="bg-white rounded-md px-2 py-1.5 border border-slate-100 hover:border-slate-200 transition-colors">
+                        <div className="flex items-center gap-1 mb-0.5">
+                            <div className={`p-0.5 rounded ${stat.iconBg}`}>
+                                <stat.icon className={`w-2.5 h-2.5 ${stat.iconColor}`} />
                             </div>
                             <span className="text-[10px] text-slate-400 font-medium truncate">{stat.title}</span>
                         </div>
                         <p className="text-sm font-bold text-slate-900 leading-tight">{stat.value}</p>
-                        <p className="text-[10px] text-slate-400 mt-0.5 truncate">{stat.subtitle}</p>
+                        <p className="text-[10px] text-slate-400 truncate leading-tight">{stat.subtitle}</p>
                     </ExpandableCard>
                 ))}
             </div>
 
             {/* Stage Tiles — click to view project-level details */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1.5">
                 {stageTiles.map(tile => (
-                    <ExpandableCard key={tile.label} drillConfig={tile.drill} className="bg-white rounded-lg px-3 py-2.5 border border-slate-100 hover:border-slate-200 transition-colors">
-                        <div className="flex items-center gap-1.5 mb-1">
+                    <ExpandableCard key={tile.label} drillConfig={tile.drill} className="bg-white rounded-md px-2 py-1.5 border border-slate-100 hover:border-slate-200 transition-colors">
+                        <div className="flex items-center gap-1 mb-0.5">
                             <span className={`px-1.5 py-0.5 rounded text-[9px] font-semibold border ${tile.badgeColor}`}>{tile.label}</span>
                             <span className="text-[10px] text-slate-400 ml-auto">{tile.count}</span>
                         </div>
-                        <p className="text-sm font-bold text-slate-900 leading-tight">{fmtCurrency(tile.totalValue, { compact: true })}</p>
-                        <p className="text-[10px] text-slate-400 mt-0.5 truncate">{tile.count} {tile.count === 1 ? 'opportunity' : 'opportunities'}</p>
+                        <p className="text-sm font-bold text-slate-900 leading-tight">{fmtCurrency(tile.totalValue)}</p>
+                        <p className="text-[10px] text-slate-400 truncate leading-tight">{tile.count} {tile.count === 1 ? 'opportunity' : 'opportunities'}</p>
                     </ExpandableCard>
                 ))}
             </div>
 
+            {/* Pending Actions for the logged-in user (Admins see all open opps) */}
+            {user?.name && (() => {
+                const CLOSED = ['Closed Won', 'Closed-Won', 'Closed Lost', 'Proposal Lost', 'Delivered'];
+                const isAdmin = !!user?.role?.permissions?.includes('*') || user?.role?.name?.toLowerCase() === 'admin';
+                const myPending = opportunities.filter(o => {
+                    if (CLOSED.includes(o.currentStage)) return false;
+                    if (isAdmin) return true;
+                    return o.owner === user.name || o.salesRepName === user.name || o.managerName === user.name;
+                });
+                const actionForStage = (s: string) => {
+                    if (s === 'Pipeline' || s === 'Discovery') return 'Qualify & assign presales';
+                    if (s === 'Qualification' || s === 'Presales') return 'Complete presales estimation';
+                    if (s === 'Proposal' || s === 'Sales') return 'Prepare or send quote';
+                    if (s === 'Negotiation') return 'Close negotiation';
+                    return 'Review';
+                };
+                const fmtDate = (d?: string) => {
+                    if (!d) return '—';
+                    const dt = new Date(d);
+                    if (isNaN(dt.getTime())) return '—';
+                    return dt.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: '2-digit' });
+                };
+                const today = new Date(); today.setHours(0, 0, 0, 0);
+                const dueClass = (d?: string) => {
+                    if (!d) return 'text-slate-500';
+                    const dt = new Date(d); if (isNaN(dt.getTime())) return 'text-slate-500';
+                    const diffDays = Math.ceil((dt.getTime() - today.getTime()) / 86400000);
+                    if (diffDays < 0) return 'text-red-600 font-semibold';
+                    if (diffDays <= 7) return 'text-amber-600 font-semibold';
+                    return 'text-slate-600';
+                };
+                const ownerFor = (o: Opportunity) => {
+                    const parts: string[] = [];
+                    if (o.salesRepName) parts.push(`Sales: ${o.salesRepName}`);
+                    else if (o.owner) parts.push(`Owner: ${o.owner}`);
+                    if (o.managerName) parts.push(`Mgr: ${o.managerName}`);
+                    return parts.join(' · ') || 'Unassigned';
+                };
+                // Sort: overdue first, then soonest due, then stalled
+                const sorted = [...myPending].sort((a, b) => {
+                    const da = a.expectedCloseDate ? new Date(a.expectedCloseDate).getTime() : Number.MAX_SAFE_INTEGER;
+                    const db = b.expectedCloseDate ? new Date(b.expectedCloseDate).getTime() : Number.MAX_SAFE_INTEGER;
+                    if (da !== db) return da - db;
+                    return (b.daysInStage || 0) - (a.daysInStage || 0);
+                });
+                return (
+                    <div className="bg-white rounded-md border border-slate-100 px-2.5 py-1.5">
+                        <div className="flex items-center gap-1 mb-1">
+                            <Clock className="w-3 h-3 text-amber-600" />
+                            <h3 className="text-xs font-semibold text-slate-800">
+                                {isAdmin ? 'All Pending Actions' : 'Your Pending Actions'}
+                            </h3>
+                            <span className="text-[10px] text-slate-400">
+                                ({sorted.length})
+                            </span>
+                        </div>
+                        {sorted.length === 0 ? (
+                            <div className="text-[11px] text-slate-400 py-1">No pending actions.</div>
+                        ) : (
+                            <div className="overflow-x-auto max-h-52 overflow-y-auto">
+                                <table className="w-full text-[10px]">
+                                    <thead className="text-[9px] text-slate-400 uppercase tracking-wide bg-slate-50 sticky top-0">
+                                        <tr>
+                                            <th className="text-left px-2 py-1 font-medium">Opportunity</th>
+                                            <th className="text-left px-2 py-1 font-medium">Stage</th>
+                                            <th className="text-left px-2 py-1 font-medium">Action Needed</th>
+                                            <th className="text-left px-2 py-1 font-medium">Owner / Assignee</th>
+                                            <th className="text-left px-2 py-1 font-medium">Due</th>
+                                            <th className="text-left px-2 py-1 font-medium">Days</th>
+                                            <th className="text-right px-2 py-1 font-medium">Value</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                        {sorted.map(o => (
+                                            <tr
+                                                key={o.id}
+                                                onClick={() => router.push(`/dashboard/opportunities/${o.id}`)}
+                                                className="cursor-pointer hover:bg-slate-50"
+                                            >
+                                                <td className="px-2 py-0.5">
+                                                    <div className="font-medium text-slate-800 truncate max-w-[180px] leading-tight" title={o.name}>{o.name}</div>
+                                                    <div className="text-[9px] text-slate-400 truncate max-w-[180px] leading-tight" title={o.client}>{o.client}</div>
+                                                </td>
+                                                <td className="px-2 py-0.5">
+                                                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-semibold border ${STAGE_COLORS[o.currentStage] || 'bg-slate-50 text-slate-600 border-slate-200'}`}>
+                                                        {STAGE_DISPLAY[o.currentStage] || o.currentStage}
+                                                    </span>
+                                                </td>
+                                                <td className="px-2 py-0.5 text-slate-700">{actionForStage(o.currentStage)}</td>
+                                                <td className="px-2 py-0.5 text-slate-600 truncate max-w-[160px]" title={ownerFor(o)}>{ownerFor(o)}</td>
+                                                <td className={`px-2 py-0.5 ${dueClass(o.expectedCloseDate)}`}>{fmtDate(o.expectedCloseDate)}</td>
+                                                <td className="px-2 py-0.5 text-slate-600 whitespace-nowrap">
+                                                    {o.daysInStage ?? 0}d
+                                                    {o.isStalled && <span className="ml-1 text-[9px] text-red-600 font-semibold">STALLED</span>}
+                                                </td>
+                                                <td className="px-2 py-0.5 text-right text-slate-700 font-medium whitespace-nowrap">{fmtCurrency(o.value)}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+                    </div>
+                );
+            })()}
+
             {/* Row 1: Revenue chart + Stage pie */}
-            <div className="grid grid-cols-1 lg:grid-cols-4 gap-2">
-                <ExpandableCard drillConfig={revenueDrill} className="lg:col-span-3 bg-white rounded-lg border border-slate-100">
-                    <div className="flex items-center justify-between px-3 py-2">
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-1.5">
+                <ExpandableCard drillConfig={revenueDrill} className="lg:col-span-3 bg-white rounded-md border border-slate-100">
+                    <div className="flex items-center justify-between px-2.5 pt-1.5 pb-1">
                         <h3 className="font-medium text-xs text-slate-700">Revenue Projection</h3>
                     </div>
-                    <div className="px-3 pb-3">
-                        <div className="h-[160px] w-full">
+                    <div className="px-2.5 pb-2">
+                        <div className="h-[140px] w-full">
                             {revenueData.length > 0 ? (
                                 <ResponsiveContainer width="100%" height="100%">
                                     <BarChart data={revenueData} barSize={12}>
                                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                                         <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} />
-                                        <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} tickFormatter={(v) => fmtCurrency(v, { compact: true })} width={45} />
-                                        <Tooltip contentStyle={{ fontSize: '11px', borderRadius: '8px', border: '1px solid #e2e8f0', padding: '6px 10px' }} formatter={(value: number) => [fmtCurrency(value, { compact: true }), undefined]} />
+                                        <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} tickFormatter={(v) => fmtCurrency(v)} width={45} />
+                                        <Tooltip contentStyle={{ fontSize: '11px', borderRadius: '8px', border: '1px solid #e2e8f0', padding: '6px 10px' }} formatter={(value: number) => [fmtCurrency(value), undefined]} />
                                         <Bar dataKey="proposed" name="Proposed" fill="#6366f1" radius={[2, 2, 0, 0]} />
                                         <Bar dataKey="actual" name="Won" fill="#10b981" radius={[2, 2, 0, 0]} />
                                         <Bar dataKey="lost" name="Lost" fill="#ef4444" radius={[2, 2, 0, 0]} />
@@ -858,8 +986,8 @@ export default function DashboardPage() {
                     </div>
                 </ExpandableCard>
 
-                <ExpandableCard drillConfig={stageDrill} className="bg-white rounded-lg border border-slate-100 px-3 py-2">
-                    <h3 className="font-medium text-xs text-slate-700 mb-1">By Stage</h3>
+                <ExpandableCard drillConfig={stageDrill} className="bg-white rounded-md border border-slate-100 px-2.5 py-1.5">
+                    <h3 className="font-medium text-xs text-slate-700 mb-0.5">By Stage</h3>
                     {statusData.length > 0 ? (
                         <>
                             <div className="h-[100px] w-full">
@@ -891,9 +1019,9 @@ export default function DashboardPage() {
             </div>
 
             {/* Row 2: Salesperson bar + Tech revenue + Client revenue */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-2">
-                <ExpandableCard drillConfig={salespersonDrill} className="bg-white rounded-lg border border-slate-100 px-3 py-2">
-                    <h3 className="font-medium text-xs text-slate-700 mb-1">Opps by Salesperson</h3>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-1.5">
+                <ExpandableCard drillConfig={salespersonDrill} className="bg-white rounded-md border border-slate-100 px-2.5 py-1.5">
+                    <h3 className="font-medium text-xs text-slate-700 mb-0.5">Opps by Salesperson</h3>
                     {ownerData.length > 0 ? (
                         <div className="h-[130px] w-full">
                             <ResponsiveContainer width="100%" height="100%">
@@ -911,14 +1039,14 @@ export default function DashboardPage() {
                     ) : <div className="flex items-center justify-center h-[130px] text-slate-300 text-xs">No data</div>}
                 </ExpandableCard>
 
-                <ExpandableCard drillConfig={techRevDrill} className="bg-white rounded-lg border border-slate-100 px-3 py-2">
-                    <h3 className="font-medium text-xs text-slate-700 mb-1">Revenue by Tech Stack</h3>
+                <ExpandableCard drillConfig={techRevDrill} className="bg-white rounded-md border border-slate-100 px-2.5 py-1.5">
+                    <h3 className="font-medium text-xs text-slate-700 mb-0.5">Revenue by Tech Stack</h3>
                     {techRevenueData.length > 0 ? (
                         <div className="h-[130px] w-full">
                             <ResponsiveContainer width="100%" height="100%">
                                 <BarChart data={techRevenueData.slice(0,6)} layout="vertical" margin={{ left: 0, right: 5 }} barSize={10}>
                                     <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
-                                    <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} tickFormatter={(v) => fmtCurrency(v, { compact: true })} />
+                                    <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} tickFormatter={(v) => fmtCurrency(v)} />
                                     <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} width={65} />
                                     <Tooltip content={<TechRevTooltip />} />
                                     <Legend wrapperStyle={{ fontSize: '9px', paddingTop: '2px' }} iconSize={8} />
@@ -929,14 +1057,14 @@ export default function DashboardPage() {
                     ) : <div className="flex items-center justify-center h-[130px] text-slate-300 text-xs">No data</div>}
                 </ExpandableCard>
 
-                <ExpandableCard drillConfig={clientRevDrill} className="bg-white rounded-lg border border-slate-100 px-3 py-2">
-                    <h3 className="font-medium text-xs text-slate-700 mb-1">Revenue by Client</h3>
+                <ExpandableCard drillConfig={clientRevDrill} className="bg-white rounded-md border border-slate-100 px-2.5 py-1.5">
+                    <h3 className="font-medium text-xs text-slate-700 mb-0.5">Revenue by Client</h3>
                     {clientRevenueData.length > 0 ? (
                         <div className="h-[130px] w-full">
                             <ResponsiveContainer width="100%" height="100%">
                                 <BarChart data={clientRevenueData.slice(0,6)} layout="vertical" margin={{ left: 0, right: 5 }} barSize={10}>
                                     <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
-                                    <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} tickFormatter={(v) => fmtCurrency(v, { compact: true })} />
+                                    <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} tickFormatter={(v) => fmtCurrency(v)} />
                                     <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} width={80} />
                                     <Tooltip content={<ClientRevTooltip />} />
                                     <Legend wrapperStyle={{ fontSize: '9px', paddingTop: '2px' }} iconSize={8} />
@@ -949,15 +1077,15 @@ export default function DashboardPage() {
             </div>
 
             {/* Row 3: Rev by Sales Rep + Client count */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
-                <ExpandableCard drillConfig={salesRepRevDrill} className="bg-white rounded-lg border border-slate-100 px-3 py-2">
-                    <h3 className="font-medium text-xs text-slate-700 mb-1">Revenue by Sales Rep</h3>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-1.5">
+                <ExpandableCard drillConfig={salesRepRevDrill} className="bg-white rounded-md border border-slate-100 px-2.5 py-1.5">
+                    <h3 className="font-medium text-xs text-slate-700 mb-0.5">Revenue by Sales Rep</h3>
                     {ownerRevenueData.length > 0 ? (
                         <div className="h-[120px] w-full">
                             <ResponsiveContainer width="100%" height="100%">
                                 <BarChart data={ownerRevenueData} layout="vertical" margin={{ left: 0, right: 5 }} barSize={10}>
                                     <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
-                                    <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} tickFormatter={(v) => fmtCurrency(v, { compact: true })} />
+                                    <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} tickFormatter={(v) => fmtCurrency(v)} />
                                     <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} tick={<TruncatedTick />} width={110} interval={0} />
                                     <Tooltip content={<SalesRepRevTooltip />} />
                                     <Legend wrapperStyle={{ fontSize: '9px', paddingTop: '2px' }} iconSize={8} />
@@ -968,8 +1096,8 @@ export default function DashboardPage() {
                     ) : <div className="flex items-center justify-center h-[120px] text-slate-300 text-xs">No data</div>}
                 </ExpandableCard>
 
-                <ExpandableCard drillConfig={clientCountDrill} className="bg-white rounded-lg border border-slate-100 px-3 py-2">
-                    <h3 className="font-medium text-xs text-slate-700 mb-1">Opps by Client</h3>
+                <ExpandableCard drillConfig={clientCountDrill} className="bg-white rounded-md border border-slate-100 px-2.5 py-1.5">
+                    <h3 className="font-medium text-xs text-slate-700 mb-0.5">Opps by Client</h3>
                     {clientCountData.length > 0 ? (
                         <div className="h-[120px] w-full">
                             <ResponsiveContainer width="100%" height="100%">
@@ -988,10 +1116,10 @@ export default function DashboardPage() {
             </div>
 
             {/* Row 4: Recent Opps table + Manager KPI + Insights */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-2">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-1.5">
                 {/* Recent Opportunities — compact table */}
-                <ExpandableCard drillConfig={recentOppsDrill} className="lg:col-span-6 bg-white rounded-lg border border-slate-100 px-3 py-2 overflow-hidden">
-                    <div className="flex justify-between items-center mb-1.5">
+                <ExpandableCard drillConfig={recentOppsDrill} className="lg:col-span-6 bg-white rounded-md border border-slate-100 px-2.5 py-1.5 overflow-hidden">
+                    <div className="flex justify-between items-center mb-1">
                         <h3 className="font-medium text-xs text-slate-700">Recent Opportunities</h3>
                         <button onClick={(e) => { e.stopPropagation(); router.push('/dashboard/opportunities'); }} className="text-[10px] text-indigo-500 hover:text-indigo-700 font-medium">View All</button>
                     </div>
@@ -1013,7 +1141,7 @@ export default function DashboardPage() {
                                                 <div className="font-medium text-slate-800 truncate max-w-[140px]">{opp.name}</div>
                                                 <div className="text-[9px] text-slate-400 truncate max-w-[140px]">{opp.client}</div>
                                             </td>
-                                            <td className="py-1.5 text-slate-600">{fmtCurrency(opp.value, { compact: true })}</td>
+                                            <td className="py-1.5 text-slate-600">{fmtCurrency(opp.value)}</td>
                                             <td className="py-1.5">
                                                 <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium border ${STAGE_COLORS[STAGE_DISPLAY[opp.currentStage] || opp.currentStage] || "bg-slate-50 text-slate-600 border-slate-200"}`}>
                                                     {STAGE_DISPLAY[opp.currentStage] || opp.currentStage}
@@ -1034,8 +1162,8 @@ export default function DashboardPage() {
                 </ExpandableCard>
 
                 {/* Manager KPI */}
-                <ExpandableCard drillConfig={managerKpiDrill} className="lg:col-span-3 bg-white rounded-lg border border-slate-100 px-3 py-2">
-                    <h3 className="font-medium text-xs text-slate-700 mb-1.5">Manager KPI</h3>
+                <ExpandableCard drillConfig={managerKpiDrill} className="lg:col-span-3 bg-white rounded-md border border-slate-100 px-2.5 py-1.5">
+                    <h3 className="font-medium text-xs text-slate-700 mb-1">Manager KPI</h3>
                     {(sales?.managerKpi || []).length > 0 ? (
                         <table className="w-full text-[10px]">
                             <thead>
@@ -1054,7 +1182,7 @@ export default function DashboardPage() {
                                         <td className="py-1.5 text-center text-slate-500">{mgr.totalAssigned}</td>
                                         <td className="py-1.5 text-center text-emerald-600 font-semibold">{mgr.wonCount}</td>
                                         <td className="py-1.5 text-center text-red-500 font-semibold">{mgr.lostCount}</td>
-                                        <td className="py-1.5 text-right text-slate-600">{fmtCurrency(mgr.totalRevenue || 0, { compact: true })}</td>
+                                        <td className="py-1.5 text-right text-slate-600">{fmtCurrency(mgr.totalRevenue || 0)}</td>
                                     </tr>
                                 ))}
                             </tbody>
@@ -1063,8 +1191,8 @@ export default function DashboardPage() {
                 </ExpandableCard>
 
                 {/* AI Insights + Quick Stats */}
-                <ExpandableCard drillConfig={insightsDrill} className="lg:col-span-3 bg-white rounded-lg border border-slate-100 px-3 py-2">
-                    <h3 className="font-medium text-xs text-slate-700 mb-1.5">Insights</h3>
+                <ExpandableCard drillConfig={insightsDrill} className="lg:col-span-3 bg-white rounded-md border border-slate-100 px-2.5 py-1.5">
+                    <h3 className="font-medium text-xs text-slate-700 mb-1">Insights</h3>
                     <div className="space-y-1">
                         {insights.slice(0, 4).map((insight, idx) => (
                             <div key={idx} className="flex gap-1.5 py-1 border-b border-slate-50/50 last:border-0">
