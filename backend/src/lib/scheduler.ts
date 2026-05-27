@@ -4,13 +4,6 @@ import { evaluateStaleOpportunityReminders } from './notification-engine';
 // imported more than once (e.g. ts-node-dev hot reload).
 let started = false;
 
-function parseNumberEnv(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (!raw) return fallback;
-  const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? n : fallback;
-}
-
 /**
  * Parse "HH:MM" (24-hour, server local time) into {hours, minutes}.
  * Falls back to 09:00 if invalid.
@@ -72,13 +65,14 @@ export function startScheduledJobs(): void {
     return;
   }
 
-  const thresholdDays = parseNumberEnv('STALE_REMINDER_DAYS', 3);
   const { hours, minutes } = parseTimeOfDay(process.env.STALE_REMINDER_DAILY_AT);
   const hhmm = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
 
+  // Threshold/recipients/template/channels come from active NotificationRule
+  // rows with triggerType='stalled_deal' — managed by Admin in Settings.
   scheduleDailyAt('stale-reminder', hours, minutes, async () => {
-    await evaluateStaleOpportunityReminders({ thresholdDays });
+    await evaluateStaleOpportunityReminders();
   });
 
-  console.log(`[Scheduler] stale-reminder armed: threshold=${thresholdDays}d daily-at=${hhmm} (server local time)`);
+  console.log(`[Scheduler] stale-reminder armed: daily-at=${hhmm} (server local time) — config sourced from Admin > Notifications`);
 }

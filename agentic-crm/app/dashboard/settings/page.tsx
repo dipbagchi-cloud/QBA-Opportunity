@@ -4082,6 +4082,7 @@ const CONDITION_FIELDS = [
     { value: "probability", label: "Probability (%)", type: "number" },
     { value: "healthScore", label: "Health Score", type: "number" },
     { value: "daysInStage", label: "Days in Stage", type: "number" },
+    { value: "daysSinceUpdate", label: "Days Since Last Update", type: "number" },
     { value: "stage", label: "Stage", type: "select", options: STAGES },
     { value: "technology", label: "Technology", type: "text" },
     { value: "region", label: "Region", type: "text" },
