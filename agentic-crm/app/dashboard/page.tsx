@@ -234,7 +234,7 @@ export default function DashboardPage() {
     // High-value deals progressing well
     const highValueHealthy = healthyDeals.filter(d => d.value > 0).sort((a, b) => b.value - a.value);
     highValueHealthy.slice(0, 1).forEach(d => {
-        insights.push({ text: `'${d.name}' (${d.client}) is progressing well — ${fmtCurrency(d.value, { compact: true })} at ${d.probability}% probability.`, type: "success" });
+        insights.push({ text: `'${d.name}' (${d.client}) is progressing well — ${fmtCurrency(d.value)} at ${d.probability}% probability.`, type: "success" });
     });
 
     // Critical deals needing attention
@@ -249,7 +249,7 @@ export default function DashboardPage() {
 
     // Summary insights
     if (pipeline && pipeline.totalOpps > 0 && insights.length < 5) {
-        insights.push({ text: `Pipeline has ${pipeline.totalOpps} opportunities worth ${fmtCurrency(pipeline.pipelineValue || 0, { compact: true })} total.`, type: "neutral" });
+        insights.push({ text: `Pipeline has ${pipeline.totalOpps} opportunities worth ${fmtCurrency(pipeline.pipelineValue || 0)} total.`, type: "neutral" });
     }
 
     if (sales && sales.wonCount > 0 && insights.length < 5) {
@@ -338,7 +338,7 @@ export default function DashboardPage() {
                 <p className="text-xs font-bold text-slate-800 mb-1">{category}</p>
                 {payload.map((entry: any, i: number) => (
                     <p key={i} className="text-xs text-purple-600 font-semibold">
-                        {entry.name || entry.dataKey}: {isCurrency ? fmtCurrency(entry.value, { compact: true }) : entry.value}
+                        {entry.name || entry.dataKey}: {isCurrency ? fmtCurrency(entry.value) : entry.value}
                     </p>
                 ))}
                 {projects.length > 0 && (
@@ -377,7 +377,7 @@ export default function DashboardPage() {
     const stats = [
         {
             title: "Projected Revenue",
-            value: fmtCurrency(projectedRevenue, { compact: true }),
+            value: fmtCurrency(projectedRevenue),
             subtitle: `${pipeline?.totalOpps || 0} opportunities`,
             icon: IndianRupee,
             iconBg: "bg-indigo-100",
@@ -385,7 +385,7 @@ export default function DashboardPage() {
         },
         {
             title: "Closed Revenue",
-            value: fmtCurrency(closedRevenue, { compact: true }),
+            value: fmtCurrency(closedRevenue),
             subtitle: `${sales?.wonCount || 0} deals won`,
             icon: CheckCircle2,
             iconBg: "bg-emerald-100",
@@ -401,8 +401,8 @@ export default function DashboardPage() {
         },
         {
             title: "Pipeline Value",
-            value: fmtCurrency(pipeline?.pipelineValue || 0, { compact: true }),
-            subtitle: `Avg ${fmtCurrency(pipeline?.avgDealValue || 0, { compact: true })} per deal`,
+            value: fmtCurrency(pipeline?.pipelineValue || 0),
+            subtitle: `Avg ${fmtCurrency(pipeline?.avgDealValue || 0)} per deal`,
             icon: Target,
             iconBg: "bg-amber-100",
             iconColor: "text-amber-600",
@@ -453,8 +453,8 @@ export default function DashboardPage() {
                 <BarChart data={revenueData} barSize={20}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                     <XAxis dataKey="name" tick={{ fill: '#64748b', fontSize: 11 }} />
-                    <YAxis tickFormatter={(v) => fmtCurrency(v, { compact: true })} tick={{ fill: '#64748b', fontSize: 11 }} />
-                    <Tooltip formatter={(v: number) => [fmtCurrency(v, { compact: true }), undefined]} />
+                    <YAxis tickFormatter={(v) => fmtCurrency(v)} tick={{ fill: '#64748b', fontSize: 11 }} />
+                    <Tooltip formatter={(v: number) => [fmtCurrency(v), undefined]} />
                     <Legend />
                     <Bar dataKey="proposed" name="Proposed" fill="#6366f1" radius={[3, 3, 0, 0]} />
                     <Bar dataKey="actual" name="Won" fill="#10b981" radius={[3, 3, 0, 0]} />
@@ -536,7 +536,7 @@ export default function DashboardPage() {
             <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={techRevenueData} layout="vertical" margin={{ left: 10, right: 20 }} barSize={14}>
                     <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
-                    <XAxis type="number" tickFormatter={(v) => fmtCurrency(v, { compact: true })} tick={{ fill: '#64748b', fontSize: 11 }} />
+                    <XAxis type="number" tickFormatter={(v) => fmtCurrency(v)} tick={{ fill: '#64748b', fontSize: 11 }} />
                     <YAxis type="category" dataKey="name" tick={{ fill: '#64748b', fontSize: 11 }} width={100} />
                     <Tooltip content={<TechRevTooltip />} />
                     <Bar dataKey="value" fill="#8b5cf6" radius={[0, 3, 3, 0]} />
@@ -560,7 +560,7 @@ export default function DashboardPage() {
             <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={clientRevenueData} layout="vertical" margin={{ left: 10, right: 20 }} barSize={14}>
                     <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
-                    <XAxis type="number" tickFormatter={(v) => fmtCurrency(v, { compact: true })} tick={{ fill: '#64748b', fontSize: 11 }} />
+                    <XAxis type="number" tickFormatter={(v) => fmtCurrency(v)} tick={{ fill: '#64748b', fontSize: 11 }} />
                     <YAxis type="category" dataKey="name" tick={{ fill: '#64748b', fontSize: 11 }} width={120} />
                     <Tooltip content={<ClientRevTooltip />} />
                     <Bar dataKey="value" name="Revenue" fill="#ec4899" radius={[0, 3, 3, 0]} />
@@ -584,7 +584,7 @@ export default function DashboardPage() {
             <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={ownerRevenueData} layout="vertical" margin={{ left: 10, right: 20 }} barSize={14}>
                     <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
-                    <XAxis type="number" tickFormatter={(v) => fmtCurrency(v, { compact: true })} tick={{ fill: '#64748b', fontSize: 11 }} />
+                    <XAxis type="number" tickFormatter={(v) => fmtCurrency(v)} tick={{ fill: '#64748b', fontSize: 11 }} />
                     <YAxis type="category" dataKey="name" tick={{ fill: '#64748b', fontSize: 11 }} width={120} />
                     <Tooltip content={<SalesRepRevTooltip />} />
                     <Bar dataKey="revenue" name="Revenue" fill="#0ea5e9" radius={[0, 3, 3, 0]} />
@@ -849,7 +849,7 @@ export default function DashboardPage() {
                             <span className={`px-1.5 py-0.5 rounded text-[9px] font-semibold border ${tile.badgeColor}`}>{tile.label}</span>
                             <span className="text-[10px] text-slate-400 ml-auto">{tile.count}</span>
                         </div>
-                        <p className="text-sm font-bold text-slate-900 leading-tight">{fmtCurrency(tile.totalValue, { compact: true })}</p>
+                        <p className="text-sm font-bold text-slate-900 leading-tight">{fmtCurrency(tile.totalValue)}</p>
                         <p className="text-[10px] text-slate-400 truncate leading-tight">{tile.count} {tile.count === 1 ? 'opportunity' : 'opportunities'}</p>
                     </ExpandableCard>
                 ))}
@@ -950,7 +950,7 @@ export default function DashboardPage() {
                                                     {o.daysInStage ?? 0}d
                                                     {o.isStalled && <span className="ml-1 text-[9px] text-red-600 font-semibold">STALLED</span>}
                                                 </td>
-                                                <td className="px-2 py-0.5 text-right text-slate-700 font-medium whitespace-nowrap">{fmtCurrency(o.value, { compact: true })}</td>
+                                                <td className="px-2 py-0.5 text-right text-slate-700 font-medium whitespace-nowrap">{fmtCurrency(o.value)}</td>
                                             </tr>
                                         ))}
                                     </tbody>
@@ -974,8 +974,8 @@ export default function DashboardPage() {
                                     <BarChart data={revenueData} barSize={12}>
                                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                                         <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} />
-                                        <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} tickFormatter={(v) => fmtCurrency(v, { compact: true })} width={45} />
-                                        <Tooltip contentStyle={{ fontSize: '11px', borderRadius: '8px', border: '1px solid #e2e8f0', padding: '6px 10px' }} formatter={(value: number) => [fmtCurrency(value, { compact: true }), undefined]} />
+                                        <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} tickFormatter={(v) => fmtCurrency(v)} width={45} />
+                                        <Tooltip contentStyle={{ fontSize: '11px', borderRadius: '8px', border: '1px solid #e2e8f0', padding: '6px 10px' }} formatter={(value: number) => [fmtCurrency(value), undefined]} />
                                         <Bar dataKey="proposed" name="Proposed" fill="#6366f1" radius={[2, 2, 0, 0]} />
                                         <Bar dataKey="actual" name="Won" fill="#10b981" radius={[2, 2, 0, 0]} />
                                         <Bar dataKey="lost" name="Lost" fill="#ef4444" radius={[2, 2, 0, 0]} />
@@ -1046,7 +1046,7 @@ export default function DashboardPage() {
                             <ResponsiveContainer width="100%" height="100%">
                                 <BarChart data={techRevenueData.slice(0,6)} layout="vertical" margin={{ left: 0, right: 5 }} barSize={10}>
                                     <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
-                                    <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} tickFormatter={(v) => fmtCurrency(v, { compact: true })} />
+                                    <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} tickFormatter={(v) => fmtCurrency(v)} />
                                     <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} width={65} />
                                     <Tooltip content={<TechRevTooltip />} />
                                     <Legend wrapperStyle={{ fontSize: '9px', paddingTop: '2px' }} iconSize={8} />
@@ -1064,7 +1064,7 @@ export default function DashboardPage() {
                             <ResponsiveContainer width="100%" height="100%">
                                 <BarChart data={clientRevenueData.slice(0,6)} layout="vertical" margin={{ left: 0, right: 5 }} barSize={10}>
                                     <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
-                                    <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} tickFormatter={(v) => fmtCurrency(v, { compact: true })} />
+                                    <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} tickFormatter={(v) => fmtCurrency(v)} />
                                     <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} width={80} />
                                     <Tooltip content={<ClientRevTooltip />} />
                                     <Legend wrapperStyle={{ fontSize: '9px', paddingTop: '2px' }} iconSize={8} />
@@ -1085,7 +1085,7 @@ export default function DashboardPage() {
                             <ResponsiveContainer width="100%" height="100%">
                                 <BarChart data={ownerRevenueData} layout="vertical" margin={{ left: 0, right: 5 }} barSize={10}>
                                     <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
-                                    <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} tickFormatter={(v) => fmtCurrency(v, { compact: true })} />
+                                    <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} tickFormatter={(v) => fmtCurrency(v)} />
                                     <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} tick={<TruncatedTick />} width={110} interval={0} />
                                     <Tooltip content={<SalesRepRevTooltip />} />
                                     <Legend wrapperStyle={{ fontSize: '9px', paddingTop: '2px' }} iconSize={8} />
@@ -1141,7 +1141,7 @@ export default function DashboardPage() {
                                                 <div className="font-medium text-slate-800 truncate max-w-[140px]">{opp.name}</div>
                                                 <div className="text-[9px] text-slate-400 truncate max-w-[140px]">{opp.client}</div>
                                             </td>
-                                            <td className="py-1.5 text-slate-600">{fmtCurrency(opp.value, { compact: true })}</td>
+                                            <td className="py-1.5 text-slate-600">{fmtCurrency(opp.value)}</td>
                                             <td className="py-1.5">
                                                 <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium border ${STAGE_COLORS[STAGE_DISPLAY[opp.currentStage] || opp.currentStage] || "bg-slate-50 text-slate-600 border-slate-200"}`}>
                                                     {STAGE_DISPLAY[opp.currentStage] || opp.currentStage}
@@ -1182,7 +1182,7 @@ export default function DashboardPage() {
                                         <td className="py-1.5 text-center text-slate-500">{mgr.totalAssigned}</td>
                                         <td className="py-1.5 text-center text-emerald-600 font-semibold">{mgr.wonCount}</td>
                                         <td className="py-1.5 text-center text-red-500 font-semibold">{mgr.lostCount}</td>
-                                        <td className="py-1.5 text-right text-slate-600">{fmtCurrency(mgr.totalRevenue || 0, { compact: true })}</td>
+                                        <td className="py-1.5 text-right text-slate-600">{fmtCurrency(mgr.totalRevenue || 0)}</td>
                                     </tr>
                                 ))}
                             </tbody>

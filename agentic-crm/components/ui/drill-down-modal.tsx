@@ -37,13 +37,9 @@ export interface DrillDownConfig {
 function formatCell(value: any, format?: string, currencyFormat?: (v: number, opts?: any) => string): string {
     if (value == null) return "";
     if (format === "currency") {
-        if (currencyFormat) return currencyFormat(Number(value), { compact: true });
+        if (currencyFormat) return currencyFormat(Number(value));
         const n = Number(value);
-        const abs = Math.abs(n);
-        if (abs >= 1_000_000_000) return `₹${(n / 1_000_000_000).toFixed(2)}B`;
-        if (abs >= 1_000_000)     return `₹${(n / 1_000_000).toFixed(2)}M`;
-        if (abs >= 1_000)         return `₹${(n / 1_000).toFixed(2)}K`;
-        return `₹${n.toFixed(2)}`;
+        return `₹${n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
     }
     if (format === "percent") return `${Number(value).toFixed(1)}%`;
     if (format === "number") return String(Number(value));
@@ -101,6 +97,9 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
     const [fundingTypeFilter, setFundingTypeFilter] = useState("");
     const [pricingModelFilter, setPricingModelFilter] = useState("");
     const [departmentFilter, setDepartmentFilter] = useState("");
+    // Date range filter (Opportunity Close Date)
+    const [dateFromFilter, setDateFromFilter] = useState("");
+    const [dateToFilter, setDateToFilter] = useState("");
 
     // Currency context for formatting
     let currencyFormat: ((v: number, opts?: any) => string) | undefined;
@@ -208,7 +207,9 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
 
     // Apply role + attribute filters first — used by every section below
     const roleFiltered = useMemo(() => {
-        if (!ownerFilter && !salesRepFilter && !presalesFilter && !clientFilter && !countryFilter && !regionFilter && !technologyFilter && !projectTypeFilter && !fundingTypeFilter && !pricingModelFilter && !departmentFilter) return config.data;
+        if (!ownerFilter && !salesRepFilter && !presalesFilter && !clientFilter && !countryFilter && !regionFilter && !technologyFilter && !projectTypeFilter && !fundingTypeFilter && !pricingModelFilter && !departmentFilter && !dateFromFilter && !dateToFilter) return config.data;
+        const from = dateFromFilter ? new Date(dateFromFilter).getTime() : null;
+        const to = dateToFilter ? new Date(dateToFilter + "T23:59:59").getTime() : null;
         return config.data.filter(r => {
             if (ownerFilter && r.owner !== ownerFilter) return false;
             if (salesRepFilter && r.salesRepName !== salesRepFilter) return false;
@@ -227,9 +228,17 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
             if (fundingTypeFilter && r.fundingType !== fundingTypeFilter) return false;
             if (pricingModelFilter && r.pricingModel !== pricingModelFilter) return false;
             if (departmentFilter && r.department !== departmentFilter) return false;
+            if (from != null || to != null) {
+                const raw = r.expectedCloseDate || r.actualCloseDate || r.createdAt;
+                if (!raw) return false;
+                const t = new Date(raw).getTime();
+                if (isNaN(t)) return false;
+                if (from != null && t < from) return false;
+                if (to != null && t > to) return false;
+            }
             return true;
         });
-    }, [config.data, ownerFilter, salesRepFilter, presalesFilter, clientFilter, countryFilter, regionFilter, technologyFilter, projectTypeFilter, fundingTypeFilter, pricingModelFilter, departmentFilter]);
+    }, [config.data, ownerFilter, salesRepFilter, presalesFilter, clientFilter, countryFilter, regionFilter, technologyFilter, projectTypeFilter, fundingTypeFilter, pricingModelFilter, departmentFilter, dateFromFilter, dateToFilter]);
 
     // Monthly buckets — adaptive 12-month window
     //
@@ -389,7 +398,7 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
     }, [sortedData, page, pageSize]);
 
     // Reset page when search/filter changes
-    useEffect(() => { setPage(1); }, [search, filterCol, filterVal, pageSize, ownerFilter, salesRepFilter, presalesFilter, clientFilter, countryFilter, regionFilter, technologyFilter, projectTypeFilter, fundingTypeFilter, pricingModelFilter, departmentFilter]);
+    useEffect(() => { setPage(1); }, [search, filterCol, filterVal, pageSize, ownerFilter, salesRepFilter, presalesFilter, clientFilter, countryFilter, regionFilter, technologyFilter, projectTypeFilter, fundingTypeFilter, pricingModelFilter, departmentFilter, dateFromFilter, dateToFilter]);
 
     const handleSort = (key: string) => {
         if (sortKey === key) {
@@ -543,12 +552,29 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
                                 {uniqueDepartments.map(d => <option key={d} value={d}>Dept: {d}</option>)}
                             </select>
                         )}
-                        {(ownerFilter || salesRepFilter || presalesFilter || clientFilter || countryFilter || regionFilter || technologyFilter || projectTypeFilter || fundingTypeFilter || pricingModelFilter || departmentFilter) && (
+                        <span className="text-[10px] text-slate-400 ml-1">Close date:</span>
+                        <input
+                            type="date"
+                            value={dateFromFilter}
+                            onChange={e => setDateFromFilter(e.target.value)}
+                            className="px-2 py-1 text-xs border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                            title="From"
+                        />
+                        <span className="text-[10px] text-slate-400">to</span>
+                        <input
+                            type="date"
+                            value={dateToFilter}
+                            onChange={e => setDateToFilter(e.target.value)}
+                            className="px-2 py-1 text-xs border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                            title="To"
+                        />
+                        {(ownerFilter || salesRepFilter || presalesFilter || clientFilter || countryFilter || regionFilter || technologyFilter || projectTypeFilter || fundingTypeFilter || pricingModelFilter || departmentFilter || dateFromFilter || dateToFilter) && (
                             <button
                                 onClick={() => {
                                     setOwnerFilter(""); setSalesRepFilter(""); setPresalesFilter("");
                                     setClientFilter(""); setCountryFilter(""); setRegionFilter(""); setTechnologyFilter("");
                                     setProjectTypeFilter(""); setFundingTypeFilter(""); setPricingModelFilter(""); setDepartmentFilter("");
+                                    setDateFromFilter(""); setDateToFilter("");
                                 }}
                                 className="text-[10px] text-red-500 hover:text-red-700 underline"
                             >
@@ -736,7 +762,7 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
                                     {pagedData.length === 0 && (
                                         <tr>
                                             <td colSpan={config.columns.length + 1} className="py-8 text-center text-slate-400">
-                                                {search || filterVal || ownerFilter || salesRepFilter || presalesFilter || clientFilter || countryFilter || regionFilter || technologyFilter || projectTypeFilter || fundingTypeFilter || pricingModelFilter || departmentFilter ? "No matching results" : "No data available"}
+                                                {search || filterVal || ownerFilter || salesRepFilter || presalesFilter || clientFilter || countryFilter || regionFilter || technologyFilter || projectTypeFilter || fundingTypeFilter || pricingModelFilter || departmentFilter || dateFromFilter || dateToFilter ? "No matching results" : "No data available"}
                                             </td>
                                         </tr>
                                     )}
