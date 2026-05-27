@@ -291,6 +291,17 @@ export async function createOpportunity(req: Request, res: Response) {
     try {
         const body = req.body;
 
+        // Opportunity Close Date must be before the Tentative Start Date.
+        // (When no start date is supplied yet, the close date is allowed and the
+        //  constraint will be re-checked on the next update.)
+        if (body.expectedCloseDate && body.tentativeStartDate) {
+            const close = new Date(body.expectedCloseDate);
+            const start = new Date(body.tentativeStartDate);
+            if (!isNaN(close.getTime()) && !isNaN(start.getTime()) && close.getTime() >= start.getTime()) {
+                return res.status(400).json({ error: 'Opportunity Close Date must be before the Tentative Start Date.' });
+            }
+        }
+
         const defaultType = await prisma.opportunityType.findFirst();
         const discoveryStage = await prisma.stage.findFirst({ where: { name: 'Discovery' } });
 
@@ -356,6 +367,18 @@ export async function createOpportunity(req: Request, res: Response) {
                 tentativeDuration: body.tentativeDuration,
                 tentativeDurationUnit: body.tentativeDurationUnit,
                 tentativeEndDate: body.tentativeEndDate ? new Date(body.tentativeEndDate) : undefined,
+                expectedCloseDate: (() => {
+                    // Explicit value wins (must be before start date — validated below).
+                    if (body.expectedCloseDate) return new Date(body.expectedCloseDate);
+                    // Otherwise default to 2 days before tentativeStartDate, matching the
+                    // seed rule used for existing rows.
+                    if (body.tentativeStartDate) {
+                        const d = new Date(body.tentativeStartDate);
+                        d.setDate(d.getDate() - 2);
+                        return d;
+                    }
+                    return undefined;
+                })(),
                 pricingModel: body.pricingModel,
                 expectedDayRate: body.expectedDayRate !== undefined && body.expectedDayRate !== '' ? body.expectedDayRate : null,
                 salesRepName: body.salesRepName,
@@ -504,6 +527,32 @@ export async function updateOpportunity(req: Request, res: Response) {
                 return res.status(403).json({
                     error: `${frozen.join(', ')} cannot be changed after the opportunity moves out of Pipeline.`,
                 });
+            }
+        }
+
+        // Opportunity Close Date is editable only until the proposal is submitted
+        // (stage moves to Proposal / Sales / Negotiation / Closed). The freeze
+        // applies to non-admin actors; admins can correct it at any stage.
+        const SUBMITTED_STAGES = new Set(['Proposal', 'Sales', 'Negotiation', 'Closed Won', 'Closed-Won', 'Closed Lost', 'Proposal Lost', 'Delivered']);
+        const proposalSubmitted = SUBMITTED_STAGES.has(prevStageNameForRule);
+        if (body.expectedCloseDate !== undefined) {
+            const incoming = body.expectedCloseDate ? new Date(body.expectedCloseDate) : null;
+            const prevClose = previous?.expectedCloseDate ? new Date(previous.expectedCloseDate) : null;
+            const changed = (incoming?.getTime() || 0) !== (prevClose?.getTime() || 0);
+            if (changed && proposalSubmitted && !isAdminActor) {
+                return res.status(403).json({
+                    error: 'Opportunity Close Date is locked once the proposal has been submitted.',
+                });
+            }
+            // Must be strictly before the (incoming or stored) Tentative Start Date.
+            if (incoming) {
+                const startSource = body.tentativeStartDate !== undefined ? body.tentativeStartDate : previous?.tentativeStartDate;
+                const start = startSource ? new Date(startSource) : null;
+                if (start && !isNaN(start.getTime()) && incoming.getTime() >= start.getTime()) {
+                    return res.status(400).json({
+                        error: 'Opportunity Close Date must be before the Tentative Start Date.',
+                    });
+                }
             }
         }
 
@@ -758,6 +807,9 @@ export async function updateOpportunity(req: Request, res: Response) {
                 presalesAssigneeName: body.presalesAssigneeName,
                 tentativeStartDate: body.tentativeStartDate ? new Date(body.tentativeStartDate) : undefined,
                 tentativeEndDate: body.tentativeEndDate ? new Date(body.tentativeEndDate) : undefined,
+                expectedCloseDate: body.expectedCloseDate !== undefined
+                    ? (body.expectedCloseDate ? new Date(body.expectedCloseDate) : null)
+                    : undefined,
                 tentativeDuration: body.tentativeDuration || body.duration,
                 tentativeDurationUnit: body.tentativeDurationUnit || body.durationUnit,
                 pricingModel: body.pricingModel,

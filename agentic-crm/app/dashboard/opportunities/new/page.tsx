@@ -174,6 +174,8 @@ export default function NewOpportunityPage() {
     const [technologies, setTechnologies] = useState<string[]>([]);
     const [pricingModels, setPricingModels] = useState<string[]>([]);
     const [salespersons, setSalespersons] = useState<{ id: string; name: string; department?: string }[]>([]);
+    const [managers, setManagers] = useState<{ id: string; name: string; department?: string }[]>([]);
+    const [presalesTeam, setPresalesTeam] = useState<{ id: string; name: string; department?: string }[]>([]);
     const [departments, setDepartments] = useState<string[]>([]);
     const [projectTypes, setProjectTypes] = useState<string[]>([]);
 
@@ -200,9 +202,12 @@ export default function NewOpportunityPage() {
         projectName: "",
         practice: "",
         salesRep: "",
+        managerName: "",
+        presalesAssigneeName: "",
         technology: "",
         tentativeStartDate: "",
         tentativeEndDate: "",
+        expectedCloseDate: "",
         duration: "",
         durationUnit: "months",
         pricingModel: "",
@@ -230,12 +235,14 @@ export default function NewOpportunityPage() {
         const fetchMasterData = async () => {
             const headers = getAuthHeaders();
             try {
-                const [clientsRes, regionsRes, techRes, pricingRes, salesRes, deptRes, projTypesRes, countryMapRes, holRes] = await Promise.all([
+                const [clientsRes, regionsRes, techRes, pricingRes, salesRes, mgrRes, presalesRes, deptRes, projTypesRes, countryMapRes, holRes] = await Promise.all([
                     fetch(`${API_URL}/api/master/clients`, { headers }),
                     fetch(`${API_URL}/api/master/regions`, { headers }),
                     fetch(`${API_URL}/api/master/technologies`, { headers }),
                     fetch(`${API_URL}/api/master/pricing-models`, { headers }),
                     fetch(`${API_URL}/api/master/salespersons`, { headers }),
+                    fetch(`${API_URL}/api/master/managers`, { headers }),
+                    fetch(`${API_URL}/api/master/presales-team`, { headers }),
                     fetch(`${API_URL}/api/master/departments`, { headers }),
                     fetch(`${API_URL}/api/master/project-types`, { headers }),
                     fetch(`${API_URL}/api/master/country-region-map`, { headers }),
@@ -246,6 +253,8 @@ export default function NewOpportunityPage() {
                 if (techRes.ok) setTechnologies((await techRes.json()).map((t: any) => t.name));
                 if (pricingRes.ok) setPricingModels((await pricingRes.json()).map((p: any) => p.name));
                 if (salesRes.ok) setSalespersons(await salesRes.json());
+                if (mgrRes.ok) setManagers(await mgrRes.json());
+                if (presalesRes.ok) setPresalesTeam(await presalesRes.json());
                 if (deptRes.ok) setDepartments(await deptRes.json());
                 if (projTypesRes.ok) setProjectTypes((await projTypesRes.json()).map((p: any) => p.name));
                 if (countryMapRes.ok) setCountryRegionMap(await countryMapRes.json());
@@ -273,6 +282,15 @@ export default function NewOpportunityPage() {
             setFormData(prev => ({ ...prev, tentativeEndDate: end.toISOString().split('T')[0] }));
         }
     }, [formData.tentativeStartDate, formData.duration, formData.durationUnit, holidays]);
+
+    // Default Opportunity Close Date to 2 days before the Tentative Start Date
+    // until the user explicitly picks one.
+    useEffect(() => {
+        if (!formData.tentativeStartDate || formData.expectedCloseDate) return;
+        const d = new Date(formData.tentativeStartDate);
+        d.setDate(d.getDate() - 2);
+        setFormData(prev => ({ ...prev, expectedCloseDate: d.toISOString().split('T')[0] }));
+    }, [formData.tentativeStartDate, formData.expectedCloseDate]);
 
     // Auto-calculate estimated value = Expected Day Rate × 20 working days × Duration months (only for Staffing)
     useEffect(() => {
@@ -400,6 +418,15 @@ export default function NewOpportunityPage() {
             return;
         }
 
+        if (formData.expectedCloseDate && formData.tentativeStartDate &&
+            formData.expectedCloseDate >= formData.tentativeStartDate) {
+            toast({
+                title: "Validation Error",
+                description: "Opportunity Close Date must be before the Tentative Start Date.",
+            });
+            return;
+        }
+
         setIsLoading(true);
 
         try {
@@ -424,9 +451,12 @@ export default function NewOpportunityPage() {
                 projectType: formData.projectType,
                 tentativeStartDate: formData.tentativeStartDate ? new Date(formData.tentativeStartDate) : null,
                 tentativeEndDate: formData.tentativeEndDate ? new Date(formData.tentativeEndDate) : null,
+                expectedCloseDate: formData.expectedCloseDate ? new Date(formData.expectedCloseDate) : null,
                 tentativeDuration: formData.duration,
                 tentativeDurationUnit: formData.durationUnit,
                 salesRepName: formData.salesRep,
+                managerName: formData.managerName || undefined,
+                presalesAssigneeName: formData.presalesAssigneeName || undefined,
                 pricingModel: formData.pricingModel,
                 expectedDayRate: Number(formData.expectedDayRate),
 
@@ -603,6 +633,30 @@ export default function NewOpportunityPage() {
                     </div>
 
                     <div className="space-y-1.5">
+                        <label className="block text-sm font-bold text-slate-700">Offshore Manager</label>
+                        <SearchableSelect
+                            name="managerName"
+                            value={formData.managerName}
+                            onChange={handleChange}
+                            placeholder="Find Manager (optional)"
+                            options={managers.map(m => ({ label: `${m.name}${m.department ? ` (${m.department})` : ''}`, value: m.name }))}
+                        />
+                        <p className="text-[10px] text-slate-400">Can be assigned later at Move-to-Presales</p>
+                    </div>
+
+                    <div className="space-y-1.5">
+                        <label className="block text-sm font-bold text-slate-700">Presales Assignee</label>
+                        <SearchableSelect
+                            name="presalesAssigneeName"
+                            value={formData.presalesAssigneeName}
+                            onChange={handleChange}
+                            placeholder="Find Presales (optional)"
+                            options={presalesTeam.map(p => ({ label: `${p.name}${p.department ? ` (${p.department})` : ''}`, value: p.name }))}
+                        />
+                        <p className="text-[10px] text-slate-400">Can be assigned later during Presales</p>
+                    </div>
+
+                    <div className="space-y-1.5">
                         <label className="block text-sm font-bold text-slate-700">Technology *</label>
                         <div className="relative" ref={techDropdownRef}>
                             <input type="text" name="technology" value={formData.technology || ''} readOnly className="absolute bottom-0 left-0 w-full h-0 opacity-0 pointer-events-none" required tabIndex={-1} />
@@ -729,6 +783,21 @@ export default function NewOpportunityPage() {
                             className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-md text-sm shadow-sm text-slate-500 cursor-not-allowed"
                         />
                         <p className="text-[10px] text-slate-400">Auto-calculated from Start Date + Duration</p>
+                    </div>
+
+                    {/* Opportunity Close Date — when we expect the deal to close (must be before the project starts) */}
+                    <div className="space-y-1.5">
+                        <label className="block text-sm font-bold text-slate-700">Opportunity Close Date</label>
+                        <input
+                            type="date"
+                            name="expectedCloseDate"
+                            value={formData.expectedCloseDate}
+                            max={formData.tentativeStartDate ? (() => { const d = new Date(formData.tentativeStartDate); d.setDate(d.getDate() - 1); return d.toISOString().split('T')[0]; })() : undefined}
+                            className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm text-slate-500 cursor-pointer"
+                            onChange={handleChange}
+                            onClick={(e) => (e.target as HTMLInputElement).showPicker?.()}
+                        />
+                        <p className="text-[10px] text-slate-400">Defaults to 2 days before Start Date. Must be before the Tentative Start Date.</p>
                     </div>
 
                     {/* Row 5: Pricing */}

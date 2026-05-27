@@ -421,6 +421,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         technology: "",
         tentativeStartDate: "",
         tentativeEndDate: "",
+        expectedCloseDate: "",
         presalesAssignee: "",
         duration: "",
         durationUnit: "months",
@@ -577,7 +578,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const managerHandoffLock = !isActiveAdmin && managerHandoffsDone >= 1;
     const canEditSalesRepAssignment = !baseAssignmentLock && !salesRepHandoffLock && (isActiveAdmin || activeRoleName === "sales") && (activeStep === 0 || activeStep === 2);
     const canEditManagerAssignment = !baseAssignmentLock && !managerHandoffLock && (isActiveAdmin || activeRoleName === "manager") && (activeStep === 1 || activeStep === 2);
-    const canEditPresalesAssignment = !baseAssignmentLock && (isActiveAdmin || activeRoleName === "presales" || (activeRoleName === "manager" && opportunityAccess?.assignment?.isManager)) && (activeStep === 0 || activeStep === 1);
+    const canEditPresalesAssignment = !baseAssignmentLock && (isActiveAdmin || activeRoleName === "presales" || activeRoleName === "sales" || (activeRoleName === "manager" && opportunityAccess?.assignment?.isManager)) && (activeStep === 0 || activeStep === 1);
 
     // Technology multiselect state
     const [techDropdownOpen, setTechDropdownOpen] = useState(false);
@@ -893,6 +894,11 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     technology: data.technology || "",
                     tentativeStartDate: data.tentativeStartDate ? new Date(data.tentativeStartDate).toISOString().split('T')[0] : "",
                     tentativeEndDate: data.tentativeEndDate ? new Date(data.tentativeEndDate).toISOString().split('T')[0] : "",
+                    expectedCloseDate: data.expectedCloseDate
+                        ? new Date(data.expectedCloseDate).toISOString().split('T')[0]
+                        : (data.tentativeStartDate
+                            ? (() => { const d = new Date(data.tentativeStartDate); d.setDate(d.getDate() - 2); return d.toISOString().split('T')[0]; })()
+                            : ""),
                     duration: data.tentativeDuration || "",
                     durationUnit: data.tentativeDurationUnit || "months",
                     pricingModel: data.pricingModel || "",
@@ -1178,6 +1184,13 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
         if (!formData.technology || formData.technology.trim() === "") {
             toast({ title: "Validation Error", description: "Technology is required." });
+            return;
+        }
+
+        // Opportunity Close Date must be before Tentative Start Date
+        if (formData.expectedCloseDate && formData.tentativeStartDate &&
+            formData.expectedCloseDate >= formData.tentativeStartDate) {
+            toast({ title: "Validation Error", description: "Opportunity Close Date must be before the Tentative Start Date." });
             return;
         }
 
@@ -2289,6 +2302,26 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-md text-sm shadow-sm text-slate-500 cursor-not-allowed"
                             />
                             <p className="text-[10px] text-slate-400">Auto-calculated from Start Date + Duration</p>
+                        </div>
+
+                        {/* Opportunity Close Date — when we expect the deal to close (must be before the project starts) */}
+                        <div className="space-y-1.5">
+                            <label className="block text-sm font-bold text-slate-700">Opportunity Close Date</label>
+                            <input
+                                type="date"
+                                name="expectedCloseDate"
+                                value={formData.expectedCloseDate}
+                                max={formData.tentativeStartDate ? (() => { const d = new Date(formData.tentativeStartDate); d.setDate(d.getDate() - 1); return d.toISOString().split('T')[0]; })() : undefined}
+                                disabled={!(isPipelineEditable && opportunityStage < 2)}
+                                className={`w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm shadow-sm text-slate-500 ${(isPipelineEditable && opportunityStage < 2) ? 'cursor-pointer bg-white' : 'cursor-not-allowed bg-slate-50 opacity-70'}`}
+                                onChange={handleChange}
+                                onClick={(e) => { if (isPipelineEditable && opportunityStage < 2) (e.target as HTMLInputElement).showPicker?.(); }}
+                            />
+                            <p className="text-[10px] text-slate-400">
+                                {opportunityStage >= 2
+                                    ? 'Locked once the proposal is submitted.'
+                                    : 'When the deal is expected to close. Must be before the Tentative Start Date.'}
+                            </p>
                         </div>
 
                         {/* Row 5: Description & Attachments */}
