@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { sendNotificationEmail } from '../lib/email';
-import { evaluateStageChangeRules, evaluateDataConditionRules, evaluateOpportunityCreatedRules, evaluateAssignmentChangeRules, evaluateOpportunityChangeNotice, resolveCalculatedFields } from '../lib/notification-engine';
+import { evaluateStageChangeRules, evaluateDataConditionRules, evaluateOpportunityCreatedRules, evaluateAssignmentChangeRules, evaluateOpportunityChangeNotice, evaluateExtendedNotification, resolveCalculatedFields } from '../lib/notification-engine';
 import { calculateOpportunityProbability } from '../lib/opportunity-probability';
 import { buildOpportunityAccess } from '../lib/opportunity-access';
 import path from 'path';
@@ -556,6 +556,54 @@ export async function updateOpportunity(req: Request, res: Response) {
             }
         }
 
+        // ────────────────────────────────────────────────────────────────────
+        // Extended-status auto-transition.
+        // When a Sales-role user updates tentativeStartDate while the opp is
+        // already past proposal submission (Proposal / Negotiation), the deal
+        // must go back to Qualification for re-estimation with detailedStatus
+        // ='Extended'. Admins bypass this auto-transition (they may be
+        // correcting data without intending a re-estimation cycle).
+        // ────────────────────────────────────────────────────────────────────
+        const POST_SUBMIT_STAGES = new Set(['Proposal', 'Negotiation']);
+        const tentativeStartChanged =
+            body.tentativeStartDate !== undefined &&
+            (body.tentativeStartDate
+                ? new Date(body.tentativeStartDate).getTime()
+                : 0) !==
+            (previous?.tentativeStartDate
+                ? new Date(previous.tentativeStartDate).getTime()
+                : 0);
+        const actorIsSales = (req.user!.roleName || '').trim().toLowerCase() === 'sales';
+        const triggerExtended =
+            tentativeStartChanged &&
+            POST_SUBMIT_STAGES.has(prevStageNameForRule) &&
+            !isAdminActor &&
+            actorIsSales;
+
+        let autoExtended = false;
+        if (triggerExtended) {
+            const qualStage = await prisma.stage.findFirst({ where: { name: 'Qualification' } });
+            if (qualStage) {
+                // stageUpdate (built further below) will overwrite stageId — we
+                // pre-empt it here so the controller commits the move on this
+                // single update.
+                (body as any).__autoExtendedStageId = qualStage.id;
+                autoExtended = true;
+                // Auto-bump close date to (newStart − 2 days) to maintain the
+                // close < start invariant.
+                const newStart = new Date(body.tentativeStartDate);
+                if (!isNaN(newStart.getTime())) {
+                    const autoClose = new Date(newStart);
+                    autoClose.setDate(autoClose.getDate() - 2);
+                    if (body.expectedCloseDate === undefined) {
+                        body.expectedCloseDate = autoClose.toISOString().slice(0, 10);
+                    }
+                }
+            } else {
+                console.warn('[ExtendedTransition] Qualification stage not found — skipping auto-transition for opp', id);
+            }
+        }
+
         // Handle Client update if name changed
         let clientId = body.clientId;
         if (body.clientName) {
@@ -829,7 +877,16 @@ export async function updateOpportunity(req: Request, res: Response) {
                 clientId: clientId,
                 ...(body.detailedStatus !== undefined ? { detailedStatus: body.detailedStatus } : {}),
                 ...(body.isStalled !== undefined ? { isStalled: body.isStalled } : {}),
-                ...stageUpdate
+                ...stageUpdate,
+                // Extended-status auto-transition overrides (applied last so they
+                // win over any other stage/status fields in the same PATCH).
+                ...(autoExtended ? {
+                    stageId: (body as any).__autoExtendedStageId,
+                    currentStage: 'Qualification',
+                    detailedStatus: 'Extended',
+                    gomApproved: false,
+                    reEstimateCount: (previous?.reEstimateCount ?? 0) + 1,
+                } : {}),
             }
         });
 
@@ -1095,6 +1152,19 @@ export async function updateOpportunity(req: Request, res: Response) {
                     fireAssignmentEvent('presales', '', name);
                 }
             }
+        }
+
+        // Extended-status notification: fire when Sales auto-reverted the
+        // opportunity to Qualification with detailedStatus='Extended' (see
+        // the auto-transition block earlier in this handler).
+        if (autoExtended) {
+            const actor = await prisma.user.findUnique({
+                where: { id: req.user!.userId },
+                select: { name: true, email: true },
+            });
+            const actorLabel = actor?.name || actor?.email || req.user!.email || 'Sales';
+            evaluateExtendedNotification(id, actorLabel, prevStageNameForRule)
+                .catch(err => console.error('[ExtendedNotice] dispatch failed:', err));
         }
 
         // Evaluate data condition rules on every update

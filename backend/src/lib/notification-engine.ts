@@ -1005,6 +1005,374 @@ export async function evaluateStaleOpportunityReminders(
   return result;
 }
 
+/* -------------------------------------------------------------------------
+ * Start-date approaching reminders (time-driven, triggerType="start_date_approaching")
+ *
+ * Daily scan. For every active rule with triggerType=start_date_approaching,
+ * read the day window from conditions (field="daysToStartDate", operator="lte"
+ * or "lt"; default 7) and find every open opportunity whose tentativeStartDate
+ * falls between today and today + N days. Send a reminder asking sales to
+ * confirm or update the start date.
+ *
+ * Recipients (dynamic; rule.recipientRolesCc adds extras):
+ *   To: Sales rep (falls back to owner)
+ *   Cc: manager + presales assignees + owner (deduped)
+ *
+ * Cooldown stamp lives at opportunity.metadata.lastStartDateReminderAt so we
+ * don't double-send within a 20h window.
+ * ------------------------------------------------------------------------- */
+
+function extractDaysWindow(conditions: any, fieldName: string, fallback: number): number {
+  if (!Array.isArray(conditions)) return fallback;
+  const cond = conditions.find((c: any) => c?.field === fieldName);
+  if (!cond) return fallback;
+  const n = Number(cond.value);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+export interface StartDateReminderResult {
+  rulesEvaluated: number;
+  scanned: number;
+  reminded: number;
+  skippedClosed: number;
+  skippedNoStartDate: number;
+  skippedRecent: number;
+  skippedNoRecipients: number;
+}
+
+export async function evaluateStartDateApproachingReminders(): Promise<StartDateReminderResult> {
+  const rules = await prisma.notificationRule.findMany({
+    where: { isActive: true, triggerType: 'start_date_approaching' },
+  });
+
+  const result: StartDateReminderResult = {
+    rulesEvaluated: rules.length,
+    scanned: 0,
+    reminded: 0,
+    skippedClosed: 0,
+    skippedNoStartDate: 0,
+    skippedRecent: 0,
+    skippedNoRecipients: 0,
+  };
+
+  if (rules.length === 0) {
+    console.log('[StartDateReminder] no active start_date_approaching rules — skipping');
+    return result;
+  }
+
+  const now = new Date();
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  const cooldownDate = new Date(now.getTime() - 20 * 3600000);
+
+  for (const rule of rules) {
+    const daysWindow = extractDaysWindow(rule.conditions, 'daysToStartDate', 7);
+    const channels = (rule.channels as string[]) || [];
+    const sendEmail = channels.includes('email');
+    const sendInApp = channels.includes('in_app');
+    const ccRoles = ((rule as any).recipientRolesCc as string[]) || [];
+
+    const windowEnd = new Date(today.getTime() + daysWindow * 86400000);
+    const approaching = await prisma.opportunity.findMany({
+      where: {
+        tentativeStartDate: { gte: today, lte: windowEnd },
+      },
+      select: {
+        id: true, title: true, currentStage: true, ownerId: true,
+        metadata: true, salesRepName: true, managerName: true, presalesAssigneeName: true,
+        currency: true, value: true, tentativeStartDate: true, expectedCloseDate: true,
+        client: { select: { name: true } },
+        owner: { select: { id: true, email: true, name: true, muteNotification: true } },
+        stage: { select: { name: true } },
+      },
+    });
+    result.scanned += approaching.length;
+
+    for (const opp of approaching) {
+      const stageName = opp.stage?.name || opp.currentStage || '';
+      if (CLOSED_STAGES_FOR_REMINDER.has(stageName)) {
+        result.skippedClosed += 1;
+        continue;
+      }
+      if (!opp.tentativeStartDate) {
+        result.skippedNoStartDate += 1;
+        continue;
+      }
+
+      const meta = (opp.metadata as any) || {};
+      const lastSent = meta?.lastStartDateReminderAt ? new Date(meta.lastStartDateReminderAt) : null;
+      if (lastSent && lastSent > cooldownDate) {
+        result.skippedRecent += 1;
+        continue;
+      }
+
+      // Build "involved" set
+      const involved: { id: string; email: string; name: string; role: 'owner' | 'sales' | 'manager' | 'presales' }[] = [];
+      const seen = new Set<string>();
+      const addInvolved = (u: { id: string; email: string; name: string; muteNotification?: boolean } | null, role: 'owner' | 'sales' | 'manager' | 'presales') => {
+        if (!u || u.muteNotification || seen.has(u.id)) return;
+        seen.add(u.id);
+        involved.push({ id: u.id, email: u.email, name: u.name, role });
+      };
+      addInvolved(opp.owner, 'owner');
+      addInvolved(await resolveUserByName(opp.salesRepName), 'sales');
+      addInvolved(await resolveUserByName(opp.managerName), 'manager');
+      for (const pname of (opp.presalesAssigneeName || '').split(',').map(s => s.trim()).filter(Boolean)) {
+        addInvolved(await resolveUserByName(pname), 'presales');
+      }
+      if (involved.length === 0) {
+        result.skippedNoRecipients += 1;
+        continue;
+      }
+
+      // To = Sales rep (fallback owner); Cc = the rest
+      let toUsers = involved.filter(u => u.role === 'sales');
+      if (toUsers.length === 0) toUsers = involved.filter(u => u.role === 'owner');
+      if (toUsers.length === 0) toUsers = [involved[0]];
+      const toIds = new Set(toUsers.map(u => u.id));
+      const ccUsers = involved.filter(u => !toIds.has(u.id));
+
+      // rule.recipientRolesCc -> extra opp-scoped CCs (e.g. Admin global pool)
+      let extraCcUsers: typeof ccUsers = [];
+      if (ccRoles.length > 0) {
+        try {
+          const extra = await resolveAssignedRecipients(opp.id, ccRoles, null);
+          extraCcUsers = extra
+            .filter(u => !toIds.has(u.id))
+            .filter(u => !ccUsers.find(c => c.id === u.id))
+            .map(u => ({ id: u.id, email: u.email, name: u.name, role: 'owner' as const }));
+        } catch { /* ignore */ }
+      }
+      const allCcUsers = [...ccUsers, ...extraCcUsers];
+
+      const startDateStr = opp.tentativeStartDate.toISOString().slice(0, 10);
+      const daysToStart = Math.max(0, Math.ceil((opp.tentativeStartDate.getTime() - today.getTime()) / 86400000));
+      const oppLink = `${process.env.FRONTEND_URL || 'https://qcrm.qbadvisory.com'}/dashboard/opportunities/${opp.id}`;
+      const oppCurrency = opp.currency || 'USD';
+
+      const variables: Record<string, string> = {
+        opportunityTitle: opp.title,
+        opportunityId: opp.id,
+        client: opp.client?.name || '',
+        clientName: opp.client?.name || '',
+        stage: stageName,
+        stageName,
+        currentStage: stageName,
+        owner: opp.owner?.name || '',
+        ownerName: opp.owner?.name || '',
+        salesRep: opp.salesRepName || '',
+        salesRepName: opp.salesRepName || '',
+        manager: opp.managerName || '',
+        managerName: opp.managerName || '',
+        presales: opp.presalesAssigneeName || '',
+        tentativeStartDate: startDateStr,
+        daysToStartDate: String(daysToStart),
+        expectedCloseDate: opp.expectedCloseDate ? new Date(opp.expectedCloseDate).toISOString().slice(0, 10) : '',
+        value: opp.value != null ? fmtNum(Number(opp.value)) : '',
+        currency: oppCurrency,
+        opportunityLink: oppLink,
+      };
+
+      const title = rule.titleTemplate
+        ? renderTemplate(rule.titleTemplate, variables)
+        : `Start date in ${daysToStart} day${daysToStart === 1 ? '' : 's'}: "${opp.title}"`;
+      const message = rule.messageTemplate
+        ? renderTemplate(rule.messageTemplate, variables)
+        : `Tentative Start Date ${startDateStr} is approaching — confirm or update.`;
+
+      if (sendEmail) {
+        const eventKey = rule.emailTemplateKey || 'start_date_approaching';
+        await sendNotificationEmail(
+          eventKey,
+          toUsers.map(u => u.email),
+          toUsers.map(u => u.name).join(', '),
+          variables,
+          allCcUsers.map(u => u.email)
+        ).catch(err => console.error('[StartDateReminder] email send failed:', err));
+      }
+      if (sendInApp) {
+        for (const u of [...toUsers, ...allCcUsers]) {
+          await prisma.notification.create({
+            data: {
+              type: 'start_date_approaching',
+              title,
+              message,
+              link: `/dashboard/opportunities/${opp.id}`,
+              userId: u.id,
+            },
+          });
+        }
+      }
+
+      await prisma.opportunity.update({
+        where: { id: opp.id },
+        data: { metadata: { ...meta, lastStartDateReminderAt: now.toISOString() } },
+      });
+
+      result.reminded += 1;
+      console.log(`[StartDateReminder] rule="${rule.name}" opp=${opp.id} "${opp.title}" startsIn=${daysToStart}d to=${toUsers.length} cc=${allCcUsers.length}`);
+    }
+  }
+
+  console.log(`[StartDateReminder] scan complete: rules=${result.rulesEvaluated} scanned=${result.scanned} reminded=${result.reminded} skippedClosed=${result.skippedClosed} skippedNoStartDate=${result.skippedNoStartDate} skippedRecent=${result.skippedRecent} skippedNoRecipients=${result.skippedNoRecipients}`);
+  return result;
+}
+
+/* -------------------------------------------------------------------------
+ * "Opportunity Extended" event notification (event-driven,
+ * triggerType="opportunity_extended").
+ *
+ * Fired by the opportunities PATCH handler when a Sales-role user updates
+ * tentativeStartDate on an opportunity whose stage is post-proposal
+ * (Proposal / Negotiation). The PATCH handler is responsible for the workflow
+ * changes (stage->Qualification, detailedStatus='Extended', gomApproved=false,
+ * reEstimateCount++, close-date auto-bump). This function only handles the
+ * notification side.
+ *
+ * Recipients (dynamic; rule.recipientRolesCc adds extras):
+ *   To: Presales assignee(s) (fallback Manager, then Sales rep, then Owner)
+ *   Cc: Sales rep + Manager + Owner (the rest of the involved set)
+ * ------------------------------------------------------------------------- */
+
+export async function evaluateExtendedNotification(opportunityId: string, updatedByName: string, previousStage: string): Promise<void> {
+  try {
+    const rules = await prisma.notificationRule.findMany({
+      where: { isActive: true, triggerType: 'opportunity_extended' },
+    });
+    if (rules.length === 0) {
+      console.log('[ExtendedNotice] no active opportunity_extended rules — skipping');
+      return;
+    }
+
+    const opp = await prisma.opportunity.findUnique({
+      where: { id: opportunityId },
+      select: {
+        id: true, title: true, currentStage: true, detailedStatus: true,
+        salesRepName: true, managerName: true, presalesAssigneeName: true,
+        currency: true, value: true, tentativeStartDate: true, expectedCloseDate: true,
+        reEstimateCount: true,
+        client: { select: { name: true } },
+        owner: { select: { id: true, email: true, name: true, muteNotification: true } },
+        stage: { select: { name: true } },
+      },
+    });
+    if (!opp) return;
+
+    for (const rule of rules) {
+      const channels = (rule.channels as string[]) || [];
+      const sendEmail = channels.includes('email');
+      const sendInApp = channels.includes('in_app');
+      const ccRoles = ((rule as any).recipientRolesCc as string[]) || [];
+
+      // Build "involved" set
+      const involved: { id: string; email: string; name: string; role: 'owner' | 'sales' | 'manager' | 'presales' }[] = [];
+      const seen = new Set<string>();
+      const addInvolved = (u: { id: string; email: string; name: string; muteNotification?: boolean } | null, role: 'owner' | 'sales' | 'manager' | 'presales') => {
+        if (!u || u.muteNotification || seen.has(u.id)) return;
+        seen.add(u.id);
+        involved.push({ id: u.id, email: u.email, name: u.name, role });
+      };
+      addInvolved(opp.owner, 'owner');
+      addInvolved(await resolveUserByName(opp.salesRepName), 'sales');
+      addInvolved(await resolveUserByName(opp.managerName), 'manager');
+      for (const pname of (opp.presalesAssigneeName || '').split(',').map(s => s.trim()).filter(Boolean)) {
+        addInvolved(await resolveUserByName(pname), 'presales');
+      }
+      if (involved.length === 0) continue;
+
+      // To = Presales (fallback Manager, Sales, Owner); Cc = the rest
+      let toUsers = involved.filter(u => u.role === 'presales');
+      if (toUsers.length === 0) toUsers = involved.filter(u => u.role === 'manager');
+      if (toUsers.length === 0) toUsers = involved.filter(u => u.role === 'sales');
+      if (toUsers.length === 0) toUsers = involved.filter(u => u.role === 'owner');
+      if (toUsers.length === 0) toUsers = [involved[0]];
+      const toIds = new Set(toUsers.map(u => u.id));
+      const ccUsers = involved.filter(u => !toIds.has(u.id));
+
+      let extraCcUsers: typeof ccUsers = [];
+      if (ccRoles.length > 0) {
+        try {
+          const extra = await resolveAssignedRecipients(opp.id, ccRoles, null);
+          extraCcUsers = extra
+            .filter(u => !toIds.has(u.id))
+            .filter(u => !ccUsers.find(c => c.id === u.id))
+            .map(u => ({ id: u.id, email: u.email, name: u.name, role: 'owner' as const }));
+        } catch { /* ignore */ }
+      }
+      const allCcUsers = [...ccUsers, ...extraCcUsers];
+
+      const stageName = opp.stage?.name || opp.currentStage || '';
+      const newStartStr = opp.tentativeStartDate ? opp.tentativeStartDate.toISOString().slice(0, 10) : '';
+      const closeStr = opp.expectedCloseDate ? opp.expectedCloseDate.toISOString().slice(0, 10) : '';
+      const oppLink = `${process.env.FRONTEND_URL || 'https://qcrm.qbadvisory.com'}/dashboard/opportunities/${opp.id}`;
+      const oppCurrency = opp.currency || 'USD';
+
+      const variables: Record<string, string> = {
+        opportunityTitle: opp.title,
+        opportunityId: opp.id,
+        client: opp.client?.name || '',
+        clientName: opp.client?.name || '',
+        stage: stageName,
+        stageName,
+        currentStage: stageName,
+        previousStage,
+        detailedStatus: opp.detailedStatus || 'Extended',
+        salesRep: opp.salesRepName || '',
+        salesRepName: opp.salesRepName || '',
+        manager: opp.managerName || '',
+        managerName: opp.managerName || '',
+        presales: opp.presalesAssigneeName || '',
+        owner: opp.owner?.name || '',
+        ownerName: opp.owner?.name || '',
+        updatedBy: updatedByName,
+        updatedByName,
+        tentativeStartDate: newStartStr,
+        newStartDate: newStartStr,
+        expectedCloseDate: closeStr,
+        reEstimateCount: String(opp.reEstimateCount ?? 0),
+        value: opp.value != null ? fmtNum(Number(opp.value)) : '',
+        currency: oppCurrency,
+        opportunityLink: oppLink,
+      };
+
+      const title = rule.titleTemplate
+        ? renderTemplate(rule.titleTemplate, variables)
+        : `Opportunity Extended: "${opp.title}"`;
+      const message = rule.messageTemplate
+        ? renderTemplate(rule.messageTemplate, variables)
+        : `${updatedByName} updated Tentative Start Date to ${newStartStr}. Status moved to Extended; please re-estimate to match GOM%.`;
+
+      if (sendEmail) {
+        const eventKey = rule.emailTemplateKey || 'opportunity_extended';
+        await sendNotificationEmail(
+          eventKey,
+          toUsers.map(u => u.email),
+          toUsers.map(u => u.name).join(', '),
+          variables,
+          allCcUsers.map(u => u.email)
+        ).catch(err => console.error('[ExtendedNotice] email send failed:', err));
+      }
+      if (sendInApp) {
+        for (const u of [...toUsers, ...allCcUsers]) {
+          await prisma.notification.create({
+            data: {
+              type: 'opportunity_extended',
+              title,
+              message,
+              link: `/dashboard/opportunities/${opp.id}`,
+              userId: u.id,
+            },
+          });
+        }
+      }
+
+      console.log(`[ExtendedNotice] rule="${rule.name}" opp=${opp.id} "${opp.title}" to=${toUsers.length} cc=${allCcUsers.length}`);
+    }
+  } catch (err) {
+    console.error('[ExtendedNotice] error:', err);
+  }
+}
+
 /**
  * Evaluate data condition rules against an opportunity.
  * Called after opportunity updates.
