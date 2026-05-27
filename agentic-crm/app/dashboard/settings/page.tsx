@@ -4065,7 +4065,9 @@ const TRIGGER_TYPES = [
     { value: "assignment_change", label: "Assignment Change", description: "When Sales Rep / Manager / Presales is reassigned" },
     { value: "data_condition", label: "Data Condition", description: "When opportunity data matches a condition" },
     { value: "approval", label: "Approval Required", description: "When an approval action is needed" },
-    { value: "stalled_deal", label: "Stalled Deal", description: "When a deal stays too long in a stage" },
+    { value: "stalled_deal", label: "Stalled Deal", description: "When a deal has had no update in N days (time-driven)" },
+    { value: "start_date_approaching", label: "Start Date Approaching", description: "Tentative Start Date is within N days of today (time-driven)" },
+    { value: "opportunity_extended", label: "Opportunity Extended", description: "Sales moved Start Date on a submitted deal — auto re-estimate" },
     { value: "health_drop", label: "Health Score Drop", description: "When deal health score drops" },
 ];
 
@@ -4083,6 +4085,7 @@ const CONDITION_FIELDS = [
     { value: "healthScore", label: "Health Score", type: "number" },
     { value: "daysInStage", label: "Days in Stage", type: "number" },
     { value: "daysSinceUpdate", label: "Days Since Last Update", type: "number" },
+    { value: "daysToStartDate", label: "Days Until Start Date", type: "number" },
     { value: "stage", label: "Stage", type: "select", options: STAGES },
     { value: "technology", label: "Technology", type: "text" },
     { value: "region", label: "Region", type: "text" },
@@ -4542,7 +4545,7 @@ function NotificationRulesTab() {
                                     <div className="mt-3">
                                         <label className="block text-xs font-medium text-slate-700 mb-1.5">Trigger Type</label>
                                         <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                                            {TRIGGER_TYPES.filter(t => ['stalled_deal', 'health_drop', 'data_condition'].includes(t.value)).map(t => (
+                                            {TRIGGER_TYPES.filter(t => ['stalled_deal', 'start_date_approaching', 'health_drop', 'data_condition'].includes(t.value)).map(t => (
                                                 <button
                                                     key={t.value}
                                                     type="button"

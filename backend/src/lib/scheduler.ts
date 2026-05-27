@@ -1,8 +1,27 @@
-import { evaluateStaleOpportunityReminders } from './notification-engine';
+import {
+  evaluateStaleOpportunityReminders,
+  evaluateStartDateApproachingReminders,
+} from './notification-engine';
 
 // Process-wide guard so we never start the scheduler twice if this module is
 // imported more than once (e.g. ts-node-dev hot reload).
 let started = false;
+
+/**
+ * Time-driven job registry. Every entry binds a NotificationRule.triggerType
+ * value to its evaluator. To add a new time-driven category:
+ *   1. Implement an evaluator in notification-engine.ts that reads its own
+ *      active rules (isActive=true, triggerType=<X>) and is a no-op when none.
+ *   2. Append it here.
+ *   3. Seed (or let admin create) the EmailTemplate + NotificationRule for
+ *      that triggerType.
+ * No code changes are needed to add/remove instances of an existing
+ * triggerType — admins manage those in Settings -> Notifications.
+ */
+const TIME_DRIVEN_JOBS: { triggerType: string; evaluator: () => Promise<unknown> }[] = [
+  { triggerType: 'stalled_deal', evaluator: evaluateStaleOpportunityReminders },
+  { triggerType: 'start_date_approaching', evaluator: evaluateStartDateApproachingReminders },
+];
 
 /**
  * Parse "HH:MM" (24-hour, server local time) into {hours, minutes}.
@@ -59,20 +78,33 @@ export function startScheduledJobs(): void {
   if (started) return;
   started = true;
 
-  const enabled = (process.env.STALE_REMINDER_ENABLED || 'true').toLowerCase() !== 'false';
+  // Master switch — disables the entire time-driven scheduler.
+  const enabled = (process.env.TIME_DRIVEN_JOBS_ENABLED || process.env.STALE_REMINDER_ENABLED || 'true').toLowerCase() !== 'false';
   if (!enabled) {
-    console.log('[Scheduler] stale-reminder job disabled via STALE_REMINDER_ENABLED=false');
+    console.log('[Scheduler] time-driven jobs disabled via env');
     return;
   }
 
-  const { hours, minutes } = parseTimeOfDay(process.env.STALE_REMINDER_DAILY_AT);
+  // Single daily fire-time for all time-driven jobs. Per-job behaviour
+  // (threshold, recipients, template, channels, enable/disable) lives in
+  // NotificationRule rows managed by Admin > Notifications.
+  const { hours, minutes } = parseTimeOfDay(
+    process.env.TIME_DRIVEN_JOBS_DAILY_AT || process.env.STALE_REMINDER_DAILY_AT
+  );
   const hhmm = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
 
-  // Threshold/recipients/template/channels come from active NotificationRule
-  // rows with triggerType='stalled_deal' — managed by Admin in Settings.
-  scheduleDailyAt('stale-reminder', hours, minutes, async () => {
-    await evaluateStaleOpportunityReminders();
+  scheduleDailyAt('time-driven-jobs', hours, minutes, async () => {
+    for (const job of TIME_DRIVEN_JOBS) {
+      try {
+        console.log(`[Scheduler] running job triggerType=${job.triggerType}`);
+        await job.evaluator();
+      } catch (err) {
+        console.error(`[Scheduler] job triggerType=${job.triggerType} failed:`, err);
+      }
+    }
   });
 
-  console.log(`[Scheduler] stale-reminder armed: daily-at=${hhmm} (server local time) — config sourced from Admin > Notifications`);
+  console.log(
+    `[Scheduler] time-driven jobs armed: daily-at=${hhmm} (server local) — ${TIME_DRIVEN_JOBS.length} job(s) registered: ${TIME_DRIVEN_JOBS.map(j => j.triggerType).join(', ')}`
+  );
 }
