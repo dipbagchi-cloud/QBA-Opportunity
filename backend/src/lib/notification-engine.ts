@@ -1219,6 +1219,255 @@ export async function evaluateStartDateApproachingReminders(): Promise<StartDate
 }
 
 /* -------------------------------------------------------------------------
+ * Start-date overdue workflow (time-driven, triggerType="start_date_overdue")
+ *
+ * Daily scan. For every active rule with triggerType=start_date_overdue, find
+ * every opportunity whose tentativeStartDate has slipped past today AND is
+ * still open (any stage other than Closed Won / Closed-Won / Closed Lost /
+ * Proposal Lost / Delivered).
+ *
+ * Workflow actions when an overdue is detected and the opportunity is not
+ * already in Qualification + Extended:
+ *   - currentStage      -> Qualification
+ *   - detailedStatus    -> "Extended"
+ *   - gomApproved       -> false (re-approval required after re-estimation)
+ *   - reEstimateCount++
+ *   - tentativeDuration / tentativeDurationUnit untouched (per spec:
+ *     "reevaluate of the same duration")
+ *
+ * Then send a daily notification asking Sales to update the revised start
+ * date. Recipients (dynamic; rule.recipientRolesCc adds extras):
+ *   To: Sales rep (fallback owner)
+ *   Cc: manager + presales assignees + owner (deduped)
+ *
+ * Cooldown lives at opportunity.metadata.lastOverdueStartReminderAt so we
+ * don't re-notify within a 20h window if the job runs more than once a day.
+ * ------------------------------------------------------------------------- */
+
+export interface StartDateOverdueResult {
+  rulesEvaluated: number;
+  scanned: number;
+  reverted: number;
+  notified: number;
+  skippedClosed: number;
+  skippedNoStartDate: number;
+  skippedRecent: number;
+  skippedNoRecipients: number;
+}
+
+export async function evaluateStartDateOverdueWorkflow(): Promise<StartDateOverdueResult> {
+  const rules = await prisma.notificationRule.findMany({
+    where: { isActive: true, triggerType: 'start_date_overdue' },
+  });
+
+  const result: StartDateOverdueResult = {
+    rulesEvaluated: rules.length,
+    scanned: 0,
+    reverted: 0,
+    notified: 0,
+    skippedClosed: 0,
+    skippedNoStartDate: 0,
+    skippedRecent: 0,
+    skippedNoRecipients: 0,
+  };
+
+  if (rules.length === 0) {
+    console.log('[StartDateOverdue] no active start_date_overdue rules — skipping');
+    return result;
+  }
+
+  const now = new Date();
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  const cooldownDate = new Date(now.getTime() - 20 * 3600000);
+
+  // Resolve Qualification stage once per run.
+  const qualStage = await prisma.stage.findFirst({ where: { name: 'Qualification' } });
+  if (!qualStage) {
+    console.warn('[StartDateOverdue] Qualification stage not found — cannot perform auto-revert; skipping rule run');
+    return result;
+  }
+
+  for (const rule of rules) {
+    const channels = (rule.channels as string[]) || [];
+    const sendEmail = channels.includes('email');
+    const sendInApp = channels.includes('in_app');
+    const ccRoles = ((rule as any).recipientRolesCc as string[]) || [];
+
+    const overdue = await prisma.opportunity.findMany({
+      where: { tentativeStartDate: { lt: today, not: null } },
+      select: {
+        id: true, title: true, currentStage: true, detailedStatus: true,
+        gomApproved: true, reEstimateCount: true, ownerId: true, metadata: true,
+        salesRepName: true, managerName: true, presalesAssigneeName: true,
+        currency: true, value: true, tentativeStartDate: true, expectedCloseDate: true,
+        tentativeDuration: true, tentativeDurationUnit: true,
+        client: { select: { name: true } },
+        owner: { select: { id: true, email: true, name: true, muteNotification: true } },
+        stage: { select: { name: true } },
+      },
+    });
+    result.scanned += overdue.length;
+
+    for (const opp of overdue) {
+      const stageName = opp.stage?.name || opp.currentStage || '';
+      if (CLOSED_STAGES_FOR_REMINDER.has(stageName)) {
+        result.skippedClosed += 1;
+        continue;
+      }
+      if (!opp.tentativeStartDate) {
+        result.skippedNoStartDate += 1;
+        continue;
+      }
+
+      const meta = (opp.metadata as any) || {};
+      const lastSent = meta?.lastOverdueStartReminderAt ? new Date(meta.lastOverdueStartReminderAt) : null;
+      if (lastSent && lastSent > cooldownDate) {
+        result.skippedRecent += 1;
+        continue;
+      }
+
+      const daysOverdue = Math.max(1, Math.ceil((today.getTime() - opp.tentativeStartDate.getTime()) / 86400000));
+      const previousStage = stageName;
+
+      // Workflow auto-revert: move to Qualification + Extended status unless
+      // already there. Always reset gomApproved on detection (a passed start
+      // date invalidates any prior approval).
+      const alreadyExtendedInQual = stageName === 'Qualification' && opp.detailedStatus === 'Extended';
+      if (!alreadyExtendedInQual) {
+        await prisma.opportunity.update({
+          where: { id: opp.id },
+          data: {
+            stageId: qualStage.id,
+            currentStage: 'Qualification',
+            detailedStatus: 'Extended',
+            gomApproved: false,
+            reEstimateCount: (opp.reEstimateCount ?? 0) + 1,
+          },
+        });
+        result.reverted += 1;
+        console.log(`[StartDateOverdue] reverted opp=${opp.id} "${opp.title}" prev=${previousStage} overdueBy=${daysOverdue}d`);
+      }
+
+      // Build "involved" set for notification dispatch
+      const involved: { id: string; email: string; name: string; role: 'owner' | 'sales' | 'manager' | 'presales' }[] = [];
+      const seen = new Set<string>();
+      const addInvolved = (u: { id: string; email: string; name: string; muteNotification?: boolean } | null, role: 'owner' | 'sales' | 'manager' | 'presales') => {
+        if (!u || u.muteNotification || seen.has(u.id)) return;
+        seen.add(u.id);
+        involved.push({ id: u.id, email: u.email, name: u.name, role });
+      };
+      addInvolved(opp.owner, 'owner');
+      addInvolved(await resolveUserByName(opp.salesRepName), 'sales');
+      addInvolved(await resolveUserByName(opp.managerName), 'manager');
+      for (const pname of (opp.presalesAssigneeName || '').split(',').map(s => s.trim()).filter(Boolean)) {
+        addInvolved(await resolveUserByName(pname), 'presales');
+      }
+      if (involved.length === 0) {
+        result.skippedNoRecipients += 1;
+        continue;
+      }
+
+      // To = Sales rep (fallback owner); Cc = the rest
+      let toUsers = involved.filter(u => u.role === 'sales');
+      if (toUsers.length === 0) toUsers = involved.filter(u => u.role === 'owner');
+      if (toUsers.length === 0) toUsers = [involved[0]];
+      const toIds = new Set(toUsers.map(u => u.id));
+      const ccUsers = involved.filter(u => !toIds.has(u.id));
+
+      let extraCcUsers: typeof ccUsers = [];
+      if (ccRoles.length > 0) {
+        try {
+          const extra = await resolveAssignedRecipients(opp.id, ccRoles, null);
+          extraCcUsers = extra
+            .filter(u => !toIds.has(u.id))
+            .filter(u => !ccUsers.find(c => c.id === u.id))
+            .map(u => ({ id: u.id, email: u.email, name: u.name, role: 'owner' as const }));
+        } catch { /* ignore */ }
+      }
+      const allCcUsers = [...ccUsers, ...extraCcUsers];
+
+      const startDateStr = opp.tentativeStartDate.toISOString().slice(0, 10);
+      const oppLink = `${process.env.FRONTEND_URL || 'https://qcrm.qbadvisory.com'}/dashboard/opportunities/${opp.id}`;
+      const oppCurrency = opp.currency || 'USD';
+      const durationStr = opp.tentativeDuration
+        ? `${opp.tentativeDuration} ${opp.tentativeDurationUnit || ''}`.trim()
+        : '';
+
+      const variables: Record<string, string> = {
+        opportunityTitle: opp.title,
+        opportunityId: opp.id,
+        client: opp.client?.name || '',
+        clientName: opp.client?.name || '',
+        stage: 'Qualification',
+        stageName: 'Qualification',
+        currentStage: 'Qualification',
+        previousStage,
+        detailedStatus: 'Extended',
+        owner: opp.owner?.name || '',
+        ownerName: opp.owner?.name || '',
+        salesRep: opp.salesRepName || '',
+        salesRepName: opp.salesRepName || '',
+        manager: opp.managerName || '',
+        managerName: opp.managerName || '',
+        presales: opp.presalesAssigneeName || '',
+        tentativeStartDate: startDateStr,
+        oldStartDate: startDateStr,
+        daysOverdue: String(daysOverdue),
+        tentativeDuration: opp.tentativeDuration || '',
+        tentativeDurationUnit: opp.tentativeDurationUnit || '',
+        duration: durationStr,
+        reEstimateCount: String(opp.reEstimateCount ?? 0),
+        expectedCloseDate: opp.expectedCloseDate ? new Date(opp.expectedCloseDate).toISOString().slice(0, 10) : '',
+        value: opp.value != null ? fmtNum(Number(opp.value)) : '',
+        currency: oppCurrency,
+        opportunityLink: oppLink,
+      };
+
+      const title = rule.titleTemplate
+        ? renderTemplate(rule.titleTemplate, variables)
+        : `Start date overdue by ${daysOverdue} day${daysOverdue === 1 ? '' : 's'}: "${opp.title}"`;
+      const message = rule.messageTemplate
+        ? renderTemplate(rule.messageTemplate, variables)
+        : `Start date ${startDateStr} has passed — please update with revised date. Opportunity moved back to Qualification for re-estimation.`;
+
+      if (sendEmail) {
+        const eventKey = rule.emailTemplateKey || 'start_date_overdue';
+        await sendNotificationEmail(
+          eventKey,
+          toUsers.map(u => u.email),
+          toUsers.map(u => u.name).join(', '),
+          variables,
+          allCcUsers.map(u => u.email)
+        ).catch(err => console.error('[StartDateOverdue] email send failed:', err));
+      }
+      if (sendInApp) {
+        for (const u of [...toUsers, ...allCcUsers]) {
+          await prisma.notification.create({
+            data: {
+              type: 'start_date_overdue',
+              title,
+              message,
+              link: `/dashboard/opportunities/${opp.id}`,
+              userId: u.id,
+            },
+          });
+        }
+      }
+
+      await prisma.opportunity.update({
+        where: { id: opp.id },
+        data: { metadata: { ...meta, lastOverdueStartReminderAt: now.toISOString() } },
+      });
+      result.notified += 1;
+    }
+  }
+
+  console.log(`[StartDateOverdue] scan complete: rules=${result.rulesEvaluated} scanned=${result.scanned} reverted=${result.reverted} notified=${result.notified} skippedClosed=${result.skippedClosed} skippedNoStartDate=${result.skippedNoStartDate} skippedRecent=${result.skippedRecent} skippedNoRecipients=${result.skippedNoRecipients}`);
+  return result;
+}
+
+/* -------------------------------------------------------------------------
  * "Opportunity Extended" event notification (event-driven,
  * triggerType="opportunity_extended").
  *

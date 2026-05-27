@@ -4067,6 +4067,7 @@ const TRIGGER_TYPES = [
     { value: "approval", label: "Approval Required", description: "When an approval action is needed" },
     { value: "stalled_deal", label: "Stalled Deal", description: "When a deal has had no update in N days (time-driven)" },
     { value: "start_date_approaching", label: "Start Date Approaching", description: "Tentative Start Date is within N days of today (time-driven)" },
+    { value: "start_date_overdue", label: "Start Date Overdue", description: "Tentative Start Date has passed — auto-revert to Qualification + ask Sales for new date (time-driven)" },
     { value: "opportunity_extended", label: "Opportunity Extended", description: "Sales moved Start Date on a submitted deal — auto re-estimate" },
     { value: "health_drop", label: "Health Score Drop", description: "When deal health score drops" },
 ];
@@ -4545,7 +4546,7 @@ function NotificationRulesTab() {
                                     <div className="mt-3">
                                         <label className="block text-xs font-medium text-slate-700 mb-1.5">Trigger Type</label>
                                         <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                                            {TRIGGER_TYPES.filter(t => ['stalled_deal', 'start_date_approaching', 'health_drop', 'data_condition'].includes(t.value)).map(t => (
+                                            {TRIGGER_TYPES.filter(t => ['stalled_deal', 'start_date_approaching', 'start_date_overdue', 'health_drop', 'data_condition'].includes(t.value)).map(t => (
                                                 <button
                                                     key={t.value}
                                                     type="button"
