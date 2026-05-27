@@ -1,6 +1,7 @@
 import {
   evaluateStaleOpportunityReminders,
   evaluateStartDateApproachingReminders,
+  evaluateStartDateOverdueWorkflow,
 } from './notification-engine';
 
 // Process-wide guard so we never start the scheduler twice if this module is
@@ -21,6 +22,10 @@ let started = false;
 const TIME_DRIVEN_JOBS: { triggerType: string; evaluator: () => Promise<unknown> }[] = [
   { triggerType: 'stalled_deal', evaluator: evaluateStaleOpportunityReminders },
   { triggerType: 'start_date_approaching', evaluator: evaluateStartDateApproachingReminders },
+  // start_date_overdue runs AFTER start_date_approaching so a deal that
+  // crosses today on the same day the scheduler fires is handled once as
+  // overdue (not twice — first as approaching, then as overdue).
+  { triggerType: 'start_date_overdue', evaluator: evaluateStartDateOverdueWorkflow },
 ];
 
 /**
