@@ -735,6 +735,221 @@ ${changesHtml}
 }
 
 /**
+ * Stale-opportunity reminders.
+ *
+ * Finds every open opportunity (not Closed Won / Closed Lost / Proposal Lost /
+ * Delivered) whose updatedAt is older than the threshold (default 3 days) and
+ * emails the people involved. The current stage's owner sits in TO; every
+ * other involved party (owner / sales rep / manager / presales assignees) is
+ * CC'd. Idempotent per opportunity per day — the last reminder timestamp is
+ * stored on opportunity.metadata.lastStaleReminderAt so the same deal isn't
+ * notified twice in the same 24-hour window if the job runs more than once.
+ *
+ * Stage → primary owner mapping ("To"):
+ *   Pipeline / Discovery          → Sales rep (else owner)
+ *   Qualification / Presales      → Presales assignee(s)
+ *   Proposal / Sales / Negotiation → Sales rep (else owner)
+ *   anything else                 → owner
+ */
+const CLOSED_STAGES_FOR_REMINDER = new Set<string>([
+  'Closed Won',
+  'Closed-Won',
+  'Closed Lost',
+  'Proposal Lost',
+  'Delivered',
+]);
+
+function pickStageOwnerRole(stageName: string): 'sales' | 'presales' | 'owner' {
+  const s = (stageName || '').trim();
+  if (s === 'Qualification' || s === 'Presales') return 'presales';
+  if (s === 'Pipeline' || s === 'Discovery' || s === 'Proposal' || s === 'Sales' || s === 'Negotiation') return 'sales';
+  return 'owner';
+}
+
+export interface StaleReminderOptions {
+  thresholdDays?: number;          // default 3
+  cooldownHours?: number;          // skip if reminded within this window (default 20h)
+  dryRun?: boolean;                // log only, do not send
+}
+
+export interface StaleReminderResult {
+  scanned: number;
+  reminded: number;
+  skippedClosed: number;
+  skippedRecent: number;
+  skippedNoRecipients: number;
+}
+
+export async function evaluateStaleOpportunityReminders(
+  options: StaleReminderOptions = {}
+): Promise<StaleReminderResult> {
+  const thresholdDays = Number.isFinite(options.thresholdDays) && (options.thresholdDays as number) > 0
+    ? (options.thresholdDays as number)
+    : 3;
+  const cooldownHours = Number.isFinite(options.cooldownHours) && (options.cooldownHours as number) > 0
+    ? (options.cooldownHours as number)
+    : 20;
+  const dryRun = !!options.dryRun;
+
+  const now = new Date();
+  const thresholdDate = new Date(now.getTime() - thresholdDays * 86400000);
+  const cooldownDate = new Date(now.getTime() - cooldownHours * 3600000);
+
+  const stale = await prisma.opportunity.findMany({
+    where: {
+      updatedAt: { lt: thresholdDate },
+    },
+    select: {
+      id: true,
+      title: true,
+      currentStage: true,
+      ownerId: true,
+      updatedAt: true,
+      metadata: true,
+      salesRepName: true,
+      managerName: true,
+      presalesAssigneeName: true,
+      currency: true,
+      value: true,
+      expectedCloseDate: true,
+      client: { select: { name: true } },
+      owner: { select: { id: true, email: true, name: true, muteNotification: true } },
+      stage: { select: { name: true } },
+    },
+  });
+
+  const result: StaleReminderResult = {
+    scanned: stale.length,
+    reminded: 0,
+    skippedClosed: 0,
+    skippedRecent: 0,
+    skippedNoRecipients: 0,
+  };
+
+  for (const opp of stale) {
+    const stageName = opp.stage?.name || opp.currentStage || '';
+    if (CLOSED_STAGES_FOR_REMINDER.has(stageName)) {
+      result.skippedClosed += 1;
+      continue;
+    }
+
+    const meta = (opp.metadata as any) || {};
+    const lastSent = meta?.lastStaleReminderAt ? new Date(meta.lastStaleReminderAt) : null;
+    if (lastSent && lastSent > cooldownDate) {
+      result.skippedRecent += 1;
+      continue;
+    }
+
+    // Build the full "involved" set
+    const involved: { id: string; email: string; name: string; role: 'owner' | 'sales' | 'manager' | 'presales' }[] = [];
+    const seen = new Set<string>();
+    const addInvolved = (u: { id: string; email: string; name: string; muteNotification?: boolean } | null, role: 'owner' | 'sales' | 'manager' | 'presales') => {
+      if (!u || u.muteNotification || seen.has(u.id)) return;
+      seen.add(u.id);
+      involved.push({ id: u.id, email: u.email, name: u.name, role });
+    };
+
+    addInvolved(opp.owner, 'owner');
+    addInvolved(await resolveUserByName(opp.salesRepName), 'sales');
+    addInvolved(await resolveUserByName(opp.managerName), 'manager');
+    const presalesNames = (opp.presalesAssigneeName || '')
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean);
+    for (const pname of presalesNames) {
+      addInvolved(await resolveUserByName(pname), 'presales');
+    }
+
+    if (involved.length === 0) {
+      result.skippedNoRecipients += 1;
+      continue;
+    }
+
+    // Pick the stage owner -> TO; rest -> CC
+    const ownerRole = pickStageOwnerRole(stageName);
+    let toUsers = involved.filter(u => u.role === ownerRole);
+    if (toUsers.length === 0) {
+      // Fallback ladder: presales→sales→owner
+      if (ownerRole === 'presales') toUsers = involved.filter(u => u.role === 'sales');
+      if (toUsers.length === 0) toUsers = involved.filter(u => u.role === 'owner');
+      if (toUsers.length === 0) toUsers = [involved[0]];
+    }
+    const toIds = new Set(toUsers.map(u => u.id));
+    const ccUsers = involved.filter(u => !toIds.has(u.id));
+
+    if (toUsers.length === 0) {
+      result.skippedNoRecipients += 1;
+      continue;
+    }
+
+    const daysIdle = Math.floor((now.getTime() - opp.updatedAt.getTime()) / 86400000);
+    const oppLink = `${process.env.FRONTEND_URL || 'https://qcrm.qbadvisory.com'}/dashboard/opportunities/${opp.id}`;
+    const valueStr = opp.value != null ? `${opp.currency || 'USD'} ${fmtNum(Number(opp.value))}` : '';
+    const closeStr = opp.expectedCloseDate ? new Date(opp.expectedCloseDate).toISOString().slice(0, 10) : '';
+
+    const escape = (s: string) => String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+
+    const subject = `Q-CRM: No update in ${daysIdle} day${daysIdle === 1 ? '' : 's'} — "${opp.title}"`;
+    const html = `<div style="font-family:Arial,sans-serif;max-width:640px;margin:0 auto;padding:20px">
+<h2 style="color:#b45309;margin:0 0 16px">Stale Opportunity Reminder</h2>
+<p>This opportunity has not been updated in <strong>${daysIdle} day${daysIdle === 1 ? '' : 's'}</strong>. The current stage's owner is in the <strong>To</strong> line; everyone else involved is in <strong>Cc</strong>.</p>
+<table style="width:100%;border-collapse:collapse;margin:16px 0;font-size:14px">
+<tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;width:35%"><strong>Opportunity</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">${escape(opp.title)}</td></tr>
+<tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Client</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">${escape(opp.client?.name || '')}</td></tr>
+<tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Current Stage</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">${escape(stageName)}</td></tr>
+${valueStr ? `<tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Value</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">${escape(valueStr)}</td></tr>` : ''}
+${closeStr ? `<tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Expected Close</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">${escape(closeStr)}</td></tr>` : ''}
+<tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Last updated</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">${opp.updatedAt.toISOString().slice(0, 10)} (${daysIdle}d ago)</td></tr>
+</table>
+<p style="margin-top:20px"><a href="${oppLink}" style="background:#4f46e5;color:#fff;padding:10px 20px;text-decoration:none;border-radius:6px;display:inline-block">Open Opportunity</a></p>
+<p style="color:#64748b;font-size:12px;margin-top:24px">Automated reminder from Q-CRM. You are receiving this because you are the current stage owner or part of the opportunity assignment.</p>
+</div>`;
+
+    if (dryRun) {
+      console.log(`[StaleReminder][dry] ${opp.id} "${opp.title}" stage=${stageName} idle=${daysIdle}d to=${toUsers.map(u => u.name).join(',')} cc=${ccUsers.map(u => u.name).join(',')}`);
+    } else {
+      await sendRawEmail(
+        toUsers.map(u => u.email),
+        ccUsers.map(u => u.email),
+        subject,
+        html,
+        'stale_reminder'
+      );
+
+      for (const u of [...toUsers, ...ccUsers]) {
+        await prisma.notification.create({
+          data: {
+            type: 'stale_opportunity_reminder',
+            title: `No update in ${daysIdle} days: "${opp.title}"`,
+            message: `${stageName} stage — last updated ${opp.updatedAt.toISOString().slice(0, 10)}.`,
+            link: `/dashboard/opportunities/${opp.id}`,
+            userId: u.id,
+          },
+        });
+      }
+
+      // Stamp the cooldown marker on metadata so we don't double-send within
+      // the cooldown window if the job runs again the same day.
+      await prisma.opportunity.update({
+        where: { id: opp.id },
+        data: {
+          metadata: { ...meta, lastStaleReminderAt: now.toISOString() },
+        },
+      });
+
+      result.reminded += 1;
+      console.log(`[StaleReminder] ${opp.id} "${opp.title}" stage=${stageName} idle=${daysIdle}d to=${toUsers.length} cc=${ccUsers.length}`);
+    }
+  }
+
+  console.log(`[StaleReminder] scan complete: scanned=${result.scanned} reminded=${result.reminded} skippedClosed=${result.skippedClosed} skippedRecent=${result.skippedRecent} skippedNoRecipients=${result.skippedNoRecipients} threshold=${thresholdDays}d`);
+  return result;
+}
+
+/**
  * Evaluate data condition rules against an opportunity.
  * Called after opportunity updates.
  */
