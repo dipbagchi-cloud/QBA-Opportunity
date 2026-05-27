@@ -9,7 +9,7 @@ import fs from 'fs';
 
 async function resolveOpportunityAccess(
     authUser: NonNullable<Request['user']>,
-    opportunity: { ownerId: string; salesRepName?: string | null; managerName?: string | null; presalesAssigneeName?: string | null },
+    opportunity: { ownerId: string; salesRepName?: string | null; managerName?: string | null; presalesAssigneeName?: string | null; stage?: { name?: string | null } | null; currentStage?: string | null },
     pendingApproval?: { reviewerId?: string | null } | null
 ) {
     const currentUser = await prisma.user.findUnique({
@@ -1135,6 +1135,7 @@ export async function approveGom(req: Request, res: Response) {
                 managerName: true,
                 presalesAssigneeName: true,
                 gomApproved: true,
+                currentStage: true,
             },
         });
         if (!opportunity) {
@@ -1268,7 +1269,7 @@ export async function reviewGomApproval(req: Request, res: Response) {
         const { approved, comments } = req.body;
         const opportunity = await prisma.opportunity.findUnique({
             where: { id },
-            select: { ownerId: true, salesRepName: true, managerName: true, presalesAssigneeName: true },
+            select: { ownerId: true, salesRepName: true, managerName: true, presalesAssigneeName: true, currentStage: true },
         });
         if (!opportunity) return res.status(404).json({ error: 'Opportunity not found' });
 
@@ -1449,7 +1450,7 @@ export async function addComment(req: Request, res: Response) {
         }
         const opportunity = await prisma.opportunity.findUnique({
             where: { id },
-            select: { ownerId: true, salesRepName: true, managerName: true, presalesAssigneeName: true },
+            select: { ownerId: true, salesRepName: true, managerName: true, presalesAssigneeName: true, currentStage: true },
         });
         if (!opportunity) {
             return res.status(404).json({ error: 'Opportunity not found' });
@@ -1510,7 +1511,7 @@ export async function uploadAttachment(req: Request, res: Response) {
 
         const opp = await prisma.opportunity.findUnique({
             where: { id },
-            select: { ownerId: true, salesRepName: true, managerName: true, presalesAssigneeName: true },
+            select: { ownerId: true, salesRepName: true, managerName: true, presalesAssigneeName: true, currentStage: true },
         });
         if (!opp) return res.status(404).json({ error: 'Opportunity not found' });
         const access = await resolveOpportunityAccess(req.user!, opp);
@@ -1571,7 +1572,7 @@ export async function deleteAttachment(req: Request, res: Response) {
         const { id, attachmentId } = req.params;
         const opp = await prisma.opportunity.findUnique({
             where: { id },
-            select: { ownerId: true, salesRepName: true, managerName: true, presalesAssigneeName: true },
+            select: { ownerId: true, salesRepName: true, managerName: true, presalesAssigneeName: true, currentStage: true },
         });
         if (!opp) return res.status(404).json({ error: 'Opportunity not found' });
         const access = await resolveOpportunityAccess(req.user!, opp);

@@ -19,6 +19,11 @@ export const PERMISSIONS = {
   // Pipeline / Opportunities
   PIPELINE_VIEW: 'pipeline:view',
   PIPELINE_WRITE: 'pipeline:write',
+  // Bypass the per-opportunity assignment check: holder can edit any
+  // opportunity that has not yet closed (Won / Lost / Delivered). Intended
+  // for senior roles (e.g. Management) that supervise but are not named on
+  // each deal.
+  OPPORTUNITIES_EDIT_ALL: 'opportunities:edit-all',
 
   // Presales
   PRESALES_VIEW: 'presales:view',
@@ -153,8 +158,12 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
   Management: [
     PERMISSIONS.DASHBOARD_VIEW,
     PERMISSIONS.PIPELINE_VIEW,
+    PERMISSIONS.PIPELINE_WRITE,
     PERMISSIONS.PRESALES_VIEW,
+    PERMISSIONS.PRESALES_WRITE,
+    PERMISSIONS.ESTIMATION_MANAGE,
     PERMISSIONS.SALES_VIEW,
+    PERMISSIONS.SALES_WRITE,
     PERMISSIONS.CONTACTS_VIEW,
     PERMISSIONS.ANALYTICS_VIEW,
     PERMISSIONS.ANALYTICS_EXPORT,
@@ -163,6 +172,8 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
     PERMISSIONS.GOM_VIEW,
     PERMISSIONS.SETTINGS_VIEW,
     PERMISSIONS.SOW_VIEW,
+    PERMISSIONS.SOW_WRITE,
+    PERMISSIONS.OPPORTUNITIES_EDIT_ALL,
   ],
 };
 
