@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import { User, Lock, Users, Shield, Plus, X, Check, AlertCircle, RotateCcw, Pencil, ToggleLeft, ToggleRight, DollarSign, Trash2, Globe, Cpu, Tag, Building2, Download, Settings2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, Search, Eye, EyeOff, FileText, Mail, Send, Briefcase, ShieldCheck, RefreshCw, Coins, UserPlus, UserMinus, Calculator, Percent, Info, Clock, Bell, Filter, Zap, ArrowRight, Calendar } from "lucide-react";
 import { useAuthStore } from "@/lib/auth-store";
 import { apiClient, API_URL, getAuthHeaders } from "@/lib/api";
@@ -438,15 +439,50 @@ function SecurityTab() {
 /* ─────────────── Role Multi-Select Dropdown ─────────────── */
 function RoleMultiSelect({ roles, selectedRoles, onChange }: { roles: AdminRole[]; selectedRoles: { id: string; name: string }[]; onChange: (roleIds: string[]) => void }) {
     const [open, setOpen] = useState(false);
-    const ref = useRef<HTMLDivElement>(null);
+    const btnRef = useRef<HTMLButtonElement>(null);
+    const menuRef = useRef<HTMLDivElement>(null);
+    // Fixed-position coordinates for the portalled menu. The dropdown is
+    // rendered into document.body so it escapes the users-table scroll
+    // container (overflow-x-auto forces overflow-y to clip too), which
+    // otherwise hid the menu.
+    const [coords, setCoords] = useState<{ top: number; left: number; width: number } | null>(null);
+
+    const computeCoords = useCallback(() => {
+        const el = btnRef.current;
+        if (!el) return;
+        const rect = el.getBoundingClientRect();
+        const menuWidth = 176; // w-44
+        const menuHeight = Math.min(roles.length * 30 + 8, 240);
+        // Flip upward if there isn't room below.
+        const spaceBelow = window.innerHeight - rect.bottom;
+        const openUp = spaceBelow < menuHeight && rect.top > menuHeight;
+        const top = openUp ? rect.top - menuHeight - 4 : rect.bottom + 4;
+        let left = rect.left;
+        // Keep within viewport horizontally.
+        if (left + menuWidth > window.innerWidth - 8) left = window.innerWidth - menuWidth - 8;
+        setCoords({ top, left: Math.max(8, left), width: Math.max(menuWidth, rect.width) });
+    }, [roles.length]);
 
     useEffect(() => {
-        const handler = (e: MouseEvent) => {
-            if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+        if (!open) return;
+        computeCoords();
+        const onScroll = () => computeCoords();
+        const onClick = (e: MouseEvent) => {
+            const t = e.target as Node;
+            if (btnRef.current?.contains(t)) return;
+            if (menuRef.current?.contains(t)) return;
+            setOpen(false);
         };
-        document.addEventListener("mousedown", handler);
-        return () => document.removeEventListener("mousedown", handler);
-    }, []);
+        // capture=true so we catch scrolls on any ancestor scroll container.
+        window.addEventListener("scroll", onScroll, true);
+        window.addEventListener("resize", onScroll);
+        document.addEventListener("mousedown", onClick);
+        return () => {
+            window.removeEventListener("scroll", onScroll, true);
+            window.removeEventListener("resize", onScroll);
+            document.removeEventListener("mousedown", onClick);
+        };
+    }, [open, computeCoords]);
 
     const toggle = (roleId: string) => {
         const isSelected = selectedRoles.some(r => r.id === roleId);
@@ -458,9 +494,10 @@ function RoleMultiSelect({ roles, selectedRoles, onChange }: { roles: AdminRole[
     };
 
     return (
-        <div ref={ref} className="relative">
+        <>
             <button
-                onClick={() => setOpen(!open)}
+                ref={btnRef}
+                onClick={() => setOpen(o => !o)}
                 className="flex items-center gap-1 px-2 py-1 rounded-lg border border-slate-200 bg-white text-xs hover:bg-slate-50 transition-colors min-w-[100px]"
             >
                 <span className="flex-1 text-left truncate">
@@ -470,8 +507,12 @@ function RoleMultiSelect({ roles, selectedRoles, onChange }: { roles: AdminRole[
                 </span>
                 <ChevronDown className={`w-3 h-3 text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`} />
             </button>
-            {open && (
-                <div className="absolute z-50 mt-1 w-44 bg-white rounded-lg border border-slate-200 shadow-lg py-1 animate-in fade-in duration-150">
+            {open && coords && typeof document !== 'undefined' && createPortal(
+                <div
+                    ref={menuRef}
+                    style={{ position: 'fixed', top: coords.top, left: coords.left, width: coords.width, zIndex: 9999 }}
+                    className="max-h-60 overflow-y-auto bg-white rounded-lg border border-slate-200 shadow-xl py-1 animate-in fade-in duration-150"
+                >
                     {roles.map(r => {
                         const isChecked = selectedRoles.some(sr => sr.id === r.id);
                         return (
@@ -487,9 +528,10 @@ function RoleMultiSelect({ roles, selectedRoles, onChange }: { roles: AdminRole[
                             </button>
                         );
                     })}
-                </div>
+                </div>,
+                document.body
             )}
-        </div>
+        </>
     );
 }
 
