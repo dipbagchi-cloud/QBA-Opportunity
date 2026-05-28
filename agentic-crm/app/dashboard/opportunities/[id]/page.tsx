@@ -1369,6 +1369,12 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     };
 
     const handleMoveToSales = async () => {
+        // A committed quote (GOM-calculated revenue) must exist before the deal
+        // can be submitted to Sales. No GOM => no quote => block.
+        if (!(contextRevenue > 0)) {
+            toast({ title: "No Quote Yet", description: "Complete the GOM Calculator first — there is no quote to submit to Sales." });
+            return;
+        }
         // GOM is effectively approved when flagged by manager OR when at/above the
         // auto-approve threshold. Mirrors the top banner and bottom Status panel
         // so the gate doesn't contradict what the UI shows.
@@ -1750,13 +1756,23 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 <span className="flex items-center gap-1.5"><XCircle className="w-4 h-4" /> Proposal Lost</span>
                             </button>
                             {(() => {
-                                const canMove = gomApproved || (gomAutoApprovePercent > 0 && contextGomPercent >= gomAutoApprovePercent);
+                                // A committed quote must exist (GOM calculated) AND be approved
+                                // before the deal can be submitted to Sales. No GOM => no quote
+                                // => Move to Sales stays disabled.
+                                const hasQuote = contextRevenue > 0;
+                                const gomOk = gomApproved || (gomAutoApprovePercent > 0 && contextGomPercent >= gomAutoApprovePercent);
+                                const canMove = hasQuote && gomOk;
+                                const blockReason = !hasQuote
+                                    ? 'Complete the GOM Calculator first — there is no quote to submit to Sales.'
+                                    : !gomOk
+                                        ? 'GOM must be approved first (see GOM Calculator tab).'
+                                        : '';
                                 return (
                                     <button
                                         onClick={handleMoveToSales}
                                         disabled={isSaving || isStalled || !canMove}
                                         className={`px-4 py-2 rounded-md font-medium disabled:opacity-50 ${canMove && !isStalled ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-slate-300 text-slate-600 cursor-not-allowed'}`}
-                                        title={!canMove ? 'GOM must be approved first (see GOM Calculator tab)' : ''}
+                                        title={blockReason}
                                     >
                                         {isSaving ? 'Moving...' : 'Move to Sales'}
                                     </button>

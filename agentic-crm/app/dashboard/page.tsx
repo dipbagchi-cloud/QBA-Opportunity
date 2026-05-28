@@ -432,7 +432,7 @@ export default function DashboardPage() {
     const [refreshing, setRefreshing] = useState(false);
 
     const PRESALES_SALES_STAGES = ['Qualification', 'Presales', 'Proposal', 'Sales', 'Negotiation'];
-    const CLOSED_WON_STAGES = ['Closed Won', 'Closed-Won', 'Delivered'];
+    const CLOSED_STAGES_ALL = ['Closed Won', 'Closed-Won', 'Closed Lost', 'Proposal Lost', 'Delivered'];
 
     const opportunities = useMemo(() => {
         return rawOpportunities.map(o => {
@@ -454,7 +454,13 @@ export default function DashboardPage() {
             const quoteInBase = o.quote != null ? toBase(Number(o.quote)) : null;
 
             let displayValue = rawValueInBase;
-            if (CLOSED_WON_STAGES.includes(o.currentStage) || PRESALES_SALES_STAGES.includes(o.currentStage)) {
+            if (CLOSED_STAGES_ALL.includes(o.currentStage)) {
+                // Closed (won/lost/delivered) = realized revenue = committed
+                // quote only. An un-quoted closed deal contributes 0, matching
+                // the backend Closed Revenue stat (no raw-value fallback).
+                displayValue = (quoteInBase != null && quoteInBase > 0) ? quoteInBase : 0;
+            } else if (PRESALES_SALES_STAGES.includes(o.currentStage)) {
+                // Active deals: projected = quote if present, else estimated value.
                 if (quoteInBase != null && quoteInBase > 0) displayValue = quoteInBase;
             }
 

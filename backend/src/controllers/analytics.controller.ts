@@ -36,33 +36,48 @@ const PIPELINE_STAGE_NAMES = new Set(['Discovery', 'Pipeline']);
 //   - Pipeline/Discovery → raw opp.value converted from opp.currency to INR base.
 //   - Presales/Sales/Closed Won → latest committed quote from presalesData (already
 //     stored in INR base by the estimation context). Falls back to value conversion.
-function getRevenue(opp: any, ratesToBase: Record<string, number>): number {
+function getRevenue(opp: any, ratesToBase: Record<string, number>, opts?: { quoteOnly?: boolean }): number {
+    const quoteOnly = opts?.quoteOnly === true;
     const val = Number(opp.value) || 0;
     const cur = opp.currency || 'INR';
-    const rateInrToCur = cur === 'INR' ? 1 : (ratesToBase[cur] || 0);
-    const valInBase = rateInrToCur > 0 ? val / rateInrToCur : val;
+
+    // Prefer the opportunity's stored exchangeRatesSnapshot (the same basis the
+    // list/detail views use) so analytics totals reconcile to the cent with the
+    // row-level figures; fall back to the current live rates if no snapshot.
+    const meta = (opp.metadata && typeof opp.metadata === 'object') ? opp.metadata : null;
+    const snapshot = (meta && typeof (meta as any).exchangeRatesSnapshot === 'object')
+        ? (meta as any).exchangeRatesSnapshot as Record<string, number>
+        : null;
+    const rateFor = (code: string): number => {
+        if (code === 'INR') return 1;
+        if (snapshot && Number(snapshot[code]) > 0) return Number(snapshot[code]);
+        return Number(ratesToBase[code]) || 0;
+    };
+
+    const rCur = rateFor(cur);
+    const valInBase = rCur > 0 ? val / rCur : val;
 
     const stageName = opp.stage?.name || opp.currentStage || 'Pipeline';
     if (PIPELINE_STAGE_NAMES.has(stageName)) {
-        return valInBase;
+        // Pipeline/Discovery never has a committed quote.
+        return quoteOnly ? 0 : valInBase;
     }
 
     const presales = typeof opp.presalesData === 'string' ? JSON.parse(opp.presalesData) : opp.presalesData;
     const sales = typeof opp.salesData === 'string' ? JSON.parse(opp.salesData) : opp.salesData;
     const quote = sales?.finalQuote ?? presales?.finalRevenue ?? presales?.totalRevenue ?? presales?.gomSummary?.totalRevenue ?? presales?.projectedQuote;
     if (quote != null && Number(quote) > 0) {
-        // Quote is stored in the presalesData's own currency (typically INR);
-        // normalize to INR-base so it sums consistently with valInBase across
-        // opportunities of different currencies. Without this conversion, an
-        // opportunity in EUR with a EUR-denominated quote was being summed
-        // against INR-base values, producing the figure mismatch users saw in
-        // dashboard panels vs. row-level numbers.
+        // Quote is stored in presalesData's own currency (typically INR);
+        // normalize to INR-base using snapshot rates.
         const presalesCur = presales?.currency || cur;
-        const rateInrToPresalesCur = presalesCur === 'INR' ? 1 : (ratesToBase[presalesCur] || 0);
-        const quoteInBase = rateInrToPresalesCur > 0 ? Number(quote) / rateInrToPresalesCur : Number(quote);
-        return quoteInBase;
+        const rPre = rateFor(presalesCur);
+        return rPre > 0 ? Number(quote) / rPre : Number(quote);
     }
-    return valInBase;
+    // No committed quote. For projected/pipeline metrics (quoteOnly=false) fall
+    // back to the estimated value; for realized metrics (Closed Revenue,
+    // quoteOnly=true) an un-quoted deal contributes 0 — its estimated value is
+    // not realized revenue.
+    return quoteOnly ? 0 : valInBase;
 }
 
 // GET /api/analytics
@@ -265,8 +280,10 @@ export async function getAnalytics(req: Request, res: Response) {
 
         // Total revenue computations
         const projectedRevenue = activeOpps.reduce((sum, o) => sum + getRevenue(o, ratesToBase), 0);
-        const closedRevenue = wonOpps.reduce((sum, o) => sum + getRevenue(o, ratesToBase), 0);
-        const lostRevenue = lostOpps.reduce((sum, o) => sum + getRevenue(o, ratesToBase), 0);
+        // Closed/Lost are realized outcomes — count committed quotes only (an
+        // un-quoted won deal contributes 0, not its raw estimated value).
+        const closedRevenue = wonOpps.reduce((sum, o) => sum + getRevenue(o, ratesToBase, { quoteOnly: true }), 0);
+        const lostRevenue = lostOpps.reduce((sum, o) => sum + getRevenue(o, ratesToBase, { quoteOnly: true }), 0);
         const wonRevenue = closedRevenue;
         const totalOpportunities = opportunities.length;
         const winRate = closedOpps > 0 ? (wonOpps.length / closedOpps) * 100 : 0;
@@ -317,7 +334,7 @@ export async function getAnalytics(req: Request, res: Response) {
             const owner = o.salesRepName || o.owner?.name || 'Unassigned';
             if (!salesByOwner[owner]) salesByOwner[owner] = { name: owner, wonRevenue: 0, wonCount: 0, lostCount: 0 };
             const sn = o.stage?.name || o.currentStage;
-            if (sn === 'Closed Won') { salesByOwner[owner].wonRevenue += getRevenue(o, ratesToBase); salesByOwner[owner].wonCount += 1; }
+            if (sn === 'Closed Won') { salesByOwner[owner].wonRevenue += getRevenue(o, ratesToBase, { quoteOnly: true }); salesByOwner[owner].wonCount += 1; }
             else { salesByOwner[owner].lostCount += 1; }
         });
         const salesBySalesOwner = Object.values(salesByOwner);
@@ -370,7 +387,7 @@ export async function getAnalytics(req: Request, res: Response) {
             const sn = o.stage?.name || o.currentStage || '';
             if (sn === 'Closed Won') {
                 managerStats[mgr].wonCount += 1;
-                managerStats[mgr].totalRevenue += getRevenue(o, ratesToBase);
+                managerStats[mgr].totalRevenue += getRevenue(o, ratesToBase, { quoteOnly: true });
             } else if (sn === 'Closed Lost' || sn === 'Proposal Lost') {
                 managerStats[mgr].lostCount += 1;
             }

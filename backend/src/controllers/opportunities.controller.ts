@@ -784,6 +784,15 @@ export async function updateOpportunity(req: Request, res: Response) {
                 }
                 // When presales submits to sales: first time = 'Estimation Submitted', subsequent = 'Re-estimation Submitted'
                 if (newStageName === 'Proposal') {
+                    // Hard requirement: a committed quote (GOM-calculated revenue)
+                    // must exist before a deal can be submitted to Sales. No GOM
+                    // => no quote => block. This stops un-quoted deals from ever
+                    // reaching Sales / Closed (which then skewed Closed Revenue).
+                    const pd = previous?.presalesData as any;
+                    const committedQuote = pd?.finalRevenue ?? pd?.totalRevenue ?? pd?.gomSummary?.totalRevenue ?? pd?.projectedQuote;
+                    if (!(committedQuote != null && Number(committedQuote) > 0)) {
+                        return res.status(400).json({ error: 'Cannot move to Sales: complete the GOM Calculator first — there is no quote to submit.' });
+                    }
                     if (!previous?.gomApproved) {
                         // Auto-approve when the final GOM% is at/above the configured
                         // threshold (mirrors the frontend banner + Move-to-Sales gate so
