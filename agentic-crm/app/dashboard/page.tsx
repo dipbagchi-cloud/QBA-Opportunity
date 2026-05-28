@@ -12,6 +12,12 @@ import {
     Briefcase,
     Loader2,
     RefreshCw,
+    Search,
+    ArrowUp,
+    ArrowDown,
+    ArrowUpDown,
+    Filter,
+    X,
 } from "lucide-react";
 import {
     BarChart, Bar, PieChart, Pie, Cell,
@@ -127,6 +133,292 @@ interface Opportunity {
     daysInStage: number;
     isStalled: boolean;
     monthlyRevenue?: Record<string, number>;
+}
+
+/* ------------------------------------------------------------------ */
+/* Pending Actions panel — searchable / sortable / column-filterable   */
+/* ------------------------------------------------------------------ */
+
+type PendingSortKey = 'opportunity' | 'stage' | 'action' | 'owner' | 'due' | 'days' | 'value';
+
+interface PendingRow {
+    id: string;
+    opportunity: string;
+    client: string;
+    stage: string;            // display stage
+    rawStage: string;         // currentStage for color lookup
+    action: string;
+    owner: string;            // owner/assignee composite string
+    dueTs: number;            // timestamp for sort (MAX if none)
+    dueRaw?: string;          // raw expectedCloseDate
+    days: number;
+    isStalled: boolean;
+    value: number;
+}
+
+const PENDING_COLUMNS: { key: PendingSortKey; label: string; align?: 'right' }[] = [
+    { key: 'opportunity', label: 'Opportunity' },
+    { key: 'stage', label: 'Stage' },
+    { key: 'action', label: 'Action Needed' },
+    { key: 'owner', label: 'Owner / Assignee' },
+    { key: 'due', label: 'Due' },
+    { key: 'days', label: 'Days' },
+    { key: 'value', label: 'Value', align: 'right' },
+];
+
+function PendingActionsPanel({
+    opportunities,
+    userName,
+    isAdmin,
+    onOpen,
+    fmtCurrency,
+}: {
+    opportunities: Opportunity[];
+    userName: string;
+    isAdmin: boolean;
+    onOpen: (id: string) => void;
+    fmtCurrency: (v: number, opts?: { compact?: boolean; decimals?: number }) => string;
+}) {
+    const [search, setSearch] = useState("");
+    const [sortKey, setSortKey] = useState<PendingSortKey>('due');
+    const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+    const [showFilters, setShowFilters] = useState(false);
+    const [colFilters, setColFilters] = useState<Record<string, string>>({});
+
+    const CLOSED = ['Closed Won', 'Closed-Won', 'Closed Lost', 'Proposal Lost', 'Delivered'];
+    const actionForStage = (s: string) => {
+        if (s === 'Pipeline' || s === 'Discovery') return 'Qualify & assign presales';
+        if (s === 'Qualification' || s === 'Presales') return 'Complete presales estimation';
+        if (s === 'Proposal' || s === 'Sales') return 'Prepare or send quote';
+        if (s === 'Negotiation') return 'Close negotiation';
+        return 'Review';
+    };
+    const ownerFor = (o: Opportunity) => {
+        const parts: string[] = [];
+        if (o.salesRepName) parts.push(`Sales: ${o.salesRepName}`);
+        else if (o.owner) parts.push(`Owner: ${o.owner}`);
+        if (o.managerName) parts.push(`Mgr: ${o.managerName}`);
+        return parts.join(' · ') || 'Unassigned';
+    };
+    const fmtDate = (d?: string) => {
+        if (!d) return '—';
+        const dt = new Date(d);
+        if (isNaN(dt.getTime())) return '—';
+        return dt.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: '2-digit' });
+    };
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const dueClass = (d?: string) => {
+        if (!d) return 'text-slate-500';
+        const dt = new Date(d); if (isNaN(dt.getTime())) return 'text-slate-500';
+        const diffDays = Math.ceil((dt.getTime() - today.getTime()) / 86400000);
+        if (diffDays < 0) return 'text-red-600 font-semibold';
+        if (diffDays <= 7) return 'text-amber-600 font-semibold';
+        return 'text-slate-600';
+    };
+
+    // Build normalized rows
+    const rows: PendingRow[] = useMemo(() => {
+        return opportunities
+            .filter(o => {
+                if (CLOSED.includes(o.currentStage)) return false;
+                if (isAdmin) return true;
+                return o.owner === userName || o.salesRepName === userName || o.managerName === userName;
+            })
+            .map(o => ({
+                id: o.id,
+                opportunity: o.name,
+                client: o.client,
+                stage: STAGE_DISPLAY[o.currentStage] || o.currentStage,
+                rawStage: o.currentStage,
+                action: actionForStage(o.currentStage),
+                owner: ownerFor(o),
+                dueTs: o.expectedCloseDate ? new Date(o.expectedCloseDate).getTime() : Number.MAX_SAFE_INTEGER,
+                dueRaw: o.expectedCloseDate,
+                days: o.daysInStage ?? 0,
+                isStalled: o.isStalled,
+                value: Number(o.value) || 0,
+            }));
+    }, [opportunities, userName, isAdmin]);
+
+    // Global search (across text columns)
+    const searched = useMemo(() => {
+        const q = search.trim().toLowerCase();
+        if (!q) return rows;
+        return rows.filter(r =>
+            r.opportunity.toLowerCase().includes(q) ||
+            r.client.toLowerCase().includes(q) ||
+            r.stage.toLowerCase().includes(q) ||
+            r.action.toLowerCase().includes(q) ||
+            r.owner.toLowerCase().includes(q)
+        );
+    }, [rows, search]);
+
+    // Per-column filters
+    const filtered = useMemo(() => {
+        const active = Object.entries(colFilters).filter(([, v]) => v.trim());
+        if (active.length === 0) return searched;
+        return searched.filter(r =>
+            active.every(([key, val]) => {
+                const fv = val.trim().toLowerCase();
+                switch (key as PendingSortKey) {
+                    case 'opportunity': return (r.opportunity + ' ' + r.client).toLowerCase().includes(fv);
+                    case 'stage': return r.stage.toLowerCase().includes(fv);
+                    case 'action': return r.action.toLowerCase().includes(fv);
+                    case 'owner': return r.owner.toLowerCase().includes(fv);
+                    case 'due': return fmtDate(r.dueRaw).toLowerCase().includes(fv);
+                    case 'days': return String(r.days).includes(fv);
+                    case 'value': return String(r.value).includes(fv);
+                    default: return true;
+                }
+            })
+        );
+    }, [searched, colFilters]);
+
+    // Sort
+    const sorted = useMemo(() => {
+        const dir = sortDir === 'asc' ? 1 : -1;
+        return [...filtered].sort((a, b) => {
+            let av: string | number;
+            let bv: string | number;
+            switch (sortKey) {
+                case 'due': av = a.dueTs; bv = b.dueTs; break;
+                case 'days': av = a.days; bv = b.days; break;
+                case 'value': av = a.value; bv = b.value; break;
+                case 'opportunity': av = a.opportunity.toLowerCase(); bv = b.opportunity.toLowerCase(); break;
+                case 'stage': av = a.stage.toLowerCase(); bv = b.stage.toLowerCase(); break;
+                case 'action': av = a.action.toLowerCase(); bv = b.action.toLowerCase(); break;
+                case 'owner': av = a.owner.toLowerCase(); bv = b.owner.toLowerCase(); break;
+                default: av = 0; bv = 0;
+            }
+            if (av < bv) return -1 * dir;
+            if (av > bv) return 1 * dir;
+            return 0;
+        });
+    }, [filtered, sortKey, sortDir]);
+
+    const toggleSort = (key: PendingSortKey) => {
+        if (sortKey === key) {
+            setSortDir(prev => (prev === 'asc' ? 'desc' : 'asc'));
+        } else {
+            setSortKey(key);
+            setSortDir('asc');
+        }
+    };
+
+    const activeFilterCount = Object.values(colFilters).filter(v => v.trim()).length;
+
+    return (
+        <div className="bg-white rounded-md border border-slate-100 px-2.5 py-1.5">
+            <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                <div className="flex items-center gap-1">
+                    <Clock className="w-3 h-3 text-amber-600" />
+                    <h3 className="text-xs font-semibold text-slate-800">
+                        {isAdmin ? 'All Pending Actions' : 'Your Pending Actions'}
+                    </h3>
+                    <span className="text-[10px] text-slate-400">({sorted.length}{sorted.length !== rows.length ? ` of ${rows.length}` : ''})</span>
+                </div>
+                <div className="relative ml-auto">
+                    <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-400" />
+                    <input
+                        value={search}
+                        onChange={e => setSearch(e.target.value)}
+                        placeholder="Search pending actions…"
+                        className="pl-7 pr-6 py-1 text-[11px] border border-slate-200 rounded-md w-56 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400"
+                    />
+                    {search && (
+                        <button onClick={() => setSearch("")} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                            <X className="w-3 h-3" />
+                        </button>
+                    )}
+                </div>
+                <button
+                    onClick={() => setShowFilters(s => !s)}
+                    className={`flex items-center gap-1 px-2 py-1 text-[10px] rounded-md border transition-colors ${showFilters || activeFilterCount > 0 ? 'bg-indigo-50 text-indigo-600 border-indigo-200' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+                >
+                    <Filter className="w-3 h-3" />
+                    Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
+                </button>
+                {activeFilterCount > 0 && (
+                    <button onClick={() => setColFilters({})} className="text-[10px] text-red-500 hover:text-red-700 underline">Clear</button>
+                )}
+            </div>
+            {rows.length === 0 ? (
+                <div className="text-[11px] text-slate-400 py-1">No pending actions.</div>
+            ) : (
+                <div className="overflow-x-auto max-h-72 overflow-y-auto">
+                    <table className="w-full text-[10px]">
+                        <thead className="text-[9px] text-slate-400 uppercase tracking-wide bg-slate-50 sticky top-0 z-10">
+                            <tr>
+                                {PENDING_COLUMNS.map(col => (
+                                    <th
+                                        key={col.key}
+                                        onClick={() => toggleSort(col.key)}
+                                        className={`px-2 py-1 font-medium cursor-pointer select-none hover:text-slate-600 ${col.align === 'right' ? 'text-right' : 'text-left'}`}
+                                    >
+                                        <span className={`inline-flex items-center gap-0.5 ${col.align === 'right' ? 'flex-row-reverse' : ''}`}>
+                                            {col.label}
+                                            {sortKey === col.key
+                                                ? (sortDir === 'asc' ? <ArrowUp className="w-2.5 h-2.5" /> : <ArrowDown className="w-2.5 h-2.5" />)
+                                                : <ArrowUpDown className="w-2.5 h-2.5 opacity-40" />}
+                                        </span>
+                                    </th>
+                                ))}
+                            </tr>
+                            {showFilters && (
+                                <tr>
+                                    {PENDING_COLUMNS.map(col => (
+                                        <th key={col.key} className="px-1 pb-1">
+                                            <input
+                                                value={colFilters[col.key] || ''}
+                                                onChange={e => setColFilters(prev => ({ ...prev, [col.key]: e.target.value }))}
+                                                onClick={e => e.stopPropagation()}
+                                                placeholder="filter…"
+                                                className="w-full px-1.5 py-0.5 text-[9px] font-normal normal-case border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                                            />
+                                        </th>
+                                    ))}
+                                </tr>
+                            )}
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {sorted.map(r => (
+                                <tr
+                                    key={r.id}
+                                    onClick={() => onOpen(r.id)}
+                                    className="cursor-pointer hover:bg-slate-50"
+                                >
+                                    <td className="px-2 py-0.5">
+                                        <div className="font-medium text-slate-800 truncate max-w-[180px] leading-tight" title={r.opportunity}>{r.opportunity}</div>
+                                        <div className="text-[9px] text-slate-400 truncate max-w-[180px] leading-tight" title={r.client}>{r.client}</div>
+                                    </td>
+                                    <td className="px-2 py-0.5">
+                                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-semibold border ${STAGE_COLORS[r.rawStage] || 'bg-slate-50 text-slate-600 border-slate-200'}`}>
+                                            {r.stage}
+                                        </span>
+                                    </td>
+                                    <td className="px-2 py-0.5 text-slate-700">{r.action}</td>
+                                    <td className="px-2 py-0.5 text-slate-600 truncate max-w-[160px]" title={r.owner}>{r.owner}</td>
+                                    <td className={`px-2 py-0.5 ${dueClass(r.dueRaw)}`}>{fmtDate(r.dueRaw)}</td>
+                                    <td className="px-2 py-0.5 text-slate-600 whitespace-nowrap">
+                                        {r.days}d
+                                        {r.isStalled && <span className="ml-1 text-[9px] text-red-600 font-semibold">STALLED</span>}
+                                    </td>
+                                    <td className="px-2 py-0.5 text-right text-slate-700 font-medium whitespace-nowrap">{fmtCurrency(r.value)}</td>
+                                </tr>
+                            ))}
+                            {sorted.length === 0 && (
+                                <tr>
+                                    <td colSpan={PENDING_COLUMNS.length} className="px-2 py-4 text-center text-slate-400 text-[11px]">
+                                        No matching pending actions.
+                                    </td>
+                                </tr>
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+        </div>
+    );
 }
 
 export default function DashboardPage() {
@@ -856,110 +1148,15 @@ export default function DashboardPage() {
             </div>
 
             {/* Pending Actions for the logged-in user (Admins see all open opps) */}
-            {user?.name && (() => {
-                const CLOSED = ['Closed Won', 'Closed-Won', 'Closed Lost', 'Proposal Lost', 'Delivered'];
-                const isAdmin = !!user?.role?.permissions?.includes('*') || user?.role?.name?.toLowerCase() === 'admin';
-                const myPending = opportunities.filter(o => {
-                    if (CLOSED.includes(o.currentStage)) return false;
-                    if (isAdmin) return true;
-                    return o.owner === user.name || o.salesRepName === user.name || o.managerName === user.name;
-                });
-                const actionForStage = (s: string) => {
-                    if (s === 'Pipeline' || s === 'Discovery') return 'Qualify & assign presales';
-                    if (s === 'Qualification' || s === 'Presales') return 'Complete presales estimation';
-                    if (s === 'Proposal' || s === 'Sales') return 'Prepare or send quote';
-                    if (s === 'Negotiation') return 'Close negotiation';
-                    return 'Review';
-                };
-                const fmtDate = (d?: string) => {
-                    if (!d) return '—';
-                    const dt = new Date(d);
-                    if (isNaN(dt.getTime())) return '—';
-                    return dt.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: '2-digit' });
-                };
-                const today = new Date(); today.setHours(0, 0, 0, 0);
-                const dueClass = (d?: string) => {
-                    if (!d) return 'text-slate-500';
-                    const dt = new Date(d); if (isNaN(dt.getTime())) return 'text-slate-500';
-                    const diffDays = Math.ceil((dt.getTime() - today.getTime()) / 86400000);
-                    if (diffDays < 0) return 'text-red-600 font-semibold';
-                    if (diffDays <= 7) return 'text-amber-600 font-semibold';
-                    return 'text-slate-600';
-                };
-                const ownerFor = (o: Opportunity) => {
-                    const parts: string[] = [];
-                    if (o.salesRepName) parts.push(`Sales: ${o.salesRepName}`);
-                    else if (o.owner) parts.push(`Owner: ${o.owner}`);
-                    if (o.managerName) parts.push(`Mgr: ${o.managerName}`);
-                    return parts.join(' · ') || 'Unassigned';
-                };
-                // Sort: overdue first, then soonest due, then stalled
-                const sorted = [...myPending].sort((a, b) => {
-                    const da = a.expectedCloseDate ? new Date(a.expectedCloseDate).getTime() : Number.MAX_SAFE_INTEGER;
-                    const db = b.expectedCloseDate ? new Date(b.expectedCloseDate).getTime() : Number.MAX_SAFE_INTEGER;
-                    if (da !== db) return da - db;
-                    return (b.daysInStage || 0) - (a.daysInStage || 0);
-                });
-                return (
-                    <div className="bg-white rounded-md border border-slate-100 px-2.5 py-1.5">
-                        <div className="flex items-center gap-1 mb-1">
-                            <Clock className="w-3 h-3 text-amber-600" />
-                            <h3 className="text-xs font-semibold text-slate-800">
-                                {isAdmin ? 'All Pending Actions' : 'Your Pending Actions'}
-                            </h3>
-                            <span className="text-[10px] text-slate-400">
-                                ({sorted.length})
-                            </span>
-                        </div>
-                        {sorted.length === 0 ? (
-                            <div className="text-[11px] text-slate-400 py-1">No pending actions.</div>
-                        ) : (
-                            <div className="overflow-x-auto max-h-52 overflow-y-auto">
-                                <table className="w-full text-[10px]">
-                                    <thead className="text-[9px] text-slate-400 uppercase tracking-wide bg-slate-50 sticky top-0">
-                                        <tr>
-                                            <th className="text-left px-2 py-1 font-medium">Opportunity</th>
-                                            <th className="text-left px-2 py-1 font-medium">Stage</th>
-                                            <th className="text-left px-2 py-1 font-medium">Action Needed</th>
-                                            <th className="text-left px-2 py-1 font-medium">Owner / Assignee</th>
-                                            <th className="text-left px-2 py-1 font-medium">Due</th>
-                                            <th className="text-left px-2 py-1 font-medium">Days</th>
-                                            <th className="text-right px-2 py-1 font-medium">Value</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-100">
-                                        {sorted.map(o => (
-                                            <tr
-                                                key={o.id}
-                                                onClick={() => router.push(`/dashboard/opportunities/${o.id}`)}
-                                                className="cursor-pointer hover:bg-slate-50"
-                                            >
-                                                <td className="px-2 py-0.5">
-                                                    <div className="font-medium text-slate-800 truncate max-w-[180px] leading-tight" title={o.name}>{o.name}</div>
-                                                    <div className="text-[9px] text-slate-400 truncate max-w-[180px] leading-tight" title={o.client}>{o.client}</div>
-                                                </td>
-                                                <td className="px-2 py-0.5">
-                                                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-semibold border ${STAGE_COLORS[o.currentStage] || 'bg-slate-50 text-slate-600 border-slate-200'}`}>
-                                                        {STAGE_DISPLAY[o.currentStage] || o.currentStage}
-                                                    </span>
-                                                </td>
-                                                <td className="px-2 py-0.5 text-slate-700">{actionForStage(o.currentStage)}</td>
-                                                <td className="px-2 py-0.5 text-slate-600 truncate max-w-[160px]" title={ownerFor(o)}>{ownerFor(o)}</td>
-                                                <td className={`px-2 py-0.5 ${dueClass(o.expectedCloseDate)}`}>{fmtDate(o.expectedCloseDate)}</td>
-                                                <td className="px-2 py-0.5 text-slate-600 whitespace-nowrap">
-                                                    {o.daysInStage ?? 0}d
-                                                    {o.isStalled && <span className="ml-1 text-[9px] text-red-600 font-semibold">STALLED</span>}
-                                                </td>
-                                                <td className="px-2 py-0.5 text-right text-slate-700 font-medium whitespace-nowrap">{fmtCurrency(o.value)}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        )}
-                    </div>
-                );
-            })()}
+            {user?.name && (
+                <PendingActionsPanel
+                    opportunities={opportunities}
+                    userName={user.name}
+                    isAdmin={!!user?.role?.permissions?.includes('*') || user?.role?.name?.toLowerCase() === 'admin'}
+                    onOpen={(id) => router.push(`/dashboard/opportunities/${id}`)}
+                    fmtCurrency={fmtCurrency}
+                />
+            )}
 
             {/* Row 1: Revenue chart + Stage pie */}
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-1.5">
