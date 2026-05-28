@@ -10,14 +10,22 @@ export default function DashboardError({
   reset: () => void;
 }) {
   useEffect(() => {
-    // Auto-reload on ChunkLoadError (happens after new deployments)
-    if (
+    // Auto-reload on ChunkLoadError (happens after new deployments) — but only
+    // ONCE per short window. An uncapped reload here turns a persistent chunk
+    // error into an infinite reload loop (the page visibly "dances"). The
+    // sessionStorage guard means a genuinely broken build shows the error UI
+    // (with a manual Reload button) instead of reloading forever.
+    const isChunkError =
       error.name === "ChunkLoadError" ||
       error.message?.includes("Loading chunk") ||
-      error.message?.includes("Failed to fetch dynamically imported module")
-    ) {
-      window.location.reload();
-      return;
+      error.message?.includes("Failed to fetch dynamically imported module");
+    if (isChunkError) {
+      const KEY = "qcrm_chunk_reload_at";
+      const last = Number(sessionStorage.getItem(KEY) || 0);
+      if (Date.now() - last > 30000) {
+        sessionStorage.setItem(KEY, String(Date.now()));
+        window.location.reload();
+      }
     }
   }, [error]);
 
