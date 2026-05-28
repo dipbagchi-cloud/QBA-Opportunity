@@ -437,8 +437,15 @@ export default function DashboardPage() {
     const opportunities = useMemo(() => {
         return rawOpportunities.map(o => {
             const cur = o.currency || 'INR';
-            const rate = getRate(cur);
-            const toBase = (n: number) => (cur === 'INR' || !rate ? n : n / rate);
+            // Convert opp-currency amounts to INR base. Prefer the opportunity's
+            // stored exchangeRatesSnapshot (the same rates the list view uses)
+            // so dashboard and list values reconcile exactly — live rates drift
+            // from the snapshot and produce a ~1% mismatch on converted quotes.
+            const snapshot = (o as any).metadata?.exchangeRatesSnapshot as Record<string, number> | undefined;
+            const snapRate = snapshot?.[cur];
+            const liveRate = getRate(cur);
+            const rate = (snapRate && snapRate > 0) ? snapRate : liveRate;
+            const toBase = (n: number) => (cur === 'INR' || !rate ? Number(n) || 0 : (Number(n) || 0) / rate);
             const rawValueInBase = toBase(Number(o.value) || 0);
             // Backend returns o.quote already converted to the opportunity's currency
             // (see opportunities.controller.ts), so apply the same INR-base conversion
