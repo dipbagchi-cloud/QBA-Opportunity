@@ -125,8 +125,13 @@ export async function listOpportunities(req: Request, res: Response) {
             const now = new Date();
             const daysInStage = Math.floor((now.getTime() - stageEnteredAt.getTime()) / (1000 * 3600 * 24));
 
-            // 3. Stalled detection
-            const isStalled = opp.isStalled || (daysInStage > 30 && !['Closed Won', 'Closed Lost'].includes(stageName));
+            // Closed deals (Won / Lost / Delivered) carry no health risk — the
+            // deal is done, so stall/health signals don't apply.
+            const CLOSED_STAGE_SET = ['Closed Won', 'Closed-Won', 'Closed Lost', 'Proposal Lost', 'Delivered'];
+            const isClosedStage = CLOSED_STAGE_SET.includes(stageName);
+
+            // 3. Stalled detection — never flag a closed deal as stalled.
+            const isStalled = !isClosedStage && (opp.isStalled || (daysInStage > 30));
             const access = buildOpportunityAccess({
                 authUser: req.user!,
                 currentUser,
@@ -190,7 +195,7 @@ export async function listOpportunities(req: Request, res: Response) {
                     canEdit: access.assignment.canEditAssignedOpportunity,
                     viewOnlyReason: access.viewOnlyReason,
                 },
-                status: opp.isStalled ? 'stalled' : (finalHealth > 70 ? 'healthy' : (finalHealth > 40 ? 'at-risk' : 'critical')),
+                status: isClosedStage ? 'closed' : (isStalled ? 'stalled' : (finalHealth > 70 ? 'healthy' : (finalHealth > 40 ? 'at-risk' : 'critical'))),
                 detailedStatus: opp.detailedStatus,
                 description: opp.description,
                 technology: opp.technology || '',
@@ -205,6 +210,12 @@ export async function listOpportunities(req: Request, res: Response) {
                 tentativeStartDate: opp.tentativeStartDate ? new Date(opp.tentativeStartDate).toISOString().slice(0, 10) : '',
                 tentativeEndDate: opp.tentativeEndDate ? new Date(opp.tentativeEndDate).toISOString().slice(0, 10) : '',
                 createdAt: new Date(opp.createdAt).toISOString().slice(0, 10),
+                // Fractional days from creation to actual close, computed from
+                // full timestamps (the date strings above are truncated to
+                // YYYY-MM-DD so the UI can't derive hours). null for open deals.
+                daysToClose: (opp.actualCloseDate && opp.createdAt)
+                    ? Math.max(0, (new Date(opp.actualCloseDate).getTime() - new Date(opp.createdAt).getTime()) / 86400000)
+                    : null,
                 daysInStage,
                 isStalled,
                 healthScore: finalHealth,

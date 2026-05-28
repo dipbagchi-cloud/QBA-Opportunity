@@ -131,6 +131,7 @@ interface Opportunity {
     status: string;
     healthScore: number;
     daysInStage: number;
+    daysToClose?: number | null;
     isStalled: boolean;
     monthlyRevenue?: Record<string, number>;
 }
@@ -465,15 +466,37 @@ export default function DashboardPage() {
         if (!silent) setLoading(true);
         else setRefreshing(true);
         try {
-            const [analyticsRes, oppsRes] = await Promise.all([
+            // The opportunities API is paginated and capped at 100 rows/page.
+            // Every dashboard aggregate (stage tiles, charts, drill-downs,
+            // pending actions) runs client-side over this array, so we must
+            // load ALL pages — otherwise closed/older deals (beyond the first
+            // 100 most-recently-updated) silently vanish from the lists.
+            const PAGE = 100;
+            const [analyticsRes, firstRes] = await Promise.all([
                 fetch(`${API_URL}/api/analytics`, { headers }),
-                fetch(`${API_URL}/api/opportunities?limit=100`, { headers }),
+                fetch(`${API_URL}/api/opportunities?limit=${PAGE}&page=1`, { headers }),
             ]);
             if (analyticsRes.ok) setAnalytics(await analyticsRes.json());
-            if (oppsRes.ok) {
-                const oppsJson = await oppsRes.json();
-                // API now returns paginated { data, total, ... } — extract the array
-                setRawOpportunities(Array.isArray(oppsJson) ? oppsJson : (oppsJson.data ?? []));
+            if (firstRes.ok) {
+                const firstJson = await firstRes.json();
+                if (Array.isArray(firstJson)) {
+                    setRawOpportunities(firstJson);
+                } else {
+                    let all: Opportunity[] = firstJson.data ?? [];
+                    const totalPages = Number(firstJson.totalPages) || 1;
+                    if (totalPages > 1) {
+                        const rest = await Promise.all(
+                            Array.from({ length: totalPages - 1 }, (_, i) =>
+                                fetch(`${API_URL}/api/opportunities?limit=${PAGE}&page=${i + 2}`, { headers })
+                                    .then(r => (r.ok ? r.json() : { data: [] }))
+                                    .then(j => (Array.isArray(j) ? j : (j.data ?? [])))
+                                    .catch(() => [])
+                            )
+                        );
+                        all = all.concat(...rest);
+                    }
+                    setRawOpportunities(all);
+                }
             }
         } catch (err) {
             console.error("Dashboard fetch error:", err);
@@ -709,7 +732,15 @@ export default function DashboardPage() {
         },
         {
             title: "Avg. Close Time",
-            value: `${(sales?.avgTimeToClose || 0).toFixed(0)}d`,
+            value: (() => {
+                // Show fractional days so deals closed within hours don't read
+                // as a misleading "0d". e.g. 5h => 0.21d.
+                const d = sales?.avgTimeToClose || 0;
+                if (d <= 0) return '0d';
+                if (d < 1) return `${d.toFixed(2)}d`;
+                if (d < 10) return `${d.toFixed(1)}d`;
+                return `${d.toFixed(0)}d`;
+            })(),
             subtitle: `Presales success ${(presales?.proposalSuccessRate || 0).toFixed(0)}%`,
             icon: Clock,
             iconBg: "bg-rose-100",
@@ -965,13 +996,22 @@ export default function DashboardPage() {
         { key: 'daysInStage',        label: 'Days in Stage',   format: 'number' },
     ];
 
+    const CLOSED_BUCKET_LABELS = ['Closed Won', 'Closed Lost'];
     const stageTiles = STAGE_BUCKETS.map(bucket => {
         const oppsInStage = opportunities.filter(o => bucket.stages.includes((o as any).currentStage));
         const totalValue = oppsInStage.reduce((sum, o) => sum + (Number(o.value) || 0), 0);
+        // For closed tiles, surface the date the deal was actually won/lost.
+        const columns = CLOSED_BUCKET_LABELS.includes(bucket.label)
+            ? [
+                ...stageProjectColumns.filter(c => c.key !== 'expectedCloseDate'),
+                { key: 'actualCloseDate', label: 'Closed On', format: 'text' as const },
+            ]
+            : stageProjectColumns;
         const drill: DrillDownConfig = {
             title: `${bucket.label} — Project Details`,
-            columns: stageProjectColumns,
+            columns,
             data: oppsInStage,
+            dateKey: CLOSED_BUCKET_LABELS.includes(bucket.label) ? 'actualCloseDate' : 'expectedCloseDate',
         };
         return { ...bucket, count: oppsInStage.length, totalValue, drill };
     });
@@ -1073,17 +1113,32 @@ export default function DashboardPage() {
             data: opportunities.filter(o => ['Closed Won', 'Closed-Won', 'Closed Lost', 'Proposal Lost'].includes(o.currentStage)),
         },
         { // Avg Close Time
-            title: "Deals – Cycle Time",
+            title: "Deals – Cycle Time (Closed Deals)",
             columns: [
                 { key: "name", label: "Opportunity", format: "text" },
                 { key: "client", label: "Client", format: "text" },
                 { key: "value", label: "Value", format: "currency" },
                 { key: "currentStage", label: "Stage", format: "text" },
-                { key: "daysInStage", label: "Days in Stage", format: "number" },
-                { key: "lastActivity", label: "Last Activity", format: "text" },
-                { key: "status", label: "Health", format: "text" },
+                { key: "createdAt", label: "Created", format: "text" },
+                { key: "actualCloseDate", label: "Closed On", format: "text" },
+                { key: "daysToClose", label: "Days to Close", format: "text" },
             ],
-            data: opportunities,
+            // Avg Close Time is computed only over closed (won/lost) deals, so
+            // the drill-down must show only those — not every opportunity.
+            // Days to Close is fractional (based on the actual hours between
+            // creation and close) so same-day closes don't read as "0".
+            data: opportunities
+                .filter(o => ['Closed Won', 'Closed-Won', 'Closed Lost', 'Proposal Lost', 'Delivered'].includes(o.currentStage))
+                .map(o => {
+                    // daysToClose comes from the backend as a fractional number
+                    // (full-timestamp precision). Format for display.
+                    const d = (o as any).daysToClose;
+                    const display = (d == null || isNaN(Number(d)))
+                        ? '—'
+                        : (Number(d) < 1 ? Number(d).toFixed(2) : Number(d) < 10 ? Number(d).toFixed(1) : Number(d).toFixed(0));
+                    return { ...o, daysToClose: display };
+                }),
+            dateKey: 'actualCloseDate',
         },
         { // Re-estimate Iterations
             title: "Re-estimation Details",
@@ -1347,8 +1402,8 @@ export default function DashboardPage() {
                                             </td>
                                             <td className="py-1.5">
                                                 <div className="flex items-center gap-1">
-                                                    <div className={`w-1.5 h-1.5 rounded-full ${opp.status === 'healthy' ? 'bg-emerald-500' : opp.status === 'at-risk' ? 'bg-amber-500' : 'bg-red-500'}`} />
-                                                    <span className="text-slate-500">{opp.healthScore}%</span>
+                                                    <div className={`w-1.5 h-1.5 rounded-full ${opp.status === 'healthy' ? 'bg-emerald-500' : opp.status === 'closed' ? 'bg-slate-400' : opp.status === 'at-risk' ? 'bg-amber-500' : 'bg-red-500'}`} />
+                                                    <span className="text-slate-500">{opp.status === 'closed' ? 'Closed' : `${opp.healthScore}%`}</span>
                                                 </div>
                                             </td>
                                         </tr>
