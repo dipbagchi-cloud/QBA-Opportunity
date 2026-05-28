@@ -290,23 +290,38 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
         }
     }, [isLoaded, resources.length, initialLoadState, startDate, endDate, durationInDays]);
 
-    // Clear resource allocations when duration parameters change significantly
+    // Clear resource allocations when duration parameters change significantly.
+    // Both writes below are made idempotent: we only rebuild the resources
+    // array when there are allocations to clear, and we only re-capture
+    // initialLoadState when the tracked values actually differ. Without these
+    // guards a transient wobble in the parent-derived endDate / durationInDays
+    // props (which settle a couple of frames after the detail page loads) made
+    // this effect rebuild new resource arrays + a new initialLoadState object
+    // on every render — an infinite re-render loop ("screen dancing").
     useEffect(() => {
         if (!isLoaded || !initialLoadState || readOnly) return;
-        
-        // Check if duration parameters have changed
+
         const datesChanged = initialLoadState.startDate !== startDate || initialLoadState.endDate !== endDate;
         const durationChanged = Math.abs(initialLoadState.durationInDays - durationInDays) > Math.max(1, initialLoadState.durationInDays * 0.1); // >10% change or >1 day
-        
-        if (datesChanged || durationChanged) {
-            // Clear all monthlyEfforts allocations to force re-allocation
-            setResources(prev => prev.map(r => ({
-                ...r,
-                monthlyEfforts: {}
-            })));
-            // Update the tracked state to prevent re-triggering
-            setInitialLoadState({ startDate, endDate, durationInDays });
-        }
+
+        if (!datesChanged && !durationChanged) return;
+
+        // Clear monthlyEfforts only if any resource actually has allocations —
+        // otherwise return the same array so no re-render is triggered.
+        setResources(prev => {
+            const hasEfforts = prev.some(r => r.monthlyEfforts && Object.keys(r.monthlyEfforts).length > 0);
+            if (!hasEfforts) return prev;
+            return prev.map(r => ({ ...r, monthlyEfforts: {} }));
+        });
+
+        // Re-capture tracked params only if they truly changed, so we don't
+        // spin on a fresh object identity each render.
+        setInitialLoadState(prev => {
+            if (prev && prev.startDate === startDate && prev.endDate === endDate && prev.durationInDays === durationInDays) {
+                return prev;
+            }
+            return { startDate, endDate, durationInDays };
+        });
     }, [startDate, endDate, durationInDays, isLoaded, initialLoadState, readOnly]);
 
 
