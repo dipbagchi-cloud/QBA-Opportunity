@@ -1622,6 +1622,161 @@ export async function evaluateExtendedNotification(opportunityId: string, update
   }
 }
 
+/* -------------------------------------------------------------------------
+ * "Start Date Changed (imminent)" event notification (event-driven,
+ * triggerType="start_date_changed").
+ *
+ * Fired by the opportunities PATCH handler when a Sales-role user changes
+ * tentativeStartDate while the start date is imminent — i.e. the previous
+ * OR new start date is within 7 days of today (the window is read from the
+ * rule's conditions field "daysToStartDate", default 7). Every person
+ * involved in the opportunity is notified so a last-minute schedule change
+ * doesn't surprise anyone.
+ *
+ * Recipients: ALL involved (owner / sales rep / manager / presales
+ * assignees), minus the person who made the change. rule.recipientRolesCc
+ * adds extra Cc users (e.g. all Admins).
+ * ------------------------------------------------------------------------- */
+
+export async function evaluateStartDateChangedNotification(params: {
+  opportunityId: string;
+  updatedByUserId: string;
+  updatedByName: string;
+  oldStartDate?: string | null;
+  newStartDate?: string | null;
+}): Promise<void> {
+  try {
+    const rules = await prisma.notificationRule.findMany({
+      where: { isActive: true, triggerType: 'start_date_changed' },
+    });
+    if (rules.length === 0) {
+      console.log('[StartDateChanged] no active start_date_changed rules — skipping');
+      return;
+    }
+
+    const opp = await prisma.opportunity.findUnique({
+      where: { id: params.opportunityId },
+      select: {
+        id: true, title: true, currentStage: true, detailedStatus: true,
+        salesRepName: true, managerName: true, presalesAssigneeName: true,
+        currency: true, value: true, tentativeStartDate: true, expectedCloseDate: true,
+        client: { select: { name: true } },
+        owner: { select: { id: true, email: true, name: true, muteNotification: true } },
+        stage: { select: { name: true } },
+      },
+    });
+    if (!opp) return;
+
+    for (const rule of rules) {
+      const channels = (rule.channels as string[]) || [];
+      const sendEmail = channels.includes('email');
+      const sendInApp = channels.includes('in_app');
+      const ccRoles = ((rule as any).recipientRolesCc as string[]) || [];
+
+      // Everyone involved — minus the actor (they made the change).
+      const involved: { id: string; email: string; name: string }[] = [];
+      const seen = new Set<string>();
+      const addInvolved = (u: { id: string; email: string; name: string; muteNotification?: boolean } | null) => {
+        if (!u || u.muteNotification || seen.has(u.id)) return;
+        if (u.id === params.updatedByUserId) return; // no self-notify
+        seen.add(u.id);
+        involved.push({ id: u.id, email: u.email, name: u.name });
+      };
+      addInvolved(opp.owner);
+      addInvolved(await resolveUserByName(opp.salesRepName));
+      addInvolved(await resolveUserByName(opp.managerName));
+      for (const pname of (opp.presalesAssigneeName || '').split(',').map(s => s.trim()).filter(Boolean)) {
+        addInvolved(await resolveUserByName(pname));
+      }
+
+      // rule.recipientRolesCc -> extra opp-scoped CC users (e.g. Admin pool)
+      let extraCc: { id: string; email: string; name: string }[] = [];
+      if (ccRoles.length > 0) {
+        try {
+          const extra = await resolveAssignedRecipients(opp.id, ccRoles, null);
+          extraCc = extra
+            .filter(u => u.id !== params.updatedByUserId)
+            .filter(u => !seen.has(u.id))
+            .map(u => ({ id: u.id, email: u.email, name: u.name }));
+          extraCc.forEach(u => seen.add(u.id));
+        } catch { /* ignore */ }
+      }
+
+      const toUsers = involved;            // all involved in To
+      const ccUsers = extraCc;             // admin/extra roles in Cc
+      if (toUsers.length === 0 && ccUsers.length === 0) {
+        console.log(`[StartDateChanged] no eligible recipients for opp ${opp.id} — skipping`);
+        continue;
+      }
+
+      const stageName = opp.stage?.name || opp.currentStage || '';
+      const oppLink = `${process.env.FRONTEND_URL || 'https://qcrm.qbadvisory.com'}/dashboard/opportunities/${opp.id}`;
+      const oppCurrency = opp.currency || 'USD';
+
+      const variables: Record<string, string> = {
+        opportunityTitle: opp.title,
+        opportunityId: opp.id,
+        client: opp.client?.name || '',
+        clientName: opp.client?.name || '',
+        stage: stageName,
+        stageName,
+        currentStage: stageName,
+        owner: opp.owner?.name || '',
+        ownerName: opp.owner?.name || '',
+        salesRep: opp.salesRepName || '',
+        salesRepName: opp.salesRepName || '',
+        manager: opp.managerName || '',
+        managerName: opp.managerName || '',
+        presales: opp.presalesAssigneeName || '',
+        updatedBy: params.updatedByName,
+        updatedByName: params.updatedByName,
+        oldStartDate: params.oldStartDate || '—',
+        newStartDate: params.newStartDate || '—',
+        tentativeStartDate: params.newStartDate || '',
+        expectedCloseDate: opp.expectedCloseDate ? new Date(opp.expectedCloseDate).toISOString().slice(0, 10) : '',
+        value: opp.value != null ? fmtNum(Number(opp.value)) : '',
+        currency: oppCurrency,
+        opportunityLink: oppLink,
+      };
+
+      const title = rule.titleTemplate
+        ? renderTemplate(rule.titleTemplate, variables)
+        : `Start date changed: "${opp.title}"`;
+      const message = rule.messageTemplate
+        ? renderTemplate(rule.messageTemplate, variables)
+        : `${params.updatedByName} moved the start date from ${variables.oldStartDate} to ${variables.newStartDate}.`;
+
+      if (sendEmail) {
+        const eventKey = rule.emailTemplateKey || 'start_date_changed';
+        await sendNotificationEmail(
+          eventKey,
+          toUsers.map(u => u.email),
+          toUsers.map(u => u.name).join(', '),
+          variables,
+          ccUsers.map(u => u.email)
+        ).catch(err => console.error('[StartDateChanged] email send failed:', err));
+      }
+      if (sendInApp) {
+        for (const u of [...toUsers, ...ccUsers]) {
+          await prisma.notification.create({
+            data: {
+              type: 'start_date_changed',
+              title,
+              message,
+              link: `/dashboard/opportunities/${opp.id}`,
+              userId: u.id,
+            },
+          });
+        }
+      }
+
+      console.log(`[StartDateChanged] rule="${rule.name}" opp=${opp.id} "${opp.title}" to=${toUsers.length} cc=${ccUsers.length}`);
+    }
+  } catch (err) {
+    console.error('[StartDateChanged] error:', err);
+  }
+}
+
 /**
  * Evaluate data condition rules against an opportunity.
  * Called after opportunity updates.

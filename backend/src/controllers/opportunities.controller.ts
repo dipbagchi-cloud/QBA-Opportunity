@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { sendNotificationEmail } from '../lib/email';
-import { evaluateStageChangeRules, evaluateDataConditionRules, evaluateOpportunityCreatedRules, evaluateAssignmentChangeRules, evaluateOpportunityChangeNotice, evaluateExtendedNotification, resolveCalculatedFields } from '../lib/notification-engine';
+import { evaluateStageChangeRules, evaluateDataConditionRules, evaluateOpportunityCreatedRules, evaluateAssignmentChangeRules, evaluateOpportunityChangeNotice, evaluateExtendedNotification, evaluateStartDateChangedNotification, resolveCalculatedFields } from '../lib/notification-engine';
 import { calculateOpportunityProbability } from '../lib/opportunity-probability';
 import { buildOpportunityAccess } from '../lib/opportunity-access';
 import path from 'path';
@@ -579,6 +579,24 @@ export async function updateOpportunity(req: Request, res: Response) {
             POST_SUBMIT_STAGES.has(prevStageNameForRule) &&
             !isAdminActor &&
             actorIsSales;
+
+        // "Start Date Changed (imminent)" notification: a Sales user changes
+        // the start date while either the previous OR new start date is within
+        // 7 days of today. Notifies everyone involved (event-driven rule
+        // start_date_changed). The window is a sensible default here; the
+        // rule's conditions can override the audience/copy in Admin.
+        const withinDays = (d?: Date | string | null, days = 7) => {
+            if (!d) return false;
+            const dt = new Date(d);
+            if (isNaN(dt.getTime())) return false;
+            const t0 = new Date(); t0.setHours(0, 0, 0, 0);
+            const diff = Math.ceil((dt.getTime() - t0.getTime()) / 86400000);
+            return diff >= 0 && diff <= days;
+        };
+        const notifyStartDateChangedImminent =
+            tentativeStartChanged &&
+            actorIsSales &&
+            (withinDays(previous?.tentativeStartDate) || withinDays(body.tentativeStartDate));
 
         let autoExtended = false;
         if (triggerExtended) {
@@ -1165,6 +1183,25 @@ export async function updateOpportunity(req: Request, res: Response) {
             const actorLabel = actor?.name || actor?.email || req.user!.email || 'Sales';
             evaluateExtendedNotification(id, actorLabel, prevStageNameForRule)
                 .catch(err => console.error('[ExtendedNotice] dispatch failed:', err));
+        }
+
+        // "Start Date Changed (imminent)" notification — Sales moved the start
+        // date while it was within 7 days. Notifies everyone involved.
+        if (notifyStartDateChangedImminent) {
+            const actor = await prisma.user.findUnique({
+                where: { id: req.user!.userId },
+                select: { name: true, email: true },
+            });
+            const actorLabel = actor?.name || actor?.email || req.user!.email || 'Sales';
+            const oldStartStr = previous?.tentativeStartDate ? new Date(previous.tentativeStartDate).toISOString().slice(0, 10) : null;
+            const newStartStr = body.tentativeStartDate ? new Date(body.tentativeStartDate).toISOString().slice(0, 10) : null;
+            evaluateStartDateChangedNotification({
+                opportunityId: id,
+                updatedByUserId: req.user!.userId,
+                updatedByName: actorLabel,
+                oldStartDate: oldStartStr,
+                newStartDate: newStartStr,
+            }).catch(err => console.error('[StartDateChanged] dispatch failed:', err));
         }
 
         // Evaluate data condition rules on every update

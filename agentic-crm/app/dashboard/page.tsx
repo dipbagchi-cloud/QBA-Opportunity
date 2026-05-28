@@ -1165,14 +1165,15 @@ export default function DashboardPage() {
                         <h3 className="font-medium text-xs text-slate-700">Revenue Projection</h3>
                     </div>
                     <div className="px-2.5 pb-2">
-                        <div className="h-[140px] w-full">
+                        <div className="h-[160px] w-full">
                             {revenueData.length > 0 ? (
                                 <ResponsiveContainer width="100%" height="100%">
-                                    <BarChart data={revenueData} barSize={12}>
+                                    <BarChart data={revenueData} barSize={12} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
                                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                                         <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} />
                                         <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 9 }} tickFormatter={(v) => fmtCurrency(v)} width={45} />
                                         <Tooltip contentStyle={{ fontSize: '11px', borderRadius: '8px', border: '1px solid #e2e8f0', padding: '6px 10px' }} formatter={(value: number) => [fmtCurrency(value), undefined]} />
+                                        <Legend wrapperStyle={{ fontSize: '10px', paddingTop: '4px' }} iconType="circle" iconSize={8} />
                                         <Bar dataKey="proposed" name="Proposed" fill="#6366f1" radius={[2, 2, 0, 0]} />
                                         <Bar dataKey="actual" name="Won" fill="#10b981" radius={[2, 2, 0, 0]} />
                                         <Bar dataKey="lost" name="Lost" fill="#ef4444" radius={[2, 2, 0, 0]} />

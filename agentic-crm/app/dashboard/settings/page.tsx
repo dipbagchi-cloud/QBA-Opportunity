@@ -4111,6 +4111,7 @@ const TRIGGER_TYPES = [
     { value: "start_date_approaching", label: "Start Date Approaching", description: "Tentative Start Date is within N days of today (time-driven)" },
     { value: "start_date_overdue", label: "Start Date Overdue", description: "Tentative Start Date has passed — auto-revert to Qualification + ask Sales for new date (time-driven)" },
     { value: "opportunity_extended", label: "Opportunity Extended", description: "Sales moved Start Date on a submitted deal — auto re-estimate" },
+    { value: "start_date_changed", label: "Start Date Changed (imminent)", description: "Sales changed Start Date while it was within 7 days — notify all involved" },
     { value: "health_drop", label: "Health Score Drop", description: "When deal health score drops" },
 ];
 
