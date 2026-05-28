@@ -240,63 +240,53 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
         });
     }, [config.data, ownerFilter, salesRepFilter, presalesFilter, clientFilter, countryFilter, regionFilter, technologyFilter, projectTypeFilter, fundingTypeFilter, pricingModelFilter, departmentFilter, dateFromFilter, dateToFilter]);
 
-    // Monthly buckets — adaptive 12-month window
+    // Monthly buckets — adaptive 12-month window.
     //
-    // Primary source: each row's `monthlyRevenue` map ({ "YYYY-MM": revenue })
-    // built from the GOM Calculator's monthlyData. Rows that contribute revenue
-    // to a month bump that month's deal count by 1.
-    //
-    // Fallback: if no row has monthlyRevenue, bucket by date (expectedCloseDate /
-    // actualCloseDate fallback chain) — useful for tiles whose data isn't tied
-    // to a GOM sheet.
+    // EVERY row contributes so the monthly breakdown total reconciles with the
+    // detailed-listing total:
+    //   - rows with a GOM `monthlyRevenue` map ({ "YYYY-MM": revenue }) are
+    //     split across those months;
+    //   - rows WITHOUT GOM monthly data (e.g. a closed deal that never had a
+    //     GOM sheet) contribute their full row value in the month of their
+    //     resolved date (expectedCloseDate / actualCloseDate / createdAt).
+    // Previously the GOM path silently dropped rows lacking monthlyRevenue,
+    // making the monthly total fall short by exactly those rows' values.
     const monthlyData = useMemo(() => {
-        // Collect all unique month keys that actually have GOM revenue
-        const gomMonthKeys = new Set<string>();
-        roleFiltered.forEach(r => {
+        // 1. Build per-row contributions: [{ monthKey, value, rowIdx }]
+        const contributions: { monthKey: string; value: number; rowIdx: number }[] = [];
+        roleFiltered.forEach((r, rowIdx) => {
             const mr = (r as any).monthlyRevenue as Record<string, number> | undefined;
-            if (!mr) return;
-            for (const [k, v] of Object.entries(mr)) {
-                if (Number(v) > 0) gomMonthKeys.add(k);
-            }
-        });
-        const useGom = gomMonthKeys.size > 0;
-
-        // Pick a 12-month window
-        const now = new Date(); now.setDate(1); now.setHours(0, 0, 0, 0);
-        let windowStart = new Date(now.getFullYear(), now.getMonth(), 1);
-
-        if (useGom) {
-            // Center the window on the GOM data range
-            const sorted = Array.from(gomMonthKeys).sort();
-            const [minY, minM] = sorted[0].split("-").map(Number);
-            const [maxY, maxM] = sorted[sorted.length - 1].split("-").map(Number);
-            const minDate = new Date(minY, minM - 1, 1);
-            const maxDate = new Date(maxY, maxM - 1, 1);
-            const elevenAhead = new Date(now.getFullYear(), now.getMonth() + 11, 1);
-            if (maxDate < now) {
-                windowStart = new Date(maxDate.getFullYear(), maxDate.getMonth() - 11, 1);
-            } else if (minDate > elevenAhead) {
-                windowStart = new Date(minDate.getFullYear(), minDate.getMonth(), 1);
-            } else if (minDate > now) {
-                windowStart = new Date(minDate.getFullYear(), minDate.getMonth(), 1);
-            }
-        } else {
-            // Date fallback path — same adaptive logic against resolved row dates
-            const dates = roleFiltered
-                .map(r => resolveRowDate(r))
-                .filter((d): d is Date => d != null);
-            if (dates.length > 0) {
-                const maxTs = Math.max(...dates.map(d => d.getTime()));
-                const minTs = Math.min(...dates.map(d => d.getTime()));
-                const maxDate = new Date(maxTs); maxDate.setDate(1);
-                const minDate = new Date(minTs); minDate.setDate(1);
-                const elevenAhead = new Date(now.getFullYear(), now.getMonth() + 11, 1);
-                if (maxDate < now) {
-                    windowStart = new Date(maxDate.getFullYear(), maxDate.getMonth() - 11, 1);
-                } else if (minDate > elevenAhead) {
-                    windowStart = new Date(minDate.getFullYear(), minDate.getMonth(), 1);
+            const positive = mr ? Object.entries(mr).filter(([, v]) => Number(v) > 0) : [];
+            if (positive.length > 0) {
+                positive.forEach(([k, v]) => contributions.push({ monthKey: k, value: Number(v), rowIdx }));
+            } else {
+                const d = resolveRowDate(r);
+                if (d) {
+                    const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+                    contributions.push({ monthKey: k, value: Number((r as any)[valueKey]) || 0, rowIdx });
                 }
             }
+        });
+
+        if (contributions.length === 0) {
+            return [] as { key: string; label: string; count: number; value: number }[];
+        }
+
+        // 2. Adaptive 12-month window covering the contribution months.
+        const now = new Date(); now.setDate(1); now.setHours(0, 0, 0, 0);
+        let windowStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        const monthKeys = Array.from(new Set(contributions.map(c => c.monthKey))).sort();
+        const [minY, minM] = monthKeys[0].split("-").map(Number);
+        const [maxY, maxM] = monthKeys[monthKeys.length - 1].split("-").map(Number);
+        const minDate = new Date(minY, minM - 1, 1);
+        const maxDate = new Date(maxY, maxM - 1, 1);
+        const elevenAhead = new Date(now.getFullYear(), now.getMonth() + 11, 1);
+        if (maxDate < now) {
+            windowStart = new Date(maxDate.getFullYear(), maxDate.getMonth() - 11, 1);
+        } else if (minDate > elevenAhead) {
+            windowStart = new Date(minDate.getFullYear(), minDate.getMonth(), 1);
+        } else if (minDate > now) {
+            windowStart = new Date(minDate.getFullYear(), minDate.getMonth(), 1);
         }
 
         const buckets: { key: string; label: string; count: number; value: number }[] = [];
@@ -311,33 +301,16 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
         }
         const idx = new Map(buckets.map((b, i) => [b.key, i]));
 
-        if (useGom) {
-            roleFiltered.forEach(r => {
-                const mr = (r as any).monthlyRevenue as Record<string, number> | undefined;
-                if (!mr) return;
-                const touched = new Set<number>();
-                for (const [k, v] of Object.entries(mr)) {
-                    const i = idx.get(k);
-                    if (i != null && Number(v) > 0) {
-                        buckets[i].value += Number(v);
-                        touched.add(i);
-                    }
-                }
-                // Count a deal once per bucket it contributes revenue to
-                touched.forEach(i => { buckets[i].count += 1; });
-            });
-        } else {
-            roleFiltered.forEach(r => {
-                const d = resolveRowDate(r);
-                if (!d) return;
-                const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-                const i = idx.get(key);
-                if (i != null) {
-                    buckets[i].count += 1;
-                    buckets[i].value += Number(r[valueKey]) || 0;
-                }
-            });
-        }
+        // 3. Distribute contributions; count each deal once per bucket it touches.
+        const bucketRows: Set<number>[] = buckets.map(() => new Set<number>());
+        contributions.forEach(c => {
+            const i = idx.get(c.monthKey);
+            if (i != null) {
+                buckets[i].value += c.value;
+                bucketRows[i].add(c.rowIdx);
+            }
+        });
+        buckets.forEach((b, i) => { b.count = bucketRows[i].size; });
         return buckets;
     }, [roleFiltered, valueKey, resolveRowDate]);
 
