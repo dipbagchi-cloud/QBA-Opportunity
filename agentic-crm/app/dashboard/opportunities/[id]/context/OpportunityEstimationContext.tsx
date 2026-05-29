@@ -113,11 +113,23 @@ interface OpportunityEstimationContextType {
     endDate: string;
     durationInDays: number; // Duration in working days from the form
     exchangeRatesSnapshot?: Record<string, number>;
+
+    // Country-attributed holidays (from QPeople). Each resource row is in a
+    // specific country, so the Resource Assignment grid uses these to clamp
+    // each row's monthly effort to the working days in THAT country.
+    holidays: HolidayInfo[];
+}
+
+export interface HolidayInfo {
+    date: string;
+    name: string;
+    country: string;
+    isOptional: boolean;
 }
 
 const OpportunityEstimationContext = createContext<OpportunityEstimationContextType | undefined>(undefined);
 
-export function OpportunityEstimationProvider({ children, opportunityId, readOnly = false, startDate = '', endDate = '', durationInDays = 0, salesTargetRevenue = 0, reEstimateSuggestedRevenue = 0, isReEstimation = false, initialCurrency = "INR", currentUserName = "" }: { children: ReactNode; opportunityId?: string; readOnly?: boolean; startDate?: string; endDate?: string; durationInDays?: number; salesTargetRevenue?: number; reEstimateSuggestedRevenue?: number; isReEstimation?: boolean; initialCurrency?: string; currentUserName?: string }) {
+export function OpportunityEstimationProvider({ children, opportunityId, readOnly = false, startDate = '', endDate = '', durationInDays = 0, salesTargetRevenue = 0, reEstimateSuggestedRevenue = 0, isReEstimation = false, initialCurrency = "INR", currentUserName = "", holidays = [] }: { children: ReactNode; opportunityId?: string; readOnly?: boolean; startDate?: string; endDate?: string; durationInDays?: number; salesTargetRevenue?: number; reEstimateSuggestedRevenue?: number; isReEstimation?: boolean; initialCurrency?: string; currentUserName?: string; holidays?: HolidayInfo[] }) {
     // State
     const [assumptions, setAssumptions] = useState<BudgetAssumptions>(DEFAULT_ASSUMPTIONS);
     const [resources, setResources] = useState<ResourceRow[]>([]);
@@ -601,6 +613,7 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
         endDate,
         durationInDays,
         exchangeRatesSnapshot,
+        holidays,
     };
 
     return (

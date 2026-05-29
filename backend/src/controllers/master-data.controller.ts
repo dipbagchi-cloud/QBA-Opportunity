@@ -771,15 +771,73 @@ export async function listPresalesTeam(req: Request, res: Response) {
     }
 }
 
-let holidaysCache: string[] | null = null;
+// Holidays come from QPeople (Frappe/ERPNext) Holiday Lists. Each list is
+// scoped to an entity / country, but QPeople doesn't reliably populate the
+// `country` field — so we derive the country from the list name (e.g. QBAPL =
+// India, QBALUX = Luxembourg) and fall back to the country code when present.
+type HolidayEntry = {
+    date: string;        // YYYY-MM-DD
+    name: string;        // holiday name (HTML stripped)
+    country: string;     // canonical country name
+    isOptional: boolean; // optional vs mandatory (per list name)
+    listName: string;    // source QPeople Holiday List
+};
+
+// ISO 3166-1 alpha-2 -> canonical country name we use across the CRM.
+const ISO_TO_COUNTRY: Record<string, string> = {
+    IN: 'India', LU: 'Luxembourg', UZ: 'Uzbekistan', ID: 'Indonesia',
+    US: 'United States', GB: 'United Kingdom', AE: 'United Arab Emirates',
+    SG: 'Singapore', AU: 'Australia', CA: 'Canada',
+};
+
+function deriveCountry(listName: string, countryField?: string): string {
+    if (countryField) {
+        const up = String(countryField).toUpperCase();
+        if (ISO_TO_COUNTRY[up]) return ISO_TO_COUNTRY[up];
+        return String(countryField); // already a full name
+    }
+    const n = (listName || '').toUpperCase();
+    // QBAPL = QB Advisory Pvt Ltd (India entity, incl. BCOE sub-list).
+    if (n.includes('QBAPL') || /\bINDIA\b/.test(n)) return 'India';
+    // QBALUX = QB Advisory Luxembourg.
+    if (n.includes('QBALUX') || /\bLUXEMBOURG\b/.test(n)) return 'Luxembourg';
+    if (n.includes('UZBEK')) return 'Uzbekistan';
+    if (n.includes('INDONESIA')) return 'Indonesia';
+    return 'Other';
+}
+
+// `holiday_name` is undefined in the QPeople payload; the human name lives in
+// `description`, often wrapped in Quill HTML (`<div class="ql-editor"><p>...`).
+function parseHolidayName(h: any): string {
+    const raw = String(h.holiday_name || h.description || '').trim();
+    if (!raw) return 'Holiday';
+    return raw
+        .replace(/<[^>]*>/g, ' ')          // strip tags
+        .replace(/&nbsp;|&amp;|&lt;|&gt;/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim() || 'Holiday';
+}
+
+let holidaysCache: HolidayEntry[] | null = null;
 let holidaysCacheTime = 0;
 
+function filterByCountry(entries: HolidayEntry[], country: string): HolidayEntry[] {
+    if (!country) return entries;
+    const c = country.trim().toLowerCase();
+    return entries.filter(e => e.country.toLowerCase() === c);
+}
+
+// GET /api/master/holidays?country=<name>&refresh=true
+// Returns the full holiday list (or filtered to a single country). Each entry
+// carries the country, name, and optional/mandatory flag so callers (the
+// settings UI and the working-days calculator) can scope correctly.
 export async function listHolidays(req: Request, res: Response) {
     try {
         const forceRefresh = req.query.refresh === 'true';
-        
+        const countryFilter = (req.query.country as string | undefined) || '';
+
         if (!forceRefresh && holidaysCache && Date.now() - holidaysCacheTime < 3600000) {
-            return res.json(holidaysCache);
+            return res.json(filterByCountry(holidaysCache, countryFilter));
         }
 
         const qpeopleToken = process.env.QPEOPLE_API_TOKEN;
@@ -793,7 +851,7 @@ export async function listHolidays(req: Request, res: Response) {
         const listsJson: any = await listsRes.json();
         const lists = listsJson.data || [];
 
-        const allHolidays = new Set<string>();
+        const entries: HolidayEntry[] = [];
 
         await Promise.all(lists.map(async (l: any) => {
             try {
@@ -801,20 +859,43 @@ export async function listHolidays(req: Request, res: Response) {
                     headers: { 'Authorization': `token ${qpeopleToken}` }
                 });
                 const listJson: any = await listRes.json();
-                const holidays = listJson.data?.holidays || [];
-                holidays.forEach((h: any) => {
+                const d: any = listJson.data || {};
+                const sourceName = d.name || l.name;
+                const country = deriveCountry(sourceName, d.country);
+                const isOptional = /optional/i.test(sourceName);
+                const holidays = d.holidays || [];
+                for (const h of holidays) {
                     if (h.weekly_off === 0 && h.holiday_date) {
-                        allHolidays.add(h.holiday_date);
+                        entries.push({
+                            date: h.holiday_date,
+                            name: parseHolidayName(h),
+                            country,
+                            isOptional,
+                            listName: sourceName,
+                        });
                     }
-                });
+                }
             } catch (err) {
                 console.error(`Failed to fetch holiday list ${l.name}`, err);
             }
         }));
 
-        holidaysCache = Array.from(allHolidays).sort();
+        // Dedupe by (date, country, name). If the same holiday appears in both
+        // a mandatory and an optional list for the same country, the mandatory
+        // entry wins (it's the stricter classification for working-days calc).
+        const byKey = new Map<string, HolidayEntry>();
+        for (const e of entries) {
+            const key = `${e.date}|${e.country}|${e.name.toLowerCase()}`;
+            const prev = byKey.get(key);
+            if (!prev || (prev.isOptional && !e.isOptional)) byKey.set(key, e);
+        }
+        const final = Array.from(byKey.values()).sort((a, b) =>
+            a.date.localeCompare(b.date) || a.country.localeCompare(b.country)
+        );
+
+        holidaysCache = final;
         holidaysCacheTime = Date.now();
-        res.json(holidaysCache);
+        res.json(filterByCountry(final, countryFilter));
     } catch (error) {
         console.error('QPeople Holiday API error:', error);
         res.status(502).json({ error: 'Failed to fetch holidays from HRMS.' });
