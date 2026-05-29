@@ -791,6 +791,7 @@ const DEFAULT_BUDGET_ASSUMPTIONS = {
   indirectCostPercent: 0,
   welfarePerFte: 0,
   trainingPerFte: 0,
+  stalledDaysThreshold: 30,
 };
 
 // GET /api/admin/budget-assumptions

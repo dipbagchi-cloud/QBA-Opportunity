@@ -235,14 +235,12 @@ export default function NewOpportunityPage() {
         const fetchMasterData = async () => {
             const headers = getAuthHeaders();
             try {
-                const [clientsRes, regionsRes, techRes, pricingRes, salesRes, mgrRes, presalesRes, deptRes, projTypesRes, countryMapRes, holRes] = await Promise.all([
+                const [clientsRes, regionsRes, techRes, pricingRes, salesRes, deptRes, projTypesRes, countryMapRes, holRes] = await Promise.all([
                     fetch(`${API_URL}/api/master/clients`, { headers }),
                     fetch(`${API_URL}/api/master/regions`, { headers }),
                     fetch(`${API_URL}/api/master/technologies`, { headers }),
                     fetch(`${API_URL}/api/master/pricing-models`, { headers }),
                     fetch(`${API_URL}/api/master/salespersons`, { headers }),
-                    fetch(`${API_URL}/api/master/managers`, { headers }),
-                    fetch(`${API_URL}/api/master/presales-team`, { headers }),
                     fetch(`${API_URL}/api/master/departments`, { headers }),
                     fetch(`${API_URL}/api/master/project-types`, { headers }),
                     fetch(`${API_URL}/api/master/country-region-map`, { headers }),
@@ -253,8 +251,6 @@ export default function NewOpportunityPage() {
                 if (techRes.ok) setTechnologies((await techRes.json()).map((t: any) => t.name));
                 if (pricingRes.ok) setPricingModels((await pricingRes.json()).map((p: any) => p.name));
                 if (salesRes.ok) setSalespersons(await salesRes.json());
-                if (mgrRes.ok) setManagers(await mgrRes.json());
-                if (presalesRes.ok) setPresalesTeam(await presalesRes.json());
                 if (deptRes.ok) setDepartments(await deptRes.json());
                 if (projTypesRes.ok) setProjectTypes((await projTypesRes.json()).map((p: any) => p.name));
                 if (countryMapRes.ok) setCountryRegionMap(await countryMapRes.json());
@@ -268,6 +264,44 @@ export default function NewOpportunityPage() {
         };
         fetchMasterData();
     }, []);
+
+    // Manager & Presales lists are scoped to the selected Practice/department.
+    // (Sales Rep is intentionally unfiltered — a salesperson can be anyone.)
+    useEffect(() => {
+        let cancelled = false;
+        const headers = getAuthHeaders();
+        const dept = formData.practice;
+        const mgrUrl = dept
+            ? `${API_URL}/api/master/managers?department=${encodeURIComponent(dept)}`
+            : `${API_URL}/api/master/managers`;
+        const presalesUrl = dept
+            ? `${API_URL}/api/master/presales-team?department=${encodeURIComponent(dept)}`
+            : `${API_URL}/api/master/presales-team`;
+        Promise.all([
+            fetch(mgrUrl, { headers }).then(r => r.ok ? r.json() : []),
+            fetch(presalesUrl, { headers }).then(r => r.ok ? r.json() : []),
+        ])
+            .then(([mgrData, presalesData]) => {
+                if (cancelled) return;
+                const mgrList = Array.isArray(mgrData) ? mgrData : [];
+                const presalesList = Array.isArray(presalesData) ? presalesData : [];
+                setManagers(mgrList);
+                setPresalesTeam(presalesList);
+                // Drop a previously-picked person who isn't in the new department's list.
+                setFormData(prev => {
+                    const next = { ...prev };
+                    if (prev.managerName && !mgrList.some((m: any) => m.name === prev.managerName)) next.managerName = "";
+                    if (prev.presalesAssigneeName && !presalesList.some((p: any) => p.name === prev.presalesAssigneeName)) next.presalesAssigneeName = "";
+                    return next;
+                });
+            })
+            .catch(() => {
+                if (cancelled) return;
+                setManagers([]);
+                setPresalesTeam([]);
+            });
+        return () => { cancelled = true; };
+    }, [formData.practice]);
 
 
 

@@ -90,7 +90,7 @@ export async function listOpportunities(req: Request, res: Response) {
             select: { id: true, name: true },
         });
 
-        const [opportunities, total] = await Promise.all([
+        const [opportunities, total, stalledConfig] = await Promise.all([
             prisma.opportunity.findMany({
                 where,
                 include: {
@@ -107,7 +107,16 @@ export async function listOpportunities(req: Request, res: Response) {
                 take: limit,
             }),
             prisma.opportunity.count({ where }),
+            prisma.systemConfig.findUnique({ where: { key: 'budget_assumptions' } }),
         ]);
+
+        // Inactivity threshold (in days) used to flag a deal as stalled —
+        // configurable from Admin > Budget Assumptions (default 30).
+        const stalledDaysThreshold = (() => {
+            const raw = (stalledConfig?.value as any)?.stalledDaysThreshold;
+            const n = Number(raw);
+            return Number.isFinite(n) && n > 0 ? n : 30;
+        })();
 
         // Transform for frontend with dynamic intelligence 
         const formatted = opportunities.map(opp => {
@@ -131,7 +140,7 @@ export async function listOpportunities(req: Request, res: Response) {
             const isClosedStage = CLOSED_STAGE_SET.includes(stageName);
 
             // 3. Stalled detection — never flag a closed deal as stalled.
-            const isStalled = !isClosedStage && (opp.isStalled || (daysInStage > 30));
+            const isStalled = !isClosedStage && (opp.isStalled || (daysInStage > stalledDaysThreshold));
             const access = buildOpportunityAccess({
                 authUser: req.user!,
                 currentUser,
