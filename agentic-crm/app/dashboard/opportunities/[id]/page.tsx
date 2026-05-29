@@ -29,7 +29,8 @@ import {
     Upload,
     Download,
     Trash2,
-    FileText
+    FileText,
+    History
 } from "lucide-react";
 import { useOpportunityStore } from "@/lib/store";
 import { useAuthStore } from "@/lib/auth-store";
@@ -463,6 +464,12 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const [attachments, setAttachments] = useState<{ id: string; fileName: string; fileType: string; fileSize: number; uploadedAt: string }[]>([]);
     const [isUploading, setIsUploading] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    // SOW (Statement of Work) document — mandatory, versioned with archive
+    const [sowDocuments, setSowDocuments] = useState<{ id: string; fileName: string; fileType: string; fileSize: number; uploadedAt: string; version: number; isCurrent: boolean }[]>([]);
+    const [sowUploading, setSowUploading] = useState(false);
+    const [showSowHistory, setShowSowHistory] = useState(false);
+    const sowInputRef = useRef<HTMLInputElement>(null);
 
     // Add Client modal
     const [showAddClient, setShowAddClient] = useState(false);
@@ -932,6 +939,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 if (data.attachments && Array.isArray(data.attachments)) {
                     setAttachments(data.attachments);
                 }
+                // Load SOW document(s) — current + versioned archive
+                setSowDocuments(Array.isArray(data.sowDocuments) ? data.sowDocuments : []);
 
                 setOpportunityManagerName(data.managerName || "");
                 setPresalesForm(prev => ({ ...prev, managerName: data.managerName || "" }));
@@ -1133,6 +1142,34 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         } finally {
             setIsUploading(false);
             if (fileInputRef.current) fileInputRef.current.value = "";
+        }
+    };
+
+    // SOW upload handler — uploading a new SOW archives the previous version
+    const handleUploadSow = async (files: FileList | null) => {
+        if (!files || files.length === 0) return;
+        const file = files[0];
+        setSowUploading(true);
+        try {
+            const fd = new FormData();
+            fd.append("file", file);
+            const res = await fetch(`${API_URL}/api/opportunities/${id}/sow`, {
+                method: "POST",
+                headers: { Authorization: getAuthHeaders().Authorization },
+                body: fd,
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.error || "Upload failed");
+            }
+            const data = await res.json();
+            setSowDocuments(Array.isArray(data.sowDocuments) ? data.sowDocuments : []);
+            toast({ title: "SOW attached", description: "The Statement of Work has been saved." });
+        } catch (e: any) {
+            toast({ title: "Error", description: e.message || "Failed to upload SOW." });
+        } finally {
+            setSowUploading(false);
+            if (sowInputRef.current) sowInputRef.current.value = "";
         }
     };
 
@@ -1756,17 +1793,20 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 <span className="flex items-center gap-1.5"><XCircle className="w-4 h-4" /> Proposal Lost</span>
                             </button>
                             {(() => {
-                                // A committed quote must exist (GOM calculated) AND be approved
-                                // before the deal can be submitted to Sales. No GOM => no quote
-                                // => Move to Sales stays disabled.
+                                // A SOW must be attached, and a committed quote must exist
+                                // (GOM calculated) AND be approved, before the deal can be
+                                // submitted to Sales.
+                                const hasSow = sowDocuments.some(d => d.isCurrent);
                                 const hasQuote = contextRevenue > 0;
                                 const gomOk = gomApproved || (gomAutoApprovePercent > 0 && contextGomPercent >= gomAutoApprovePercent);
-                                const canMove = hasQuote && gomOk;
-                                const blockReason = !hasQuote
-                                    ? 'Complete the GOM Calculator first — there is no quote to submit to Sales.'
-                                    : !gomOk
-                                        ? 'GOM must be approved first (see GOM Calculator tab).'
-                                        : '';
+                                const canMove = hasSow && hasQuote && gomOk;
+                                const blockReason = !hasSow
+                                    ? 'Attach the Statement of Work (SOW) first — it is mandatory before moving to Sales.'
+                                    : !hasQuote
+                                        ? 'Complete the GOM Calculator first — there is no quote to submit to Sales.'
+                                        : !gomOk
+                                            ? 'GOM must be approved first (see GOM Calculator tab).'
+                                            : '';
                                 return (
                                     <button
                                         onClick={handleMoveToSales}
@@ -1845,6 +1885,83 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     )}
                 </div>
             </div>
+
+            {/* Statement of Work (SOW) — mandatory, versioned. Hidden in Pipeline;
+                shown from Pre-sales onward (editable in Pre-sales, read-only after). */}
+            {opportunityStage >= 1 && (() => {
+                const currentSow = sowDocuments.find(d => d.isCurrent);
+                const canEditSow = canManageAttachments && opportunityStage === 1 && !isLost;
+                const archived = sowDocuments.filter(d => !d.isCurrent).sort((a, b) => b.version - a.version);
+                return (
+                    <section className="bg-white rounded-lg border border-slate-200 shadow-sm">
+                        <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-100">
+                            <div className="flex items-center gap-2">
+                                <FileText className="w-4 h-4 text-indigo-600" />
+                                <h3 className="text-sm font-bold text-slate-800">Statement of Work (SOW)</h3>
+                                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-rose-50 text-rose-600 border border-rose-200">Mandatory</span>
+                            </div>
+                            {canEditSow && (
+                                <>
+                                    <input ref={sowInputRef} type="file" className="hidden" onChange={(e) => handleUploadSow(e.target.files)} />
+                                    <button
+                                        onClick={() => sowInputRef.current?.click()}
+                                        disabled={sowUploading}
+                                        className="px-3 py-1.5 bg-indigo-600 text-white text-xs font-medium rounded-md hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-1.5"
+                                    >
+                                        <Upload className="w-3.5 h-3.5" />
+                                        {sowUploading ? 'Uploading…' : (currentSow ? 'Replace SOW' : 'Upload SOW')}
+                                    </button>
+                                </>
+                            )}
+                        </div>
+                        <div className="px-4 py-3 space-y-2">
+                            {!currentSow ? (
+                                <div className={`text-sm rounded-md px-3 py-2 ${canEditSow ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'bg-slate-50 text-slate-500'}`}>
+                                    {canEditSow
+                                        ? 'No SOW attached yet. A Statement of Work is required before this opportunity can be moved to Sales.'
+                                        : 'No SOW document has been attached.'}
+                                </div>
+                            ) : (
+                                <div className="flex items-center justify-between gap-3 bg-indigo-50/50 border border-indigo-100 rounded-md px-3 py-2">
+                                    <div className="flex items-center gap-2 min-w-0">
+                                        <FileText className="w-4 h-4 text-indigo-500 shrink-0" />
+                                        <button onClick={() => handleDownloadAttachment(currentSow.id, currentSow.fileName)} className="text-indigo-700 font-medium hover:underline truncate text-left">{currentSow.fileName}</button>
+                                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 whitespace-nowrap">Current · v{currentSow.version}</span>
+                                    </div>
+                                    <div className="flex items-center gap-3 shrink-0">
+                                        <span className="text-[11px] text-slate-400 whitespace-nowrap">{new Date(currentSow.uploadedAt).toLocaleDateString()}</span>
+                                        <button onClick={() => handleDownloadAttachment(currentSow.id, currentSow.fileName)} className="text-slate-500 hover:text-indigo-600" title="Download SOW"><Download className="w-4 h-4" /></button>
+                                    </div>
+                                </div>
+                            )}
+                            {archived.length > 0 && (
+                                <div>
+                                    <button onClick={() => setShowSowHistory(s => !s)} className="text-xs text-slate-500 hover:text-indigo-600 flex items-center gap-1">
+                                        <History className="w-3.5 h-3.5" /> {showSowHistory ? 'Hide' : 'Show'} version history ({archived.length} archived)
+                                    </button>
+                                    {showSowHistory && (
+                                        <div className="mt-2 border border-slate-100 rounded-md divide-y divide-slate-100">
+                                            {archived.map(d => (
+                                                <div key={d.id} className="flex items-center justify-between gap-3 px-3 py-1.5 text-xs">
+                                                    <div className="flex items-center gap-2 min-w-0">
+                                                        <span className="text-slate-400 font-mono">v{d.version}</span>
+                                                        <button onClick={() => handleDownloadAttachment(d.id, d.fileName)} className="text-slate-600 hover:text-indigo-600 hover:underline truncate text-left">{d.fileName}</button>
+                                                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 whitespace-nowrap">Archived</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-3 shrink-0">
+                                                        <span className="text-[10px] text-slate-400 whitespace-nowrap">{new Date(d.uploadedAt).toLocaleDateString()}</span>
+                                                        <button onClick={() => handleDownloadAttachment(d.id, d.fileName)} className="text-slate-400 hover:text-indigo-600" title="Download"><Download className="w-3.5 h-3.5" /></button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    </section>
+                );
+            })()}
 
             {/* Detailed Status Banner */}
             {(detailedStatus === 'Sent for Re-estimate' || detailedStatus === 'Re-estimation') && (

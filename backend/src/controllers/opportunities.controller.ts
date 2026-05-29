@@ -480,7 +480,7 @@ export async function getOpportunity(req: Request, res: Response) {
                 stage: true,
                 owner: true,
                 attachments: {
-                    select: { id: true, fileName: true, fileType: true, fileSize: true, uploadedAt: true },
+                    select: { id: true, fileName: true, fileType: true, fileSize: true, uploadedAt: true, category: true },
                     orderBy: { uploadedAt: 'desc' },
                 },
             }
@@ -490,6 +490,27 @@ export async function getOpportunity(req: Request, res: Response) {
             return res.status(404).json({ error: 'Opportunity not found' });
         }
 
+        // Separate the SOW document(s) from generic attachments. SOW versions are
+        // returned as their own ordered, versioned list; everything else stays in
+        // the generic attachments list (unchanged shape for existing UI).
+        const allAttachments = opportunity.attachments || [];
+        const sowDocuments = allAttachments
+            .filter((a: any) => a.category === SOW_CURRENT_CATEGORY || a.category === SOW_ARCHIVED_CATEGORY)
+            .sort((a: any, b: any) => new Date(a.uploadedAt).getTime() - new Date(b.uploadedAt).getTime())
+            .map((a: any, i: number) => ({
+                id: a.id,
+                fileName: a.fileName,
+                fileType: a.fileType,
+                fileSize: a.fileSize,
+                uploadedAt: a.uploadedAt,
+                version: i + 1,
+                isCurrent: a.category === SOW_CURRENT_CATEGORY,
+            }));
+        const genericAttachments = allAttachments
+            .filter((a: any) => a.category !== SOW_CURRENT_CATEGORY && a.category !== SOW_ARCHIVED_CATEGORY)
+            .map((a: any) => ({ id: a.id, fileName: a.fileName, fileType: a.fileType, fileSize: a.fileSize, uploadedAt: a.uploadedAt }));
+        (opportunity as any).attachments = genericAttachments;
+
         const pendingApproval = await prisma.approvalRequest.findFirst({
             where: { opportunityId: id, type: 'GOM_APPROVAL', status: 'Pending' },
             select: { reviewerId: true },
@@ -498,7 +519,7 @@ export async function getOpportunity(req: Request, res: Response) {
 
         // Include project info if exists
         const project = await prisma.project.findFirst({ where: { opportunityId: id } });
-        res.json({ ...opportunity, project: project || null, access });
+        res.json({ ...opportunity, sowDocuments, project: project || null, access });
     } catch (error) {
         res.status(500).json({ error: 'Failed to fetch opportunity' });
     }
@@ -793,6 +814,16 @@ export async function updateOpportunity(req: Request, res: Response) {
                 }
                 // When presales submits to sales: first time = 'Estimation Submitted', subsequent = 'Re-estimation Submitted'
                 if (newStageName === 'Proposal') {
+                    // Hard requirement: a signed-off Statement of Work (SOW) document
+                    // must be attached in Pre-sales before the deal can be submitted
+                    // to Sales.
+                    const currentSow = await prisma.attachment.findFirst({
+                        where: { opportunityId: id, category: SOW_CURRENT_CATEGORY },
+                        select: { id: true },
+                    });
+                    if (!currentSow) {
+                        return res.status(400).json({ error: 'Cannot move to Sales: a Statement of Work (SOW) document must be attached in Pre-sales first.' });
+                    }
                     // Hard requirement: a committed quote (GOM-calculated revenue)
                     // must exist before a deal can be submitted to Sales. No GOM
                     // => no quote => block. This stops un-quoted deals from ever
@@ -1737,5 +1768,85 @@ export async function deleteAttachment(req: Request, res: Response) {
     } catch (error) {
         console.error('Delete attachment error:', error);
         res.status(500).json({ error: 'Failed to delete attachment' });
+    }
+}
+
+// ── Statement of Work (SOW) document ──
+// The SOW is a single mandatory document attached during Pre-sales. It is stored
+// as an Attachment tagged with category 'SOW' (the current version). Replacing it
+// (e.g. on re-estimation) archives the previous one as 'SOW_ARCHIVED' so the full
+// version history stays visible and downloadable in every later stage.
+export const SOW_CURRENT_CATEGORY = 'SOW';
+export const SOW_ARCHIVED_CATEGORY = 'SOW_ARCHIVED';
+const SOW_CATEGORIES = [SOW_CURRENT_CATEGORY, SOW_ARCHIVED_CATEGORY];
+// SOW may only be uploaded/replaced before the deal is submitted to Sales.
+const SOW_EDITABLE_STAGES = ['Discovery', 'Pipeline', 'Qualification', 'Presales'];
+
+// Build the versioned SOW list for an opportunity (oldest = v1, current = latest).
+export async function buildSowDocuments(opportunityId: string) {
+    const rows = await prisma.attachment.findMany({
+        where: { opportunityId, category: { in: SOW_CATEGORIES } },
+        orderBy: { uploadedAt: 'asc' },
+        select: { id: true, fileName: true, fileType: true, fileSize: true, uploadedAt: true, category: true },
+    });
+    return rows.map((a, i) => ({
+        id: a.id,
+        fileName: a.fileName,
+        fileType: a.fileType,
+        fileSize: a.fileSize,
+        uploadedAt: a.uploadedAt,
+        version: i + 1,
+        isCurrent: a.category === SOW_CURRENT_CATEGORY,
+    }));
+}
+
+// POST /api/opportunities/:id/sow
+export async function uploadSow(req: Request, res: Response) {
+    try {
+        const { id } = req.params;
+        const file = (req as any).file;
+        if (!file) return res.status(400).json({ error: 'No SOW file uploaded' });
+
+        const opp = await prisma.opportunity.findUnique({
+            where: { id },
+            select: { ownerId: true, salesRepName: true, managerName: true, presalesAssigneeName: true, currentStage: true },
+        });
+        if (!opp) return res.status(404).json({ error: 'Opportunity not found' });
+
+        const access = await resolveOpportunityAccess(req.user!, opp);
+        if (!access.workflow.attachmentsEditable) {
+            return res.status(403).json({
+                error: access.viewOnlyReason || 'Only assigned team members can attach the SOW for this opportunity.',
+            });
+        }
+        if (!SOW_EDITABLE_STAGES.includes(opp.currentStage || '')) {
+            return res.status(400).json({
+                error: 'The SOW can only be attached or replaced during Pre-sales (before the deal is submitted to Sales).',
+            });
+        }
+
+        // Archive the existing current SOW (if any) before storing the new one.
+        await prisma.attachment.updateMany({
+            where: { opportunityId: id, category: SOW_CURRENT_CATEGORY },
+            data: { category: SOW_ARCHIVED_CATEGORY },
+        });
+
+        const relativePath = path.relative(PROJECT_ROOT, file.path);
+        await prisma.attachment.create({
+            data: {
+                fileName: file.originalname,
+                fileType: file.mimetype,
+                fileSize: file.size,
+                filePath: relativePath,
+                category: SOW_CURRENT_CATEGORY,
+                opportunityId: id,
+            },
+        });
+
+        const sowDocuments = await buildSowDocuments(id);
+        res.status(201).json({ sowDocuments });
+    } catch (error) {
+        console.error('Upload SOW error:', error);
+        res.status(500).json({ error: 'Failed to upload SOW document' });
     }
 }
