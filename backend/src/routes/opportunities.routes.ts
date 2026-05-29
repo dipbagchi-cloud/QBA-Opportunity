@@ -16,6 +16,7 @@ import {
     uploadAttachment,
     downloadAttachment,
     deleteAttachment,
+    uploadSow,
 } from '../controllers/opportunities.controller';
 import { authenticate, authorize, authorizeAny } from '../middleware/auth';
 import { PERMISSIONS } from '../lib/permissions';
@@ -50,6 +51,7 @@ router.post('/:id/comments', authorizeAny(PERMISSIONS.PIPELINE_WRITE, PERMISSION
 router.get('/:id/audit-log', authorizeAny(PERMISSIONS.PIPELINE_VIEW, PERMISSIONS.PRESALES_VIEW, PERMISSIONS.SALES_VIEW), getOpportunityAuditLog);
 
 // Attachment routes
+router.post('/:id/sow', authorizeAny(PERMISSIONS.PIPELINE_WRITE, PERMISSIONS.PRESALES_WRITE, PERMISSIONS.SALES_WRITE), upload.single('file'), uploadSow);
 router.post('/:id/attachments', authorizeAny(PERMISSIONS.PIPELINE_WRITE, PERMISSIONS.PRESALES_WRITE, PERMISSIONS.SALES_WRITE), upload.single('file'), uploadAttachment);
 router.get('/:id/attachments/:attachmentId/download', authorizeAny(PERMISSIONS.PIPELINE_VIEW, PERMISSIONS.PRESALES_VIEW, PERMISSIONS.SALES_VIEW), downloadAttachment);
 router.delete('/:id/attachments/:attachmentId', authorizeAny(PERMISSIONS.PIPELINE_WRITE, PERMISSIONS.PRESALES_WRITE, PERMISSIONS.SALES_WRITE), deleteAttachment);

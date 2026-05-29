@@ -255,15 +255,24 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
         // 1. Build per-row contributions: [{ monthKey, value, rowIdx }]
         const contributions: { monthKey: string; value: number; rowIdx: number }[] = [];
         roleFiltered.forEach((r, rowIdx) => {
+            const rowVal = Number((r as any)[valueKey]) || 0;
             const mr = (r as any).monthlyRevenue as Record<string, number> | undefined;
             const positive = mr ? Object.entries(mr).filter(([, v]) => Number(v) > 0) : [];
             if (positive.length > 0) {
-                positive.forEach(([k, v]) => contributions.push({ monthKey: k, value: Number(v), rowIdx }));
+                // Distribute the row's DISPLAY value across its GOM months using the
+                // GOM monthly shape, so each row contributes EXACTLY its listed value.
+                // (Raw GOM monthly figures can sum to a different number than the
+                // adjusted quote the row actually shows, which made the monthly total
+                // drift from the detailed listing.)
+                const gomSum = positive.reduce((s, [, v]) => s + Number(v), 0);
+                positive.forEach(([k, v]) =>
+                    contributions.push({ monthKey: k, value: gomSum > 0 ? rowVal * (Number(v) / gomSum) : 0, rowIdx })
+                );
             } else {
                 const d = resolveRowDate(r);
                 if (d) {
                     const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-                    contributions.push({ monthKey: k, value: Number((r as any)[valueKey]) || 0, rowIdx });
+                    contributions.push({ monthKey: k, value: rowVal, rowIdx });
                 }
             }
         });
@@ -302,13 +311,16 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
         const idx = new Map(buckets.map((b, i) => [b.key, i]));
 
         // 3. Distribute contributions; count each deal once per bucket it touches.
+        //    Contributions outside the 12-month window are clamped to the nearest
+        //    edge bucket so the monthly total still reconciles with the detailed
+        //    listing (rather than being silently dropped).
         const bucketRows: Set<number>[] = buckets.map(() => new Set<number>());
+        const firstKey = buckets[0].key;
         contributions.forEach(c => {
-            const i = idx.get(c.monthKey);
-            if (i != null) {
-                buckets[i].value += c.value;
-                bucketRows[i].add(c.rowIdx);
-            }
+            let i = idx.get(c.monthKey);
+            if (i == null) i = c.monthKey < firstKey ? 0 : buckets.length - 1;
+            buckets[i].value += c.value;
+            bucketRows[i].add(c.rowIdx);
         });
         buckets.forEach((b, i) => { b.count = bucketRows[i].size; });
         return buckets;

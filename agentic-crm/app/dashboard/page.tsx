@@ -170,13 +170,11 @@ const PENDING_COLUMNS: { key: PendingSortKey; label: string; align?: 'right' }[]
 function PendingActionsPanel({
     opportunities,
     userName,
-    isAdmin,
     onOpen,
     fmtCurrency,
 }: {
     opportunities: Opportunity[];
     userName: string;
-    isAdmin: boolean;
     onOpen: (id: string) => void;
     fmtCurrency: (v: number, opts?: { compact?: boolean; decimals?: number }) => string;
 }) {
@@ -222,8 +220,12 @@ function PendingActionsPanel({
         return opportunities
             .filter(o => {
                 if (CLOSED.includes(o.currentStage)) return false;
-                if (isAdmin) return true;
-                return o.owner === userName || o.salesRepName === userName || o.managerName === userName;
+                // Only the logged-in user's pending actions — they own it, sell it,
+                // manage it, or are the assigned presales estimator.
+                return o.owner === userName
+                    || o.salesRepName === userName
+                    || o.managerName === userName
+                    || o.presalesAssigneeName === userName;
             })
             .map(o => ({
                 id: o.id,
@@ -239,7 +241,7 @@ function PendingActionsPanel({
                 isStalled: o.isStalled,
                 value: Number(o.value) || 0,
             }));
-    }, [opportunities, userName, isAdmin]);
+    }, [opportunities, userName]);
 
     // Global search (across text columns)
     const searched = useMemo(() => {
@@ -314,7 +316,7 @@ function PendingActionsPanel({
                 <div className="flex items-center gap-1">
                     <Clock className="w-3 h-3 text-amber-600" />
                     <h3 className="text-xs font-semibold text-slate-800">
-                        {isAdmin ? 'All Pending Actions' : 'Your Pending Actions'}
+                        Your Pending Actions
                     </h3>
                     <span className="text-[10px] text-slate-400">({sorted.length}{sorted.length !== rows.length ? ` of ${rows.length}` : ''})</span>
                 </div>
@@ -594,8 +596,23 @@ export default function DashboardPage() {
     const ownerData = analytics?.dashboard.countBySalesRep || analytics?.dashboard.countByOwner || [];
     const techRevenueData = analytics?.dashboard.revenueByTech || [];
     const clientCountData = analytics?.dashboard.countByClient || [];
-    const projectedRevenue = analytics?.dashboard.projectedRevenue || 0;
-    const closedRevenue = analytics?.dashboard.closedRevenue || 0;
+    // Each value card is summed from the SAME frontend opportunity set its
+    // drill-down lists (using per-row display value), so the card total always
+    // reconciles with the drill-down detailed listing + monthly breakdown
+    // instead of drifting from the backend aggregate (different FX/filter basis).
+    const sumValue = (rows: typeof opportunities) => rows.reduce((s, o) => s + (Number(o.value) || 0), 0);
+    // Projected Revenue — drill filter: status not won/lost
+    const projectedRevenue = sumValue(opportunities.filter(o => o.status !== "won" && o.status !== "lost"));
+    // Closed Revenue — drill filter: Project stage or Closed Won
+    const closedRevenue = sumValue(opportunities.filter(o => {
+        const s = STAGE_DISPLAY[o.currentStage] || o.currentStage;
+        return s === 'Project' || o.currentStage === 'Closed Won' || o.currentStage === 'Closed-Won';
+    }));
+    // Pipeline Value — drill filter: any non-closed stage
+    const pipelineValueSum = sumValue(opportunities.filter(o => {
+        const s = o.currentStage;
+        return s !== 'Closed Won' && s !== 'Closed-Won' && s !== 'Closed Lost' && s !== 'Proposal Lost';
+    }));
 
     // Recompute revenue-by-X charts directly from the opportunities array so the
     // charts match the drill-down table. The /api/analytics revenueByClient and
@@ -721,7 +738,7 @@ export default function DashboardPage() {
         },
         {
             title: "Opportunities",
-            value: String(pipeline?.totalOpps || 0),
+            value: String(opportunities.length),
             subtitle: `${pipeline?.activeProjects || 0} active`,
             icon: Briefcase,
             iconBg: "bg-blue-100",
@@ -729,7 +746,7 @@ export default function DashboardPage() {
         },
         {
             title: "Pipeline Value",
-            value: fmtCurrency(pipeline?.pipelineValue || 0),
+            value: fmtCurrency(pipelineValueSum),
             subtitle: `Avg ${fmtCurrency(pipeline?.avgDealValue || 0)} per deal`,
             icon: Target,
             iconBg: "bg-amber-100",
@@ -1215,12 +1232,11 @@ export default function DashboardPage() {
                 ))}
             </div>
 
-            {/* Pending Actions for the logged-in user (Admins see all open opps) */}
+            {/* Pending Actions — only the logged-in user's own open opportunities */}
             {user?.name && (
                 <PendingActionsPanel
                     opportunities={opportunities}
                     userName={user.name}
-                    isAdmin={!!user?.role?.permissions?.includes('*') || user?.role?.name?.toLowerCase() === 'admin'}
                     onOpen={(id) => router.push(`/dashboard/opportunities/${id}`)}
                     fmtCurrency={fmtCurrency}
                 />
