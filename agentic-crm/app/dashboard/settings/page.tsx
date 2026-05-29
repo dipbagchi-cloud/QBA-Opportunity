@@ -1998,6 +1998,7 @@ interface BudgetAssumptionsData {
     autoSaveIntervalMinutes: number;
     minGomPercent: number;
     gomAutoApprovePercent: number;
+    stalledDaysThreshold: number;
     defaultCurrency: string;
     supportedCurrencies: string;
 }
@@ -2017,6 +2018,7 @@ const DEFAULT_ASSUMPTIONS: BudgetAssumptionsData = {
     autoSaveIntervalMinutes: 2,
     minGomPercent: 20,
     gomAutoApprovePercent: 0,
+    stalledDaysThreshold: 30,
     defaultCurrency: "INR",
     supportedCurrencies: "INR,USD,EUR,GBP,AED,SGD",
 };
@@ -2041,7 +2043,7 @@ function BudgetAssumptionsTab() {
     }, []);
 
     const handleChange = (name: keyof BudgetAssumptionsData, value: string) => {
-        const numericFields = ['marginPercent', 'workingDaysPerYear', 'deliveryMgmtPercent', 'benchPercent', 'leaveEligibilityPercent', 'annualGrowthBufferPercent', 'averageIncrementPercent', 'bonusPercent', 'indirectCostPercent', 'welfarePerFte', 'trainingPerFte', 'autoSaveIntervalMinutes', 'minGomPercent', 'gomAutoApprovePercent'];
+        const numericFields = ['marginPercent', 'workingDaysPerYear', 'deliveryMgmtPercent', 'benchPercent', 'leaveEligibilityPercent', 'annualGrowthBufferPercent', 'averageIncrementPercent', 'bonusPercent', 'indirectCostPercent', 'welfarePerFte', 'trainingPerFte', 'autoSaveIntervalMinutes', 'minGomPercent', 'gomAutoApprovePercent', 'stalledDaysThreshold'];
         if (numericFields.includes(name)) {
             setData(prev => ({ ...prev, [name]: parseFloat(value) || 0 }));
         } else {
@@ -2132,6 +2134,7 @@ function BudgetAssumptionsTab() {
                         <InputField label="Auto-Save Interval (minutes)" name="autoSaveIntervalMinutes" desc="How often opportunity forms auto-save (0 = disabled)." />
                         <InputField label="Min GOM % for Sales Submission" name="minGomPercent" desc="Presales cannot submit to Sales unless GOM meets this % (0 = no check)." />
                         <InputField label="GOM Auto-Approve Above %" name="gomAutoApprovePercent" desc="Auto-approve GOM when GOM % is at or above this threshold (0 = manual only)." />
+                        <InputField label="Stalled After (days of inactivity)" name="stalledDaysThreshold" desc="An opportunity is flagged as stalled after this many days with no stage movement (default 30)." />
                     </div>
                 </div>
 

@@ -28,7 +28,6 @@ import { CurrencyProvider, useCurrency } from "@/components/providers/currency-p
 import { useAuthStore } from "@/lib/auth-store";
 import { canAccessDashboardRoute, hasAnyGrantedPermission } from "@/lib/access-control";
 import { AccessDenied } from "@/components/auth/AccessDenied";
-import ChatBot from "@/components/chatbot/ChatBot";
 import GlobalSearch from "@/components/ui/GlobalSearch";
 
 interface NavItem {
@@ -36,6 +35,7 @@ interface NavItem {
     label: string;
     href: string;
     permissionsAny?: string[];
+    adminOnly?: boolean;
 }
 
 const allSidebarItems: NavItem[] = [
@@ -43,7 +43,7 @@ const allSidebarItems: NavItem[] = [
     { icon: Briefcase, label: "Opportunities", href: "/dashboard/opportunities", permissionsAny: ["pipeline:view", "presales:view", "sales:view"] },
     { icon: Users, label: "Contacts", href: "/dashboard/contacts", permissionsAny: ["contacts:view", "contacts:write"] },
     { icon: BarChart3, label: "Analytics", href: "/dashboard/analytics", permissionsAny: ["analytics:view", "analytics:export"] },
-    { icon: Bot, label: "Agentic AI", href: "/dashboard/agents", permissionsAny: ["agents:execute"] },
+    { icon: Bot, label: "Agentic AI", href: "/dashboard/agents", adminOnly: true },
     { icon: Settings, label: "Settings", href: "/dashboard/settings", permissionsAny: ["settings:view", "settings:manage", "users:manage", "roles:manage", "metadata:manage", "costcard:manage", "auditlogs:view"] },
 ];
 
@@ -71,7 +71,9 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
     const { currency: globalCurrency, setCurrency: setGlobalCurrency, currencies } = useCurrency();
     const userPermissions = user?.role?.permissions || [];
 
+    const isAdmin = userPermissions.includes("*");
     const sidebarItems = allSidebarItems.filter((item) => {
+        if (item.adminOnly && !isAdmin) return false;
         if (!item.permissionsAny?.length) return true;
         return hasAnyGrantedPermission(userPermissions, item.permissionsAny);
     });
@@ -295,8 +297,6 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
                 </main>
             </div>
 
-            {/* AI Chatbot */}
-            <ChatBot />
         </div>
     );
 }

@@ -214,18 +214,24 @@ export async function sendNotificationEmail(
       }
     }
 
-    // Auto-prepend "Dear <To recipient names>," — not editable in templates
-    const toUserRows = actualTo.length > 0
+    // Auto-prepend "Dear <recipient names>," — not editable in templates.
+    // When To is empty (rule resolved only CC users), fall back to CC names so
+    // the greeting never renders as "Dear ," — which used to happen for
+    // opportunity_created when Manager wasn't assigned at creation time.
+    const greetingSource = actualTo.length > 0 ? actualTo : actualCc;
+    const greetingRows = greetingSource.length > 0
       ? await prisma.user.findMany({
-          where: { email: { in: actualTo, mode: 'insensitive' } },
+          where: { email: { in: greetingSource, mode: 'insensitive' } },
           select: { email: true, name: true },
         })
       : [];
-    const nameMap = new Map(toUserRows.map(u => [u.email.toLowerCase(), u.name]));
-    const recipientNames = actualTo
+    const nameMap = new Map(greetingRows.map(u => [u.email.toLowerCase(), u.name]));
+    const recipientNames = greetingSource
       .map(e => nameMap.get(e.toLowerCase()) || e.split('@')[0])
       .join(', ');
-    const greetingHtml = `<p style="margin:0 0 12px 0;">Dear ${recipientNames},</p>`;
+    const greetingHtml = recipientNames
+      ? `<p style="margin:0 0 12px 0;">Dear ${recipientNames},</p>`
+      : '';
 
     let subject = renderTemplate(template.subject, allVars);
     const htmlBody = greetingHtml + renderTemplate(template.body, allVars);
@@ -337,18 +343,22 @@ export async function sendRawEmail(
       }
     }
 
-    // Auto-prepend "Dear <To recipient names>,"
-    const toUserRows = actualTo.length > 0
+    // Auto-prepend "Dear <recipient names>," — fall back to CC if To is empty
+    // so we never render "Dear ,".
+    const greetingSource = actualTo.length > 0 ? actualTo : actualCc;
+    const greetingRows = greetingSource.length > 0
       ? await prisma.user.findMany({
-          where: { email: { in: actualTo, mode: 'insensitive' } },
+          where: { email: { in: greetingSource, mode: 'insensitive' } },
           select: { email: true, name: true },
         })
       : [];
-    const nameMap = new Map(toUserRows.map(u => [u.email.toLowerCase(), u.name]));
-    const recipientNames = actualTo
+    const nameMap = new Map(greetingRows.map(u => [u.email.toLowerCase(), u.name]));
+    const recipientNames = greetingSource
       .map(e => nameMap.get(e.toLowerCase()) || e.split('@')[0])
       .join(', ');
-    const greetingHtml = `<p style="margin:0 0 12px 0;">Dear ${recipientNames},</p>`;
+    const greetingHtml = recipientNames
+      ? `<p style="margin:0 0 12px 0;">Dear ${recipientNames},</p>`
+      : '';
     const finalHtml = greetingHtml + htmlBody;
 
     let finalSubject = subject;
