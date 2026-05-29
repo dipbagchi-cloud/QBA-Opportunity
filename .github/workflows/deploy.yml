@@ -15,7 +15,11 @@ concurrency:
 
 jobs:
   deploy-production:
-    if: github.ref == 'refs/heads/Opportunity_MVC'
+    # Only deploy from the canonical repo (the VM's git remote). The workflow
+    # also exists on the mirror repo because branches are pushed to both remotes;
+    # guarding by repository stops the mirror's runs from failing on missing
+    # secrets and prevents two repos racing to deploy to the same VM.
+    if: github.ref == 'refs/heads/Opportunity_MVC' && github.repository == 'QuantumBusinessAdvisory/QCRM'
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
@@ -68,7 +72,7 @@ jobs:
             pm2 list | grep -E 'qcrm-(backend|frontend)\b' || true
 
   deploy-uat:
-    if: github.ref == 'refs/heads/uat'
+    if: github.ref == 'refs/heads/uat' && github.repository == 'QuantumBusinessAdvisory/QCRM'
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
@@ -116,7 +120,7 @@ jobs:
             pm2 list | grep -E 'qcrm-uat-' || true
 
   deploy-qa:
-    if: github.ref == 'refs/heads/qa'
+    if: github.ref == 'refs/heads/qa' && github.repository == 'QuantumBusinessAdvisory/QCRM'
     runs-on: ubuntu-latest
     timeout-minutes: 25
 

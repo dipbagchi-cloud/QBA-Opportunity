@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useCurrency } from "@/components/providers/currency-provider";
 import {
@@ -220,7 +220,7 @@ export default function NewOpportunityPage() {
     const [countryRegionMap, setCountryRegionMap] = useState<Record<string, { region: string; currency: string }>>({});
     const countries = Object.keys(countryRegionMap).sort();
 
-    const [holidays, setHolidays] = useState<string[]>([]);
+    const [holidays, setHolidays] = useState<{ date: string; name: string; country: string; isOptional: boolean }[]>([]);
 
     // Attachments State
     const [pendingFiles, setPendingFiles] = useState<File[]>([]);
@@ -305,6 +305,16 @@ export default function NewOpportunityPage() {
 
 
 
+    // Mandatory holidays scoped to the opportunity's country (Pre-sales /
+    // working-days calc only excludes mandatory holidays for the destination
+    // country — optional days don't reduce the working-day count).
+    const holidayDates = useMemo(() => {
+        const country = (formData.country || '').trim();
+        return holidays
+            .filter(h => !h.isOptional && (!country || h.country === country))
+            .map(h => h.date);
+    }, [holidays, formData.country]);
+
     // Auto-calculate tentative end date using standard formulas:
     // - Days: Start date = day 1, end = Nth working day (skip weekends/holidays)
     // - Weeks: End = Start + N×7 − 1 day (calendar)
@@ -312,10 +322,10 @@ export default function NewOpportunityPage() {
     useEffect(() => {
         const dur = Number(formData.duration);
         if (formData.tentativeStartDate && dur > 0 && formData.durationUnit) {
-            const end = calculateEndDate(formData.tentativeStartDate, dur, formData.durationUnit, holidays);
+            const end = calculateEndDate(formData.tentativeStartDate, dur, formData.durationUnit, holidayDates);
             setFormData(prev => ({ ...prev, tentativeEndDate: end.toISOString().split('T')[0] }));
         }
-    }, [formData.tentativeStartDate, formData.duration, formData.durationUnit, holidays]);
+    }, [formData.tentativeStartDate, formData.duration, formData.durationUnit, holidayDates]);
 
     // Default Opportunity Close Date to 2 days before the Tentative Start Date
     // until the user explicitly picks one.

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback, use } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo, use } from "react";
 import { useRouter } from "next/navigation";
 import { API_URL, getAuthHeaders } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
@@ -458,7 +458,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const [countryRegionMap, setCountryRegionMap] = useState<Record<string, { region: string; currency: string }>>({});
     const countries = Object.keys(countryRegionMap).sort();
 
-    const [holidays, setHolidays] = useState<string[]>([]);
+    const [holidays, setHolidays] = useState<{ date: string; name: string; country: string; isOptional: boolean }[]>([]);
 
     // Attachments state
     const [attachments, setAttachments] = useState<{ id: string; fileName: string; fileType: string; fileSize: number; uploadedAt: string }[]>([]);
@@ -699,16 +699,25 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         onsiteProfit: 0
     });
 
+    // Mandatory holidays scoped to the opportunity's country — only these
+    // reduce working days. Optional holidays don't.
+    const holidayDates = useMemo(() => {
+        const country = (formData.country || '').trim();
+        return holidays
+            .filter(h => !h.isOptional && (!country || h.country === country))
+            .map(h => h.date);
+    }, [holidays, formData.country]);
+
     // Auto-calculate working days from start date + duration months (excluding weekends & holidays)
     useEffect(() => {
         if (skipDerivedEffects.current) return;
         if (formData.tentativeStartDate && gomInputs.durationMonths > 0) {
-            const days = countWorkingDaysInPeriod(formData.tentativeStartDate, gomInputs.durationMonths, holidays);
+            const days = countWorkingDaysInPeriod(formData.tentativeStartDate, gomInputs.durationMonths, holidayDates);
             if (days > 0) {
                 setGomInputs(prev => ({ ...prev, workingDays: days }));
             }
         }
-    }, [formData.tentativeStartDate, gomInputs.durationMonths, holidays]);
+    }, [formData.tentativeStartDate, gomInputs.durationMonths, holidayDates]);
 
     // GOM Calculations
     useEffect(() => {
@@ -838,10 +847,10 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         if (skipDerivedEffects.current) return;
         const dur = Number(formData.duration);
         if (formData.tentativeStartDate && dur > 0 && formData.durationUnit) {
-            const end = calculateEndDate(formData.tentativeStartDate, dur, formData.durationUnit, holidays);
+            const end = calculateEndDate(formData.tentativeStartDate, dur, formData.durationUnit, holidayDates);
             setFormData(prev => ({ ...prev, tentativeEndDate: end.toISOString().split('T')[0] }));
         }
-    }, [formData.tentativeStartDate, formData.duration, formData.durationUnit, holidays]);
+    }, [formData.tentativeStartDate, formData.duration, formData.durationUnit, holidayDates]);
 
     // Auto-calculate estimated value = Expected Day Rate × 20 working days × Duration months (only for Staffing)
     useEffect(() => {
@@ -2556,7 +2565,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     endDate={formData.tentativeEndDate}
                     durationInDays={
                         formData.durationUnit === 'months' && formData.tentativeStartDate
-                            ? countWorkingDaysInPeriod(formData.tentativeStartDate, Number(formData.duration) || 0, holidays)
+                            ? countWorkingDaysInPeriod(formData.tentativeStartDate, Number(formData.duration) || 0, holidayDates)
                             : durationToWorkingDays(Number(formData.duration) || 0, formData.durationUnit)
                     }
                     salesTargetRevenue={getPipelineProjectedRevenueBase()}
@@ -2564,6 +2573,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     isReEstimation={detailedStatus === 'Re-estimation' || detailedStatus === 'Sent for Re-estimate'}
                     initialCurrency={globalCurrency}
                     currentUserName={user?.name || ''}
+                    holidays={holidays}
                 >
                     <GomPercentSync onGomPercentChange={setContextGomPercent} />
                     <RevenueSync onRevenueChange={setContextRevenue} />

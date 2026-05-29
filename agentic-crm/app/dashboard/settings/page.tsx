@@ -4874,31 +4874,31 @@ function NotificationRulesTab() {
 }
 
 /* ─────────────── Holidays Tab ─────────────── */
+type HolidayEntry = {
+    date: string;
+    name: string;
+    country: string;
+    isOptional: boolean;
+    listName: string;
+};
+
 function HolidaysTab() {
-    const [holidays, setHolidays] = useState<string[]>([]);
+    const [holidays, setHolidays] = useState<HolidayEntry[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [searchTerm, setSearchTerm] = useState("");
     const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
+    const [countryFilter, setCountryFilter] = useState<string>("");
+    const [includeOptional, setIncludeOptional] = useState<boolean>(true);
 
     const loadHolidays = useCallback(async (forceRefresh = false) => {
         try {
             setError(null);
-            if (forceRefresh) {
-                setRefreshing(true);
-            } else {
-                setLoading(true);
-            }
-
-            // Fetch holidays from the backend API
-            const data = await apiClient<string[]>("/api/master/holidays" + (forceRefresh ? "?refresh=true" : ""));
-            
-            if (Array.isArray(data)) {
-                setHolidays(data);
-            } else {
-                setError("Invalid data format received");
-            }
+            if (forceRefresh) setRefreshing(true); else setLoading(true);
+            const data = await apiClient<HolidayEntry[]>("/api/master/holidays" + (forceRefresh ? "?refresh=true" : ""));
+            if (Array.isArray(data)) setHolidays(data);
+            else setError("Invalid data format received");
         } catch (e: any) {
             console.error("Failed to load holidays:", e);
             setError(e.message || "Failed to load holidays");
@@ -4908,39 +4908,43 @@ function HolidaysTab() {
         }
     }, []);
 
-    useEffect(() => {
-        loadHolidays();
-    }, [loadHolidays]);
+    useEffect(() => { loadHolidays(); }, [loadHolidays]);
 
-    // Parse holiday string to get date and day of week
-    const parseHoliday = (dateStr: string) => {
-        const date = new Date(dateStr + "T00:00:00");
-        const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-        return {
-            dateStr,
-            date,
-            dayName: dayNames[date.getDay()],
-            year: date.getFullYear(),
-            month: date.toLocaleString("default", { month: "long" }),
-            day: date.getDate(),
-        };
-    };
+    const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
-    // Filter and sort holidays
-    const filteredHolidays = holidays
-        .filter(h => h.toLowerCase().includes(searchTerm.toLowerCase()))
-        .map(parseHoliday)
+    // Unique countries for the filter dropdown.
+    const countries = Array.from(new Set(holidays.map(h => h.country))).filter(Boolean).sort();
+
+    const parsed = holidays
+        .filter(h => includeOptional || !h.isOptional)
+        .filter(h => !countryFilter || h.country === countryFilter)
+        .filter(h => {
+            const q = searchTerm.trim().toLowerCase();
+            if (!q) return true;
+            return h.date.includes(q) || h.name.toLowerCase().includes(q) || h.country.toLowerCase().includes(q);
+        })
+        .map(h => {
+            const d = new Date(h.date + "T00:00:00");
+            return {
+                ...h,
+                date: h.date,
+                dateObj: d,
+                dayName: dayNames[d.getDay()],
+                year: d.getFullYear(),
+                month: d.toLocaleString("default", { month: "long" }),
+                day: d.getDate(),
+            };
+        })
         .sort((a, b) => {
-            const comparison = a.date.getTime() - b.date.getTime();
-            return sortOrder === "asc" ? comparison : -comparison;
+            const c = a.dateObj.getTime() - b.dateObj.getTime();
+            return sortOrder === "asc" ? c : -c;
         });
 
-    // Group by year
-    const groupedByYear = filteredHolidays.reduce((acc, h) => {
+    const groupedByYear = parsed.reduce((acc, h) => {
         if (!acc[h.year]) acc[h.year] = [];
         acc[h.year].push(h);
         return acc;
-    }, {} as Record<number, typeof filteredHolidays>);
+    }, {} as Record<number, typeof parsed>);
 
     if (loading) {
         return (
@@ -4987,16 +4991,34 @@ function HolidaysTab() {
             )}
 
             {/* Search and Stats */}
-            <div className="flex items-center gap-3 mb-4">
-                <div className="flex-1">
+            <div className="flex items-center gap-3 mb-4 flex-wrap">
+                <div className="flex-1 min-w-[200px]">
                     <input
                         type="text"
-                        placeholder="Search by date (e.g., 2026-08-15)..."
+                        placeholder="Search by name, country, or date (e.g., Bengali, India, 2026-08-15)…"
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
                         className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
                     />
                 </div>
+                <select
+                    value={countryFilter}
+                    onChange={(e) => setCountryFilter(e.target.value)}
+                    className="px-3 py-1.5 text-xs font-medium border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                    title="Filter by country"
+                >
+                    <option value="">All countries</option>
+                    {countries.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+                <label className="flex items-center gap-1.5 text-xs font-medium text-slate-600 cursor-pointer select-none">
+                    <input
+                        type="checkbox"
+                        checked={includeOptional}
+                        onChange={(e) => setIncludeOptional(e.target.checked)}
+                        className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    Include optional
+                </label>
                 <button
                     onClick={() => setSortOrder(sortOrder === "asc" ? "desc" : "asc")}
                     className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
@@ -5004,12 +5026,12 @@ function HolidaysTab() {
                     {sortOrder === "asc" ? "↑ Oldest First" : "↓ Newest First"}
                 </button>
                 <div className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-50 border border-slate-200 rounded-lg">
-                    {filteredHolidays.length} {filteredHolidays.length === 1 ? "Holiday" : "Holidays"}
+                    {parsed.length} {parsed.length === 1 ? "Holiday" : "Holidays"}
                 </div>
             </div>
 
             {/* Holidays List */}
-            {filteredHolidays.length === 0 ? (
+            {parsed.length === 0 ? (
                 <div className="text-center py-12 text-slate-500">
                     <Calendar className="w-12 h-12 mx-auto mb-3 text-slate-300" />
                     <p className="text-sm font-medium">No holidays found</p>
@@ -5033,16 +5055,20 @@ function HolidaysTab() {
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
                                     {yearHolidays.map((h) => (
                                         <div
-                                            key={h.dateStr}
+                                            key={`${h.date}|${h.country}|${h.name}`}
                                             className="flex items-center gap-3 p-3 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
                                         >
-                                            <div className="flex-shrink-0 w-12 h-12 bg-indigo-100 rounded-lg flex flex-col items-center justify-center">
-                                                <div className="text-xs font-medium text-indigo-800 uppercase">{h.month.slice(0, 3)}</div>
-                                                <div className="text-lg font-bold text-indigo-900">{h.day}</div>
+                                            <div className={`flex-shrink-0 w-12 h-12 rounded-lg flex flex-col items-center justify-center ${h.isOptional ? 'bg-amber-50' : 'bg-indigo-100'}`}>
+                                                <div className={`text-xs font-medium uppercase ${h.isOptional ? 'text-amber-800' : 'text-indigo-800'}`}>{h.month.slice(0, 3)}</div>
+                                                <div className={`text-lg font-bold ${h.isOptional ? 'text-amber-900' : 'text-indigo-900'}`}>{h.day}</div>
                                             </div>
                                             <div className="flex-1 min-w-0">
-                                                <div className="text-sm font-semibold text-slate-900">{h.dayName}</div>
-                                                <div className="text-xs text-slate-500 truncate">{h.dateStr}</div>
+                                                <div className="text-sm font-semibold text-slate-900 truncate" title={h.name}>{h.name}</div>
+                                                <div className="text-[11px] text-slate-500 flex items-center gap-1.5 flex-wrap">
+                                                    <span>{h.dayName} · {h.date}</span>
+                                                    <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-medium">{h.country}</span>
+                                                    {h.isOptional && <span className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 font-semibold">Optional</span>}
+                                                </div>
                                             </div>
                                         </div>
                                     ))}

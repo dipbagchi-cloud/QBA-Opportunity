@@ -35,6 +35,7 @@ export function ResourceAssignmentTab() {
         isReEstimation,
         totalResourceCost,
         salesTargetRevenue,
+        holidays,
     } = useOpportunityEstimation();
 
     const { format: fmtCurrency, convert: convertCurrency, symbol: cSym, currency: globalCurrencyCode } = useCurrency();
@@ -177,8 +178,14 @@ export function ResourceAssignmentTab() {
         setResources(resources.filter(r => r.id !== id));
     };
 
-    const maxDaysPerMonth = useMemo(() => {
-        const getMaxDaysForMonth = (monthStr: string, year: number): number => {
+    // Max working days per month, computed per country so each resource row's
+    // ceiling reflects the holidays for THAT resource's location (e.g. an
+    // offshore India row excludes India mandatory holidays, an onsite
+    // Luxembourg row excludes Luxembourg holidays). Optional holidays don't
+    // reduce the cap. An empty-country baseline (weekends only) is kept as a
+    // fallback for rows whose country has no holiday list in QPeople.
+    const maxDaysByCountry = useMemo(() => {
+        const getMaxDaysForMonth = (monthStr: string, year: number, holDates: Set<string>): number => {
             if (!startDate) return 31;
             const monthIndex = ALL_MONTHS.indexOf(monthStr);
             if (monthIndex === -1) return 31;
@@ -188,9 +195,9 @@ export function ResourceAssignmentTab() {
 
             const sDate = new Date(startDate);
             const eDate = endDate ? new Date(endDate) : new Date(8640000000000000);
-            
-            sDate.setHours(0,0,0,0);
-            eDate.setHours(23,59,59,999);
+
+            sDate.setHours(0, 0, 0, 0);
+            eDate.setHours(23, 59, 59, 999);
 
             const calcStart = sDate > firstDayOfMonth ? sDate : firstDayOfMonth;
             const calcEnd = eDate < lastDayOfMonth ? eDate : lastDayOfMonth;
@@ -198,29 +205,49 @@ export function ResourceAssignmentTab() {
             if (calcStart > calcEnd) return 0;
 
             let workingDays = 0;
-            let current = new Date(calcStart);
-            current.setHours(0,0,0,0);
-            
+            const current = new Date(calcStart);
+            current.setHours(0, 0, 0, 0);
+
             while (current <= calcEnd) {
                 const dayOfWeek = current.getDay();
-                // 0 = Sunday, 6 = Saturday. Exclude weekends.
                 if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-                    workingDays++;
+                    const iso = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}-${String(current.getDate()).padStart(2, '0')}`;
+                    if (!holDates.has(iso)) workingDays++;
                 }
                 current.setDate(current.getDate() + 1);
             }
             return workingDays;
         };
 
-        const maxDays: Record<string, number> = {};
-        ALL_MONTHS.forEach(month => {
-            maxDays[month] = getMaxDaysForMonth(month, selectedYear);
+        // Build the set of countries to cover: baseline ('') plus every country
+        // present in the mandatory-holiday data.
+        const countries = new Set<string>(['']);
+        holidays.forEach(h => { if (!h.isOptional && h.country) countries.add(h.country); });
+
+        const result: Record<string, Record<string, number>> = {};
+        countries.forEach(country => {
+            const holDates = country
+                ? new Set(holidays.filter(h => !h.isOptional && h.country === country).map(h => h.date))
+                : new Set<string>();
+            const monthMap: Record<string, number> = {};
+            ALL_MONTHS.forEach(month => { monthMap[month] = getMaxDaysForMonth(month, selectedYear, holDates); });
+            result[country] = monthMap;
         });
-        return maxDays;
-    }, [startDate, endDate, selectedYear]);
+        return result;
+    }, [startDate, endDate, selectedYear, holidays]);
+
+    // Lookup helper: max working days for a given resource row in a given month.
+    // Falls back to the weekend-only baseline if the row's country has no
+    // holiday list (e.g. a country QPeople doesn't track yet).
+    const getMaxFor = (resource: ResourceRow, month: string): number => {
+        const country = ((resource as any).country || resource.baseLocation || '').trim();
+        const map = maxDaysByCountry[country] || maxDaysByCountry[''];
+        return (map && map[month]) ?? 31;
+    };
 
     const updateMonthlyEffort = (id: string, month: string, value: number) => {
-        const maxVal = maxDaysPerMonth[month] || 31;
+        const resource = resources.find(r => r.id === id);
+        const maxVal = resource ? getMaxFor(resource, month) : 31;
         const boundedValue = Math.max(0, Math.min(value, maxVal));
         setResources(resources.map(r => {
             if (r.id === id) {
@@ -485,27 +512,31 @@ export function ResourceAssignmentTab() {
                                             </select>
                                         </div>
                                     </td>
-                                    {visibleMonths.map(month => (
-                                        <td key={month} className="p-1 border-r">
-                                            {!rowEditable ? (
-                                                <div className="w-full text-center text-xs p-1 text-slate-700">{row.monthlyEfforts[month] || 0}</div>
-                                            ) : (
-                                                <div className="relative group">
-                                                    <input
-                                                        type="number"
-                                                        min="0"
-                                                        max={maxDaysPerMonth[month] || 31}
-                                                        placeholder="0"
-                                                        value={row.monthlyEfforts[month] === undefined ? "" : row.monthlyEfforts[month]}
-                                                        onChange={(e) => updateMonthlyEffort(row.id, month, Number(e.target.value) || 0)}
-                                                        className={`w-full text-center border-none text-xs focus:outline-none p-1 ${maxDaysPerMonth[month] === 0 ? 'bg-slate-100 cursor-not-allowed text-slate-400' : 'bg-transparent focus:bg-blue-50 text-slate-900'}`}
-                                                        disabled={maxDaysPerMonth[month] === 0}
-                                                        title={`Max working days: ${maxDaysPerMonth[month]}`}
-                                                    />
-                                                </div>
-                                            )}
-                                        </td>
-                                    ))}
+                                    {visibleMonths.map(month => {
+                                        const rowMax = getMaxFor(row, month);
+                                        const rowCountry = ((row as any).country || row.baseLocation || '').trim();
+                                        return (
+                                            <td key={month} className="p-1 border-r">
+                                                {!rowEditable ? (
+                                                    <div className="w-full text-center text-xs p-1 text-slate-700">{row.monthlyEfforts[month] || 0}</div>
+                                                ) : (
+                                                    <div className="relative group">
+                                                        <input
+                                                            type="number"
+                                                            min="0"
+                                                            max={rowMax || 31}
+                                                            placeholder="0"
+                                                            value={row.monthlyEfforts[month] === undefined ? "" : row.monthlyEfforts[month]}
+                                                            onChange={(e) => updateMonthlyEffort(row.id, month, Number(e.target.value) || 0)}
+                                                            className={`w-full text-center border-none text-xs focus:outline-none p-1 ${rowMax === 0 ? 'bg-slate-100 cursor-not-allowed text-slate-400' : 'bg-transparent focus:bg-blue-50 text-slate-900'}`}
+                                                            disabled={rowMax === 0}
+                                                            title={`Max working days: ${rowMax}${rowCountry ? ` (${rowCountry})` : ''}`}
+                                                        />
+                                                    </div>
+                                                )}
+                                            </td>
+                                        );
+                                    })}
                                     <td className="p-2 text-center border-r font-mono text-xs text-slate-700">
                                         {(() => {
                                             const totalDays = visibleMonths.reduce((sum, m) => sum + (row.monthlyEfforts[m] || 0), 0);
