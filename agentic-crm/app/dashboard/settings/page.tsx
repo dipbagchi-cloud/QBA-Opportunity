@@ -1999,6 +1999,7 @@ interface BudgetAssumptionsData {
     minGomPercent: number;
     gomAutoApprovePercent: number;
     stalledDaysThreshold: number;
+    nonProdTimeDrivenReminderEmail: string;
     defaultCurrency: string;
     supportedCurrencies: string;
 }
@@ -2019,6 +2020,7 @@ const DEFAULT_ASSUMPTIONS: BudgetAssumptionsData = {
     minGomPercent: 20,
     gomAutoApprovePercent: 0,
     stalledDaysThreshold: 30,
+    nonProdTimeDrivenReminderEmail: "jaydeep.bandyopadhyay@qbadvisory.com",
     defaultCurrency: "INR",
     supportedCurrencies: "INR,USD,EUR,GBP,AED,SGD",
 };
@@ -2135,6 +2137,17 @@ function BudgetAssumptionsTab() {
                         <InputField label="Min GOM % for Sales Submission" name="minGomPercent" desc="Presales cannot submit to Sales unless GOM meets this % (0 = no check)." />
                         <InputField label="GOM Auto-Approve Above %" name="gomAutoApprovePercent" desc="Auto-approve GOM when GOM % is at or above this threshold (0 = manual only)." />
                         <InputField label="Stalled After (days of inactivity)" name="stalledDaysThreshold" desc="An opportunity is flagged as stalled after this many days with no stage movement (default 30)." />
+                        <div className="grid gap-1 md:col-span-2">
+                            <label className="text-xs font-medium text-slate-700">Non-Prod Time-Driven Reminder Email</label>
+                            <input
+                                type="email"
+                                value={data.nonProdTimeDrivenReminderEmail || ''}
+                                onChange={(e) => handleChange('nonProdTimeDrivenReminderEmail', e.target.value)}
+                                placeholder="alerts@example.com"
+                                className="flex h-8 w-full rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            />
+                            <p className="text-xs text-slate-500">In QA/UAT, all time-driven reminders are redirected to this email.</p>
+                        </div>
                     </div>
                 </div>
 

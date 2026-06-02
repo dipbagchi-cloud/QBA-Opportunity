@@ -322,6 +322,20 @@ export async function createOpportunity(req: Request, res: Response) {
             }
         }
 
+        if (body.tentativeStartDate) {
+            const start = new Date(body.tentativeStartDate);
+            if (isNaN(start.getTime())) {
+                return res.status(400).json({ error: 'Tentative Start Date is invalid.' });
+            }
+            const startDay = new Date(start);
+            startDay.setHours(0, 0, 0, 0);
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            if (startDay.getTime() <= today.getTime()) {
+                return res.status(400).json({ error: 'Tentative Start Date must be in the future.' });
+            }
+        }
+
         const defaultType = await prisma.opportunityType.findFirst();
         const discoveryStage = await prisma.stage.findFirst({ where: { name: 'Discovery' } });
 
@@ -597,6 +611,24 @@ export async function updateOpportunity(req: Request, res: Response) {
             }
         }
 
+        if (body.tentativeStartDate !== undefined && body.tentativeStartDate) {
+            const incomingStart = new Date(body.tentativeStartDate);
+            if (isNaN(incomingStart.getTime())) {
+                return res.status(400).json({ error: 'Tentative Start Date is invalid.' });
+            }
+            const previousStart = previous?.tentativeStartDate ? new Date(previous.tentativeStartDate) : null;
+            const changed = incomingStart.getTime() !== (previousStart?.getTime() || 0);
+            if (changed) {
+                const incomingDay = new Date(incomingStart);
+                incomingDay.setHours(0, 0, 0, 0);
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                if (incomingDay.getTime() <= today.getTime()) {
+                    return res.status(400).json({ error: 'Tentative Start Date must be in the future.' });
+                }
+            }
+        }
+
         // ────────────────────────────────────────────────────────────────────
         // Extended-status auto-transition.
         // When a Sales-role user updates tentativeStartDate while the opp is
@@ -692,7 +724,10 @@ export async function updateOpportunity(req: Request, res: Response) {
 
         if (salesRepChanged || managerChanged || presalesAssigneeChanged) {
             const lockedAssignmentStages = new Set(['Negotiation', 'Closed Won', 'Closed-Won', 'Closed Lost', 'Proposal Lost', 'Delivered']);
-            if (lockedAssignmentStages.has(previousStageName) || previous?.isStalled || previous?.detailedStatus === 'On Hold') {
+            const managerClosedStages = new Set(['Closed Won', 'Closed-Won', 'Closed Lost', 'Proposal Lost', 'Delivered']);
+            const nonManagerChanged = salesRepChanged || presalesAssigneeChanged;
+            if ((nonManagerChanged && (lockedAssignmentStages.has(previousStageName) || previous?.isStalled || previous?.detailedStatus === 'On Hold'))
+                || (managerChanged && managerClosedStages.has(previousStageName))) {
                 return res.status(400).json({ error: 'Assignment fields are locked for this opportunity stage/status.' });
             }
 
@@ -729,11 +764,8 @@ export async function updateOpportunity(req: Request, res: Response) {
             // the very first assignment (previous value empty) does NOT consume the quota.
             const prevMeta = (previous?.metadata as any) || {};
             const salesRepHandoffsDone = Number(prevMeta.salesRepHandoffs) || 0;
-            const managerHandoffsDone = Number(prevMeta.managerHandoffs) || 0;
             const previousSalesRepName = normalizeAssignment(previous?.salesRepName);
-            const previousManagerName = normalizeAssignment(previous?.managerName);
             const salesRepIsInitialAssignment = salesRepChanged && previousSalesRepName === '';
-            const managerIsInitialAssignment = managerChanged && previousManagerName === '';
             if (salesRepChanged) {
                 if (!isAdminRole && activeRoleName !== 'sales') {
                     invalidAssignmentEdits.push('Sales Rep');
@@ -748,15 +780,8 @@ export async function updateOpportunity(req: Request, res: Response) {
             }
 
             if (managerChanged) {
-                if (!isAdminRole && activeRoleName !== 'manager' && !isInitialMoveToPresales) {
+                if (!isAdminRole && activeRoleName !== 'manager' && activeRoleName !== 'sales' && !isInitialMoveToPresales) {
                     invalidAssignmentEdits.push('Manager');
-                }
-                const managerAllowedStages = new Set(['Qualification', 'Proposal']);
-                if (!isAdminRole && !isInitialMoveToPresales && !managerAllowedStages.has(previousStageName)) {
-                    invalidAssignmentEdits.push('Manager');
-                }
-                if (!isAdminRole && !isInitialMoveToPresales && !managerIsInitialAssignment && managerHandoffsDone >= 1) {
-                    invalidAssignmentEdits.push('Manager (already handed off once — Admin only)');
                 }
             }
 
