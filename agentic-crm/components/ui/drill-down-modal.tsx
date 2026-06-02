@@ -100,6 +100,8 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
     // Date range filter (Opportunity Close Date)
     const [dateFromFilter, setDateFromFilter] = useState("");
     const [dateToFilter, setDateToFilter] = useState("");
+    // Status filter
+    const [statusFilter, setStatusFilter] = useState("");
 
     // Currency context for formatting
     let currencyFormat: ((v: number, opts?: any) => string) | undefined;
@@ -200,14 +202,21 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
         return Array.from(s).sort();
     }, [config.data]);
 
+    const uniqueStatuses = useMemo(() => {
+        const s = new Set<string>();
+        config.data.forEach(r => { const v = r.status; if (v) s.add(String(v)); });
+        return Array.from(s).sort();
+    }, [config.data]);
+
     const hasRoleFilters =
         uniqueOwners.length > 0 || uniqueSalesReps.length > 0 || uniquePresales.length > 0 ||
         uniqueClients.length > 0 || uniqueCountries.length > 0 || uniqueRegions.length > 0 || uniqueTechnologies.length > 0 ||
-        uniqueProjectTypes.length > 0 || uniqueFundingTypes.length > 0 || uniquePricingModels.length > 0 || uniqueDepartments.length > 0;
+        uniqueProjectTypes.length > 0 || uniqueFundingTypes.length > 0 || uniquePricingModels.length > 0 || uniqueDepartments.length > 0 ||
+        uniqueStatuses.length > 0;
 
     // Apply role + attribute filters first — used by every section below
     const roleFiltered = useMemo(() => {
-        if (!ownerFilter && !salesRepFilter && !presalesFilter && !clientFilter && !countryFilter && !regionFilter && !technologyFilter && !projectTypeFilter && !fundingTypeFilter && !pricingModelFilter && !departmentFilter && !dateFromFilter && !dateToFilter) return config.data;
+        if (!ownerFilter && !salesRepFilter && !presalesFilter && !clientFilter && !countryFilter && !regionFilter && !technologyFilter && !projectTypeFilter && !fundingTypeFilter && !pricingModelFilter && !departmentFilter && !dateFromFilter && !dateToFilter && !statusFilter) return config.data;
         const from = dateFromFilter ? new Date(dateFromFilter).getTime() : null;
         const to = dateToFilter ? new Date(dateToFilter + "T23:59:59").getTime() : null;
         return config.data.filter(r => {
@@ -228,6 +237,7 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
             if (fundingTypeFilter && r.fundingType !== fundingTypeFilter) return false;
             if (pricingModelFilter && r.pricingModel !== pricingModelFilter) return false;
             if (departmentFilter && r.department !== departmentFilter) return false;
+            if (statusFilter && r.status !== statusFilter) return false;
             if (from != null || to != null) {
                 const raw = r.expectedCloseDate || r.actualCloseDate || r.createdAt;
                 if (!raw) return false;
@@ -238,7 +248,7 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
             }
             return true;
         });
-    }, [config.data, ownerFilter, salesRepFilter, presalesFilter, clientFilter, countryFilter, regionFilter, technologyFilter, projectTypeFilter, fundingTypeFilter, pricingModelFilter, departmentFilter, dateFromFilter, dateToFilter]);
+    }, [config.data, ownerFilter, salesRepFilter, presalesFilter, clientFilter, countryFilter, regionFilter, technologyFilter, projectTypeFilter, fundingTypeFilter, pricingModelFilter, departmentFilter, dateFromFilter, dateToFilter, statusFilter]);
 
     // Monthly buckets — adaptive 12-month window.
     //
@@ -383,7 +393,7 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
     }, [sortedData, page, pageSize]);
 
     // Reset page when search/filter changes
-    useEffect(() => { setPage(1); }, [search, filterCol, filterVal, pageSize, ownerFilter, salesRepFilter, presalesFilter, clientFilter, countryFilter, regionFilter, technologyFilter, projectTypeFilter, fundingTypeFilter, pricingModelFilter, departmentFilter, dateFromFilter, dateToFilter]);
+    useEffect(() => { setPage(1); }, [search, filterCol, filterVal, pageSize, ownerFilter, salesRepFilter, presalesFilter, clientFilter, countryFilter, regionFilter, technologyFilter, projectTypeFilter, fundingTypeFilter, pricingModelFilter, departmentFilter, statusFilter, dateFromFilter, dateToFilter]);
 
     const handleSort = (key: string) => {
         if (sortKey === key) {
@@ -537,6 +547,16 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
                                 {uniqueDepartments.map(d => <option key={d} value={d}>Dept: {d}</option>)}
                             </select>
                         )}
+                        {uniqueStatuses.length > 0 && (
+                            <select
+                                value={statusFilter}
+                                onChange={e => setStatusFilter(e.target.value)}
+                                className="px-2 py-1 text-xs border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                            >
+                                <option value="">Status: All</option>
+                                {uniqueStatuses.map(s => <option key={s} value={s}>Status: {s}</option>)}
+                            </select>
+                        )}
                         <span className="text-[10px] text-slate-400 ml-1">Close date:</span>
                         <input
                             type="date"
@@ -553,13 +573,13 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
                             className="px-2 py-1 text-xs border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
                             title="To"
                         />
-                        {(ownerFilter || salesRepFilter || presalesFilter || clientFilter || countryFilter || regionFilter || technologyFilter || projectTypeFilter || fundingTypeFilter || pricingModelFilter || departmentFilter || dateFromFilter || dateToFilter) && (
+                        {(ownerFilter || salesRepFilter || presalesFilter || clientFilter || countryFilter || regionFilter || technologyFilter || projectTypeFilter || fundingTypeFilter || pricingModelFilter || departmentFilter || statusFilter || dateFromFilter || dateToFilter) && (
                             <button
                                 onClick={() => {
                                     setOwnerFilter(""); setSalesRepFilter(""); setPresalesFilter("");
                                     setClientFilter(""); setCountryFilter(""); setRegionFilter(""); setTechnologyFilter("");
                                     setProjectTypeFilter(""); setFundingTypeFilter(""); setPricingModelFilter(""); setDepartmentFilter("");
-                                    setDateFromFilter(""); setDateToFilter("");
+                                    setStatusFilter(""); setDateFromFilter(""); setDateToFilter("");
                                 }}
                                 className="text-[10px] text-red-500 hover:text-red-700 underline"
                             >

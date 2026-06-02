@@ -101,6 +101,9 @@ export async function listOpportunities(req: Request, res: Response) {
                         orderBy: { enteredAt: 'desc' },
                         take: 1,
                     },
+                    _count: {
+                        select: { attachments: true },
+                    },
                 },
                 orderBy: { updatedAt: 'desc' },
                 skip: (page - 1) * limit,
@@ -289,7 +292,8 @@ export async function listOpportunities(req: Request, res: Response) {
                         if (rev > 0) out[monthKey] = rev * factor * scale;
                     }
                     return out;
-                })()
+                })(),
+                attachmentCount: (opp as any)._count?.attachments ?? 0,
             };
         });
 
@@ -841,12 +845,14 @@ export async function updateOpportunity(req: Request, res: Response) {
                 if (newStageName === 'Proposal') {
                     // Hard requirement: a signed-off Statement of Work (SOW) document
                     // must be attached in Pre-sales before the deal can be submitted
-                    // to Sales.
-                    const currentSow = await prisma.attachment.findFirst({
+                    // to Sales. T&M opportunities are exempt — they are billed
+                    // on actuals and typically don't require a signed SOW upfront.
+                    const isTandM = (previous?.pricingModel as string || '').trim().toUpperCase() === 'T&M';
+                    const currentSow = isTandM ? null : await prisma.attachment.findFirst({
                         where: { opportunityId: id, category: SOW_CURRENT_CATEGORY },
                         select: { id: true },
                     });
-                    if (!currentSow) {
+                    if (!isTandM && !currentSow) {
                         return res.status(400).json({ error: 'Cannot move to Sales: a Statement of Work (SOW) document must be attached in Pre-sales first.' });
                     }
                     // Hard requirement: a committed quote (GOM-calculated revenue)
