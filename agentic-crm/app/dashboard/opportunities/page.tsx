@@ -492,9 +492,13 @@ export default function OpportunitiesPage() {
                                                     }`}>
                                                         {opp.stage}
                                                     </span>
-                                                    {(opp.status === 'stalled' || opp.detailedStatus === 'On Hold') ? (
+                                                    {opp.detailedStatus === 'On Hold' ? (
                                                         <span className="text-[10px] text-amber-800 font-medium px-1.5 py-0.5 bg-amber-100 rounded-md border border-amber-300">
                                                             On Hold
+                                                        </span>
+                                                    ) : opp.status === 'stalled' ? (
+                                                        <span className="text-[10px] text-orange-800 font-medium px-1.5 py-0.5 bg-orange-100 rounded-md border border-orange-300">
+                                                            Stalled
                                                         </span>
                                                     ) : opp.detailedStatus && !['Lost', 'Won', 'Open'].includes(opp.detailedStatus) ? (
                                                         <span className="text-[10px] text-slate-500 font-medium px-1 bg-slate-100 rounded border border-slate-200">
