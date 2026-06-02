@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Loader2, Users, X } from "lucide-react";
+import { useEffect, useState, useMemo } from "react";
+import { Loader2, Search, Users, X } from "lucide-react";
 import { API_URL, getAuthHeaders } from "@/lib/api";
 
 interface AssignPresalesModalProps {
@@ -14,6 +14,7 @@ export function AssignPresalesModal({ opportunityId, isOpen, onAssign, onClose, 
     const [presalesTeam, setPresalesTeam] = useState<{ id: string; name: string; department: string | null }[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const [search, setSearch] = useState("");
     
     // We use a string array to allow multiple selections
     const [selectedPresales, setSelectedPresales] = useState<string[]>([]);
@@ -26,24 +27,15 @@ export function AssignPresalesModal({ opportunityId, isOpen, onAssign, onClose, 
             try {
                 const headers = getAuthHeaders();
 
-                // Build URL with department filter if provided
-                const url = managerDepartment 
-                    ? `${API_URL}/api/master/presales-team?department=${encodeURIComponent(managerDepartment)}`
-                    : `${API_URL}/api/master/presales-team`;
-                
-                console.log('[AssignPresalesModal] Fetching from:', url);
-                console.log('[AssignPresalesModal] Department:', managerDepartment);
+                // Always fetch all presales team members across all departments
+                const url = `${API_URL}/api/master/presales-team`;
                 
                 const presalesRes = await fetch(url, { headers });
                 console.log('[AssignPresalesModal] Response status:', presalesRes.status);
                 
                 if (presalesRes.ok) {
                     const presalesData = await presalesRes.json();
-                    console.log('[AssignPresalesModal] Received data:', presalesData);
                     setPresalesTeam(presalesData);
-                } else {
-                    const errorText = await presalesRes.text();
-                    console.error('[AssignPresalesModal] Error response:', presalesRes.status, errorText);
                 }
             } catch (err) {
                 console.error("[AssignPresalesModal] Error fetching presales team:", err);
@@ -53,7 +45,16 @@ export function AssignPresalesModal({ opportunityId, isOpen, onAssign, onClose, 
         };
 
         fetchTeamData();
-    }, [isOpen, managerDepartment]);
+    }, [isOpen]);
+
+    const filteredTeam = useMemo(() => {
+        const q = search.trim().toLowerCase();
+        if (!q) return presalesTeam;
+        return presalesTeam.filter(ps =>
+            ps.name.toLowerCase().includes(q) ||
+            (ps.department ?? "").toLowerCase().includes(q)
+        );
+    }, [presalesTeam, search]);
 
     const toggleSelection = (name: string) => {
         setSelectedPresales(prev => 
@@ -99,7 +100,7 @@ export function AssignPresalesModal({ opportunityId, isOpen, onAssign, onClose, 
                             Assign Presales Team
                         </h2>
                         <p className="text-sm text-slate-500">
-                            As the assigned manager, please select the presales personnel from your department to work on the schedule and estimate. You can select multiple.
+                            Select presales personnel to work on the schedule and estimate. You can select multiple.
                         </p>
                     </div>
                     {onClose && (
@@ -118,19 +119,26 @@ export function AssignPresalesModal({ opportunityId, isOpen, onAssign, onClose, 
                             <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
                         </div>
                     ) : (
+                        <>
+                        <div className="relative mb-3">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                            <input
+                                type="text"
+                                placeholder="Search by name or department…"
+                                value={search}
+                                onChange={e => setSearch(e.target.value)}
+                                className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+                                autoFocus
+                            />
+                        </div>
                         <div className="space-y-2 max-h-[250px] overflow-y-auto pr-2 custom-scrollbar">
-                            {presalesTeam.length === 0 ? (
+                            {filteredTeam.length === 0 ? (
                                 <div className="text-center py-6">
-                                    <p className="text-sm text-slate-600 font-medium mb-2">No presales team members found</p>
-                                    {managerDepartment && (
-                                        <p className="text-xs text-slate-500">
-                                            Searched in: <span className="font-semibold">{managerDepartment}</span> department
-                                        </p>
-                                    )}
-                                    <p className="text-xs text-slate-400 mt-2">Please contact your administrator to add presales users.</p>
+                                    <p className="text-sm text-slate-600 font-medium mb-2">{search ? "No matches found" : "No presales team members found"}</p>
+                                    {!search && <p className="text-xs text-slate-400 mt-2">Please contact your administrator to add presales users.</p>}
                                 </div>
                             ) : (
-                                presalesTeam.map((ps) => (
+                                filteredTeam.map((ps) => (
                                     <label 
                                         key={ps.id} 
                                         className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
@@ -155,6 +163,7 @@ export function AssignPresalesModal({ opportunityId, isOpen, onAssign, onClose, 
                                 ))
                             )}
                         </div>
+                        </>
                     )}
                 </div>
 
