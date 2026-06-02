@@ -4,6 +4,35 @@ import { calculateOpportunityProbability } from './opportunity-probability';
 
 // Roles that are "global" - all users with these roles get notified regardless of assignment
 const GLOBAL_ROLES = ['Admin'];
+const BUDGET_ASSUMPTIONS_KEY = 'budget_assumptions';
+
+function getEnvironmentLabel(): 'QA' | 'UAT' | null {
+  const envHints = [
+    process.env.APP_ENV,
+    process.env.DEPLOY_ENV,
+    process.env.NODE_ENV,
+    process.env.FRONTEND_URL,
+  ]
+    .filter(Boolean)
+    .map((v) => String(v).toLowerCase());
+
+  if (envHints.some((v) => v.includes('uat'))) return 'UAT';
+  if (envHints.some((v) => v.includes('qa'))) return 'QA';
+  return null;
+}
+
+async function getTimeDrivenReminderOverrideEmail(): Promise<string | null> {
+  const envLabel = getEnvironmentLabel();
+  if (!envLabel) return null;
+
+  const config = await prisma.systemConfig.findUnique({
+    where: { key: BUDGET_ASSUMPTIONS_KEY },
+    select: { value: true },
+  });
+  const value = (config?.value as any)?.nonProdTimeDrivenReminderEmail;
+  const email = typeof value === 'string' ? value.trim() : '';
+  return email || null;
+}
 
 /**
  * Resolve the set of user IDs assigned to an opportunity, keyed by role.
@@ -824,6 +853,7 @@ export async function evaluateStaleOpportunityReminders(
 
   const now = new Date();
   const cooldownDate = new Date(now.getTime() - cooldownHours * 3600000);
+  const timeDrivenOverrideEmail = await getTimeDrivenReminderOverrideEmail();
 
   for (const rule of rules) {
     const thresholdDays = extractThresholdDays(rule.conditions, 3);
@@ -968,12 +998,16 @@ export async function evaluateStaleOpportunityReminders(
       } else {
         if (sendEmail) {
           const eventKey = rule.emailTemplateKey || 'stalled_opportunity';
+          const toEmails = timeDrivenOverrideEmail ? [timeDrivenOverrideEmail] : toUsers.map(u => u.email);
+          const toNames = timeDrivenOverrideEmail ? timeDrivenOverrideEmail : toUsers.map(u => u.name).join(', ');
+          const ccEmails = timeDrivenOverrideEmail ? [] : allCcUsers.map(u => u.email);
           await sendNotificationEmail(
             eventKey,
-            toUsers.map(u => u.email),
-            toUsers.map(u => u.name).join(', '),
+            toEmails,
+            toNames,
             variables,
-            allCcUsers.map(u => u.email)
+            ccEmails,
+            { isTimeDriven: true }
           ).catch(err => console.error('[StaleReminder] email send failed:', err));
         }
         if (sendInApp) {
@@ -1064,6 +1098,7 @@ export async function evaluateStartDateApproachingReminders(): Promise<StartDate
   const today = new Date(now);
   today.setHours(0, 0, 0, 0);
   const cooldownDate = new Date(now.getTime() - 20 * 3600000);
+  const timeDrivenOverrideEmail = await getTimeDrivenReminderOverrideEmail();
 
   for (const rule of rules) {
     const daysWindow = extractDaysWindow(rule.conditions, 'daysToStartDate', 7);
@@ -1182,12 +1217,16 @@ export async function evaluateStartDateApproachingReminders(): Promise<StartDate
 
       if (sendEmail) {
         const eventKey = rule.emailTemplateKey || 'start_date_approaching';
+        const toEmails = timeDrivenOverrideEmail ? [timeDrivenOverrideEmail] : toUsers.map(u => u.email);
+        const toNames = timeDrivenOverrideEmail ? timeDrivenOverrideEmail : toUsers.map(u => u.name).join(', ');
+        const ccEmails = timeDrivenOverrideEmail ? [] : allCcUsers.map(u => u.email);
         await sendNotificationEmail(
           eventKey,
-          toUsers.map(u => u.email),
-          toUsers.map(u => u.name).join(', '),
+          toEmails,
+          toNames,
           variables,
-          allCcUsers.map(u => u.email)
+          ccEmails,
+          { isTimeDriven: true }
         ).catch(err => console.error('[StartDateReminder] email send failed:', err));
       }
       if (sendInApp) {
@@ -1280,6 +1319,7 @@ export async function evaluateStartDateOverdueWorkflow(): Promise<StartDateOverd
   const today = new Date(now);
   today.setHours(0, 0, 0, 0);
   const cooldownDate = new Date(now.getTime() - 20 * 3600000);
+  const timeDrivenOverrideEmail = await getTimeDrivenReminderOverrideEmail();
 
   // Resolve Qualification stage once per run.
   const qualStage = await prisma.stage.findFirst({ where: { name: 'Qualification' } });
@@ -1433,12 +1473,16 @@ export async function evaluateStartDateOverdueWorkflow(): Promise<StartDateOverd
 
       if (sendEmail) {
         const eventKey = rule.emailTemplateKey || 'start_date_overdue';
+        const toEmails = timeDrivenOverrideEmail ? [timeDrivenOverrideEmail] : toUsers.map(u => u.email);
+        const toNames = timeDrivenOverrideEmail ? timeDrivenOverrideEmail : toUsers.map(u => u.name).join(', ');
+        const ccEmails = timeDrivenOverrideEmail ? [] : allCcUsers.map(u => u.email);
         await sendNotificationEmail(
           eventKey,
-          toUsers.map(u => u.email),
-          toUsers.map(u => u.name).join(', '),
+          toEmails,
+          toNames,
           variables,
-          allCcUsers.map(u => u.email)
+          ccEmails,
+          { isTimeDriven: true }
         ).catch(err => console.error('[StartDateOverdue] email send failed:', err));
       }
       if (sendInApp) {

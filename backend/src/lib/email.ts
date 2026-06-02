@@ -137,6 +137,28 @@ function evaluateCustomFormula(formula: string, data: Record<string, string>): s
   }
 }
 
+function detectEnvironmentLabel(): 'QA' | 'UAT' | null {
+  const envHints = [
+    process.env.APP_ENV,
+    process.env.DEPLOY_ENV,
+    process.env.NODE_ENV,
+    process.env.FRONTEND_URL,
+  ]
+    .filter(Boolean)
+    .map((v) => String(v).toLowerCase());
+
+  if (envHints.some((v) => v.includes('uat'))) return 'UAT';
+  if (envHints.some((v) => v.includes('qa'))) return 'QA';
+  return null;
+}
+
+function applyNonProdSubjectPrefix(subject: string): string {
+  const envLabel = detectEnvironmentLabel();
+  if (!envLabel) return subject;
+  if (new RegExp(`^\\[${envLabel}\\]`, 'i').test(subject)) return subject;
+  return `[${envLabel}] ${subject}`;
+}
+
 /**
  * Send a notification email for a given event.
  * Looks up the template by eventKey, renders it with variables, and sends.
@@ -150,7 +172,8 @@ export async function sendNotificationEmail(
   recipientEmail: string | string[],
   recipientName: string,
   variables: Record<string, string>,
-  ccEmails?: string[]
+  ccEmails?: string[],
+  _options?: { isTimeDriven?: boolean }
 ): Promise<boolean> {
   try {
     // Normalise inputs to arrays
@@ -255,6 +278,7 @@ export async function sendNotificationEmail(
     if (isOverride) {
       subject = `[TEST→${originalToLabel}${ccList.length > 0 ? ` cc:${ccList.join(',')}` : ''}] ${subject}`;
     }
+    subject = applyNonProdSubjectPrefix(subject);
 
     if (USE_GRAPH_API) {
       // Graph API supports cc via message.ccRecipients
@@ -365,6 +389,7 @@ export async function sendRawEmail(
     if (isOverride) {
       finalSubject = `[TEST→${originalToLabel}${ccList.length > 0 ? ` cc:${ccList.join(',')}` : ''}] ${subject}`;
     }
+    finalSubject = applyNonProdSubjectPrefix(finalSubject);
 
     if (USE_GRAPH_API) {
       const token = await getGraphAccessToken();

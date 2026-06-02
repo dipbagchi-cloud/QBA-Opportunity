@@ -792,6 +792,7 @@ const DEFAULT_BUDGET_ASSUMPTIONS = {
   welfarePerFte: 0,
   trainingPerFte: 0,
   stalledDaysThreshold: 30,
+  nonProdTimeDrivenReminderEmail: 'jaydeep.bandyopadhyay@qbadvisory.com',
 };
 
 // GET /api/admin/budget-assumptions
