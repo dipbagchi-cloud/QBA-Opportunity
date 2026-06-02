@@ -3659,27 +3659,20 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
                             <div className="space-y-1.5">
                                 <label className="block text-sm font-bold text-slate-700">Manager *</label>
-                                {isLoadingManagers ? (
-                                    <div className="text-xs text-slate-400 py-2">Loading managers...</div>
-                                ) : (
-                                    <select
-                                        required
-                                        className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
-                                        value={presalesForm.managerName}
-                                        onChange={(e) => setPresalesForm({ ...presalesForm, managerName: e.target.value })}
-                                    >
-                                        <option value="">Select Manager</option>
-                                        {presalesForm.managerName && !managers.some(m => m.name === presalesForm.managerName) && (
-                                            <option value={presalesForm.managerName}>{presalesForm.managerName}</option>
-                                        )}
-                                        {managers.length > 0
-                                            ? managers.map(m => (
-                                                <option key={m.id} value={m.name}>{m.name}{m.department ? ` (${m.department})` : ''}</option>
-                                            ))
-                                            : <option value="" disabled>No managers found for this department</option>
-                                        }
-                                    </select>
-                                )}
+                                <SearchableSelect
+                                    name="managerName"
+                                    value={presalesForm.managerName}
+                                    placeholder={isLoadingManagers ? "Loading managers..." : "Search or select manager..."}
+                                    disabled={isLoadingManagers}
+                                    required
+                                    options={[
+                                        ...(presalesForm.managerName && !managers.some(m => m.name === presalesForm.managerName)
+                                            ? [{ value: presalesForm.managerName, label: presalesForm.managerName }]
+                                            : []),
+                                        ...managers.map(m => ({ value: m.name, label: m.name + (m.department ? ` (${m.department})` : '') }))
+                                    ]}
+                                    onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setPresalesForm({ ...presalesForm, managerName: e.target.value })}
+                                />
                             </div>
 
                             <div className="space-y-1.5">
