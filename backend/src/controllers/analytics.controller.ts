@@ -149,6 +149,16 @@ export async function getAnalytics(req: Request, res: Response) {
                 }
             }
 
+            // Fallback: no estimation resources → bucket by expectedCloseDate using opp value
+            if (!hasMonthlyData && rev > 0) {
+                const closeDate = opp.expectedCloseDate ? new Date(opp.expectedCloseDate) : new Date(opp.createdAt);
+                const monthKey = `${MONTH_NAMES[closeDate.getMonth()]} ${closeDate.getFullYear()}`;
+                if (!revenueByMonth[monthKey]) revenueByMonth[monthKey] = { name: monthKey, proposed: 0, actual: 0, lost: 0 };
+                if (stageName === 'Closed Won') revenueByMonth[monthKey].actual += rev;
+                else if (stageName === 'Closed Lost' || stageName === 'Proposal Lost') revenueByMonth[monthKey].lost += rev;
+                else revenueByMonth[monthKey].proposed += rev;
+            }
+
             // Count by Stage (grouped)
             countByStatus[groupName] = (countByStatus[groupName] || 0) + 1;
 
