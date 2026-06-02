@@ -175,6 +175,10 @@ async function auditMasterData(entity: string, entityId: string, action: string,
     });
 }
 
+function normalizeClientName(value: string): string {
+    return String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
 // ── Clients ──
 export async function listClients(req: Request, res: Response) {
     const clients = await prisma.client.findMany({
@@ -255,6 +259,135 @@ export async function deleteClient(req: Request, res: Response) {
     await prisma.client.update({ where: { id }, data: { isActive: false } });
     await auditMasterData('Client', id, 'DELETE', req.user!.userId, `Deactivated client: ${existing.name}`);
     res.json({ message: 'Client deactivated.' });
+}
+
+// Sync clients from QPeople Customer master.
+// Rule: clients linked to any opportunity (open or closed) are never deactivated
+// by sync, even if missing in QPeople.
+export async function syncClientsFromQPeople(req: Request, res: Response) {
+    try {
+        const qpeopleToken = process.env.QPEOPLE_API_TOKEN;
+        if (!qpeopleToken) {
+            return res.status(500).json({ error: 'QPEOPLE_API_TOKEN not configured' });
+        }
+
+        const qpeopleNames = new Map<string, string>();
+        const pageSize = 500;
+        let start = 0;
+
+        while (true) {
+            const response = await fetch(
+                `https://hr.qbadvisory.com/api/resource/Customer?limit_start=${start}&limit_page_length=${pageSize}`,
+                { headers: { Authorization: `token ${qpeopleToken}` } }
+            );
+
+            if (!response.ok) {
+                const body = await response.text().catch(() => '');
+                return res.status(502).json({ error: `Failed to fetch clients from QPeople API (${response.status})`, details: body.slice(0, 200) });
+            }
+
+            const json: any = await response.json();
+            const rows: any[] = Array.isArray(json?.data) ? json.data : [];
+            if (rows.length === 0) break;
+
+            for (const row of rows) {
+                const rawName = String(row?.customer_name || row?.name || '').trim();
+                if (!rawName) continue;
+                const key = normalizeClientName(rawName);
+                if (!qpeopleNames.has(key)) qpeopleNames.set(key, rawName);
+            }
+
+            if (rows.length < pageSize) break;
+            start += pageSize;
+        }
+
+        const qpeopleKeys = new Set(qpeopleNames.keys());
+
+        const clients = await prisma.client.findMany({
+            orderBy: { createdAt: 'desc' },
+            select: {
+                id: true,
+                name: true,
+                isActive: true,
+                _count: { select: { opportunities: true } },
+            },
+        });
+
+        const activeByKey = new Map<string, { id: string; name: string }>();
+        const inactiveByKey = new Map<string, { id: string; name: string }>();
+
+        for (const client of clients) {
+            const key = normalizeClientName(client.name);
+            if (!key) continue;
+
+            if (client.isActive) {
+                if (!activeByKey.has(key)) activeByKey.set(key, { id: client.id, name: client.name });
+            } else if (!inactiveByKey.has(key)) {
+                inactiveByKey.set(key, { id: client.id, name: client.name });
+            }
+        }
+
+        let created = 0;
+        let reactivated = 0;
+
+        for (const [key, displayName] of qpeopleNames.entries()) {
+            if (activeByKey.has(key)) continue;
+
+            const inactiveMatch = inactiveByKey.get(key);
+            if (inactiveMatch) {
+                await prisma.client.update({
+                    where: { id: inactiveMatch.id },
+                    data: { isActive: true, name: displayName },
+                });
+                reactivated += 1;
+                continue;
+            }
+
+            await prisma.client.create({ data: { name: displayName, isActive: true } });
+            created += 1;
+        }
+
+        const staleActive = clients.filter(c => c.isActive && !qpeopleKeys.has(normalizeClientName(c.name)));
+        const staleProtected = staleActive.filter(c => c._count.opportunities > 0);
+        const staleDeactivatable = staleActive.filter(c => c._count.opportunities === 0);
+        const staleIds = staleDeactivatable.map(c => c.id);
+
+        let deactivated = 0;
+        let deactivatedContacts = 0;
+        if (staleIds.length > 0) {
+            const deactivatedClientsResult = await prisma.client.updateMany({
+                where: { id: { in: staleIds } },
+                data: { isActive: false },
+            });
+            deactivated = deactivatedClientsResult.count;
+
+            const contactsResult = await prisma.contact.updateMany({
+                where: { clientId: { in: staleIds } },
+                data: { isActive: false },
+            });
+            deactivatedContacts = contactsResult.count;
+        }
+
+        const summary = {
+            qpeopleCustomers: qpeopleNames.size,
+            created,
+            reactivated,
+            deactivated,
+            deactivatedContacts,
+            protectedWithOpportunities: staleProtected.length,
+            protectedClientNames: staleProtected.map(c => c.name).slice(0, 25),
+        };
+
+        await auditMasterData('Client', 'qpeople-sync', 'SYNC_QPEOPLE', req.user!.userId, summary);
+
+        res.json({
+            message: `Client sync complete. Added ${created}, reactivated ${reactivated}, deactivated ${deactivated}, protected ${staleProtected.length}.`,
+            ...summary,
+        });
+    } catch (error: any) {
+        console.error('Sync clients from QPeople error:', error);
+        res.status(500).json({ error: error?.message || 'Failed to sync clients from QPeople' });
+    }
 }
 
 // ── Regions ──
@@ -670,16 +803,32 @@ export async function listDepartments(req: Request, res: Response) {
         if (!qpeopleToken) {
           return res.status(500).json({ error: 'QPEOPLE_API_TOKEN not configured' });
         }
-        const response = await fetch(
-            'https://hr.qbadvisory.com/api/method/hrms.api.employee.get_all_managers_with_departments',
-            { headers: { 'Authorization': `token ${qpeopleToken}` } }
-        );
-        const json: any = await response.json();
-        const departments = [...new Set(
-            (json.message?.data || [])
-                .map((e: any) => e.department || e.department_name)
-                .filter(Boolean)
-        )].sort();
+        const [managersRes, usersRes] = await Promise.all([
+            fetch(
+                'https://hr.qbadvisory.com/api/method/hrms.api.employee.get_all_managers_with_departments',
+                { headers: { 'Authorization': `token ${qpeopleToken}` } }
+            ),
+            fetch(
+                'https://hr.qbadvisory.com/api/method/hrms.api.employee.get_all_users_details',
+                { headers: { 'Authorization': `token ${qpeopleToken}` } }
+            ),
+        ]);
+
+        if (!managersRes.ok && !usersRes.ok) {
+            return res.status(502).json({ error: 'Failed to fetch departments from HRMS.' });
+        }
+
+        const managersJson: any = managersRes.ok ? await managersRes.json() : { message: { data: [] } };
+        const usersJson: any = usersRes.ok ? await usersRes.json() : { message: { data: [] } };
+
+        const managerDepartments = (managersJson.message?.data || [])
+            .map((e: any) => e.department || e.department_name)
+            .filter(Boolean);
+        const userDepartments = (usersJson.message?.data || [])
+            .map((e: any) => e.department || e.department_name)
+            .filter(Boolean);
+
+        const departments = [...new Set([...managerDepartments, ...userDepartments])].sort();
         res.json(departments);
     } catch (error) {
         console.error('QPeople API error:', error);

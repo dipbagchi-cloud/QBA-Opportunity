@@ -2666,6 +2666,7 @@ function MasterDataTab({ entity, label }: { entity: string; label: string }) {
     const [status, setStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
     const [showInactive, setShowInactive] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
+    const [syncingQPeople, setSyncingQPeople] = useState(false);
     const [mdSortKey, setMdSortKey] = useState("name");
     const [mdSortDir, setMdSortDir] = useState<SortDir>("asc");
     const handleMdSort = (key: string, dir: SortDir) => { setMdSortKey(dir ? key : "name"); setMdSortDir(dir); };
@@ -2728,6 +2729,21 @@ function MasterDataTab({ entity, label }: { entity: string; label: string }) {
         }
     };
 
+    const handleSyncClientsFromQPeople = async () => {
+        if (entity !== "clients") return;
+        setStatus(null);
+        setSyncingQPeople(true);
+        try {
+            const result = await apiClient<any>("/api/admin/clients/sync-qpeople", { method: "POST" });
+            setStatus({ type: "success", message: result?.message || "Client sync completed." });
+            await fetchData();
+        } catch (err: any) {
+            setStatus({ type: "error", message: err.message || "Failed to sync clients from QPeople." });
+        } finally {
+            setSyncingQPeople(false);
+        }
+    };
+
     if (loading) return <div className="text-center py-12 text-slate-400">Loading {label.toLowerCase()}s...</div>;
 
     return (
@@ -2735,6 +2751,16 @@ function MasterDataTab({ entity, label }: { entity: string; label: string }) {
             <div className="flex items-center justify-between">
                 <h3 className="text-base font-bold text-slate-900">{label} Management</h3>
                 <div className="flex items-center gap-3">
+                    {entity === "clients" && (
+                        <button
+                            onClick={handleSyncClientsFromQPeople}
+                            disabled={syncingQPeople}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                        >
+                            <RefreshCw className={`w-3.5 h-3.5 ${syncingQPeople ? 'animate-spin' : ''}`} />
+                            {syncingQPeople ? "Syncing..." : "Sync from QPeople"}
+                        </button>
+                    )}
                     <label className="flex items-center gap-1.5 text-xs text-slate-500 cursor-pointer select-none">
                         <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5" />
                         Show history
@@ -3848,13 +3874,20 @@ function QPeopleMappingTab() {
     const unmappedDesignations = designations.filter(d => !mappingMap.has(d.designation));
     const filtered = sortData(
         search
-            ? mappings.filter((m: any) => m.qpeopleDesignation.toLowerCase().includes(search.toLowerCase()) || m.crmRoles?.some((r: any) => r.name?.toLowerCase().includes(search.toLowerCase())))
+            ? mappings.filter((m: any) =>
+                m.qpeopleDesignation.toLowerCase().includes(search.toLowerCase()) ||
+                (m.department || '').toLowerCase().includes(search.toLowerCase()) ||
+                m.crmRoles?.some((r: any) => r.name?.toLowerCase().includes(search.toLowerCase()))
+            )
             : mappings,
         qpSortKey, qpSortDir
     );
     const filteredUnmapped = sortData(
         search
-            ? unmappedDesignations.filter(d => d.designation.toLowerCase().includes(search.toLowerCase()))
+            ? unmappedDesignations.filter(d =>
+                d.designation.toLowerCase().includes(search.toLowerCase()) ||
+                (d.department || '').toLowerCase().includes(search.toLowerCase())
+            )
             : unmappedDesignations,
         qpSortKey === "qpeopleDesignation" ? "designation" : qpSortKey, qpSortDir
     );
@@ -4004,7 +4037,7 @@ function QPeopleMappingTab() {
                                     ) : (
                                         <>
                                             <td className="py-2 px-3 font-medium text-slate-800">{m.qpeopleDesignation}</td>
-                                            <td className="py-2 px-3 text-slate-500">{m.department || "—"}</td>
+                                            <td className="py-2 px-3 text-slate-500">{m.department || "-"}</td>
                                             <td className="py-2 px-3 text-slate-500">{m.jobBand || "—"}</td>
                                             <td className="py-2 px-3">
                                                 <div className="flex flex-wrap gap-1">

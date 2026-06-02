@@ -39,6 +39,7 @@ import {
   createClient,
   updateClient,
   deleteClient,
+  syncClientsFromQPeople,
   listAllRegions,
   createRegion,
   updateRegion,
@@ -164,6 +165,7 @@ router.delete('/rate-cards/:id', authorize(PERMISSIONS.COSTCARD_MANAGE), deleteR
 // Client management (requires metadata:manage)
 router.get('/clients', authorize(PERMISSIONS.METADATA_MANAGE), listAllClients);
 router.post('/clients', authorizeAny(PERMISSIONS.METADATA_MANAGE, PERMISSIONS.PIPELINE_WRITE, PERMISSIONS.PRESALES_WRITE, PERMISSIONS.SALES_WRITE), createClient);
+router.post('/clients/sync-qpeople', authorize(PERMISSIONS.METADATA_MANAGE), syncClientsFromQPeople);
 router.patch('/clients/:id', authorize(PERMISSIONS.METADATA_MANAGE), updateClient);
 router.delete('/clients/:id', authorize(PERMISSIONS.METADATA_MANAGE), deleteClient);
 

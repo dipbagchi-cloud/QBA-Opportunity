@@ -855,13 +855,24 @@ export async function listQPeopleMappings(req: Request, res: Response) {
     const allRoles = await prisma.role.findMany({ select: { id: true, name: true } });
     const roleMap = new Map(allRoles.map(r => [r.id, r.name]));
 
-    // Also get department from User records for mappings missing department
+    // Also get department(s) from User records for mappings missing department.
+    // Keep all departments visible so QBALUX/QBAPL variants are not lost.
     const desigDeptRows = await prisma.user.findMany({
       where: { designation: { not: null }, department: { not: null } },
       select: { designation: true, department: true },
-      distinct: ['designation'],
     });
-    const desigToDept = new Map(desigDeptRows.map(r => [r.designation, r.department]));
+    const desigToDept = new Map<string, string>();
+    for (const row of desigDeptRows) {
+      if (!row.designation || !row.department) continue;
+      const existing = desigToDept.get(row.designation);
+      if (!existing) {
+        desigToDept.set(row.designation, row.department);
+        continue;
+      }
+      const parts = new Set(existing.split(' | ').map(s => s.trim()).filter(Boolean));
+      parts.add(row.department);
+      desigToDept.set(row.designation, Array.from(parts).sort((a, b) => a.localeCompare(b)).join(' | '));
+    }
 
     // Get user counts per designation
     const userCountRows = await prisma.user.groupBy({
@@ -897,24 +908,22 @@ export async function listQPeopleDesignations(req: Request, res: Response) {
       where: { designation: { not: null } },
       select: { designation: true, department: true },
     });
-    // Group by designation: pick most common department, count users
-    const desigMap = new Map<string, { departments: Map<string, number>; count: number }>();
+    // Group by designation: aggregate all departments and count users
+    const desigMap = new Map<string, { departments: Set<string>; count: number }>();
     for (const r of rows) {
       if (!r.designation) continue;
-      if (!desigMap.has(r.designation)) desigMap.set(r.designation, { departments: new Map(), count: 0 });
+      if (!desigMap.has(r.designation)) desigMap.set(r.designation, { departments: new Set(), count: 0 });
       const entry = desigMap.get(r.designation)!;
       entry.count++;
-      const dept = r.department || '';
-      entry.departments.set(dept, (entry.departments.get(dept) || 0) + 1);
+      if (r.department) {
+        entry.departments.add(r.department);
+      }
     }
     const result = Array.from(desigMap.entries()).map(([designation, info]) => {
-      // Pick the most common non-empty department
-      let bestDept = '';
-      let bestCount = 0;
-      for (const [dept, cnt] of info.departments.entries()) {
-        if (dept && cnt > bestCount) { bestDept = dept; bestCount = cnt; }
-      }
-      return { designation, department: bestDept || null, userCount: info.count };
+      const department = info.departments.size > 0
+        ? Array.from(info.departments).sort((a, b) => a.localeCompare(b)).join(' | ')
+        : null;
+      return { designation, department, userCount: info.count };
     }).sort((a, b) => a.designation.localeCompare(b.designation));
     res.json(result);
   } catch (error) {
