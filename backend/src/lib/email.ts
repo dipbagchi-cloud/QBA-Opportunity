@@ -59,33 +59,6 @@ async function getGraphAccessToken(): Promise<string> {
   return cachedToken.token;
 }
 
-async function sendViaGraphApi(to: string, subject: string, htmlBody: string): Promise<void> {
-  const token = await getGraphAccessToken();
-  const graphUrl = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(FROM_EMAIL)}/sendMail`;
-
-  const response = await fetch(graphUrl, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      message: {
-        subject,
-        body: { contentType: 'HTML', content: htmlBody },
-        toRecipients: [{ emailAddress: { address: to } }],
-        from: { emailAddress: { name: FROM_NAME, address: FROM_EMAIL } },
-      },
-      saveToSentItems: false,
-    }),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Graph API sendMail failed: ${response.status} ${errorText}`);
-  }
-}
-
 /**
  * Replace {{variable}} placeholders in a template string with actual values
  */
@@ -181,10 +154,18 @@ export async function sendNotificationEmail(
     const ccList = Array.isArray(ccEmails) ? ccEmails : [];
     const originalToLabel = toList.join(',');
 
-    // Test-mode override: when EMAIL_TEST_OVERRIDE is set, all emails are
-    // redirected to that address and the recipient's mute flag is ignored.
-    // The original recipient is annotated in the subject for visibility.
+    // Non-prod safety: QA/UAT run on cloned prod data, so without a guard real
+    // contacts get emailed. detectEnvironmentLabel() is null in prod. In a
+    // non-prod env, redirect everything to EMAIL_TEST_OVERRIDE if set, otherwise
+    // drop the send entirely so it can never reach a real recipient.
+    // Test-mode override (also usable in prod): EMAIL_TEST_OVERRIDE redirects
+    // all mail to that address, ignoring mute flags, annotating the subject.
     const testOverride = (process.env.EMAIL_TEST_OVERRIDE || '').trim();
+    const nonProdLabel = detectEnvironmentLabel();
+    if (nonProdLabel && !testOverride) {
+      console.log(`[Email] Non-prod (${nonProdLabel}) and no EMAIL_TEST_OVERRIDE set — dropping '${eventKey}' (would have gone to ${originalToLabel}${ccList.length > 0 ? ` cc:${ccList.join(',')}` : ''}).`);
+      return false;
+    }
     const isOverride = testOverride.length > 0;
 
     let actualTo: string[];
@@ -342,7 +323,14 @@ export async function sendRawEmail(
     }
     const originalToLabel = toList.join(',');
 
+    // Non-prod safety: never email real (cloned-prod) recipients from QA/UAT —
+    // redirect to EMAIL_TEST_OVERRIDE if set, otherwise drop. Null in prod.
     const testOverride = (process.env.EMAIL_TEST_OVERRIDE || '').trim();
+    const nonProdLabel = detectEnvironmentLabel();
+    if (nonProdLabel && !testOverride) {
+      console.log(`[Email:${logTag}] Non-prod (${nonProdLabel}) and no EMAIL_TEST_OVERRIDE set — dropping (would have gone to ${originalToLabel}${ccList.length > 0 ? ` cc:${ccList.join(',')}` : ''}).`);
+      return false;
+    }
     const isOverride = testOverride.length > 0;
 
     let actualTo: string[];
