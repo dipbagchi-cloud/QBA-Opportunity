@@ -783,6 +783,23 @@ export async function deleteProjectRole(req: Request, res: Response) {
     res.json({ message: 'Project role deactivated.' });
 }
 
+// The `department` field synced from QPeople can be a pipe-joined list of every
+// "<Practice> - <Entity>" a user maps to (often the same long list for many
+// users). For the person-picker dropdowns we only want a short, de-duplicated
+// list of distinct practice names, e.g. "1C, Accounts, App Dev & Maintenance +4".
+function formatDepartmentsShort(raw: string | null | undefined, max = 3): string | null {
+    if (!raw) return raw ?? null;
+    const practices: string[] = [];
+    for (const seg of raw.split('|')) {
+        const practice = seg.trim().split(' - ')[0].trim();
+        if (practice && !practices.includes(practice)) practices.push(practice);
+    }
+    if (practices.length === 0) return raw;
+    const shown = practices.slice(0, max).join(', ');
+    const extra = practices.length - max;
+    return extra > 0 ? `${shown} +${extra}` : shown;
+}
+
 // ── Salespersons (only users with the Sales role) ──
 export async function listSalespersons(req: Request, res: Response) {
     const users = await prisma.user.findMany({
@@ -793,7 +810,7 @@ export async function listSalespersons(req: Request, res: Response) {
         orderBy: { name: 'asc' },
         select: { id: true, name: true, email: true, department: true, roles: { select: { name: true } } },
     });
-    res.json(users);
+    res.json(users.map(u => ({ ...u, department: formatDepartmentsShort(u.department) })));
 }
 
 // ── Departments from QPeople ──
@@ -852,7 +869,7 @@ export async function listManagersByDepartment(req: Request, res: Response) {
             orderBy: { name: 'asc' },
             select: { id: true, name: true, email: true, department: true },
         });
-        res.json(users);
+        res.json(users.map(u => ({ ...u, department: formatDepartmentsShort(u.department) })));
     } catch (error) {
         console.error('List managers error:', error);
         res.status(500).json({ error: 'Failed to fetch managers.' });
@@ -913,7 +930,7 @@ export async function listPresalesTeam(req: Request, res: Response) {
             }
         }
         
-        res.json(users);
+        res.json(users.map(u => ({ ...u, department: formatDepartmentsShort(u.department) })));
     } catch (error) {
         console.error('[PRESALES TEAM] Error:', error);
         res.status(500).json({ error: 'Failed to fetch presales team.' });
