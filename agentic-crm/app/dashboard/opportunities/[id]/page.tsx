@@ -580,7 +580,9 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const isActiveAdmin = !!user?.role?.permissions?.includes("*") || activeRoleName === "admin";
     // Stage-specific assignment rules (tab-driven, per product spec):
     // - Sales Rep: editable in Pipeline (step 0) and Sales (step 2)
-    // - Manager:   editable in Presales (step 1) and Sales (step 2)
+    // - Manager:   editable in Pipeline (step 0), Presales (step 1) and Sales (step 2)
+    //              (Pipeline included so a manager can be assigned during edit when
+    //              the opportunity was created without one — mirrors the create form.)
     // - Presales:  editable in Pipeline (step 0) and Presales (step 1)
     // Plus: a non-admin sales rep / manager may hand off the field ONCE.
     // After the first handoff, only Admin can change it. Counts live in opp.metadata.
@@ -591,7 +593,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const salesRepHandoffLock = !isActiveAdmin && salesRepHandoffsDone >= 1;
     const managerHandoffLock = !isActiveAdmin && managerHandoffsDone >= 1;
     const canEditSalesRepAssignment = !baseAssignmentLock && !salesRepHandoffLock && (isActiveAdmin || activeRoleName === "sales") && (activeStep === 0 || activeStep === 2);
-    const canEditManagerAssignment = !baseAssignmentLock && !managerHandoffLock && (isActiveAdmin || activeRoleName === "manager") && (activeStep === 1 || activeStep === 2);
+    const canEditManagerAssignment = !baseAssignmentLock && !managerHandoffLock && (isActiveAdmin || activeRoleName === "manager") && (activeStep === 0 || activeStep === 1 || activeStep === 2);
     const canEditPresalesAssignment = !baseAssignmentLock && (isActiveAdmin || activeRoleName === "presales" || activeRoleName === "sales" || (activeRoleName === "manager" && opportunityAccess?.assignment?.isManager)) && (activeStep === 0 || activeStep === 1);
 
     // Technology multiselect state
