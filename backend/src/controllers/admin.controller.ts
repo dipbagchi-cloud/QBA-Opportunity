@@ -1079,7 +1079,10 @@ export async function applyQPeopleMappings(req: Request, res: Response) {
     const mappings: any[] = await (prisma as any).qPeopleRoleMapping.findMany();
     const designationToRoleIds = new Map<string, string[]>(mappings.map((m: any) => [m.qpeopleDesignation, m.crmRoleIds || []]));
     const designationToJobBand = new Map<string, string>(mappings.filter((m: any) => m.jobBand).map((m: any) => [m.qpeopleDesignation, m.jobBand]));
-    const designationToDept = new Map<string, string>(mappings.filter((m: any) => m.department).map((m: any) => [m.qpeopleDesignation, m.department]));
+    // NOTE: deliberately NOT building a designation→department map. A mapping's
+    // department is the aggregated, designation-wide list (practices joined by
+    // " | "); applying it to users stamps everyone with the same multi-department
+    // blob. Department is each employee's own per-user value, synced from QPeople.
 
     // Get Read-Only role for cleanup
     const readOnlyRole = await prisma.role.findFirst({ where: { name: 'Read-Only' } });
@@ -1094,17 +1097,17 @@ export async function applyQPeopleMappings(req: Request, res: Response) {
     for (const user of users) {
       const mappedRoleIds = designationToRoleIds.get(user.designation || '') || [];
       const mappedJobBand = designationToJobBand.get(user.designation || '') || null;
-      const mappedDept = designationToDept.get(user.designation || '') || null;
 
       if (mappedRoleIds.length > 0) {
-        // Has mapping: set exactly the mapped roles (removes stale Read-Only etc.)
+        // Has mapping: set exactly the mapped roles (removes stale Read-Only etc.).
+        // jobBand may be applied; department is intentionally left untouched so we
+        // never overwrite a user's own QPeople-synced department with the blob.
         await prisma.user.update({
           where: { id: user.id },
           data: {
             roles: { set: mappedRoleIds.map(rid => ({ id: rid })) },
             activeRoleId: mappedRoleIds[0],
             ...(mappedJobBand ? { jobBand: mappedJobBand } : {}),
-            ...(mappedDept ? { department: mappedDept } : {}),
           } as any,
         });
         applied++;
@@ -1115,13 +1118,12 @@ export async function applyQPeopleMappings(req: Request, res: Response) {
           // Only reset if user somehow has roles that shouldn't be there, or no roles
           // Skip: keep users who only have Read-Only already
         }
-        // Apply jobBand/dept if available even without role mapping
-        if (mappedJobBand || mappedDept) {
+        // Apply jobBand if available even without role mapping (never department).
+        if (mappedJobBand) {
           await prisma.user.update({
             where: { id: user.id },
             data: {
-              ...(mappedJobBand ? { jobBand: mappedJobBand } : {}),
-              ...(mappedDept ? { department: mappedDept } : {}),
+              jobBand: mappedJobBand,
             } as any,
           });
           applied++;
