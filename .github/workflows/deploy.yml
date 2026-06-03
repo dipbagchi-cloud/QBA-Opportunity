@@ -105,7 +105,10 @@ jobs:
             npx tsc
 
             echo "=== Restart UAT backend safely ==="
-            bash $APP_DIR/scripts/pm2-safe-restart.sh qcrm-uat-backend 3003 $ECO
+            # UAT backend listens on 3005 (see deploy/PORT_MAP.md). A wrong port
+            # here makes pm2-safe-restart fuser-kill the OTHER env's backend and
+            # then fail the bind-wait. Keep in sync with backend/.env PORT.
+            bash $APP_DIR/scripts/pm2-safe-restart.sh qcrm-uat-backend 3005 $ECO
 
             echo "=== Frontend: install + build ==="
             cd $APP_DIR/agentic-crm
@@ -153,7 +156,10 @@ jobs:
             npx tsc
 
             echo "=== Restart QA backend safely ==="
-            bash $APP_DIR/scripts/pm2-safe-restart.sh qcrm-qa-backend 3005 $ECO
+            # QA backend listens on 3003 (see deploy/PORT_MAP.md). A wrong port
+            # here makes pm2-safe-restart fuser-kill the OTHER env's backend and
+            # then fail the bind-wait. Keep in sync with backend/.env PORT.
+            bash $APP_DIR/scripts/pm2-safe-restart.sh qcrm-qa-backend 3003 $ECO
 
             echo "=== Frontend: install + build ==="
             cd $APP_DIR/agentic-crm
