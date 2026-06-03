@@ -985,7 +985,11 @@ export async function upsertQPeopleMapping(req: Request, res: Response) {
           roles: { set: crmRoleIds.map((rid: string) => ({ id: rid })) },
           activeRoleId: crmRoleIds[0],
           ...(jobBand ? { jobBand } : {}),
-          ...(department ? { department } : {}),
+          // Do NOT write department here. Department is each employee's own
+          // attribute, synced per-user from QPeople. The mappings UI shows an
+          // aggregated designation-wide department (many practices joined by
+          // " | "); writing that back stamped every user of the designation with
+          // the same multi-department blob. A mapping only controls roles/jobBand.
         } as any,
       });
       applied++;

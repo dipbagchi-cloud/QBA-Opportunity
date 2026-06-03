@@ -862,7 +862,9 @@ export async function listManagersByDepartment(req: Request, res: Response) {
             roles: { some: { name: 'Manager' } },
         };
         if (department && typeof department === 'string') {
-            where.department = department;
+            // department is stored as "<Practice> - <Entity>"; match on contains
+            // so selecting a practice scopes correctly regardless of entity suffix.
+            where.department = { contains: department, mode: 'insensitive' };
         }
         const users = await prisma.user.findMany({
             where,
@@ -891,7 +893,9 @@ export async function listPresalesTeam(req: Request, res: Response) {
                 where: {
                     isActive: true,
                     roles: { some: { name: 'Presales' } },
-                    department: department,
+                    // contains-match so a practice scopes correctly regardless of
+                    // the "<Practice> - <Entity>" suffix stored on the user.
+                    department: { contains: department, mode: 'insensitive' },
                 },
                 orderBy: { name: 'asc' },
                 select: { id: true, name: true, email: true, department: true },
