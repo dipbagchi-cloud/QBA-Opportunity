@@ -514,6 +514,13 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const canReviewGomApproval = !!opportunityAccess?.workflow?.gomApprovalReviewable;
     const viewOnlyReason = opportunityAccess?.viewOnlyReason || null;
     const canEditPresalesData = canEditPresales || canManageEstimation;
+    // Time & Material deals are exempt from the mandatory-SOW gate before moving
+    // to Sales (billed on actuals). Match the configured pricing-model value and
+    // tolerate variants ("T&M", "Time and Material", "Time&Material").
+    const isTandMPricing = (() => {
+        const p = (formData.pricingModel || '').toLowerCase().replace(/\s+/g, '').replace(/and/g, '&');
+        return p === 't&m' || p === 'time&material';
+    })();
     const canEditPresalesAttachments = canManageAttachments && canEditPresalesData;
     const canWorkPresalesStage = canEditPresalesData || canManageGomApproval;
     const canWorkSalesStage = canEditSales;
@@ -1804,12 +1811,13 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             {(() => {
                                 // A SOW must be attached, and a committed quote must exist
                                 // (GOM calculated) AND be approved, before the deal can be
-                                // submitted to Sales.
+                                // submitted to Sales. Time & Material deals are exempt from
+                                // the SOW requirement (billed on actuals).
                                 const hasSow = sowDocuments.some(d => d.isCurrent);
                                 const hasQuote = contextRevenue > 0;
                                 const gomOk = gomApproved || (gomAutoApprovePercent > 0 && contextGomPercent >= gomAutoApprovePercent);
-                                const canMove = hasSow && hasQuote && gomOk;
-                                const blockReason = !hasSow
+                                const canMove = (hasSow || isTandMPricing) && hasQuote && gomOk;
+                                const blockReason = (!hasSow && !isTandMPricing)
                                     ? 'Attach the Statement of Work (SOW) first — it is mandatory before moving to Sales.'
                                     : !hasQuote
                                         ? 'Complete the GOM Calculator first — there is no quote to submit to Sales.'
@@ -1927,7 +1935,9 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             {!currentSow ? (
                                 <div className={`text-sm rounded-md px-3 py-2 ${canEditSow ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'bg-slate-50 text-slate-500'}`}>
                                     {canEditSow
-                                        ? 'No SOW attached yet. A Statement of Work is required before this opportunity can be moved to Sales.'
+                                        ? (isTandMPricing
+                                            ? 'No SOW attached. A Statement of Work is optional for Time & Material deals — you can move to Sales without one.'
+                                            : 'No SOW attached yet. A Statement of Work is required before this opportunity can be moved to Sales.')
                                         : 'No SOW document has been attached.'}
                                 </div>
                             ) : (

@@ -845,9 +845,14 @@ export async function updateOpportunity(req: Request, res: Response) {
                 if (newStageName === 'Proposal') {
                     // Hard requirement: a signed-off Statement of Work (SOW) document
                     // must be attached in Pre-sales before the deal can be submitted
-                    // to Sales. T&M opportunities are exempt — they are billed
-                    // on actuals and typically don't require a signed SOW upfront.
-                    const isTandM = (previous?.pricingModel as string || '').trim().toUpperCase() === 'T&M';
+                    // to Sales. Time & Material opportunities are exempt — they are
+                    // billed on actuals and typically don't require a signed SOW upfront.
+                    // Match the configured pricing-model value ("Time & Material"), not
+                    // just the "T&M" abbreviation; normalize so common variants
+                    // ("T&M", "Time and Material", "Time&Material") all qualify.
+                    const normalizedPricing = (previous?.pricingModel as string || '')
+                        .toLowerCase().replace(/\s+/g, '').replace(/and/g, '&');
+                    const isTandM = normalizedPricing === 't&m' || normalizedPricing === 'time&material';
                     const currentSow = isTandM ? null : await prisma.attachment.findFirst({
                         where: { opportunityId: id, category: SOW_CURRENT_CATEGORY },
                         select: { id: true },
