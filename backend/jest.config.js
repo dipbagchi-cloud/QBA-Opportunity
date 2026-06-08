@@ -6,6 +6,8 @@ module.exports = {
   testMatch: ['**/__tests__/**/*.test.ts'],
   setupFiles: ['<rootDir>/src/__tests__/jest.setup-env.ts'],
   clearMocks: true,
+  // supertest opens short-lived sockets; force a clean exit for CI.
+  forceExit: true,
   // Test files live under src/__tests__ but are excluded from the production
   // `tsc` build (see tsconfig.json), so they never reach dist/.
   collectCoverageFrom: [
