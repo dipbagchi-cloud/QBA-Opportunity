@@ -34,6 +34,7 @@ import {
 } from "lucide-react";
 import { useOpportunityStore } from "@/lib/store";
 import { useAuthStore } from "@/lib/auth-store";
+import { getOpportunityEditAccess } from "@/lib/opportunity-edit-access";
 import { EstimationTab } from "./components/EstimationTab";
 import { ResourceAssignmentTab } from "./components/ResourceAssignmentTab";
 import { GomCalculatorTab } from "./components/GomCalculatorTab";
@@ -589,16 +590,24 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const _meta: any = (opportunityMetadata as any) || {};
     const salesRepHandoffsDone = Number(_meta.salesRepHandoffs) || 0;
     const managerHandoffsDone = Number(_meta.managerHandoffs) || 0;
-    // ── Admin edit window ────────────────────────────────────────────────────
+    // ── Edit gates (pure, unit-tested) ───────────────────────────────────────
     // Per product rule: an Admin may edit the Pipeline and Presales tabs (and
     // their sub-tabs, including assignments) at ANY open stage. The stage-
     // progression locks that freeze these tabs for normal roles (stage >= 2/3,
     // Negotiation, On-Hold) do NOT apply to Admin. The only hard stop is a deal
-    // that has actually closed — Lost (Closed Lost / Proposal Lost) or
-    // Won/Delivered (opportunityStage 3).
-    const isDealClosed = isLost || opportunityStage >= 3;
-    const adminEditUnlocked = isActiveAdmin && !isDealClosed;
-    const baseAssignmentLock = (opportunityStage >= 3 || isLost || isStalled || currentStageName === 'Negotiation') && !adminEditUnlocked;
+    // that has actually closed — Lost or Won/Delivered (stage 3). See
+    // lib/opportunity-edit-access.ts (+ its tests) for the full matrix.
+    const editAccess = getOpportunityEditAccess({
+        isActiveAdmin,
+        isLost,
+        isStalled,
+        opportunityStage,
+        currentStageName,
+        canEditPipeline,
+        canEditPresalesData,
+    });
+    const { adminEditUnlocked } = editAccess;
+    const baseAssignmentLock = editAccess.assignmentLocked;
     const salesRepHandoffLock = !isActiveAdmin && salesRepHandoffsDone >= 1;
     const managerHandoffLock = !isActiveAdmin && managerHandoffsDone >= 1;
     const canEditSalesRepAssignment = !baseAssignmentLock && !salesRepHandoffLock && (isActiveAdmin || activeRoleName === "sales") && (activeStep === 0 || activeStep === 2);
@@ -2082,8 +2091,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 // (Negotiation onwards) or the opportunity is Closed/Lost/On Hold.
                 // Client name, country, and region freeze the moment the opportunity
                 // moves OUT of Pipeline (stage > 0).
-                const isPipelineEditable = canEditPipeline && ((opportunityStage < 3 && !isLost && !isStalled && currentStageName !== 'Negotiation') || adminEditUnlocked);
-                const isClientCountryEditable = isPipelineEditable && (opportunityStage === 0 || adminEditUnlocked);
+                const isPipelineEditable = editAccess.pipelineEditable;
+                const isClientCountryEditable = editAccess.clientCountryEditable;
                 const hasAssignmentEdit = canEditSalesRepAssignment || canEditManagerAssignment || canEditPresalesAssignment;
                 const managerOptions = managers.map(m => ({ value: m.name, label: `${m.name}${m.department ? ` (${m.department})` : ''}` }));
                 if (opportunityManagerName && !managerOptions.some(o => o.value === opportunityManagerName)) {
@@ -2475,10 +2484,10 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 name="expectedCloseDate"
                                 value={formData.expectedCloseDate}
                                 max={formData.tentativeStartDate ? (() => { const d = new Date(formData.tentativeStartDate); d.setDate(d.getDate() - 1); return d.toISOString().split('T')[0]; })() : undefined}
-                                disabled={!(isPipelineEditable && (opportunityStage < 2 || adminEditUnlocked))}
-                                className={`w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm shadow-sm text-slate-500 ${(isPipelineEditable && (opportunityStage < 2 || adminEditUnlocked)) ? 'cursor-pointer bg-white' : 'cursor-not-allowed bg-slate-50 opacity-70'}`}
+                                disabled={!editAccess.closeDateEditable}
+                                className={`w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm shadow-sm text-slate-500 ${editAccess.closeDateEditable ? 'cursor-pointer bg-white' : 'cursor-not-allowed bg-slate-50 opacity-70'}`}
                                 onChange={handleChange}
-                                onClick={(e) => { if (isPipelineEditable && (opportunityStage < 2 || adminEditUnlocked)) (e.target as HTMLInputElement).showPicker?.(); }}
+                                onClick={(e) => { if (editAccess.closeDateEditable) (e.target as HTMLInputElement).showPicker?.(); }}
                             />
                             <p className="text-[10px] text-slate-400">
                                 {opportunityStage >= 2 && !adminEditUnlocked
@@ -2581,7 +2590,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             {activeStep === 1 && (
                 <OpportunityEstimationProvider
                     opportunityId={id}
-                    readOnly={!canEditPresalesData || ((opportunityStage >= 2 || isStalled || isLost) && !adminEditUnlocked)}
+                    readOnly={editAccess.presalesReadOnly}
                     startDate={formData.tentativeStartDate}
                     endDate={formData.tentativeEndDate}
                     durationInDays={
@@ -2599,7 +2608,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 >
                     <GomPercentSync onGomPercentChange={setContextGomPercent} />
                     <RevenueSync onRevenueChange={setContextRevenue} />
-                    {(opportunityStage < 2 || adminEditUnlocked) && activeTab !== "View Estimate" && (
+                    {editAccess.presalesStageUnlocked && activeTab !== "View Estimate" && (
                         <PresalesSaveButton />
                     )}
                     <div className="bg-white rounded-lg shadow-sm border border-slate-200">
@@ -2742,7 +2751,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 <div className="space-y-4">
                                     <div className="flex items-center justify-between border-b border-slate-200 pb-2 mb-4">
                                         <h3 className="font-bold text-slate-900">Attachments</h3>
-                                        {(opportunityStage < 2 || adminEditUnlocked) && (
+                                        {editAccess.presalesStageUnlocked && (
                                             <>
                                                 <input ref={fileInputRef} type="file" multiple className="hidden" disabled={!canEditPresalesAttachments} onChange={(e) => handleFileUpload(e.target.files)} />
                                                 <button onClick={() => fileInputRef.current?.click()} disabled={isUploading || !canEditPresalesAttachments} className="px-3 py-1.5 bg-slate-100 text-slate-700 font-medium rounded text-xs hover:bg-slate-200 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
@@ -2776,7 +2785,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                                         <td className="px-3 py-2">{new Date(att.uploadedAt).toLocaleDateString()}</td>
                                                         <td className="px-3 py-2 flex items-center gap-2">
                                                             <button type="button" onClick={() => handleDownloadAttachment(att.id, att.fileName)} className="text-slate-400 hover:text-indigo-600"><Download className="w-3.5 h-3.5" /></button>
-                                                            {(opportunityStage < 2 || adminEditUnlocked) && canEditPresalesAttachments && (
+                                                            {editAccess.presalesStageUnlocked && canEditPresalesAttachments && (
                                                                 <button onClick={() => handleDeleteAttachment(att.id)} className="text-slate-400 hover:text-red-600"><Trash2 className="w-3.5 h-3.5" /></button>
                                                             )}
                                                         </td>
@@ -2799,7 +2808,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                             {getBadgeText()}
                                         </span>
                                     </div>
-                                    {canEditPresalesData && (opportunityStage < 2 || adminEditUnlocked) && (
+                                    {canEditPresalesData && editAccess.presalesStageUnlocked && (
                                         <button onClick={async () => {
                                             setIsSaving(true);
                                             try {
@@ -2836,7 +2845,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                             name="tentativeStartDate"
                                             value={formData.tentativeStartDate}
                                             onChange={handleChange}
-                                            disabled={!canEditPresalesData || (opportunityStage >= 2 && !adminEditUnlocked)}
+                                            disabled={!editAccess.presalesScheduleEditable}
                                             className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm disabled:bg-slate-100 disabled:cursor-not-allowed cursor-pointer"
                                             onClick={(e) => !(e.target as HTMLInputElement).disabled && (e.target as HTMLInputElement).showPicker?.()}
                                         />
@@ -2851,7 +2860,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                                 min="1"
                                                 value={formData.duration}
                                                 onChange={handleChange}
-                                                disabled={!canEditPresalesData || (opportunityStage >= 2 && !adminEditUnlocked)}
+                                                disabled={!editAccess.presalesScheduleEditable}
                                                 placeholder="Enter duration"
                                                 className="flex-1 px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm disabled:bg-slate-100 disabled:cursor-not-allowed"
                                             />
@@ -2859,7 +2868,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                                 name="durationUnit"
                                                 value={formData.durationUnit}
                                                 onChange={handleChange}
-                                                disabled={!canEditPresalesData || (opportunityStage >= 2 && !adminEditUnlocked)}
+                                                disabled={!editAccess.presalesScheduleEditable}
                                                 className="w-28 px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm disabled:bg-slate-100 disabled:cursor-not-allowed"
                                             >
                                                 {DURATION_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
