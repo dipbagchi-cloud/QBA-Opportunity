@@ -27,6 +27,7 @@ export function ResourceAssignmentTab() {
         markupPercent,
         readOnly,
         currentUserName,
+        canEditOthersRows,
         startDate,
         endDate,
         effortType,
@@ -114,9 +115,11 @@ export function ResourceAssignmentTab() {
 
     // A row is editable if: not globally readOnly, AND either no ownership info exists
     // (backward compat) OR the row belongs to the current user.
-    // During re-estimation, any assigned presales member may edit all rows
+    // During re-estimation, any assigned presales member may edit all rows.
+    // Admins (canEditOthersRows) bypass the ownership rule entirely while the
+    // deal is open — they may edit rows authored by anyone.
     const canEditRow = (row: ResourceRow) =>
-        !readOnly && (isReEstimation || !currentUserName || !row.addedBy || row.addedBy === currentUserName);
+        !readOnly && (canEditOthersRows || isReEstimation || !currentUserName || !row.addedBy || row.addedBy === currentUserName);
 
     const addRole = (roleItem: any) => {
         // Pick CTC for the selected location; 0 if not defined in master

@@ -2594,6 +2594,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     isReEstimation={detailedStatus === 'Re-estimation' || detailedStatus === 'Sent for Re-estimate'}
                     initialCurrency={globalCurrency}
                     currentUserName={user?.name || ''}
+                    canEditOthersRows={adminEditUnlocked}
                     holidays={holidays}
                 >
                     <GomPercentSync onGomPercentChange={setContextGomPercent} />

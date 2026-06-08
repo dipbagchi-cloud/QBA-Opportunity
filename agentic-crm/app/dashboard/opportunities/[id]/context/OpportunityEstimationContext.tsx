@@ -98,6 +98,10 @@ interface OpportunityEstimationContextType {
     // Who is currently logged in (used to scope resource editing to own rows)
     currentUserName: string;
 
+    // Admin override: bypass the per-row "only the author can edit" rule so an
+    // Admin may edit any resource row while the deal is still open.
+    canEditOthersRows: boolean;
+
     // Original pipeline revenue reference.
     salesTargetRevenue: number;
 
@@ -129,7 +133,7 @@ export interface HolidayInfo {
 
 const OpportunityEstimationContext = createContext<OpportunityEstimationContextType | undefined>(undefined);
 
-export function OpportunityEstimationProvider({ children, opportunityId, readOnly = false, startDate = '', endDate = '', durationInDays = 0, salesTargetRevenue = 0, reEstimateSuggestedRevenue = 0, isReEstimation = false, initialCurrency = "INR", currentUserName = "", holidays = [] }: { children: ReactNode; opportunityId?: string; readOnly?: boolean; startDate?: string; endDate?: string; durationInDays?: number; salesTargetRevenue?: number; reEstimateSuggestedRevenue?: number; isReEstimation?: boolean; initialCurrency?: string; currentUserName?: string; holidays?: HolidayInfo[] }) {
+export function OpportunityEstimationProvider({ children, opportunityId, readOnly = false, startDate = '', endDate = '', durationInDays = 0, salesTargetRevenue = 0, reEstimateSuggestedRevenue = 0, isReEstimation = false, initialCurrency = "INR", currentUserName = "", canEditOthersRows = false, holidays = [] }: { children: ReactNode; opportunityId?: string; readOnly?: boolean; startDate?: string; endDate?: string; durationInDays?: number; salesTargetRevenue?: number; reEstimateSuggestedRevenue?: number; isReEstimation?: boolean; initialCurrency?: string; currentUserName?: string; canEditOthersRows?: boolean; holidays?: HolidayInfo[] }) {
     // State
     const [assumptions, setAssumptions] = useState<BudgetAssumptions>(DEFAULT_ASSUMPTIONS);
     const [resources, setResources] = useState<ResourceRow[]>([]);
@@ -606,6 +610,7 @@ export function OpportunityEstimationProvider({ children, opportunityId, readOnl
         isLoaded,
         readOnly,
         currentUserName,
+        canEditOthersRows,
         salesTargetRevenue,
         reEstimateSuggestedRevenue,
         isReEstimation,
