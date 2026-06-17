@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import path from 'path';
 import {
@@ -33,7 +33,26 @@ const storage = multer.diskStorage({
         cb(null, `${unique}-${file.originalname}`);
     },
 });
-const upload = multer({ storage, limits: { fileSize: 20 * 1024 * 1024 } }); // 20MB limit
+// Keep this in sync with nginx `client_max_body_size` (currently 50M on all envs).
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024; // 50MB
+const upload = multer({ storage, limits: { fileSize: MAX_UPLOAD_BYTES } });
+
+// Wrap multer's single-file middleware so size/upload errors return a clean JSON
+// response instead of bubbling up to the generic 500 error handler.
+function handleUpload(req: Request, res: Response, next: NextFunction) {
+    upload.single('file')(req, res, (err: any) => {
+        if (err) {
+            if (err instanceof multer.MulterError) {
+                if (err.code === 'LIMIT_FILE_SIZE') {
+                    return res.status(413).json({ error: 'File too large. Maximum upload size is 50MB.' });
+                }
+                return res.status(400).json({ error: `Upload error: ${err.message}` });
+            }
+            return res.status(500).json({ error: 'File upload failed.' });
+        }
+        next();
+    });
+}
 
 // All routes require authentication
 router.use(authenticate);
@@ -51,8 +70,8 @@ router.post('/:id/comments', authorizeAny(PERMISSIONS.PIPELINE_WRITE, PERMISSION
 router.get('/:id/audit-log', authorizeAny(PERMISSIONS.PIPELINE_VIEW, PERMISSIONS.PRESALES_VIEW, PERMISSIONS.SALES_VIEW), getOpportunityAuditLog);
 
 // Attachment routes
-router.post('/:id/sow', authorizeAny(PERMISSIONS.PIPELINE_WRITE, PERMISSIONS.PRESALES_WRITE, PERMISSIONS.SALES_WRITE), upload.single('file'), uploadSow);
-router.post('/:id/attachments', authorizeAny(PERMISSIONS.PIPELINE_WRITE, PERMISSIONS.PRESALES_WRITE, PERMISSIONS.SALES_WRITE), upload.single('file'), uploadAttachment);
+router.post('/:id/sow', authorizeAny(PERMISSIONS.PIPELINE_WRITE, PERMISSIONS.PRESALES_WRITE, PERMISSIONS.SALES_WRITE), handleUpload, uploadSow);
+router.post('/:id/attachments', authorizeAny(PERMISSIONS.PIPELINE_WRITE, PERMISSIONS.PRESALES_WRITE, PERMISSIONS.SALES_WRITE), handleUpload, uploadAttachment);
 router.get('/:id/attachments/:attachmentId/download', authorizeAny(PERMISSIONS.PIPELINE_VIEW, PERMISSIONS.PRESALES_VIEW, PERMISSIONS.SALES_VIEW), downloadAttachment);
 router.delete('/:id/attachments/:attachmentId', authorizeAny(PERMISSIONS.PIPELINE_WRITE, PERMISSIONS.PRESALES_WRITE, PERMISSIONS.SALES_WRITE), deleteAttachment);
 
