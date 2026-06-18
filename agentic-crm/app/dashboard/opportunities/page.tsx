@@ -35,6 +35,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import KanbanBoard from "@/components/opportunities/KanbanBoard";
 import { useCurrency } from "@/components/providers/currency-provider";
 import { ByOwnerBoard } from "./components/ByOwnerBoard";
+import { FilterCombobox } from "@/components/ui/filter-combobox";
 
 // Column model for the list. `serverSort` columns are sorted in the DB (so the
 // whole filtered dataset is ordered, not just the current page); `clientSort`
@@ -344,21 +345,13 @@ export default function OpportunitiesPage() {
                                         {LIST_COLUMNS.map((col) => (
                                             <th key={col.key} className="px-3 pb-2 pt-1 align-top">
                                                 {col.filter ? (
-                                                    <>
-                                                        <input
-                                                            list={`opp-filter-${col.key}`}
-                                                            autoComplete="off"
-                                                            value={colFilters[col.key] || ''}
-                                                            onChange={(e) => setColFilter(col.key, e.target.value)}
-                                                            placeholder="filter…"
-                                                            className="w-full min-w-[90px] px-2 py-1 text-[11px] font-normal border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-indigo-400"
-                                                        />
-                                                        <datalist id={`opp-filter-${col.key}`}>
-                                                            {(filterOptions[col.key] || []).map((o) => (
-                                                                <option key={o} value={o} />
-                                                            ))}
-                                                        </datalist>
-                                                    </>
+                                                    <FilterCombobox
+                                                        value={colFilters[col.key] || ''}
+                                                        onChange={(v) => setColFilter(col.key, v)}
+                                                        options={filterOptions[col.key] || []}
+                                                        placeholder="filter…"
+                                                        inputClassName="w-full min-w-[90px] px-2 py-1 text-[11px] font-normal border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                                                    />
                                                 ) : null}
                                             </th>
                                         ))}

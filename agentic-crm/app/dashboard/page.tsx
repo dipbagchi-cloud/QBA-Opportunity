@@ -27,6 +27,7 @@ import { API_URL, getAuthHeaders } from "@/lib/api";
 import { useAuthStore } from "@/lib/auth-store";
 import { useCurrency } from "@/components/providers/currency-provider";
 import { ExpandableCard, DrillDownConfig } from "@/components/ui/drill-down-modal";
+import { FilterCombobox } from "@/components/ui/filter-combobox";
 
 const STAGE_COLORS: Record<string, string> = {
     Pipeline: "bg-blue-50 text-blue-700 border-blue-200",
@@ -388,20 +389,13 @@ function PendingActionsPanel({
                                 <tr>
                                     {PENDING_COLUMNS.map(col => (
                                         <th key={col.key} className="px-1 pb-1">
-                                            <input
-                                                list={`pending-filter-${col.key}`}
-                                                autoComplete="off"
+                                            <FilterCombobox
                                                 value={colFilters[col.key] || ''}
-                                                onChange={e => setColFilters(prev => ({ ...prev, [col.key]: e.target.value }))}
-                                                onClick={e => e.stopPropagation()}
+                                                onChange={(v) => setColFilters(prev => ({ ...prev, [col.key]: v }))}
+                                                options={colOptions[col.key] || []}
                                                 placeholder="filter…"
-                                                className="w-full px-1.5 py-0.5 text-[9px] font-normal normal-case border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                                                inputClassName="w-full px-1.5 py-0.5 text-[9px] font-normal normal-case border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-indigo-400"
                                             />
-                                            <datalist id={`pending-filter-${col.key}`}>
-                                                {(colOptions[col.key] || []).map(o => (
-                                                    <option key={o} value={o} />
-                                                ))}
-                                            </datalist>
                                         </th>
                                     ))}
                                 </tr>
