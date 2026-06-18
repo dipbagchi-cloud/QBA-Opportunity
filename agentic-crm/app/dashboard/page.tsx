@@ -572,10 +572,10 @@ export default function DashboardPage() {
     const healthyDeals = opportunities.filter(o => o.status === "healthy");
     const atRiskDeals = opportunities.filter(o => o.status === "at-risk");
 
-    // ── Aging report ──────────────────────────────────────────────────────
+    // ── Aging report (stage-wise) ─────────────────────────────────────────
     // "Aging" = days an opportunity has been open, counted from the day AFTER
     // it was created (creation day = 0). Only open deals age; closed ones are
-    // done. Sorted oldest-first and bucketed for an at-a-glance summary.
+    // done. Grouped by current stage, also surfacing days-in-stage.
     const CLOSED_STAGES = ['Closed Won', 'Closed-Won', 'Closed Lost', 'Proposal Lost', 'Delivered'];
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
@@ -590,12 +590,22 @@ export default function DashboardPage() {
         .filter(o => !CLOSED_STAGES.includes(o.currentStage))
         .map(o => ({ ...o, agingDays: computeAgingDays(o.createdAt) }))
         .sort((a, b) => b.agingDays - a.agingDays);
-    const agingBuckets = [
-        { label: '0–30 days', min: 0, max: 30, color: 'text-emerald-600' },
-        { label: '31–60 days', min: 31, max: 60, color: 'text-amber-600' },
-        { label: '61–90 days', min: 61, max: 90, color: 'text-orange-600' },
-        { label: '90+ days', min: 91, max: Infinity, color: 'text-red-600' },
-    ].map(b => ({ ...b, count: agingRows.filter(r => r.agingDays >= b.min && r.agingDays <= b.max).length }));
+    // Stage-wise aging: group open opps by their current (display) stage and
+    // surface count, average aging (since creation) and average days-in-stage.
+    const agingByStage = (() => {
+        const map = new Map<string, { stage: string; count: number; totalAging: number; totalInStage: number }>();
+        for (const r of agingRows) {
+            const stage = STAGE_DISPLAY[r.currentStage] || r.currentStage || '—';
+            const e = map.get(stage) || { stage, count: 0, totalAging: 0, totalInStage: 0 };
+            e.count += 1;
+            e.totalAging += r.agingDays;
+            e.totalInStage += (r.daysInStage ?? 0);
+            map.set(stage, e);
+        }
+        return Array.from(map.values())
+            .map(e => ({ stage: e.stage, count: e.count, avgAging: Math.round(e.totalAging / e.count), avgInStage: Math.round(e.totalInStage / e.count) }))
+            .sort((a, b) => b.avgAging - a.avgAging);
+    })();
 
     // ── Stale report ──────────────────────────────────────────────────────
     // Uses the existing stalled logic (backend `isStalled` — inactive past the
@@ -1113,11 +1123,12 @@ export default function DashboardPage() {
     };
 
     const agingDrill: DrillDownConfig = {
-        title: "Aging Report — Open Opportunities by Age",
+        title: "Aging Report — Open Opportunities by Stage",
         columns: [
             { key: "name", label: "Opportunity", format: "text" },
             { key: "client", label: "Client", format: "text" },
-            { key: "currentStage", label: "Stage", format: "text" },
+            { key: "currentStage", label: "Current Stage", format: "text" },
+            { key: "daysInStage", label: "Days in Stage", format: "number" },
             { key: "value", label: "Value", format: "currency" },
             { key: "createdAt", label: "Created", format: "text" },
             { key: "agingDays", label: "Aging (days)", format: "number" },
@@ -1586,34 +1597,51 @@ export default function DashboardPage() {
 
             {/* Row 5: Aging Report + Stale Report */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-1.5">
-                {/* Aging Report — open opportunities by days since creation */}
+                {/* Aging Report — open opportunities by stage (aging + days-in-stage) */}
                 <ExpandableCard drillConfig={agingDrill} className="lg:col-span-6 bg-white rounded-md border border-slate-100 px-2.5 py-1.5">
                     <div className="flex justify-between items-center mb-1.5">
                         <h3 className="font-medium text-xs text-slate-700 flex items-center gap-1">
                             <Clock className="w-3 h-3 text-indigo-500" />Aging Report
+                            <span className="text-[9px] font-normal text-slate-400">by stage</span>
                         </h3>
                         <span className="text-[10px] text-slate-400">{agingRows.length} open</span>
                     </div>
-                    <div className="grid grid-cols-4 gap-1.5 mb-2">
-                        {agingBuckets.map(b => (
-                            <div key={b.label} className="rounded border border-slate-100 bg-slate-50/50 px-1.5 py-1 text-center">
-                                <div className={`text-sm font-bold ${b.color}`}>{b.count}</div>
-                                <div className="text-[9px] text-slate-400 leading-tight">{b.label}</div>
-                            </div>
-                        ))}
-                    </div>
                     {agingRows.length > 0 ? (
-                        <div className="space-y-0.5">
-                            {agingRows.slice(0, 5).map(o => (
-                                <div key={o.id} className="flex items-center justify-between gap-2 py-0.5 border-b border-slate-50/50 last:border-0">
-                                    <div className="min-w-0">
-                                        <div className="text-[10px] font-medium text-slate-700 truncate max-w-[170px]" title={o.name}>{o.name}</div>
-                                        <div className="text-[9px] text-slate-400 truncate max-w-[170px]">{o.client}</div>
-                                    </div>
-                                    <span className="text-[10px] font-semibold text-slate-600 whitespace-nowrap">{o.agingDays}d</span>
+                        <>
+                            {/* Stage-wise summary: count, avg aging (since creation), avg days-in-stage */}
+                            <div className="mb-2">
+                                <div className="grid grid-cols-[1fr_2.4rem_3rem_3.2rem] gap-1 px-1 pb-0.5 text-[9px] font-medium text-slate-400">
+                                    <span>Stage</span>
+                                    <span className="text-right">Opps</span>
+                                    <span className="text-right">Avg Age</span>
+                                    <span className="text-right">In Stage</span>
                                 </div>
-                            ))}
-                        </div>
+                                {agingByStage.map(s => (
+                                    <div key={s.stage} className="grid grid-cols-[1fr_2.4rem_3rem_3.2rem] gap-1 items-center px-1 py-0.5 border-b border-slate-50/50 last:border-0">
+                                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium border w-fit ${STAGE_COLORS[s.stage] || "bg-slate-50 text-slate-600 border-slate-200"}`}>{s.stage}</span>
+                                        <span className="text-right text-[10px] text-slate-600">{s.count}</span>
+                                        <span className="text-right text-[10px] font-semibold text-slate-700">{s.avgAging}d</span>
+                                        <span className="text-right text-[10px] text-slate-600">{s.avgInStage}d</span>
+                                    </div>
+                                ))}
+                            </div>
+                            {/* Oldest open opportunities — current stage + days in that stage */}
+                            <div className="space-y-0.5 pt-1 border-t border-slate-100">
+                                {agingRows.slice(0, 4).map(o => (
+                                    <div key={o.id} className="flex items-center justify-between gap-2 py-0.5">
+                                        <div className="min-w-0">
+                                            <div className="text-[10px] font-medium text-slate-700 truncate max-w-[140px]" title={o.name}>{o.name}</div>
+                                            <div className="text-[9px] text-slate-400 truncate max-w-[140px]">{o.client}</div>
+                                        </div>
+                                        <div className="flex items-center gap-1.5 whitespace-nowrap">
+                                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium border ${STAGE_COLORS[STAGE_DISPLAY[o.currentStage] || o.currentStage] || "bg-slate-50 text-slate-600 border-slate-200"}`}>{STAGE_DISPLAY[o.currentStage] || o.currentStage}</span>
+                                            <span className="text-[9px] text-slate-500" title="days in current stage">{o.daysInStage}d in stage</span>
+                                            <span className="text-[10px] font-semibold text-slate-700" title="aging since creation">{o.agingDays}d old</span>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </>
                     ) : <div className="text-center py-3 text-slate-300 text-[10px]">No open opportunities</div>}
                 </ExpandableCard>
 
