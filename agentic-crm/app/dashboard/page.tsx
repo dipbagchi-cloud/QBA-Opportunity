@@ -308,6 +308,23 @@ function PendingActionsPanel({
         }
     };
 
+    // Distinct values per column for the type-ahead filter dropdowns.
+    const colOptions = useMemo(() => {
+        const out: Record<string, string[]> = {};
+        const collect = (key: string, fn: (r: PendingRow) => string) => {
+            out[key] = Array.from(new Set(rows.map(fn).map(v => (v || '').trim()).filter(Boolean)))
+                .sort((a, b) => a.localeCompare(b));
+        };
+        collect('opportunity', r => r.opportunity);
+        collect('stage', r => r.stage);
+        collect('action', r => r.action);
+        collect('owner', r => r.owner);
+        collect('due', r => fmtDate(r.dueRaw));
+        collect('days', r => String(r.days));
+        collect('value', r => String(r.value));
+        return out;
+    }, [rows]);
+
     const activeFilterCount = Object.values(colFilters).filter(v => v.trim()).length;
 
     return (
@@ -372,12 +389,19 @@ function PendingActionsPanel({
                                     {PENDING_COLUMNS.map(col => (
                                         <th key={col.key} className="px-1 pb-1">
                                             <input
+                                                list={`pending-filter-${col.key}`}
+                                                autoComplete="off"
                                                 value={colFilters[col.key] || ''}
                                                 onChange={e => setColFilters(prev => ({ ...prev, [col.key]: e.target.value }))}
                                                 onClick={e => e.stopPropagation()}
                                                 placeholder="filter…"
                                                 className="w-full px-1.5 py-0.5 text-[9px] font-normal normal-case border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-indigo-400"
                                             />
+                                            <datalist id={`pending-filter-${col.key}`}>
+                                                {(colOptions[col.key] || []).map(o => (
+                                                    <option key={o} value={o} />
+                                                ))}
+                                            </datalist>
                                         </th>
                                     ))}
                                 </tr>

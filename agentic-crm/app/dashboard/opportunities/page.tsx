@@ -130,6 +130,15 @@ export default function OpportunitiesPage() {
     // = no filter. Mirrors the dashboard "Your Pending Actions" panel, but the
     // matching happens server-side so it covers the whole paginated dataset.
     const [colFilters, setColFilters] = useState<ColFilters>(EMPTY_FILTERS);
+    // Distinct values per filterable column for the type-ahead dropdowns.
+    const [filterOptions, setFilterOptions] = useState<Record<string, string[]>>({});
+
+    useEffect(() => {
+        fetch(`${API_URL}/api/opportunities/filter-options`, { headers: getAuthHeaders() })
+            .then((r) => (r.ok ? r.json() : {}))
+            .then((data: any) => setFilterOptions(data && typeof data === 'object' ? data : {}))
+            .catch(() => { /* suggestions are best-effort; filtering still works via free text */ });
+    }, []);
 
     const activeFilterCount = useMemo(
         () => FILTER_KEYS.reduce((n, k) => n + ((colFilters[k] || '').trim() ? 1 : 0), 0),
@@ -335,12 +344,21 @@ export default function OpportunitiesPage() {
                                         {LIST_COLUMNS.map((col) => (
                                             <th key={col.key} className="px-3 pb-2 pt-1 align-top">
                                                 {col.filter ? (
-                                                    <input
-                                                        value={colFilters[col.key] || ''}
-                                                        onChange={(e) => setColFilter(col.key, e.target.value)}
-                                                        placeholder="filter…"
-                                                        className="w-full min-w-[90px] px-2 py-1 text-[11px] font-normal border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-indigo-400"
-                                                    />
+                                                    <>
+                                                        <input
+                                                            list={`opp-filter-${col.key}`}
+                                                            autoComplete="off"
+                                                            value={colFilters[col.key] || ''}
+                                                            onChange={(e) => setColFilter(col.key, e.target.value)}
+                                                            placeholder="filter…"
+                                                            className="w-full min-w-[90px] px-2 py-1 text-[11px] font-normal border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                                                        />
+                                                        <datalist id={`opp-filter-${col.key}`}>
+                                                            {(filterOptions[col.key] || []).map((o) => (
+                                                                <option key={o} value={o} />
+                                                            ))}
+                                                        </datalist>
+                                                    </>
                                                 ) : null}
                                             </th>
                                         ))}

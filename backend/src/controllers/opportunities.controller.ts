@@ -361,6 +361,55 @@ export async function listOpportunities(req: Request, res: Response) {
     }
 }
 
+// GET /api/opportunities/filter-options
+// Distinct values per filterable column, used to populate the type-ahead
+// dropdowns in the Opportunities list filter row. Returns whole-dataset values
+// (the list itself is not per-user scoped) so suggestions aren't limited to the
+// current page.
+export async function getOpportunityFilterOptions(_req: Request, res: Response) {
+    try {
+        const [opps, users, stages] = await Promise.all([
+            prisma.opportunity.findMany({
+                select: {
+                    title: true,
+                    salesRepName: true,
+                    managerName: true,
+                    technology: true,
+                    owner: { select: { department: true } },
+                    stage: { select: { name: true } },
+                },
+            }),
+            prisma.user.findMany({ where: { department: { not: null } }, select: { department: true } }),
+            prisma.stage.findMany({ select: { name: true } }),
+        ]);
+
+        const uniqSorted = (arr: (string | null | undefined)[]) =>
+            Array.from(new Set(arr.map((v) => (v || '').trim()).filter(Boolean)))
+                .sort((a, b) => a.localeCompare(b));
+
+        // technology is stored as a free CSV per opportunity — split into tokens.
+        const techTokens: string[] = [];
+        for (const o of opps) {
+            (o.technology || '').split(',').forEach((t) => {
+                const v = t.trim();
+                if (v) techTokens.push(v);
+            });
+        }
+
+        res.json({
+            name: uniqSorted(opps.map((o) => o.title)),
+            stage: uniqSorted([...stages.map((s) => s.name), ...opps.map((o) => o.stage?.name)]),
+            salesRep: uniqSorted(opps.map((o) => o.salesRepName)),
+            manager: uniqSorted(opps.map((o) => o.managerName)),
+            department: uniqSorted([...users.map((u) => u.department), ...opps.map((o) => o.owner?.department)]),
+            technology: uniqSorted(techTokens),
+        });
+    } catch (error) {
+        console.error('Filter options error:', error);
+        res.status(500).json({ error: 'Failed to load filter options' });
+    }
+}
+
 // POST /api/opportunities
 export async function createOpportunity(req: Request, res: Response) {
     try {

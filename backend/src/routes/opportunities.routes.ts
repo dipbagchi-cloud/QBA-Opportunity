@@ -17,6 +17,7 @@ import {
     downloadAttachment,
     deleteAttachment,
     uploadSow,
+    getOpportunityFilterOptions,
 } from '../controllers/opportunities.controller';
 import { authenticate, authorize, authorizeAny } from '../middleware/auth';
 import { PERMISSIONS } from '../lib/permissions';
@@ -58,6 +59,8 @@ function handleUpload(req: Request, res: Response, next: NextFunction) {
 router.use(authenticate);
 
 router.get('/', authorizeAny(PERMISSIONS.PIPELINE_VIEW, PERMISSIONS.PRESALES_VIEW, PERMISSIONS.SALES_VIEW), listOpportunities);
+// Must be registered before '/:id' so it isn't captured as an opportunity id.
+router.get('/filter-options', authorizeAny(PERMISSIONS.PIPELINE_VIEW, PERMISSIONS.PRESALES_VIEW, PERMISSIONS.SALES_VIEW), getOpportunityFilterOptions);
 router.post('/', authorize(PERMISSIONS.PIPELINE_WRITE), createOpportunity);
 router.get('/:id', authorizeAny(PERMISSIONS.PIPELINE_VIEW, PERMISSIONS.PRESALES_VIEW, PERMISSIONS.SALES_VIEW), getOpportunity);
 router.patch('/:id', authorizeAny(PERMISSIONS.PIPELINE_WRITE, PERMISSIONS.PRESALES_WRITE, PERMISSIONS.SALES_WRITE), updateOpportunity);
