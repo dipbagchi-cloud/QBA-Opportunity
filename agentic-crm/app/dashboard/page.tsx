@@ -572,6 +572,39 @@ export default function DashboardPage() {
     const healthyDeals = opportunities.filter(o => o.status === "healthy");
     const atRiskDeals = opportunities.filter(o => o.status === "at-risk");
 
+    // ── Aging report ──────────────────────────────────────────────────────
+    // "Aging" = days an opportunity has been open, counted from the day AFTER
+    // it was created (creation day = 0). Only open deals age; closed ones are
+    // done. Sorted oldest-first and bucketed for an at-a-glance summary.
+    const CLOSED_STAGES = ['Closed Won', 'Closed-Won', 'Closed Lost', 'Proposal Lost', 'Delivered'];
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const computeAgingDays = (createdAt?: string) => {
+        if (!createdAt) return 0;
+        const c = new Date(createdAt);
+        if (isNaN(c.getTime())) return 0;
+        c.setHours(0, 0, 0, 0);
+        return Math.max(0, Math.floor((startOfToday.getTime() - c.getTime()) / 86400000));
+    };
+    const agingRows = opportunities
+        .filter(o => !CLOSED_STAGES.includes(o.currentStage))
+        .map(o => ({ ...o, agingDays: computeAgingDays(o.createdAt) }))
+        .sort((a, b) => b.agingDays - a.agingDays);
+    const agingBuckets = [
+        { label: '0–30 days', min: 0, max: 30, color: 'text-emerald-600' },
+        { label: '31–60 days', min: 31, max: 60, color: 'text-amber-600' },
+        { label: '61–90 days', min: 61, max: 90, color: 'text-orange-600' },
+        { label: '90+ days', min: 91, max: Infinity, color: 'text-red-600' },
+    ].map(b => ({ ...b, count: agingRows.filter(r => r.agingDays >= b.min && r.agingDays <= b.max).length }));
+
+    // ── Stale report ──────────────────────────────────────────────────────
+    // Uses the existing stalled logic (backend `isStalled` — inactive past the
+    // configured threshold). Sorted by longest-idle first.
+    const staleRows = [...stalledDeals]
+        .map(o => ({ ...o, agingDays: computeAgingDays(o.createdAt) }))
+        .sort((a, b) => (b.daysInStage ?? 0) - (a.daysInStage ?? 0));
+    const staleTotalValue = staleRows.reduce((sum, o) => sum + (Number(o.value) || 0), 0);
+
     const insights: { text: string; type: "warning" | "success" | "neutral" }[] = [];
 
     // Stalled deal warnings
@@ -1079,6 +1112,39 @@ export default function DashboardPage() {
         data: opportunities.map(o => ({ ...o, isStalled: o.isStalled ? "Yes" : "No" })),
     };
 
+    const agingDrill: DrillDownConfig = {
+        title: "Aging Report — Open Opportunities by Age",
+        columns: [
+            { key: "name", label: "Opportunity", format: "text" },
+            { key: "client", label: "Client", format: "text" },
+            { key: "currentStage", label: "Stage", format: "text" },
+            { key: "value", label: "Value", format: "currency" },
+            { key: "createdAt", label: "Created", format: "text" },
+            { key: "agingDays", label: "Aging (days)", format: "number" },
+            { key: "owner", label: "Owner", format: "text" },
+            { key: "salesRepName", label: "Sales Rep", format: "text" },
+        ],
+        data: agingRows,
+        dateKey: "createdAt",
+    };
+
+    const staleDrill: DrillDownConfig = {
+        title: "Stale Report — Stalled Opportunities",
+        columns: [
+            { key: "name", label: "Opportunity", format: "text" },
+            { key: "client", label: "Client", format: "text" },
+            { key: "currentStage", label: "Stage", format: "text" },
+            { key: "value", label: "Value", format: "currency" },
+            { key: "daysInStage", label: "Days in Stage", format: "number" },
+            { key: "agingDays", label: "Aging (days)", format: "number" },
+            { key: "createdAt", label: "Created", format: "text" },
+            { key: "owner", label: "Owner", format: "text" },
+            { key: "salesRepName", label: "Sales Rep", format: "text" },
+        ],
+        data: staleRows,
+        dateKey: "createdAt",
+    };
+
     // Build stat drill-downs
     const statDrills: DrillDownConfig[] = [
         { // Projected Revenue
@@ -1515,6 +1581,72 @@ export default function DashboardPage() {
                             <span className="font-semibold text-slate-700">{presales?.totalPresalesOpps || 0}</span>
                         </div>
                     </div>
+                </ExpandableCard>
+            </div>
+
+            {/* Row 5: Aging Report + Stale Report */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-1.5">
+                {/* Aging Report — open opportunities by days since creation */}
+                <ExpandableCard drillConfig={agingDrill} className="lg:col-span-6 bg-white rounded-md border border-slate-100 px-2.5 py-1.5">
+                    <div className="flex justify-between items-center mb-1.5">
+                        <h3 className="font-medium text-xs text-slate-700 flex items-center gap-1">
+                            <Clock className="w-3 h-3 text-indigo-500" />Aging Report
+                        </h3>
+                        <span className="text-[10px] text-slate-400">{agingRows.length} open</span>
+                    </div>
+                    <div className="grid grid-cols-4 gap-1.5 mb-2">
+                        {agingBuckets.map(b => (
+                            <div key={b.label} className="rounded border border-slate-100 bg-slate-50/50 px-1.5 py-1 text-center">
+                                <div className={`text-sm font-bold ${b.color}`}>{b.count}</div>
+                                <div className="text-[9px] text-slate-400 leading-tight">{b.label}</div>
+                            </div>
+                        ))}
+                    </div>
+                    {agingRows.length > 0 ? (
+                        <div className="space-y-0.5">
+                            {agingRows.slice(0, 5).map(o => (
+                                <div key={o.id} className="flex items-center justify-between gap-2 py-0.5 border-b border-slate-50/50 last:border-0">
+                                    <div className="min-w-0">
+                                        <div className="text-[10px] font-medium text-slate-700 truncate max-w-[170px]" title={o.name}>{o.name}</div>
+                                        <div className="text-[9px] text-slate-400 truncate max-w-[170px]">{o.client}</div>
+                                    </div>
+                                    <span className="text-[10px] font-semibold text-slate-600 whitespace-nowrap">{o.agingDays}d</span>
+                                </div>
+                            ))}
+                        </div>
+                    ) : <div className="text-center py-3 text-slate-300 text-[10px]">No open opportunities</div>}
+                </ExpandableCard>
+
+                {/* Stale Report — opportunities flagged stalled (existing logic) */}
+                <ExpandableCard drillConfig={staleDrill} className="lg:col-span-6 bg-white rounded-md border border-slate-100 px-2.5 py-1.5">
+                    <div className="flex justify-between items-center mb-1.5">
+                        <h3 className="font-medium text-xs text-slate-700 flex items-center gap-1">
+                            <AlertTriangle className="w-3 h-3 text-amber-500" />Stale Report
+                        </h3>
+                        <span className="text-[10px] text-slate-400">{staleRows.length} stalled</span>
+                    </div>
+                    <div className="flex items-center gap-4 mb-2 text-[10px] text-slate-500">
+                        <span>Stalled: <span className="font-semibold text-slate-700">{staleRows.length}</span></span>
+                        <span>Value at risk: <span className="font-semibold text-slate-700">{fmtCurrency(staleTotalValue)}</span></span>
+                    </div>
+                    {staleRows.length > 0 ? (
+                        <div className="space-y-0.5">
+                            {staleRows.slice(0, 6).map(o => (
+                                <div key={o.id} className="flex items-center justify-between gap-2 py-0.5 border-b border-slate-50/50 last:border-0">
+                                    <div className="min-w-0">
+                                        <div className="text-[10px] font-medium text-slate-700 truncate max-w-[160px]" title={o.name}>{o.name}</div>
+                                        <div className="text-[9px] text-slate-400 truncate max-w-[160px]">{o.client}</div>
+                                    </div>
+                                    <div className="flex items-center gap-2 whitespace-nowrap">
+                                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium border ${STAGE_COLORS[STAGE_DISPLAY[o.currentStage] || o.currentStage] || "bg-slate-50 text-slate-600 border-slate-200"}`}>
+                                            {STAGE_DISPLAY[o.currentStage] || o.currentStage}
+                                        </span>
+                                        <span className="text-[10px] font-semibold text-red-600">{o.daysInStage}d</span>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    ) : <div className="text-center py-3 text-slate-300 text-[10px]">No stalled opportunities</div>}
                 </ExpandableCard>
             </div>
         </div>
