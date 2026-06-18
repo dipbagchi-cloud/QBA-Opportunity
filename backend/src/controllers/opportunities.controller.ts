@@ -37,6 +37,15 @@ export async function listOpportunities(req: Request, res: Response) {
         const ownerFilter = (req.query.owner as string || '').trim();
         const salesRepFilter = (req.query.salesRep as string || '').trim();
         const managerFilter = (req.query.manager as string || '').trim();
+        // Per-column inline filters (Pending Actions–style). All are
+        // case-insensitive "contains" matches resolved in the database so
+        // they apply across the whole dataset, not just the current page.
+        const nameFilter = (req.query.name as string || '').trim();
+        const departmentFilter = (req.query.department as string || '').trim();
+        const technologyFilter = (req.query.technology as string || '').trim();
+        // Server-side sort: sortKey maps to a DB-backed orderBy below.
+        const sortKey = (req.query.sortKey as string || '').trim();
+        const sortDir = (req.query.sortDir as string) === 'desc' ? 'desc' : 'asc';
 
         const splitCsv = (value: string) =>
             value
@@ -58,11 +67,15 @@ export async function listOpportunities(req: Request, res: Response) {
             });
         }
 
-        const stageNames = splitCsv(stagesFilter || stageFilter);
+        const stageNames = splitCsv(stagesFilter);
         if (stageNames.length === 1) {
             andFilters.push({ stage: { name: stageNames[0] } });
         } else if (stageNames.length > 1) {
             andFilters.push({ stage: { name: { in: stageNames } } });
+        }
+        // Inline single-column stage filter — contains match.
+        if (stageFilter) {
+            andFilters.push({ stage: { name: { contains: stageFilter, mode: 'insensitive' } } });
         }
 
         if (clientFilter) {
@@ -81,9 +94,47 @@ export async function listOpportunities(req: Request, res: Response) {
             andFilters.push({ managerName: { contains: managerFilter, mode: 'insensitive' } });
         }
 
+        // "Opportunity Name" column shows the title plus client • owner, so its
+        // inline filter matches any of the three (mirrors the dashboard panel).
+        if (nameFilter) {
+            andFilters.push({
+                OR: [
+                    { title: { contains: nameFilter, mode: 'insensitive' } },
+                    { client: { name: { contains: nameFilter, mode: 'insensitive' } } },
+                    { owner: { name: { contains: nameFilter, mode: 'insensitive' } } },
+                ],
+            });
+        }
+
+        if (departmentFilter) {
+            andFilters.push({ owner: { department: { contains: departmentFilter, mode: 'insensitive' } } });
+        }
+
+        if (technologyFilter) {
+            andFilters.push({ technology: { contains: technologyFilter, mode: 'insensitive' } });
+        }
+
         if (andFilters.length > 0) {
             where.AND = andFilters;
         }
+
+        // Map the requested sort column to a DB-backed orderBy. Computed columns
+        // (probability, quote, last activity) are sorted client-side and never
+        // reach here, so unknown keys fall back to the default recency order.
+        const SORT_ORDER_BY: Record<string, any> = {
+            name: { title: sortDir },
+            stage: { stage: { name: sortDir } },
+            value: { value: sortDir },
+            salesRep: { salesRepName: sortDir },
+            manager: { managerName: sortDir },
+            department: { owner: { department: sortDir } },
+            technology: { technology: sortDir },
+            createdAt: { createdAt: sortDir },
+            startDate: { tentativeStartDate: sortDir },
+            endDate: { tentativeEndDate: sortDir },
+            closeDate: { expectedCloseDate: sortDir },
+        };
+        const orderBy = SORT_ORDER_BY[sortKey] || { updatedAt: 'desc' };
 
         const currentUser = await prisma.user.findUnique({
             where: { id: req.user!.userId },
@@ -105,7 +156,7 @@ export async function listOpportunities(req: Request, res: Response) {
                         select: { attachments: true },
                     },
                 },
-                orderBy: { updatedAt: 'desc' },
+                orderBy,
                 skip: (page - 1) * limit,
                 take: limit,
             }),

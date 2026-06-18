@@ -36,31 +36,42 @@ import KanbanBoard from "@/components/opportunities/KanbanBoard";
 import { useCurrency } from "@/components/providers/currency-provider";
 import { ByOwnerBoard } from "./components/ByOwnerBoard";
 
-const STAGE_OPTIONS = [
-    "Discovery",
-    "Qualification",
-    "Proposal",
-    "Negotiation",
-    "Closed Won",
-    "Closed Lost",
-    "Proposal Lost",
+// Column model for the list. `serverSort` columns are sorted in the DB (so the
+// whole filtered dataset is ordered, not just the current page); `clientSort`
+// columns are computed values sorted on the loaded page. `filter` columns get
+// an inline per-column filter input (Pending Actions–style) that maps to a
+// case-insensitive "contains" query param resolved server-side.
+type ListColumn = {
+    key: string;
+    label: string;
+    sort?: 'server' | 'client' | null;
+    filter?: boolean;
+};
+
+const LIST_COLUMNS: ListColumn[] = [
+    { key: 'name', label: 'Opportunity Name', sort: 'server', filter: true },
+    { key: 'stage', label: 'Stage', sort: 'server', filter: true },
+    { key: 'value', label: 'Estimated value', sort: 'server' },
+    { key: 'quote', label: 'Quote' },
+    { key: 'probability', label: 'Prob.', sort: 'client' },
+    { key: 'salesRep', label: 'Sales Rep', sort: 'server', filter: true },
+    { key: 'manager', label: 'Manager', sort: 'server', filter: true },
+    { key: 'department', label: 'Department', sort: 'server', filter: true },
+    { key: 'technology', label: 'Technology', sort: 'server', filter: true },
+    { key: 'createdAt', label: 'Created', sort: 'server' },
+    { key: 'startDate', label: 'Start Date', sort: 'server' },
+    { key: 'endDate', label: 'Est. End', sort: 'server' },
+    { key: 'closeDate', label: 'Close Date', sort: 'server' },
+    { key: 'lastActivity', label: 'Last Activity', sort: 'client' },
 ];
 
-type OpportunityFilters = {
-    stages: string[];
-    client: string;
-    owner: string;
-    salesRep: string;
-    manager: string;
-};
+// Columns whose sort is resolved in the DB (sent to the backend).
+const SERVER_SORT_KEYS = LIST_COLUMNS.filter(c => c.sort === 'server').map(c => c.key);
+// Columns with an inline server-side filter input.
+const FILTER_KEYS = LIST_COLUMNS.filter(c => c.filter).map(c => c.key);
 
-const EMPTY_FILTERS: OpportunityFilters = {
-    stages: [],
-    client: "",
-    owner: "",
-    salesRep: "",
-    manager: "",
-};
+type ColFilters = Record<string, string>;
+const EMPTY_FILTERS: ColFilters = {};
 
 export default function OpportunitiesPage() {
     const { opportunities, deleteOpportunity, fetchOpportunities, total, page, totalPages, isLoading } = useOpportunityStore();
@@ -115,18 +126,15 @@ export default function OpportunitiesPage() {
     const [sortKey, setSortKey] = useState<string | null>(null);
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
     const [showFilters, setShowFilters] = useState(false);
-    const [appliedFilters, setAppliedFilters] = useState<OpportunityFilters>(EMPTY_FILTERS);
-    const [draftFilters, setDraftFilters] = useState<OpportunityFilters>(EMPTY_FILTERS);
+    // One case-insensitive "contains" value per filterable column. Empty/absent
+    // = no filter. Mirrors the dashboard "Your Pending Actions" panel, but the
+    // matching happens server-side so it covers the whole paginated dataset.
+    const [colFilters, setColFilters] = useState<ColFilters>(EMPTY_FILTERS);
 
-    const activeFilterCount = useMemo(() => {
-        let count = 0;
-        if (appliedFilters.stages.length) count += 1;
-        if (appliedFilters.client.trim()) count += 1;
-        if (appliedFilters.owner.trim()) count += 1;
-        if (appliedFilters.salesRep.trim()) count += 1;
-        if (appliedFilters.manager.trim()) count += 1;
-        return count;
-    }, [appliedFilters]);
+    const activeFilterCount = useMemo(
+        () => FILTER_KEYS.reduce((n, k) => n + ((colFilters[k] || '').trim() ? 1 : 0), 0),
+        [colFilters]
+    );
 
     const handleSort = (key: string) => {
         if (sortKey === key) {
@@ -142,51 +150,39 @@ export default function OpportunitiesPage() {
         return sortDir === 'asc' ? <ArrowUp className="w-3 h-3 text-indigo-600" /> : <ArrowDown className="w-3 h-3 text-indigo-600" />;
     };
 
-    const buildQueryParams = useCallback((pg: number, search: string, filters: OpportunityFilters, fetchMax: boolean, lim?: number) => ({
-        page: pg,
-        limit: fetchMax ? 500 : (lim !== undefined ? (lim === 0 ? 500 : lim) : (limit === 0 ? 500 : limit)),
-        search,
-        stages: filters.stages,
-        client: filters.client.trim(),
-        owner: filters.owner.trim(),
-        salesRep: filters.salesRep.trim(),
-        manager: filters.manager.trim(),
-    }), [limit]);
+    const buildQueryParams = useCallback((pg: number, search: string, filters: ColFilters, fetchMax: boolean, lim?: number) => {
+        const params: any = {
+            page: pg,
+            limit: fetchMax ? 500 : (lim !== undefined ? (lim === 0 ? 500 : lim) : (limit === 0 ? 500 : limit)),
+            search,
+        };
+        FILTER_KEYS.forEach((k) => {
+            const v = (filters[k] || '').trim();
+            if (v) params[k] = v;
+        });
+        if (sortKey && SERVER_SORT_KEYS.includes(sortKey)) {
+            params.sortKey = sortKey;
+            params.sortDir = sortDir;
+        }
+        return params;
+    }, [limit, sortKey, sortDir]);
 
+    // Server resolves filters + DB-backed sorts; only computed columns
+    // (probability, last activity) are ordered client-side on the loaded page.
+    const CLIENT_SORT_KEYS = ['probability', 'lastActivity'];
     const sortedOpportunities = useMemo(() => {
-        if (!sortKey) return opportunities;
+        if (!sortKey || !CLIENT_SORT_KEYS.includes(sortKey)) return opportunities;
         return [...opportunities].sort((a, b) => {
-            let av: string | number | null | undefined;
-            let bv: string | number | null | undefined;
-            switch (sortKey) {
-                case 'name': av = a.name; bv = b.name; break;
-                case 'stage': av = a.stage; bv = b.stage; break;
-                case 'value': av = typeof a.value === 'number' ? a.value : Number(a.value) || 0; bv = typeof b.value === 'number' ? b.value : Number(b.value) || 0; break;
-                case 'probability': av = a.probability; bv = b.probability; break;
-                case 'salesRep': av = a.salesRepName ?? ''; bv = b.salesRepName ?? ''; break;
-                case 'manager': av = a.managerName ?? ''; bv = b.managerName ?? ''; break;
-                case 'createdAt': av = a.createdAt ?? ''; bv = b.createdAt ?? ''; break;
-                case 'startDate': av = a.tentativeStartDate ?? ''; bv = b.tentativeStartDate ?? ''; break;
-                case 'endDate': av = a.tentativeEndDate ?? ''; bv = b.tentativeEndDate ?? ''; break;
-                case 'closeDate': av = a.actualCloseDate ?? a.expectedCloseDate ?? ''; bv = b.actualCloseDate ?? b.expectedCloseDate ?? ''; break;
-                case 'lastActivity': av = a.lastActivity ?? ''; bv = b.lastActivity ?? ''; break;
-                default: return 0;
-            }
-            if (av == null) av = '';
-            if (bv == null) bv = '';
-            if (typeof av === 'number' && typeof bv === 'number') {
-                return sortDir === 'asc' ? av - bv : bv - av;
-            }
-            const as = String(av).toLowerCase();
-            const bs = String(bv).toLowerCase();
-            return sortDir === 'asc' ? as.localeCompare(bs) : bs.localeCompare(as);
+            const av = sortKey === 'probability' ? (a.probability ?? 0) : (a.daysInStage ?? 0);
+            const bv = sortKey === 'probability' ? (b.probability ?? 0) : (b.daysInStage ?? 0);
+            return sortDir === 'asc' ? av - bv : bv - av;
         });
     }, [opportunities, sortKey, sortDir]);
 
-    const loadPage = useCallback((pg: number, search?: string, filters?: OpportunityFilters, lim?: number) => {
+    const loadPage = useCallback((pg: number, search?: string, filters?: ColFilters, lim?: number) => {
         setCurrentPage(pg);
-        fetchOpportunities(buildQueryParams(pg, search ?? searchTerm, filters ?? appliedFilters, viewMode === 'kanban' || viewMode === 'by_owner', lim));
-    }, [fetchOpportunities, searchTerm, appliedFilters, viewMode, buildQueryParams]);
+        fetchOpportunities(buildQueryParams(pg, search ?? searchTerm, filters ?? colFilters, viewMode === 'kanban' || viewMode === 'by_owner', lim));
+    }, [fetchOpportunities, searchTerm, colFilters, viewMode, buildQueryParams]);
 
     useEffect(() => {
         loadPage(1, "", EMPTY_FILTERS);
@@ -194,40 +190,29 @@ export default function OpportunitiesPage() {
 
     // Reload all opportunities when switching to kanban mode
     useEffect(() => {
-        fetchOpportunities(buildQueryParams(currentPage, searchTerm, appliedFilters, viewMode === 'kanban' || viewMode === 'by_owner'));
+        fetchOpportunities(buildQueryParams(currentPage, searchTerm, colFilters, viewMode === 'kanban' || viewMode === 'by_owner'));
     }, [viewMode]);
 
-    // Debounced search
+    // Debounced refetch whenever the global search, any column filter, or the
+    // server-side sort changes. Skips the first render (initial load above).
+    const didMount = useRef(false);
     useEffect(() => {
+        if (!didMount.current) { didMount.current = true; return; }
         const timer = setTimeout(() => {
             setCurrentPage(1);
-            fetchOpportunities(buildQueryParams(1, searchTerm, appliedFilters, viewMode === 'kanban' || viewMode === 'by_owner'));
-        }, 400);
+            fetchOpportunities(buildQueryParams(1, searchTerm, colFilters, viewMode === 'kanban' || viewMode === 'by_owner'));
+        }, 350);
         return () => clearTimeout(timer);
-    }, [searchTerm]);
+    }, [searchTerm, colFilters, sortKey, sortDir]);
 
-    const handleApplyFilters = () => {
-        setAppliedFilters(draftFilters);
-        setShowFilters(false);
-        setCurrentPage(1);
-        fetchOpportunities(buildQueryParams(1, searchTerm, draftFilters, viewMode === 'kanban' || viewMode === 'by_owner'));
-    };
+    const setColFilter = (key: string, val: string) =>
+        setColFilters((prev) => ({ ...prev, [key]: val }));
 
     const handleClearFilters = () => {
-        setDraftFilters(EMPTY_FILTERS);
-        setAppliedFilters(EMPTY_FILTERS);
+        setColFilters(EMPTY_FILTERS);
         setShowFilters(false);
         setCurrentPage(1);
         fetchOpportunities(buildQueryParams(1, searchTerm, EMPTY_FILTERS, viewMode === 'kanban' || viewMode === 'by_owner'));
-    };
-
-    const toggleDraftStage = (stage: string) => {
-        setDraftFilters((prev) => ({
-            ...prev,
-            stages: prev.stages.includes(stage)
-                ? prev.stages.filter((item) => item !== stage)
-                : [...prev.stages, stage],
-        }));
     };
 
     const effectiveLimit = limit === 0 ? total : limit;
@@ -247,10 +232,7 @@ export default function OpportunitiesPage() {
                 </div>
                 <div className="flex gap-2 relative">
                     <button
-                        onClick={() => {
-                            setDraftFilters(appliedFilters);
-                            setShowFilters((prev) => !prev);
-                        }}
+                        onClick={() => setShowFilters((prev) => !prev)}
                         className={`btn-ghost bg-white border text-slate-600 flex items-center gap-1.5 ${showFilters || activeFilterCount > 0 ? 'border-indigo-300 text-indigo-600' : 'border-slate-200'}`}
                     >
                         <Filter className="w-3.5 h-3.5" />
@@ -268,108 +250,6 @@ export default function OpportunitiesPage() {
                                 New Opportunity
                             </button>
                         </Link>
-                    )}
-
-                    {showFilters && (
-                        <div className="absolute right-0 top-full mt-2 z-30 w-[420px] bg-white border border-slate-200 rounded-xl shadow-xl p-4">
-                            <div className="flex items-center justify-between mb-4">
-                                <div>
-                                    <h3 className="text-sm font-semibold text-slate-800">Filter Opportunities</h3>
-                                    <p className="text-xs text-slate-500">Filter by one or more columns.</p>
-                                </div>
-                                <button
-                                    onClick={() => setShowFilters(false)}
-                                    className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded"
-                                >
-                                    <X className="w-4 h-4" />
-                                </button>
-                            </div>
-
-                            <div className="space-y-4">
-                                <div>
-                                    <label className="block text-xs font-semibold text-slate-700 mb-2">Stage</label>
-                                    <div className="flex flex-wrap gap-2">
-                                        {STAGE_OPTIONS.map((stage) => {
-                                            const selected = draftFilters.stages.includes(stage);
-                                            return (
-                                                <button
-                                                    key={stage}
-                                                    type="button"
-                                                    onClick={() => toggleDraftStage(stage)}
-                                                    className={`px-2.5 py-1 rounded-full border text-xs font-medium transition-colors ${
-                                                        selected
-                                                            ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
-                                                            : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
-                                                    }`}
-                                                >
-                                                    {stage}
-                                                </button>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                    <div>
-                                        <label className="block text-xs font-semibold text-slate-700 mb-1.5">Client</label>
-                                        <input
-                                            type="text"
-                                            value={draftFilters.client}
-                                            onChange={(e) => setDraftFilters((prev) => ({ ...prev, client: e.target.value }))}
-                                            placeholder="Filter by client"
-                                            className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs font-semibold text-slate-700 mb-1.5">Owner</label>
-                                        <input
-                                            type="text"
-                                            value={draftFilters.owner}
-                                            onChange={(e) => setDraftFilters((prev) => ({ ...prev, owner: e.target.value }))}
-                                            placeholder="Filter by owner"
-                                            className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs font-semibold text-slate-700 mb-1.5">Sales Rep</label>
-                                        <input
-                                            type="text"
-                                            value={draftFilters.salesRep}
-                                            onChange={(e) => setDraftFilters((prev) => ({ ...prev, salesRep: e.target.value }))}
-                                            placeholder="Filter by sales rep"
-                                            className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs font-semibold text-slate-700 mb-1.5">Manager</label>
-                                        <input
-                                            type="text"
-                                            value={draftFilters.manager}
-                                            onChange={(e) => setDraftFilters((prev) => ({ ...prev, manager: e.target.value }))}
-                                            placeholder="Filter by manager"
-                                            className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
-                                        />
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="flex items-center justify-end gap-2 mt-4 pt-4 border-t border-slate-100">
-                                <button
-                                    type="button"
-                                    onClick={handleClearFilters}
-                                    className="px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg"
-                                >
-                                    Reset
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={handleApplyFilters}
-                                    className="px-3 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg"
-                                >
-                                    Apply Filters
-                                </button>
-                            </div>
-                        </div>
                     )}
                 </div>
             </div>
@@ -416,31 +296,11 @@ export default function OpportunitiesPage() {
 
             {activeFilterCount > 0 && (
                 <div className="flex flex-wrap gap-2">
-                    {appliedFilters.stages.length > 0 && (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs font-medium">
-                            Stage: {appliedFilters.stages.join(', ')}
+                    {LIST_COLUMNS.filter(c => c.filter && (colFilters[c.key] || '').trim()).map(c => (
+                        <span key={c.key} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-slate-50 text-slate-700 border border-slate-200 text-xs font-medium">
+                            {c.label}: {colFilters[c.key].trim()}
                         </span>
-                    )}
-                    {appliedFilters.client && (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-slate-50 text-slate-700 border border-slate-200 text-xs font-medium">
-                            Client: {appliedFilters.client}
-                        </span>
-                    )}
-                    {appliedFilters.owner && (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-slate-50 text-slate-700 border border-slate-200 text-xs font-medium">
-                            Owner: {appliedFilters.owner}
-                        </span>
-                    )}
-                    {appliedFilters.salesRep && (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-slate-50 text-slate-700 border border-slate-200 text-xs font-medium">
-                            Sales Rep: {appliedFilters.salesRep}
-                        </span>
-                    )}
-                    {appliedFilters.manager && (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-slate-50 text-slate-700 border border-slate-200 text-xs font-medium">
-                            Manager: {appliedFilters.manager}
-                        </span>
-                    )}
+                    ))}
                     <button
                         onClick={handleClearFilters}
                         className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-red-50 text-red-700 border border-red-200 text-xs font-medium hover:bg-red-100"
@@ -459,18 +319,39 @@ export default function OpportunitiesPage() {
                         <table className="w-full relative">
                             <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-20 shadow-sm">
                                 <tr>
-                                    {[['name','Opportunity Name'],['stage','Stage'],['value','Estimated value'],['quote','Quote'],['probability','Prob.'],['salesRep','Sales Rep'],['manager','Manager'],['createdAt','Created'],['startDate','Start Date'],['endDate','Est. End'],['closeDate','Close Date'],['lastActivity','Last Activity']].map(([key, label]) => (
-                                        <th key={key} className="text-left py-2.5 px-4 font-semibold text-slate-600 text-xs cursor-pointer select-none hover:bg-slate-100" onClick={() => handleSort(key)}>
-                                            <span className="flex items-center gap-1">{label}<SortIcon col={key} /></span>
+                                    {LIST_COLUMNS.map((col) => (
+                                        <th
+                                            key={col.key}
+                                            className={`text-left py-2.5 px-4 font-semibold text-slate-600 text-xs select-none ${col.sort ? 'cursor-pointer hover:bg-slate-100' : ''}`}
+                                            onClick={col.sort ? () => handleSort(col.key) : undefined}
+                                        >
+                                            <span className="flex items-center gap-1">{col.label}{col.sort && <SortIcon col={col.key} />}</span>
                                         </th>
                                     ))}
                                     <th className="w-10"></th>
                                 </tr>
+                                {showFilters && (
+                                    <tr className="bg-white">
+                                        {LIST_COLUMNS.map((col) => (
+                                            <th key={col.key} className="px-3 pb-2 pt-1 align-top">
+                                                {col.filter ? (
+                                                    <input
+                                                        value={colFilters[col.key] || ''}
+                                                        onChange={(e) => setColFilter(col.key, e.target.value)}
+                                                        placeholder="filter…"
+                                                        className="w-full min-w-[90px] px-2 py-1 text-[11px] font-normal border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                                                    />
+                                                ) : null}
+                                            </th>
+                                        ))}
+                                        <th className="w-10"></th>
+                                    </tr>
+                                )}
                             </thead>
                             <tbody className="divide-y divide-slate-100">
                                 {opportunities.length === 0 ? (
                                     <tr>
-                                        <td colSpan={13} className="py-8 text-center text-slate-400 text-sm">
+                                        <td colSpan={LIST_COLUMNS.length + 1} className="py-8 text-center text-slate-400 text-sm">
                                             No opportunities found for the current search/filter selection.
                                         </td>
                                     </tr>
@@ -656,6 +537,14 @@ export default function OpportunitiesPage() {
                                             <td className="py-2.5 px-4 text-[11px] text-slate-600">
                                                 {opp.managerName || <span className="text-slate-300">—</span>}
                                             </td>
+                                            <td className="py-2.5 px-4 text-[11px] text-slate-600">
+                                                {opp.department || <span className="text-slate-300">—</span>}
+                                            </td>
+                                            <td className="py-2.5 px-4 text-[11px] text-slate-600 max-w-[180px]">
+                                                {opp.technology
+                                                    ? <span className="block truncate" title={opp.technology}>{opp.technology}</span>
+                                                    : <span className="text-slate-300">—</span>}
+                                            </td>
                                             <td className="py-2.5 px-4 text-[11px] text-slate-500 whitespace-nowrap">
                                                 {opp.createdAt
                                                     ? <span className="flex items-center gap-1"><Calendar className="w-3 h-3 text-slate-400" />{opp.createdAt}</span>
@@ -744,7 +633,7 @@ export default function OpportunitiesPage() {
                                         const newLim = Number(e.target.value);
                                         setLimit(newLim);
                                         setCurrentPage(1);
-                                        fetchOpportunities(buildQueryParams(1, searchTerm, appliedFilters, false, newLim));
+                                        fetchOpportunities(buildQueryParams(1, searchTerm, colFilters, false, newLim));
                                     }}
                                     className="px-2 py-0.5 text-xs border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400"
                                 >

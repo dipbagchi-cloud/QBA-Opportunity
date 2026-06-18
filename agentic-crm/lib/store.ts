@@ -14,6 +14,7 @@ export interface Opportunity {
     salesRepName?: string;
     managerName?: string;
     technology?: string;
+    department?: string;
     region?: string;
     expectedCloseDate?: string;
     actualCloseDate?: string;
@@ -44,6 +45,11 @@ export interface PaginationParams {
     owner?: string;
     salesRep?: string;
     manager?: string;
+    name?: string;
+    department?: string;
+    technology?: string;
+    sortKey?: string;
+    sortDir?: 'asc' | 'desc';
 }
 
 interface OpportunityStore {
@@ -80,6 +86,11 @@ export const useOpportunityStore = create<OpportunityStore>((set, get) => ({
             if (params?.owner) qp.set('owner', params.owner);
             if (params?.salesRep) qp.set('salesRep', params.salesRep);
             if (params?.manager) qp.set('manager', params.manager);
+            if (params?.name) qp.set('name', params.name);
+            if (params?.department) qp.set('department', params.department);
+            if (params?.technology) qp.set('technology', params.technology);
+            if (params?.sortKey) qp.set('sortKey', params.sortKey);
+            if (params?.sortDir) qp.set('sortDir', params.sortDir);
             const qs = qp.toString();
             const res = await fetch(`${API_URL}/api/opportunities${qs ? `?${qs}` : ''}`, {
                 headers: getAuthHeaders(),
