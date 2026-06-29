@@ -821,6 +821,7 @@ export interface StaleReminderResult {
   scanned: number;
   reminded: number;
   skippedClosed: number;
+  skippedOnHold: number;
   skippedRecent: number;
   skippedNoRecipients: number;
 }
@@ -842,6 +843,7 @@ export async function evaluateStaleOpportunityReminders(
     scanned: 0,
     reminded: 0,
     skippedClosed: 0,
+    skippedOnHold: 0,
     skippedRecent: 0,
     skippedNoRecipients: 0,
   };
@@ -867,6 +869,7 @@ export async function evaluateStaleOpportunityReminders(
       where: { updatedAt: { lt: thresholdDate } },
       select: {
         id: true, title: true, currentStage: true, ownerId: true, updatedAt: true,
+        detailedStatus: true, isStalled: true,
         metadata: true, salesRepName: true, managerName: true, presalesAssigneeName: true,
         currency: true, value: true, expectedCloseDate: true,
         client: { select: { name: true } },
@@ -888,6 +891,15 @@ export async function evaluateStaleOpportunityReminders(
       const stageName = opp.stage?.name || opp.currentStage || '';
       if (CLOSED_STAGES_FOR_REMINDER.has(stageName)) {
         result.skippedClosed += 1;
+        continue;
+      }
+
+      // On Hold deals are intentionally paused, so the "no update in N days"
+      // nag does not apply. The On Hold toggle sets both isStalled and
+      // detailedStatus='On Hold' together (opportunity detail page), but we
+      // check both defensively in case only one was set on legacy rows.
+      if (opp.isStalled || opp.detailedStatus === 'On Hold') {
+        result.skippedOnHold += 1;
         continue;
       }
 
@@ -1035,7 +1047,7 @@ export async function evaluateStaleOpportunityReminders(
     }
   }
 
-  console.log(`[StaleReminder] scan complete: rules=${result.rulesEvaluated} scanned=${result.scanned} reminded=${result.reminded} skippedClosed=${result.skippedClosed} skippedRecent=${result.skippedRecent} skippedNoRecipients=${result.skippedNoRecipients}`);
+  console.log(`[StaleReminder] scan complete: rules=${result.rulesEvaluated} scanned=${result.scanned} reminded=${result.reminded} skippedClosed=${result.skippedClosed} skippedOnHold=${result.skippedOnHold} skippedRecent=${result.skippedRecent} skippedNoRecipients=${result.skippedNoRecipients}`);
   return result;
 }
 
