@@ -52,6 +52,7 @@ type ListColumn = {
 const LIST_COLUMNS: ListColumn[] = [
     { key: 'name', label: 'Opportunity Name', sort: 'server', filter: true },
     { key: 'stage', label: 'Stage', sort: 'server', filter: true },
+    { key: 'daysInStage', label: 'Days in Stage', sort: 'client' },
     { key: 'value', label: 'Estimated value', sort: 'server' },
     { key: 'quote', label: 'Quote' },
     { key: 'probability', label: 'Prob.', sort: 'client' },
@@ -179,16 +180,16 @@ export default function OpportunitiesPage() {
 
     // Server resolves filters + DB-backed sorts; only computed columns
     // (probability, last activity) are ordered client-side on the loaded page.
-    const CLIENT_SORT_KEYS = ['probability', 'lastActivity'];
+    const CLIENT_SORT_KEYS = ['probability', 'lastActivity', 'daysInStage'];
     const sortedOpportunities = useMemo(() => {
         if (!sortKey || !CLIENT_SORT_KEYS.includes(sortKey)) return opportunities;
-        return [...opportunities].sort((a, b) => {
-            // "Last Activity" sorts by days since last activity (matches the
-            // displayed value), not days-in-stage.
-            const av = sortKey === 'probability' ? (a.probability ?? 0) : (a.daysSinceActivity ?? 0);
-            const bv = sortKey === 'probability' ? (b.probability ?? 0) : (b.daysSinceActivity ?? 0);
-            return sortDir === 'asc' ? av - bv : bv - av;
-        });
+        // "Last Activity" sorts by days-since-activity (matches its displayed
+        // value); "Days in Stage" by time-in-stage.
+        const val = (o: any) =>
+            sortKey === 'probability' ? (o.probability ?? 0)
+            : sortKey === 'daysInStage' ? (o.daysInStage ?? 0)
+            : (o.daysSinceActivity ?? 0);
+        return [...opportunities].sort((a, b) => (sortDir === 'asc' ? val(a) - val(b) : val(b) - val(a)));
     }, [opportunities, sortKey, sortDir]);
 
     const loadPage = useCallback((pg: number, search?: string, filters?: ColFilters, lim?: number) => {
@@ -475,6 +476,15 @@ export default function OpportunitiesPage() {
                                                         </span>
                                                     ) : null}
                                                 </div>
+                                            </td>
+                                            <td className="py-2.5 px-4 text-[11px] whitespace-nowrap">
+                                                {opp.daysInStage != null ? (
+                                                    <span className={`inline-flex items-center gap-1 ${(opp.daysInStage ?? 0) > 30 ? 'text-amber-600 font-medium' : 'text-slate-600'}`} title="Days in current stage">
+                                                        <Clock className="w-3 h-3" />{opp.daysInStage}d
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-slate-300">—</span>
+                                                )}
                                             </td>
                                             <td className="py-2.5 px-4">
                                                 <span className="font-medium text-xs text-slate-700">
