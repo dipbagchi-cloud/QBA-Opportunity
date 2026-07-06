@@ -225,4 +225,27 @@ describe('PATCH /api/opportunities/:id — access + field-freeze rules', () => {
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/before the Tentative Start Date/i);
   });
+
+  it('accepts a back-dated tentative start date (past start dates are allowed)', async () => {
+    p.opportunity.findUnique.mockResolvedValue(openOpportunity());
+    const res = await request(app)
+      .patch('/api/opportunities/opp-1')
+      .set('Authorization', `Bearer ${ADMIN}`)
+      .send({ tentativeStartDate: '2020-01-01' });
+    expect(res.status).toBe(200);
+    expect(p.opportunity.update).toHaveBeenCalled();
+    // Persisted as UTC midnight of the calendar day picked, regardless of server TZ.
+    const saved = p.opportunity.update.mock.calls.at(-1)![0].data.tentativeStartDate as Date;
+    expect(saved.toISOString()).toBe('2020-01-01T00:00:00.000Z');
+  });
+
+  it('still rejects a malformed tentative start date', async () => {
+    p.opportunity.findUnique.mockResolvedValue(openOpportunity());
+    const res = await request(app)
+      .patch('/api/opportunities/opp-1')
+      .set('Authorization', `Bearer ${ADMIN}`)
+      .send({ tentativeStartDate: 'not-a-date' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/invalid/i);
+  });
 });

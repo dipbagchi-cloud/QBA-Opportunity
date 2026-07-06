@@ -525,7 +525,14 @@ export default function NewOpportunityPage() {
 
             router.push("/dashboard/opportunities");
         } catch (error) {
+            // A failed save must never look like a success. Keep the user on the
+            // form and show why it failed (server message when available) so the
+            // opportunity is never silently dropped.
             console.error("Failed to create opportunity", error);
+            toast({
+                title: "Couldn't create opportunity",
+                description: error instanceof Error ? error.message : "Something went wrong. Please try again.",
+            });
         } finally {
             setIsLoading(false);
         }

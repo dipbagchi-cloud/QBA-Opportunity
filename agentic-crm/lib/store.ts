@@ -119,22 +119,23 @@ export const useOpportunityStore = create<OpportunityStore>((set, get) => ({
     },
 
     addOpportunity: async (opportunity) => {
-        try {
-            const res = await fetch(`${API_URL}/api/opportunities`, {
-                method: 'POST',
-                headers: getAuthHeaders(),
-                body: JSON.stringify(opportunity)
-            });
-            if (res.ok) {
-                const created = await res.json();
-                await get().fetchOpportunities(); // Refresh list
-                return created;
-            }
-            return null;
-        } catch (error) {
-            console.error("Failed to add", error);
-            return null;
+        // NOTE: this intentionally throws on failure. A non-2xx response (e.g. a
+        // 400 validation error or a 401 from an expired token) is NOT a network
+        // exception, so `fetch` resolves normally — swallowing it here would let
+        // the caller navigate away as if the save succeeded, silently dropping
+        // the opportunity. Surface the server's message so the UI can show it.
+        const res = await fetch(`${API_URL}/api/opportunities`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify(opportunity)
+        });
+        if (!res.ok) {
+            const detail = await res.json().catch(() => ({}));
+            throw new Error(detail?.error || `Failed to create opportunity (HTTP ${res.status}).`);
         }
+        const created = await res.json();
+        await get().fetchOpportunities(); // Refresh list
+        return created;
     },
 
     deleteOpportunity: async (id) => {

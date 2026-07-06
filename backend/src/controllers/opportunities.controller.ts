@@ -7,6 +7,32 @@ import { buildOpportunityAccess } from '../lib/opportunity-access';
 import path from 'path';
 import fs from 'fs';
 
+/**
+ * Parse a date-only value into a Date pinned to UTC midnight of that calendar
+ * day, so stored/compared dates never drift with the server's local timezone.
+ *
+ * The web app sends dates as `new Date("YYYY-MM-DD")` → "YYYY-MM-DDT00:00:00.000Z",
+ * but other clients (mobile, chatbot) may send bare "YYYY-MM-DD" or a full
+ * timestamp. In every case we keep the calendar date exactly as written and
+ * anchor it to 00:00 UTC — the same basis the read path uses (`toISOString`),
+ * so a date round-trips without shifting a day on servers that aren't in UTC.
+ *
+ * Returns null for empty/invalid input.
+ */
+function parseDateOnly(value: unknown): Date | null {
+    if (value === null || value === undefined || value === '') return null;
+    const raw = String(value).trim();
+    // Fast path: take the leading calendar date exactly as written.
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(raw);
+    if (m) {
+        const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+        return isNaN(d.getTime()) ? null : d;
+    }
+    const parsed = new Date(raw);
+    if (isNaN(parsed.getTime())) return null;
+    return new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate()));
+}
+
 async function resolveOpportunityAccess(
     authUser: NonNullable<Request['user']>,
     opportunity: { ownerId: string; salesRepName?: string | null; managerName?: string | null; presalesAssigneeName?: string | null; stage?: { name?: string | null } | null; currentStage?: string | null },
@@ -419,25 +445,19 @@ export async function createOpportunity(req: Request, res: Response) {
         // (When no start date is supplied yet, the close date is allowed and the
         //  constraint will be re-checked on the next update.)
         if (body.expectedCloseDate && body.tentativeStartDate) {
-            const close = new Date(body.expectedCloseDate);
-            const start = new Date(body.tentativeStartDate);
-            if (!isNaN(close.getTime()) && !isNaN(start.getTime()) && close.getTime() >= start.getTime()) {
+            const close = parseDateOnly(body.expectedCloseDate);
+            const start = parseDateOnly(body.tentativeStartDate);
+            if (close && start && close.getTime() >= start.getTime()) {
                 return res.status(400).json({ error: 'Opportunity Close Date must be before the Tentative Start Date.' });
             }
         }
 
-        if (body.tentativeStartDate) {
-            const start = new Date(body.tentativeStartDate);
-            if (isNaN(start.getTime())) {
-                return res.status(400).json({ error: 'Tentative Start Date is invalid.' });
-            }
-            const startDay = new Date(start);
-            startDay.setHours(0, 0, 0, 0);
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-            if (startDay.getTime() <= today.getTime()) {
-                return res.status(400).json({ error: 'Tentative Start Date must be in the future.' });
-            }
+        // Tentative Start Date may be in the past — the business explicitly allows
+        // back-dated opportunities (e.g. logging an engagement that already began).
+        // Only a malformed value is rejected; past dates are valid and are handled
+        // downstream by the "start-date overdue" reminder rule.
+        if (body.tentativeStartDate && !parseDateOnly(body.tentativeStartDate)) {
+            return res.status(400).json({ error: 'Tentative Start Date is invalid.' });
         }
 
         const defaultType = await prisma.opportunityType.findFirst();
@@ -501,18 +521,20 @@ export async function createOpportunity(req: Request, res: Response) {
                 practice: body.practice,
                 technology: body.technology,
                 projectType: body.projectType,
-                tentativeStartDate: body.tentativeStartDate ? new Date(body.tentativeStartDate) : undefined,
+                tentativeStartDate: parseDateOnly(body.tentativeStartDate) ?? undefined,
                 tentativeDuration: body.tentativeDuration,
                 tentativeDurationUnit: body.tentativeDurationUnit,
-                tentativeEndDate: body.tentativeEndDate ? new Date(body.tentativeEndDate) : undefined,
+                tentativeEndDate: parseDateOnly(body.tentativeEndDate) ?? undefined,
                 expectedCloseDate: (() => {
-                    // Explicit value wins (must be before start date — validated below).
-                    if (body.expectedCloseDate) return new Date(body.expectedCloseDate);
-                    // Otherwise default to 2 days before tentativeStartDate, matching the
-                    // seed rule used for existing rows.
-                    if (body.tentativeStartDate) {
-                        const d = new Date(body.tentativeStartDate);
-                        d.setDate(d.getDate() - 2);
+                    // Explicit value wins (must be before start date — validated above).
+                    const explicit = parseDateOnly(body.expectedCloseDate);
+                    if (explicit) return explicit;
+                    // Otherwise default to 2 days before tentativeStartDate. UTC math so
+                    // the stored calendar date doesn't drift with the server timezone.
+                    const start = parseDateOnly(body.tentativeStartDate);
+                    if (start) {
+                        const d = new Date(start);
+                        d.setUTCDate(d.getUTCDate() - 2);
                         return d;
                     }
                     return undefined;
@@ -706,8 +728,8 @@ export async function updateOpportunity(req: Request, res: Response) {
             // Must be strictly before the (incoming or stored) Tentative Start Date.
             if (incoming) {
                 const startSource = body.tentativeStartDate !== undefined ? body.tentativeStartDate : previous?.tentativeStartDate;
-                const start = startSource ? new Date(startSource) : null;
-                if (start && !isNaN(start.getTime()) && incoming.getTime() >= start.getTime()) {
+                const start = parseDateOnly(startSource);
+                if (start && incoming.getTime() >= start.getTime()) {
                     return res.status(400).json({
                         error: 'Opportunity Close Date must be before the Tentative Start Date.',
                     });
@@ -715,22 +737,12 @@ export async function updateOpportunity(req: Request, res: Response) {
             }
         }
 
-        if (body.tentativeStartDate !== undefined && body.tentativeStartDate) {
-            const incomingStart = new Date(body.tentativeStartDate);
-            if (isNaN(incomingStart.getTime())) {
-                return res.status(400).json({ error: 'Tentative Start Date is invalid.' });
-            }
-            const previousStart = previous?.tentativeStartDate ? new Date(previous.tentativeStartDate) : null;
-            const changed = incomingStart.getTime() !== (previousStart?.getTime() || 0);
-            if (changed) {
-                const incomingDay = new Date(incomingStart);
-                incomingDay.setHours(0, 0, 0, 0);
-                const today = new Date();
-                today.setHours(0, 0, 0, 0);
-                if (incomingDay.getTime() <= today.getTime()) {
-                    return res.status(400).json({ error: 'Tentative Start Date must be in the future.' });
-                }
-            }
+        // Tentative Start Date may be back-dated (business rule — a past start
+        // date is valid, e.g. an engagement that already began). Only reject a
+        // malformed value; the previous "must be in the future" guard was also
+        // the source of a timezone off-by-one that could bounce valid dates.
+        if (body.tentativeStartDate !== undefined && body.tentativeStartDate && !parseDateOnly(body.tentativeStartDate)) {
+            return res.status(400).json({ error: 'Tentative Start Date is invalid.' });
         }
 
         // ────────────────────────────────────────────────────────────────────
@@ -1067,10 +1079,10 @@ export async function updateOpportunity(req: Request, res: Response) {
                 salesRepName: body.salesRepName || body.salesRep,
                 managerName: body.managerName,
                 presalesAssigneeName: body.presalesAssigneeName,
-                tentativeStartDate: body.tentativeStartDate ? new Date(body.tentativeStartDate) : undefined,
-                tentativeEndDate: body.tentativeEndDate ? new Date(body.tentativeEndDate) : undefined,
+                tentativeStartDate: parseDateOnly(body.tentativeStartDate) ?? undefined,
+                tentativeEndDate: parseDateOnly(body.tentativeEndDate) ?? undefined,
                 expectedCloseDate: body.expectedCloseDate !== undefined
-                    ? (body.expectedCloseDate ? new Date(body.expectedCloseDate) : null)
+                    ? parseDateOnly(body.expectedCloseDate)
                     : undefined,
                 tentativeDuration: body.tentativeDuration || body.duration,
                 tentativeDurationUnit: body.tentativeDurationUnit || body.durationUnit,
