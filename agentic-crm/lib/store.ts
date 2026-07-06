@@ -28,6 +28,7 @@ export interface Opportunity {
     healthScore?: number;
     isStalled?: boolean;
     daysInStage?: number;
+    daysSinceActivity?: number;
     gomApproved?: boolean;
     access?: {
         canEdit: boolean;

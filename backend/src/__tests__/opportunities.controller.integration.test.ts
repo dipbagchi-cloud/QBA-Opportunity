@@ -48,7 +48,7 @@ jest.mock('../lib/notification-engine', () => ({
 
 import { prisma } from '../lib/prisma';
 import { authenticate, authorizeAny } from '../middleware/auth';
-import { getOpportunity, updateOpportunity, addComment } from '../controllers/opportunities.controller';
+import { getOpportunity, updateOpportunity, addComment, listOpportunities } from '../controllers/opportunities.controller';
 import { generateToken, type TokenPayload } from '../services/auth.service';
 import { PERMISSIONS, WILDCARD, DEFAULT_ROLE_PERMISSIONS } from '../lib/permissions';
 
@@ -59,6 +59,7 @@ function makeApp(): Express {
   app.use(express.json());
   const VIEW = [PERMISSIONS.PIPELINE_VIEW, PERMISSIONS.PRESALES_VIEW, PERMISSIONS.SALES_VIEW] as const;
   const WRITE = [PERMISSIONS.PIPELINE_WRITE, PERMISSIONS.PRESALES_WRITE, PERMISSIONS.SALES_WRITE] as const;
+  app.get('/api/opportunities', authenticate, authorizeAny(...VIEW), listOpportunities);
   app.get('/api/opportunities/:id', authenticate, authorizeAny(...VIEW), getOpportunity);
   app.patch('/api/opportunities/:id', authenticate, authorizeAny(...WRITE), updateOpportunity);
   app.post('/api/opportunities/:id/comments', authenticate, authorizeAny(...WRITE), addComment);
@@ -247,5 +248,65 @@ describe('PATCH /api/opportunities/:id — access + field-freeze rules', () => {
       .send({ tentativeStartDate: 'not-a-date' });
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/invalid/i);
+  });
+});
+
+describe('GET /api/opportunities — Last Activity / Stalled reflect real activity, not time-in-stage', () => {
+  const DAY = 86400000;
+  function listRow(over: Record<string, unknown> = {}) {
+    return {
+      id: 'opp-1', title: 'Deal', currentStage: 'Discovery', stage: { name: 'Discovery' },
+      client: { name: 'Acme' }, owner: { id: 'owner-x', name: 'Owner', department: 'Sales' }, ownerId: 'owner-x',
+      salesRepName: null, managerName: null, presalesAssigneeName: null,
+      value: 1000, currency: 'USD', probability: 20, description: 'x',
+      isStalled: false, detailedStatus: null, metadata: null, presalesData: null,
+      technology: null, region: null, practice: null, tentativeDuration: null, expectedDayRate: null, pricingModel: null,
+      expectedCloseDate: null, actualCloseDate: null, tentativeStartDate: null, tentativeEndDate: null,
+      createdAt: new Date(Date.now() - 100 * DAY), updatedAt: new Date(),
+      stageHistory: [{ enteredAt: new Date(Date.now() - 40 * DAY) }],
+      notes: [] as { createdAt: Date }[],
+      _count: { attachments: 0 },
+      ...over,
+    };
+  }
+  async function firstRow() {
+    const res = await request(app).get('/api/opportunities').set('Authorization', `Bearer ${ADMIN}`);
+    expect(res.status).toBe(200);
+    return res.body.data[0];
+  }
+
+  it('a deal edited today but stuck 40 days in-stage is NOT stalled and shows "Today"', async () => {
+    // threshold defaults to 30 (systemConfig mocked null). Old logic used
+    // daysInStage(40) > 30 -> wrongly stalled; new logic uses daysSinceActivity.
+    p.opportunity.findMany.mockResolvedValue([listRow({ updatedAt: new Date() })]);
+    p.opportunity.count.mockResolvedValue(1);
+    const row = await firstRow();
+    expect(row.daysInStage).toBe(40);          // still reported for the Aging Report
+    expect(row.daysSinceActivity).toBe(0);
+    expect(row.lastActivity).toBe('Today');
+    expect(row.isStalled).toBe(false);
+    expect(row.status).not.toBe('stalled');
+  });
+
+  it('a deal with no activity for 40 days IS stalled', async () => {
+    p.opportunity.findMany.mockResolvedValue([listRow({ updatedAt: new Date(Date.now() - 40 * DAY) })]);
+    p.opportunity.count.mockResolvedValue(1);
+    const row = await firstRow();
+    expect(row.daysSinceActivity).toBe(40);
+    expect(row.isStalled).toBe(true);
+    expect(row.status).toBe('stalled');
+    expect(row.lastActivity).toBe('40 days ago');
+  });
+
+  it('a recent comment counts as activity even when updatedAt is old', async () => {
+    p.opportunity.findMany.mockResolvedValue([listRow({
+      updatedAt: new Date(Date.now() - 40 * DAY),
+      notes: [{ createdAt: new Date() }],
+    })]);
+    p.opportunity.count.mockResolvedValue(1);
+    const row = await firstRow();
+    expect(row.daysSinceActivity).toBe(0);
+    expect(row.isStalled).toBe(false);
+    expect(row.lastActivity).toBe('Today');
   });
 });

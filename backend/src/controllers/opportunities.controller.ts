@@ -178,6 +178,13 @@ export async function listOpportunities(req: Request, res: Response) {
                         orderBy: { enteredAt: 'desc' },
                         take: 1,
                     },
+                    // Latest comment — a Note does NOT bump the opportunity's
+                    // updatedAt, so it must be pulled in to count as activity.
+                    notes: {
+                        orderBy: { createdAt: 'desc' },
+                        take: 1,
+                        select: { createdAt: true },
+                    },
                     _count: {
                         select: { attachments: true },
                     },
@@ -214,13 +221,28 @@ export async function listOpportunities(req: Request, res: Response) {
             const now = new Date();
             const daysInStage = Math.floor((now.getTime() - stageEnteredAt.getTime()) / (1000 * 3600 * 24));
 
+            // Last ACTIVITY (distinct from days-in-stage): the most recent real
+            // touch on the deal — any field edit or stage change (both bump
+            // updatedAt) OR a new comment (a Note, which does not). Using
+            // stageHistory.enteredAt alone made a deal edited today but sitting
+            // in the same stage look stale. This mirrors the stale-deal reminder,
+            // which keys off updatedAt.
+            const latestNoteAt = (opp as any).notes?.[0]?.createdAt;
+            const lastActivityAt = Math.max(
+                new Date(opp.updatedAt).getTime(),
+                latestNoteAt ? new Date(latestNoteAt).getTime() : 0,
+            );
+            const daysSinceActivity = Math.max(0, Math.floor((now.getTime() - lastActivityAt) / (1000 * 3600 * 24)));
+
             // Closed deals (Won / Lost / Delivered) carry no health risk — the
             // deal is done, so stall/health signals don't apply.
             const CLOSED_STAGE_SET = ['Closed Won', 'Closed-Won', 'Closed Lost', 'Proposal Lost', 'Delivered'];
             const isClosedStage = CLOSED_STAGE_SET.includes(stageName);
 
-            // 3. Stalled detection — never flag a closed deal as stalled.
-            const isStalled = !isClosedStage && (opp.isStalled || (daysInStage > stalledDaysThreshold));
+            // 3. Stalled detection — a deal is stalled when there's been no
+            // activity for the threshold window (not merely time-in-stage), or
+            // when it's manually On Hold (opp.isStalled). Never flag a closed deal.
+            const isStalled = !isClosedStage && (opp.isStalled || (daysSinceActivity > stalledDaysThreshold));
             const access = buildOpportunityAccess({
                 authUser: req.user!,
                 currentUser,
@@ -237,10 +259,10 @@ export async function listOpportunities(req: Request, res: Response) {
 
             //    b) Recency (30%): recent activity = healthier
             let recencyScore = 100;
-            if (daysInStage > 60) recencyScore = 0;
-            else if (daysInStage > 30) recencyScore = 20;
-            else if (daysInStage > 14) recencyScore = 50;
-            else if (daysInStage > 7) recencyScore = 75;
+            if (daysSinceActivity > 60) recencyScore = 0;
+            else if (daysSinceActivity > 30) recencyScore = 20;
+            else if (daysSinceActivity > 14) recencyScore = 50;
+            else if (daysSinceActivity > 7) recencyScore = 75;
 
             //    c) Deal Completeness (20%): more data = healthier
             const totalFields = 8;
@@ -275,7 +297,7 @@ export async function listOpportunities(req: Request, res: Response) {
                 currentStage: opp.currentStage,
                 probability: probability,
                 ownerId: opp.ownerId,
-                lastActivity: daysInStage === 0 ? 'Today' : `${daysInStage} days ago`,
+                lastActivity: daysSinceActivity === 0 ? 'Today' : `${daysSinceActivity} day${daysSinceActivity === 1 ? '' : 's'} ago`,
                 owner: opp.owner.name,
                 salesRepName: opp.salesRepName || '',
                 managerName: (opp as any).managerName || '',
@@ -306,6 +328,7 @@ export async function listOpportunities(req: Request, res: Response) {
                     ? Math.max(0, (new Date(opp.actualCloseDate).getTime() - new Date(opp.createdAt).getTime()) / 86400000)
                     : null,
                 daysInStage,
+                daysSinceActivity,
                 isStalled,
                 healthScore: finalHealth,
                 metadata: opp.metadata,

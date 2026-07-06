@@ -183,8 +183,10 @@ export default function OpportunitiesPage() {
     const sortedOpportunities = useMemo(() => {
         if (!sortKey || !CLIENT_SORT_KEYS.includes(sortKey)) return opportunities;
         return [...opportunities].sort((a, b) => {
-            const av = sortKey === 'probability' ? (a.probability ?? 0) : (a.daysInStage ?? 0);
-            const bv = sortKey === 'probability' ? (b.probability ?? 0) : (b.daysInStage ?? 0);
+            // "Last Activity" sorts by days since last activity (matches the
+            // displayed value), not days-in-stage.
+            const av = sortKey === 'probability' ? (a.probability ?? 0) : (a.daysSinceActivity ?? 0);
+            const bv = sortKey === 'probability' ? (b.probability ?? 0) : (b.daysSinceActivity ?? 0);
             return sortDir === 'asc' ? av - bv : bv - av;
         });
     }, [opportunities, sortKey, sortDir]);
