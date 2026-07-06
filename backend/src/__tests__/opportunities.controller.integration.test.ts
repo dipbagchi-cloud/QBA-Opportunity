@@ -16,7 +16,7 @@ jest.mock('../lib/prisma', () => ({
     user: { findUnique: jest.fn(), findFirst: jest.fn() },
     opportunity: {
       findUnique: jest.fn(), update: jest.fn(), findFirst: jest.fn(),
-      findMany: jest.fn(), count: jest.fn(), create: jest.fn(),
+      findMany: jest.fn(), count: jest.fn(), create: jest.fn(), delete: jest.fn(),
     },
     approvalRequest: { findFirst: jest.fn(), updateMany: jest.fn(), update: jest.fn(), create: jest.fn() },
     project: { findFirst: jest.fn(), create: jest.fn() },
@@ -48,7 +48,7 @@ jest.mock('../lib/notification-engine', () => ({
 
 import { prisma } from '../lib/prisma';
 import { authenticate, authorizeAny } from '../middleware/auth';
-import { getOpportunity, updateOpportunity, addComment, listOpportunities } from '../controllers/opportunities.controller';
+import { getOpportunity, updateOpportunity, addComment, listOpportunities, deleteOpportunity } from '../controllers/opportunities.controller';
 import { generateToken, type TokenPayload } from '../services/auth.service';
 import { PERMISSIONS, WILDCARD, DEFAULT_ROLE_PERMISSIONS } from '../lib/permissions';
 
@@ -62,6 +62,7 @@ function makeApp(): Express {
   app.get('/api/opportunities', authenticate, authorizeAny(...VIEW), listOpportunities);
   app.get('/api/opportunities/:id', authenticate, authorizeAny(...VIEW), getOpportunity);
   app.patch('/api/opportunities/:id', authenticate, authorizeAny(...WRITE), updateOpportunity);
+  app.delete('/api/opportunities/:id', authenticate, authorizeAny(...WRITE), deleteOpportunity);
   app.post('/api/opportunities/:id/comments', authenticate, authorizeAny(...WRITE), addComment);
   return app;
 }
@@ -308,5 +309,34 @@ describe('GET /api/opportunities — Last Activity / Stalled reflect real activi
     expect(row.daysSinceActivity).toBe(0);
     expect(row.isStalled).toBe(false);
     expect(row.lastActivity).toBe('Today');
+  });
+});
+
+describe('DELETE /api/opportunities/:id — hard delete, Admin only', () => {
+  it('lets an Admin hard-delete (200), records an audit entry, and calls prisma.delete', async () => {
+    p.opportunity.findUnique.mockResolvedValue(openOpportunity());
+    p.opportunity.delete.mockResolvedValue({ id: 'opp-1' });
+    const res = await request(app).delete('/api/opportunities/opp-1').set('Authorization', `Bearer ${ADMIN}`);
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(p.opportunity.delete).toHaveBeenCalledWith({ where: { id: 'opp-1' } });
+    // The deletion is recorded before the row disappears.
+    const audited = p.auditLog.create.mock.calls.some((c: any[]) => c[0]?.data?.action === 'DELETE');
+    expect(audited).toBe(true);
+  });
+
+  it('forbids a non-admin writer (403) and does not delete', async () => {
+    p.opportunity.findUnique.mockResolvedValue(openOpportunity());
+    const res = await request(app).delete('/api/opportunities/opp-1').set('Authorization', `Bearer ${MANAGER}`);
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/administrator/i);
+    expect(p.opportunity.delete).not.toHaveBeenCalled();
+  });
+
+  it('404 when the opportunity does not exist', async () => {
+    p.opportunity.findUnique.mockResolvedValue(null);
+    const res = await request(app).delete('/api/opportunities/opp-1').set('Authorization', `Bearer ${ADMIN}`);
+    expect(res.status).toBe(404);
+    expect(p.opportunity.delete).not.toHaveBeenCalled();
   });
 });

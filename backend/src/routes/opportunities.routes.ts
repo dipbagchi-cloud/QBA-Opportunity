@@ -6,6 +6,7 @@ import {
     createOpportunity,
     getOpportunity,
     updateOpportunity,
+    deleteOpportunity,
     convertOpportunity,
     approveGom,
     getGomApprovalStatus,
@@ -64,6 +65,9 @@ router.get('/filter-options', authorizeAny(PERMISSIONS.PIPELINE_VIEW, PERMISSION
 router.post('/', authorize(PERMISSIONS.PIPELINE_WRITE), createOpportunity);
 router.get('/:id', authorizeAny(PERMISSIONS.PIPELINE_VIEW, PERMISSIONS.PRESALES_VIEW, PERMISSIONS.SALES_VIEW), getOpportunity);
 router.patch('/:id', authorizeAny(PERMISSIONS.PIPELINE_WRITE, PERMISSIONS.PRESALES_WRITE, PERMISSIONS.SALES_WRITE), updateOpportunity);
+// Hard delete — Admin only (the controller enforces the wildcard check and
+// returns a clear 403 for everyone else). PIPELINE_WRITE is just a base gate.
+router.delete('/:id', authorize(PERMISSIONS.PIPELINE_WRITE), deleteOpportunity);
 router.post('/:id/convert', authorize(PERMISSIONS.SALES_WRITE), convertOpportunity);
 router.patch('/:id/approve-gom', authorizeAny(PERMISSIONS.PRESALES_WRITE, PERMISSIONS.SALES_WRITE, PERMISSIONS.PIPELINE_WRITE), approveGom);
 router.get('/:id/gom-approval-status', authorizeAny(PERMISSIONS.PIPELINE_VIEW, PERMISSIONS.PRESALES_VIEW, PERMISSIONS.SALES_VIEW), getGomApprovalStatus);

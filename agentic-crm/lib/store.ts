@@ -140,13 +140,21 @@ export const useOpportunityStore = create<OpportunityStore>((set, get) => ({
     },
 
     deleteOpportunity: async (id) => {
-        // Optimistic update
+        // Hard delete on the server (Admin only — enforced by the backend).
+        // Throws on failure so the caller can surface the reason; only remove
+        // from local state AFTER the server confirms, then refresh totals.
+        const res = await fetch(`${API_URL}/api/opportunities/${id}`, {
+            method: 'DELETE',
+            headers: getAuthHeaders(),
+        });
+        if (!res.ok) {
+            const detail = await res.json().catch(() => ({}));
+            throw new Error(detail?.error || `Failed to delete opportunity (HTTP ${res.status}).`);
+        }
         set((state) => ({
             opportunities: state.opportunities.filter((opp) => opp.id !== id),
         }));
-
-        // In a real implementation:
-        // await fetch(`${API_URL}/api/opportunities/${id}`, { method: 'DELETE' });
+        await get().fetchOpportunities();
     },
 
     updateOpportunity: async (id, updates) => {

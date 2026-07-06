@@ -632,6 +632,53 @@ export async function createOpportunity(req: Request, res: Response) {
     }
 }
 
+// DELETE /api/opportunities/:id  — hard delete, Admin only
+export async function deleteOpportunity(req: Request, res: Response) {
+    try {
+        // Admin-only. A hard delete permanently removes the opportunity and, via
+        // onDelete: Cascade, all of its children (attachments, comments, stage
+        // history, tasks, approvals, GOM/estimation, SOW…). Restrict to wildcard
+        // admins — no other role may destroy a deal.
+        const isAdmin = (req.user?.permissions || []).includes('*');
+        if (!isAdmin) {
+            return res.status(403).json({ error: 'Only administrators can delete an opportunity.' });
+        }
+
+        const { id } = req.params;
+        const existing = await prisma.opportunity.findUnique({
+            where: { id },
+            include: { client: true, stage: true },
+        });
+        if (!existing) {
+            return res.status(404).json({ error: 'Opportunity not found' });
+        }
+
+        // Record the deletion before the row (and its cascade) disappear. The
+        // audit log references the opportunity by a plain entityId (no FK), so
+        // this entry survives the delete and keeps the action traceable.
+        await prisma.auditLog.create({
+            data: {
+                entity: 'Opportunity',
+                entityId: id,
+                action: 'DELETE',
+                userId: req.user!.userId,
+                changes: {
+                    title: existing.title,
+                    client: existing.client?.name,
+                    stage: existing.stage?.name,
+                    value: existing.value != null ? Number(existing.value) : null,
+                },
+            },
+        });
+
+        await prisma.opportunity.delete({ where: { id } });
+        res.json({ success: true, id });
+    } catch (error) {
+        console.error('Delete Opportunity Error:', error);
+        res.status(500).json({ error: 'Failed to delete opportunity' });
+    }
+}
+
 // GET /api/opportunities/:id
 export async function getOpportunity(req: Request, res: Response) {
     try {

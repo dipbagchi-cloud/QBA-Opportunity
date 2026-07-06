@@ -36,6 +36,7 @@ import KanbanBoard from "@/components/opportunities/KanbanBoard";
 import { useCurrency } from "@/components/providers/currency-provider";
 import { ByOwnerBoard } from "./components/ByOwnerBoard";
 import { FilterCombobox } from "@/components/ui/filter-combobox";
+import { useToast } from "@/hooks/use-toast";
 
 // Column model for the list. `serverSort` columns are sorted in the DB (so the
 // whole filtered dataset is ordered, not just the current page); `clientSort`
@@ -77,7 +78,8 @@ const EMPTY_FILTERS: ColFilters = {};
 
 export default function OpportunitiesPage() {
     const { opportunities, deleteOpportunity, fetchOpportunities, total, page, totalPages, isLoading } = useOpportunityStore();
-    const { hasPermission } = useAuthStore();
+    const { hasPermission, user } = useAuthStore();
+    const { toast } = useToast();
     const [activeMenu, setActiveMenu] = useState<string | null>(null);
     const [searchTerm, setSearchTerm] = useState("");
     const [currentPage, setCurrentPage] = useState(1);
@@ -92,6 +94,24 @@ export default function OpportunitiesPage() {
 
     const isViewOnly = useCallback((opp: any) => opp.access?.canEdit === false, []);
     const canCreateOpportunity = hasPermission("pipeline:write");
+    // Hard delete is Admin-only (wildcard permission, or the Admin role).
+    const isAdmin = hasPermission("*") || (user?.role?.name || "").trim().toLowerCase() === "admin";
+    const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+    const [deleting, setDeleting] = useState(false);
+
+    const handleConfirmDelete = async () => {
+        if (!deleteTarget) return;
+        setDeleting(true);
+        try {
+            await deleteOpportunity(deleteTarget.id);
+            toast({ title: "Opportunity deleted", description: `"${deleteTarget.name}" was permanently deleted.` });
+            setDeleteTarget(null);
+        } catch (error) {
+            toast({ title: "Couldn't delete", description: error instanceof Error ? error.message : "Something went wrong. Please try again." });
+        } finally {
+            setDeleting(false);
+        }
+    };
 
     const [viewMode, setViewMode] = useState<'list' | 'kanban' | 'by_owner'>('list');
     const { currency: globalCurrency, getSymbol, getRate } = useCurrency();
@@ -619,10 +639,10 @@ export default function OpportunitiesPage() {
                                                                 {isViewOnly(opp) ? <Info className="w-4 h-4" /> : <Edit className="w-4 h-4" />}
                                                                 {isViewOnly(opp) ? "View Details" : "Edit Details"}
                                                             </Link>
-                                                            {!isViewOnly(opp) && (
+                                                            {isAdmin && (
                                                                 <button
                                                                     onClick={() => {
-                                                                        deleteOpportunity(opp.id);
+                                                                        setDeleteTarget({ id: opp.id, name: opp.name });
                                                                         setActiveMenu(null);
                                                                     }}
                                                                     className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
@@ -693,6 +713,42 @@ export default function OpportunitiesPage() {
                 <KanbanBoard />
             ) : (
                 <ByOwnerBoard opportunities={sortedOpportunities} globalCurrency={globalCurrency} />
+            )}
+
+            {/* Hard-delete confirmation (Admin only) */}
+            {deleteTarget && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => !deleting && setDeleteTarget(null)}>
+                    <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center gap-3 mb-3">
+                            <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
+                                <Trash2 className="w-5 h-5 text-red-600" />
+                            </div>
+                            <h3 className="text-lg font-bold text-slate-900">Delete opportunity?</h3>
+                        </div>
+                        <p className="text-sm text-slate-600">
+                            This permanently deletes <span className="font-semibold text-slate-800">{deleteTarget.name}</span> and all of its
+                            data (attachments, comments, estimation, SOW, history). This cannot be undone.
+                        </p>
+                        <div className="flex justify-end gap-3 mt-5">
+                            <button
+                                type="button"
+                                onClick={() => setDeleteTarget(null)}
+                                disabled={deleting}
+                                className="px-4 py-2 bg-white border border-slate-300 rounded-md text-sm font-medium hover:bg-slate-50 disabled:opacity-50"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleConfirmDelete}
+                                disabled={deleting}
+                                className="px-4 py-2 bg-red-600 text-white rounded-md text-sm font-bold hover:bg-red-700 disabled:opacity-60"
+                            >
+                                {deleting ? "Deleting…" : "Delete permanently"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
             )}
         </div>
     );
