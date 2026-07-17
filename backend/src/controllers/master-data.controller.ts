@@ -1,8 +1,9 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { seedCurrenciesForRegion } from './currency.controller';
+import { COUNTRY_CURRENCY, getCurrencyForCountry, resolveCountryName } from '../lib/countries';
 
-// ── Country validation via REST Countries API ──
+// ── Country validation against the offline ISO 3166 list ──
 interface CountryValidationResult {
     input: string;
     valid: boolean;
@@ -22,69 +23,21 @@ export async function validateCountries(req: Request, res: Response) {
     for (const raw of countries) {
         const name = (raw as string).trim();
         if (!name) continue;
-        try {
-            const apiRes = await fetch(
-                `https://restcountries.com/v3.1/name/${encodeURIComponent(name)}?fields=name,currencies`
-            );
-            if (!apiRes.ok) {
-                results.push({ input: name, valid: false });
-                continue;
-            }
-            const data = await apiRes.json() as any[];
-            if (!data || data.length === 0) {
-                results.push({ input: name, valid: false });
-                continue;
-            }
-            // Find best match: exact match on common name, or first result
-            const exact = data.find(
-                (c: any) => c.name?.common?.toLowerCase() === name.toLowerCase()
-                    || c.name?.official?.toLowerCase() === name.toLowerCase()
-            );
-            const match = exact || data[0];
-            const correctedName = match.name?.common || name;
-            const currencies: { code: string; name: string; symbol: string }[] = [];
-            if (match.currencies) {
-                for (const [code, info] of Object.entries(match.currencies) as [string, any][]) {
-                    currencies.push({ code, name: info.name || code, symbol: info.symbol || code });
-                }
-            }
-            results.push({ input: name, valid: true, correctedName, currencies });
-        } catch {
+        const correctedName = resolveCountryName(name);
+        if (!correctedName) {
             results.push({ input: name, valid: false });
+            continue;
         }
+        const currency = getCurrencyForCountry(correctedName);
+        results.push({
+            input: name,
+            valid: true,
+            correctedName,
+            currencies: currency ? [currency] : [],
+        });
     }
 
     res.json(results);
-}
-
-// ── Auto-add currencies for newly added countries in a region ──
-async function autoAddCurrenciesForCountries(
-    regionName: string,
-    countryValidations: CountryValidationResult[]
-) {
-    const added: string[] = [];
-    for (const cv of countryValidations) {
-        if (!cv.valid || !cv.currencies) continue;
-        for (const curr of cv.currencies) {
-            const existing = await prisma.currencyRate.findFirst({
-                where: { code: curr.code, baseCurrency: 'INR' },
-            });
-            if (!existing) {
-                await prisma.currencyRate.create({
-                    data: {
-                        code: curr.code,
-                        name: curr.name,
-                        symbol: curr.symbol,
-                        region: regionName,
-                        rateToBase: 1, // placeholder until synced
-                        baseCurrency: 'INR',
-                    },
-                });
-                added.push(curr.code);
-            }
-        }
-    }
-    return added;
 }
 
 // ── Auto-add currencies from pre-validated data (sent by frontend) ──
@@ -115,57 +68,21 @@ async function autoAddCurrenciesFromData(
     return added;
 }
 
-// ── Server-side: fetch currencies from REST Countries API for country names ──
+// ── Server-side: resolve currencies for country names from the offline map ──
 // This is called as a fallback when the frontend doesn't provide currencyData,
 // ensuring currencies are always auto-added when countries are saved.
-async function fetchAndAddCurrenciesForCountries(
+async function addCurrenciesForCountries(
     regionName: string,
     countryNames: string[]
 ): Promise<string[]> {
-    const added: string[] = [];
+    const currencies: { code: string; name: string; symbol: string }[] = [];
     for (const countryName of countryNames) {
-        if (!countryName.trim()) continue;
-        try {
-            const apiRes = await fetch(
-                `https://restcountries.com/v3.1/name/${encodeURIComponent(countryName.trim())}?fields=name,currencies`
-            );
-            if (!apiRes.ok) continue;
-            const data = await apiRes.json() as any[];
-            if (!data || data.length === 0) continue;
-
-            // Find best match
-            const exact = data.find(
-                (c: any) => c.name?.common?.toLowerCase() === countryName.trim().toLowerCase()
-                    || c.name?.official?.toLowerCase() === countryName.trim().toLowerCase()
-            );
-            const match = exact || data[0];
-
-            if (match.currencies) {
-                for (const [code, info] of Object.entries(match.currencies) as [string, any][]) {
-                    const existing = await prisma.currencyRate.findFirst({
-                        where: { code, baseCurrency: 'INR' },
-                    });
-                    if (!existing) {
-                        await prisma.currencyRate.create({
-                            data: {
-                                code,
-                                name: info.name || code,
-                                symbol: info.symbol || code,
-                                region: regionName,
-                                rateToBase: 1,
-                                baseCurrency: 'INR',
-                            },
-                        });
-                        added.push(code);
-                    }
-                }
-            }
-        } catch {
-            // Non-critical: skip this country if API fails
-            console.log(`[currency-auto-add] Failed to fetch currency for country: ${countryName}`);
-        }
+        const canonical = resolveCountryName(countryName);
+        if (!canonical) continue;
+        const currency = getCurrencyForCountry(canonical);
+        if (currency) currencies.push(currency);
     }
-    return added;
+    return autoAddCurrenciesFromData(regionName, currencies);
 }
 
 // Helper: write audit log for admin master data changes
@@ -427,55 +344,13 @@ export async function getCountryRegionMap(req: Request, res: Response) {
     for (const [region, code] of Object.entries(REGION_PRIMARY_CURRENCY)) {
         regionCurrencyMap[region] = code;
     }
-    // Also create a country-specific currency override map
-    const COUNTRY_CURRENCY_OVERRIDE: Record<string, string> = {
-        'United States': 'USD', 'Canada': 'CAD', 'Mexico': 'MXN',
-        'United Kingdom': 'GBP', 'Switzerland': 'CHF', 'Sweden': 'SEK',
-        'Norway': 'NOK', 'Denmark': 'DKK', 'Poland': 'PLN',
-        'Czech Republic': 'CZK', 'Romania': 'RON', 'Hungary': 'HUF',
-        'Iceland': 'ISK', 'Serbia': 'RSD', 'Ukraine': 'UAH', 'Turkey': 'TRY',
-        'Croatia': 'HRK', 'Bulgaria': 'BGN',
-        'Japan': 'JPY', 'China': 'CNY', 'South Korea': 'KRW',
-        'Australia': 'AUD', 'New Zealand': 'NZD', 'Singapore': 'SGD',
-        'Hong Kong': 'HKD', 'Taiwan': 'TWD', 'Indonesia': 'IDR',
-        'Malaysia': 'MYR', 'Thailand': 'THB', 'Philippines': 'PHP',
-        'Vietnam': 'VND', 'Bangladesh': 'BDT', 'Sri Lanka': 'LKR',
-        'Pakistan': 'PKR', 'Myanmar': 'MMK', 'Cambodia': 'KHR', 'Nepal': 'NPR',
-        'United Arab Emirates': 'AED', 'Saudi Arabia': 'SAR', 'Qatar': 'QAR',
-        'Kuwait': 'KWD', 'Bahrain': 'BHD', 'Oman': 'OMR',
-        'Jordan': 'JOD', 'Lebanon': 'LBP', 'Iraq': 'IQD', 'Israel': 'ILS',
-        'Egypt': 'EGP',
-        'Brazil': 'BRL', 'Argentina': 'ARS', 'Chile': 'CLP',
-        'Colombia': 'COP', 'Peru': 'PEN', 'Uruguay': 'UYU',
-        'Paraguay': 'PYG', 'Bolivia': 'BOB', 'Venezuela': 'VES',
-        'Costa Rica': 'CRC', 'Panama': 'PAB', 'Dominican Republic': 'DOP',
-        'Guatemala': 'GTQ', 'Honduras': 'HNL', 'Nicaragua': 'NIO',
-        'Cuba': 'CUP', 'Jamaica': 'JMD', 'Trinidad and Tobago': 'TTD',
-        'South Africa': 'ZAR', 'Nigeria': 'NGN', 'Kenya': 'KES',
-        'Ghana': 'GHS', 'Ethiopia': 'ETB', 'Tanzania': 'TZS',
-        'Morocco': 'MAD', 'Algeria': 'DZD', 'Tunisia': 'TND',
-        'Uganda': 'UGX', 'Mozambique': 'MZN', 'Zambia': 'ZMW',
-        'Botswana': 'BWP', 'Mauritius': 'MUR', 'Rwanda': 'RWF',
-        'Angola': 'AOA', 'Namibia': 'NAD',
-        'Russia': 'RUB', 'Kazakhstan': 'KZT', 'Uzbekistan': 'UZS',
-        'Georgia': 'GEL', 'Armenia': 'AMD', 'Azerbaijan': 'AZN',
-        'Belarus': 'BYN', 'Kyrgyzstan': 'KGS', 'Tajikistan': 'TJS',
-        'Turkmenistan': 'TMT', 'Moldova': 'MDL',
-        'India': 'INR',
-        // EU countries use EUR
-        'Germany': 'EUR', 'France': 'EUR', 'Italy': 'EUR', 'Spain': 'EUR',
-        'Netherlands': 'EUR', 'Belgium': 'EUR', 'Austria': 'EUR',
-        'Finland': 'EUR', 'Ireland': 'EUR', 'Portugal': 'EUR',
-        'Greece': 'EUR', 'Luxembourg': 'EUR', 'Slovakia': 'EUR',
-        'Slovenia': 'EUR', 'Lithuania': 'EUR', 'Latvia': 'EUR', 'Estonia': 'EUR',
-    };
     const map: Record<string, { region: string; currency: string }> = {};
     for (const r of regions) {
         if (r.countries) {
             for (const c of r.countries.split(',').map(s => s.trim()).filter(Boolean)) {
                 map[c] = {
                     region: r.name,
-                    currency: COUNTRY_CURRENCY_OVERRIDE[c] || regionCurrencyMap[r.name] || 'INR',
+                    currency: COUNTRY_CURRENCY[c] || regionCurrencyMap[r.name] || 'INR',
                 };
             }
         }
@@ -503,7 +378,7 @@ export async function createRegion(req: Request, res: Response) {
     } else if (countries) {
         // Fallback: server-side fetch currencies for all countries
         const countryList = countries.split(',').map((s: string) => s.trim()).filter(Boolean);
-        addedCurrencies = await fetchAndAddCurrenciesForCountries(name, countryList).catch(() => []) || [];
+        addedCurrencies = await addCurrenciesForCountries(name, countryList).catch(() => []) || [];
     }
 
     await auditMasterData('Region', region.id, 'CREATE', req.user!.userId, `Created region: ${name}${addedCurrencies.length > 0 ? `. Auto-added currencies: ${addedCurrencies.join(', ')}` : ''}`);
@@ -547,7 +422,7 @@ export async function updateRegion(req: Request, res: Response) {
         } else {
             const newCountries = getNewCountryNames(countries);
             if (newCountries.length > 0) {
-                addedCurrencies = await fetchAndAddCurrenciesForCountries(regionName, newCountries).catch(() => []) || [];
+                addedCurrencies = await addCurrenciesForCountries(regionName, newCountries).catch(() => []) || [];
             }
         }
 
@@ -569,7 +444,7 @@ export async function updateRegion(req: Request, res: Response) {
     } else {
         const newCountries = getNewCountryNames(finalCountries);
         if (newCountries.length > 0) {
-            addedCurrencies = await fetchAndAddCurrenciesForCountries(regionName, newCountries).catch(() => []) || [];
+            addedCurrencies = await addCurrenciesForCountries(regionName, newCountries).catch(() => []) || [];
         }
     }
 

@@ -85,7 +85,7 @@ const REGIONS: RegionData[] = [
             "China", "Japan", "South Korea", "Singapore", "Australia",
             "New Zealand", "Hong Kong", "Taiwan", "Indonesia", "Malaysia",
             "Thailand", "Philippines", "Vietnam", "Bangladesh", "Sri Lanka",
-            "Pakistan", "Myanmar", "Cambodia", "Nepal",
+            "Pakistan", "Myanmar", "Cambodia", "Nepal", "Brunei",
         ],
         currencies: [
             { code: "CNY", name: "Chinese Yuan", symbol: "¥" },
