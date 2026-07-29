@@ -1456,11 +1456,12 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             toast({ title: "GOM Not Approved", description: "GOM is below the auto-approve threshold. Request manager approval in the GOM Calculator tab." });
             return;
         }
-        // Check GOM threshold if configured
-        if (minGomPercent > 0 && contextGomPercent < minGomPercent) {
-            toast({ title: "GOM Below Threshold", description: `GOM is ${contextGomPercent.toFixed(1)}%, which is below the minimum required ${minGomPercent}%. Cannot submit to Sales.` });
-            return;
-        }
+        // Once the GOM is approved (manager sign-off or auto-approve above the
+        // threshold) there is no further blocker to moving to Sales. Manager
+        // approval is the intended override for deals below the configured
+        // minimum GOM — re-blocking on `minGomPercent` here would contradict the
+        // approval banner, the Move-to-Sales button's own enable check, and the
+        // backend (which allows the move whenever gomApproved is true).
         toast({ title: "Processing", description: "Moving to Sales..." });
         setIsSaving(true);
         try {
