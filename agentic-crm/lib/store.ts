@@ -14,7 +14,7 @@ export interface Opportunity {
     salesRepName?: string;
     managerName?: string;
     technology?: string;
-    department?: string;
+    practice?: string;
     region?: string;
     expectedCloseDate?: string;
     actualCloseDate?: string;
@@ -47,7 +47,7 @@ export interface PaginationParams {
     salesRep?: string;
     manager?: string;
     name?: string;
-    department?: string;
+    practice?: string;
     technology?: string;
     sortKey?: string;
     sortDir?: 'asc' | 'desc';
@@ -88,7 +88,7 @@ export const useOpportunityStore = create<OpportunityStore>((set, get) => ({
             if (params?.salesRep) qp.set('salesRep', params.salesRep);
             if (params?.manager) qp.set('manager', params.manager);
             if (params?.name) qp.set('name', params.name);
-            if (params?.department) qp.set('department', params.department);
+            if (params?.practice) qp.set('practice', params.practice);
             if (params?.technology) qp.set('technology', params.technology);
             if (params?.sortKey) qp.set('sortKey', params.sortKey);
             if (params?.sortDir) qp.set('sortDir', params.sortDir);

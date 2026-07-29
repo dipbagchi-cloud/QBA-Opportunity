@@ -59,7 +59,7 @@ const LIST_COLUMNS: ListColumn[] = [
     { key: 'probability', label: 'Prob.', sort: 'client' },
     { key: 'salesRep', label: 'Sales Rep', sort: 'server', filter: true },
     { key: 'manager', label: 'Manager', sort: 'server', filter: true },
-    { key: 'department', label: 'Department', sort: 'server', filter: true },
+    { key: 'practice', label: 'Practice', sort: 'server', filter: true },
     { key: 'technology', label: 'Technology', sort: 'server', filter: true },
     { key: 'createdAt', label: 'Created', sort: 'server' },
     { key: 'startDate', label: 'Start Date', sort: 'server' },
@@ -581,7 +581,7 @@ export default function OpportunitiesPage() {
                                                 {opp.managerName || <span className="text-slate-300">—</span>}
                                             </td>
                                             <td className="py-2.5 px-4 text-[11px] text-slate-600">
-                                                {opp.department || <span className="text-slate-300">—</span>}
+                                                {opp.practice || <span className="text-slate-300">—</span>}
                                             </td>
                                             <td className="py-2.5 px-4 text-[11px] text-slate-600 max-w-[180px]">
                                                 {opp.technology

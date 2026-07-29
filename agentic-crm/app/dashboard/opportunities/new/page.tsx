@@ -871,6 +871,8 @@ export default function NewOpportunityPage() {
                             type="number"
                             name="expectedDayRate"
                             required
+                            step="any"
+                            min="0"
                             placeholder="0"
                             className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-md text-sm shadow-sm"
                             onChange={handleChange}

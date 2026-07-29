@@ -2381,6 +2381,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 type="number"
                                 name="expectedDayRate"
                                 required
+                                step="any"
+                                min="0"
                                 value={formData.expectedDayRate}
                                 placeholder="0"
                                 disabled={!isPipelineEditable}

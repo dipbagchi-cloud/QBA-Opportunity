@@ -67,7 +67,7 @@ export async function listOpportunities(req: Request, res: Response) {
         // case-insensitive "contains" matches resolved in the database so
         // they apply across the whole dataset, not just the current page.
         const nameFilter = (req.query.name as string || '').trim();
-        const departmentFilter = (req.query.department as string || '').trim();
+        const practiceFilter = (req.query.practice as string || '').trim();
         const technologyFilter = (req.query.technology as string || '').trim();
         // Server-side sort: sortKey maps to a DB-backed orderBy below.
         const sortKey = (req.query.sortKey as string || '').trim();
@@ -132,8 +132,8 @@ export async function listOpportunities(req: Request, res: Response) {
             });
         }
 
-        if (departmentFilter) {
-            andFilters.push({ owner: { department: { contains: departmentFilter, mode: 'insensitive' } } });
+        if (practiceFilter) {
+            andFilters.push({ practice: { contains: practiceFilter, mode: 'insensitive' } });
         }
 
         if (technologyFilter) {
@@ -153,7 +153,7 @@ export async function listOpportunities(req: Request, res: Response) {
             value: { value: sortDir },
             salesRep: { salesRepName: sortDir },
             manager: { managerName: sortDir },
-            department: { owner: { department: sortDir } },
+            practice: { practice: sortDir },
             technology: { technology: sortDir },
             createdAt: { createdAt: sortDir },
             startDate: { tentativeStartDate: sortDir },
@@ -315,7 +315,7 @@ export async function listOpportunities(req: Request, res: Response) {
                 projectType: (opp as any).projectType || '',
                 fundingType: (opp as any).fundingType || '',
                 pricingModel: (opp as any).pricingModel || '',
-                department: (opp.owner as any)?.department || '',
+                practice: (opp as any).practice || '',
                 expectedCloseDate: opp.expectedCloseDate ? new Date(opp.expectedCloseDate).toISOString().slice(0, 10) : '',
                 actualCloseDate: opp.actualCloseDate ? new Date(opp.actualCloseDate).toISOString().slice(0, 10) : '',
                 tentativeStartDate: opp.tentativeStartDate ? new Date(opp.tentativeStartDate).toISOString().slice(0, 10) : '',
@@ -417,18 +417,17 @@ export async function listOpportunities(req: Request, res: Response) {
 // current page.
 export async function getOpportunityFilterOptions(_req: Request, res: Response) {
     try {
-        const [opps, users, stages] = await Promise.all([
+        const [opps, stages] = await Promise.all([
             prisma.opportunity.findMany({
                 select: {
                     title: true,
                     salesRepName: true,
                     managerName: true,
                     technology: true,
-                    owner: { select: { department: true } },
+                    practice: true,
                     stage: { select: { name: true } },
                 },
             }),
-            prisma.user.findMany({ where: { department: { not: null } }, select: { department: true } }),
             prisma.stage.findMany({ select: { name: true } }),
         ]);
 
@@ -450,7 +449,7 @@ export async function getOpportunityFilterOptions(_req: Request, res: Response) 
             stage: uniqSorted([...stages.map((s) => s.name), ...opps.map((o) => o.stage?.name)]),
             salesRep: uniqSorted(opps.map((o) => o.salesRepName)),
             manager: uniqSorted(opps.map((o) => o.managerName)),
-            department: uniqSorted([...users.map((u) => u.department), ...opps.map((o) => o.owner?.department)]),
+            practice: uniqSorted(opps.map((o) => (o as any).practice)),
             technology: uniqSorted(techTokens),
         });
     } catch (error) {
