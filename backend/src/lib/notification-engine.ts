@@ -763,6 +763,125 @@ ${changesHtml}
   }
 }
 
+/* ------------------------------------------------------------------ */
+/* Comment added — fired when a team member posts a comment on an      */
+/* opportunity. Notifies the assigned deal team and every active Admin */
+/* so the responsible people see activity on their deals. The comment  */
+/* author is excluded from all lists (no self-notify).                 */
+/*   To: owner (salesperson) + sales rep + manager + presales assignee */
+/*   Cc: all active Admins                                             */
+/* Delivered via in-app notification (every recipient) and email.      */
+/* Fire-and-forget: errors are caught and logged, never block the      */
+/* comment write.                                                      */
+/* ------------------------------------------------------------------ */
+
+interface CommentNotificationContext {
+  opportunityId: string;
+  commentContent: string;
+  commentStage?: string | null;
+  authorUserId: string;
+  authorName: string;
+}
+
+export async function evaluateCommentNotification(
+  ctx: CommentNotificationContext
+): Promise<void> {
+  try {
+    const content = (ctx.commentContent || '').trim();
+    if (!content) return;
+
+    const opp = await prisma.opportunity.findUnique({
+      where: { id: ctx.opportunityId },
+      select: {
+        title: true,
+        currentStage: true,
+        owner: { select: { id: true, email: true, name: true, muteNotification: true } },
+        salesRepName: true,
+        managerName: true,
+        presalesAssigneeName: true,
+        client: { select: { name: true } },
+        stage: { select: { name: true } },
+      },
+    });
+    if (!opp) return;
+
+    type Recipient = { id: string; email: string; name: string; muteNotification: boolean };
+
+    // Deal team (To). Dedupe by user id; never include the comment author.
+    const toUsers: Recipient[] = [];
+    const seen = new Set<string>([ctx.authorUserId]);
+    const addTo = (u: Recipient | null) => {
+      if (!u || seen.has(u.id)) return;
+      seen.add(u.id);
+      toUsers.push(u);
+    };
+    if (opp.owner) addTo(opp.owner);
+    addTo(await resolveUserByName(opp.salesRepName));
+    addTo(await resolveUserByName(opp.managerName));
+    for (const pname of (opp.presalesAssigneeName || '').split(',').map(s => s.trim()).filter(Boolean)) {
+      addTo(await resolveUserByName(pname));
+    }
+
+    // Cc = every active Admin (global role), deduped vs the To list + author.
+    const admins = await prisma.user.findMany({
+      where: { isActive: true, roles: { some: { name: { in: GLOBAL_ROLES } } } },
+      select: { id: true, email: true, name: true, muteNotification: true },
+    });
+    const ccUsers = admins.filter(a => !seen.has(a.id));
+    ccUsers.forEach(a => seen.add(a.id));
+
+    if (toUsers.length === 0 && ccUsers.length === 0) {
+      console.log(`[NotificationEngine] comment_added: no eligible recipients for opp ${ctx.opportunityId} — skipping`);
+      return;
+    }
+
+    const stageName = opp.stage?.name || opp.currentStage || ctx.commentStage || '';
+    const clientName = opp.client?.name || '';
+    const oppLink = `${process.env.FRONTEND_URL || 'https://qcrm.qbadvisory.com'}/dashboard/opportunities/${ctx.opportunityId}`;
+
+    const escape = (s: string) => String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    const commentHtml = escape(content).replace(/\n/g, '<br/>');
+    const subject = `Q-CRM: New comment on "${opp.title}"${stageName ? ` (${stageName})` : ''}`;
+    const html = `<div style="font-family:Arial,sans-serif;max-width:640px;margin:0 auto;padding:20px">
+<h2 style="color:#4f46e5;margin:0 0 16px">New Comment</h2>
+<p><strong>${escape(ctx.authorName)}</strong> added a comment on the following opportunity${stageName ? ` (currently in <strong>${escape(stageName)}</strong>)` : ''}:</p>
+<table style="width:100%;border-collapse:collapse;margin:16px 0;font-size:14px">
+<tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0;width:35%"><strong>Opportunity</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">${escape(opp.title)}</td></tr>
+${clientName ? `<tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Client</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">${escape(clientName)}</td></tr>` : ''}
+<tr><td style="padding:8px 12px;background:#f8fafc;border:1px solid #e2e8f0"><strong>Comment by</strong></td><td style="padding:8px 12px;border:1px solid #e2e8f0">${escape(ctx.authorName)}</td></tr>
+</table>
+<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:12px 16px;font-size:14px;line-height:1.6;color:#1f2937">${commentHtml}</div>
+<p style="margin-top:20px"><a href="${oppLink}" style="background:#4f46e5;color:#fff;padding:10px 20px;text-decoration:none;border-radius:6px;display:inline-block">View Opportunity</a></p>
+<p style="color:#64748b;font-size:12px;margin-top:24px">This is an automated notification from Q-CRM. You are receiving it because you are assigned to this opportunity or are an administrator.</p>
+</div>`;
+
+    const toEmails = toUsers.filter(u => !u.muteNotification).map(u => u.email);
+    const ccEmails = ccUsers.filter(u => !u.muteNotification).map(u => u.email);
+    await sendRawEmail(toEmails, ccEmails, subject, html, 'comment_added');
+
+    // In-app notification for every To + Cc recipient.
+    const preview = content.length > 140 ? `${content.slice(0, 140)}…` : content;
+    for (const user of [...toUsers, ...ccUsers]) {
+      await prisma.notification.create({
+        data: {
+          type: 'comment_added',
+          title: `New comment on "${opp.title}"`,
+          message: `${ctx.authorName} commented: "${preview}"`,
+          link: `/dashboard/opportunities/${ctx.opportunityId}`,
+          userId: user.id,
+        },
+      });
+    }
+
+    console.log(`[NotificationEngine] comment_added for opp ${ctx.opportunityId}: To=${toUsers.length} Cc=${ccUsers.length}`);
+  } catch (error) {
+    console.error('[NotificationEngine] Error sending comment notification:', error);
+  }
+}
+
 /**
  * Stale-opportunity reminders.
  *

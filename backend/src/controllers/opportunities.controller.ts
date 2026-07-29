@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { sendNotificationEmail } from '../lib/email';
-import { evaluateStageChangeRules, evaluateDataConditionRules, evaluateOpportunityCreatedRules, evaluateAssignmentChangeRules, evaluateOpportunityChangeNotice, evaluateExtendedNotification, evaluateStartDateChangedNotification, resolveCalculatedFields } from '../lib/notification-engine';
+import { evaluateStageChangeRules, evaluateDataConditionRules, evaluateOpportunityCreatedRules, evaluateAssignmentChangeRules, evaluateOpportunityChangeNotice, evaluateExtendedNotification, evaluateStartDateChangedNotification, evaluateCommentNotification, resolveCalculatedFields } from '../lib/notification-engine';
 import { calculateOpportunityProbability } from '../lib/opportunity-probability';
 import { buildOpportunityAccess } from '../lib/opportunity-access';
 import path from 'path';
@@ -1855,6 +1855,17 @@ export async function addComment(req: Request, res: Response) {
             } as any,
             include: { author: { select: { id: true, name: true, email: true } } },
         });
+
+        // Notify the assigned deal team (sales rep, manager, presales, owner)
+        // and every active Admin that a new comment was posted. Fire-and-forget
+        // so notification delivery never blocks or fails the comment write.
+        evaluateCommentNotification({
+            opportunityId: id,
+            commentContent: comment.content,
+            commentStage: comment.stage,
+            authorUserId: req.user!.userId,
+            authorName: (comment as any).author?.name || 'A team member',
+        }).catch(err => console.error('[addComment] comment notification failed:', err));
 
         res.json(comment);
     } catch (error) {
