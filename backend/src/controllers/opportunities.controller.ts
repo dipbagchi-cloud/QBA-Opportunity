@@ -488,22 +488,19 @@ function csvCell(value: unknown): string {
 }
 
 // GET /api/opportunities/export
-// CSV of every open opportunity — any stage that is not closed, excluding
-// archived deals. Deliberately unpaginated and unfiltered: the "Download Open"
-// button on the Opportunities list always yields the whole open pipeline,
-// regardless of the search/column filters applied to the on-screen table.
+// CSV of every opportunity — open and closed alike, matching the same row set
+// the list endpoint serves. Deliberately unpaginated and unfiltered: the
+// "Download All" button on the Opportunities list always yields the whole
+// dataset, regardless of the search/column filters applied to the on-screen
+// table.
 //
 // Money columns are exported in each opportunity's own currency (with the code
 // in its own column) rather than converted to the viewer's display currency, so
 // the file carries the stored figures with no implied exchange rate.
-export async function exportOpenOpportunities(_req: Request, res: Response) {
+export async function exportOpportunities(_req: Request, res: Response) {
     try {
         const [opportunities, stalledConfig] = await Promise.all([
             prisma.opportunity.findMany({
-                where: {
-                    isArchived: false,
-                    stage: { isClosed: false, name: { notIn: CLOSED_STAGE_NAMES } },
-                },
                 include: {
                     client: true,
                     stage: true,
@@ -527,7 +524,7 @@ export async function exportOpenOpportunities(_req: Request, res: Response) {
             'Currency', 'Estimated Value', 'Quote', 'Probability (%)',
             'Sales Rep', 'Manager', 'Presales Assignee', 'Practice', 'Technology',
             'Region', 'Country', 'Project Type', 'Pricing Model',
-            'Created', 'Start Date', 'Est. End Date', 'Expected Close Date',
+            'Created', 'Start Date', 'Est. End Date', 'Expected Close Date', 'Actual Close Date',
             'Days Since Last Activity', 'Stalled',
         ];
 
@@ -538,6 +535,9 @@ export async function exportOpenOpportunities(_req: Request, res: Response) {
         const asMoney = (n: number | null) => (n == null ? '' : n.toFixed(2));
 
         const rows = opportunities.map((opp) => {
+            const stageName = opp.stage?.name || opp.currentStage || '';
+            const isClosedStage = opp.stage?.isClosed === true || CLOSED_STAGE_NAMES.includes(stageName);
+
             const stageEnteredAt = opp.stageHistory?.[0]?.enteredAt
                 ? new Date(opp.stageHistory[0].enteredAt)
                 : new Date(opp.createdAt);
@@ -554,7 +554,7 @@ export async function exportOpenOpportunities(_req: Request, res: Response) {
                 opp.title,
                 opp.client.name,
                 opp.owner.name,
-                opp.stage?.name || opp.currentStage || '',
+                stageName,
                 opp.detailedStatus || '',
                 daysInStage,
                 opp.currency || '',
@@ -574,20 +574,23 @@ export async function exportOpenOpportunities(_req: Request, res: Response) {
                 asDate(opp.tentativeStartDate),
                 asDate(opp.tentativeEndDate),
                 asDate(opp.expectedCloseDate),
+                asDate(opp.actualCloseDate),
                 daysSinceActivity,
-                (opp.isStalled || daysSinceActivity > stalledDaysThreshold) ? 'Yes' : 'No',
+                // Closed deals carry no stall risk — mirrors the list view, which
+                // never flags a won/lost/delivered deal as stalled.
+                (!isClosedStage && (opp.isStalled || daysSinceActivity > stalledDaysThreshold)) ? 'Yes' : 'No',
             ].map(csvCell).join(',');
         });
 
         // Leading BOM so Excel detects UTF-8 and renders non-ASCII client names.
         const csv = '﻿' + [HEADERS.map(csvCell).join(','), ...rows].join('\r\n') + '\r\n';
-        const filename = `open-opportunities-${new Date().toISOString().slice(0, 10)}.csv`;
+        const filename = `opportunities-${new Date().toISOString().slice(0, 10)}.csv`;
 
         res.setHeader('Content-Type', 'text/csv; charset=utf-8');
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
         res.send(csv);
     } catch (error) {
-        console.error('Export open opportunities error:', error);
+        console.error('Export opportunities error:', error);
         res.status(500).json({ error: 'Failed to export opportunities' });
     }
 }

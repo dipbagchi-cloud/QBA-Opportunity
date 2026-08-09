@@ -118,12 +118,12 @@ export default function OpportunitiesPage() {
     const [viewMode, setViewMode] = useState<'list' | 'kanban' | 'by_owner'>('list');
     const { currency: globalCurrency, getSymbol, getRate } = useCurrency();
 
-    // Download every open opportunity as CSV. The export is deliberately
-    // independent of the on-screen search/filters — it's always the full open
-    // pipeline. Fetched as a blob rather than a plain link because the API needs
+    // Download every opportunity as CSV. The export is deliberately independent
+    // of the on-screen search/filters — it's always the full dataset, open and
+    // closed. Fetched as a blob rather than a plain link because the API needs
     // the bearer token in a header.
     const [downloading, setDownloading] = useState(false);
-    const handleDownloadOpen = async () => {
+    const handleDownloadAll = async () => {
         if (downloading) return;
         setDownloading(true);
         try {
@@ -131,7 +131,7 @@ export default function OpportunitiesPage() {
             if (!res.ok) throw new Error(`Export failed (${res.status})`);
             const blob = await res.blob();
             const filename = /filename="?([^"]+)"?/.exec(res.headers.get('content-disposition') || '')?.[1]
-                || `open-opportunities-${new Date().toISOString().slice(0, 10)}.csv`;
+                || `opportunities-${new Date().toISOString().slice(0, 10)}.csv`;
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
@@ -311,15 +311,15 @@ export default function OpportunitiesPage() {
                         )}
                     </button>
                     <button
-                        onClick={handleDownloadOpen}
+                        onClick={handleDownloadAll}
                         disabled={downloading}
-                        title="Download all open opportunities as CSV (ignores the filters applied below)"
+                        title="Download all opportunities as CSV (ignores the filters applied below)"
                         className="btn-ghost bg-white border border-slate-200 text-slate-600 flex items-center gap-1.5 hover:border-indigo-300 hover:text-indigo-600 disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                         {downloading
                             ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
                             : <Download className="w-3.5 h-3.5" />}
-                        {downloading ? 'Preparing…' : 'Download Open'}
+                        {downloading ? 'Preparing…' : 'Download All'}
                     </button>
                     {canCreateOpportunity && (
                         <Link href="/dashboard/opportunities/new">
