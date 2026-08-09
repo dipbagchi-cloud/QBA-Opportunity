@@ -26,6 +26,8 @@ import {
     Target,
     Info,
     Paperclip,
+    Download,
+    Loader2,
 } from "lucide-react";
 import Link from "next/link";
 import { useOpportunityStore } from "@/lib/store";
@@ -115,6 +117,38 @@ export default function OpportunitiesPage() {
 
     const [viewMode, setViewMode] = useState<'list' | 'kanban' | 'by_owner'>('list');
     const { currency: globalCurrency, getSymbol, getRate } = useCurrency();
+
+    // Download every open opportunity as CSV. The export is deliberately
+    // independent of the on-screen search/filters — it's always the full open
+    // pipeline. Fetched as a blob rather than a plain link because the API needs
+    // the bearer token in a header.
+    const [downloading, setDownloading] = useState(false);
+    const handleDownloadOpen = async () => {
+        if (downloading) return;
+        setDownloading(true);
+        try {
+            const res = await fetch(`${API_URL}/api/opportunities/export`, { headers: getAuthHeaders() });
+            if (!res.ok) throw new Error(`Export failed (${res.status})`);
+            const blob = await res.blob();
+            const filename = /filename="?([^"]+)"?/.exec(res.headers.get('content-disposition') || '')?.[1]
+                || `open-opportunities-${new Date().toISOString().slice(0, 10)}.csv`;
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            window.URL.revokeObjectURL(url);
+        } catch (error) {
+            toast({
+                title: "Couldn't download",
+                description: error instanceof Error ? error.message : 'Something went wrong. Please try again.',
+            });
+        } finally {
+            setDownloading(false);
+        }
+    };
 
     // Attachment popover state
     type AttachItem = { id: string; originalName: string; category: string };
@@ -275,6 +309,17 @@ export default function OpportunitiesPage() {
                                 {activeFilterCount}
                             </span>
                         )}
+                    </button>
+                    <button
+                        onClick={handleDownloadOpen}
+                        disabled={downloading}
+                        title="Download all open opportunities as CSV (ignores the filters applied below)"
+                        className="btn-ghost bg-white border border-slate-200 text-slate-600 flex items-center gap-1.5 hover:border-indigo-300 hover:text-indigo-600 disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                        {downloading
+                            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            : <Download className="w-3.5 h-3.5" />}
+                        {downloading ? 'Preparing…' : 'Download Open'}
                     </button>
                     {canCreateOpportunity && (
                         <Link href="/dashboard/opportunities/new">

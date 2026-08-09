@@ -33,6 +33,39 @@ function parseDateOnly(value: unknown): Date | null {
     return new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate()));
 }
 
+/**
+ * Final closure quote — what the salesperson committed to in the GOM
+ * Calculator. Priority: finalRevenue (committed quote) → totalRevenue →
+ * gomSummary.totalRevenue. presalesData is stored in its own currency
+ * (typically INR), so the value is converted into the opportunity's currency
+ * using the rate snapshot on the opportunity. Returns null when the GOM has
+ * no revenue figure yet.
+ */
+function resolveCommittedQuote(opp: {
+    presalesData?: any;
+    currency?: string | null;
+    metadata?: any;
+}): number | null {
+    const pd = opp.presalesData as any;
+    let raw: number | null = null;
+    if (pd?.finalRevenue != null) raw = Number(pd.finalRevenue);
+    else if (pd?.totalRevenue != null) raw = Number(pd.totalRevenue);
+    else if (pd?.gomSummary?.totalRevenue != null) raw = Number(pd.gomSummary.totalRevenue);
+    if (raw == null) return null;
+
+    const oppCurr = opp.currency || 'INR';
+    const presalesCurr = pd?.currency || oppCurr;
+    if (presalesCurr === oppCurr) return raw;
+
+    const snapshot = (opp.metadata as any)?.exchangeRatesSnapshot as Record<string, number> | undefined;
+    const rateToOpp = snapshot?.[oppCurr];
+    const rateFromPre = snapshot?.[presalesCurr];
+    if (rateToOpp && rateFromPre) {
+        return (raw * rateToOpp) / rateFromPre;
+    }
+    return raw;
+}
+
 async function resolveOpportunityAccess(
     authUser: NonNullable<Request['user']>,
     opportunity: { ownerId: string; salesRepName?: string | null; managerName?: string | null; presalesAssigneeName?: string | null; stage?: { name?: string | null } | null; currentStage?: string | null },
@@ -236,8 +269,7 @@ export async function listOpportunities(req: Request, res: Response) {
 
             // Closed deals (Won / Lost / Delivered) carry no health risk — the
             // deal is done, so stall/health signals don't apply.
-            const CLOSED_STAGE_SET = ['Closed Won', 'Closed-Won', 'Closed Lost', 'Proposal Lost', 'Delivered'];
-            const isClosedStage = CLOSED_STAGE_SET.includes(stageName);
+            const isClosedStage = CLOSED_STAGE_NAMES.includes(stageName);
 
             // 3. Stalled detection — a deal is stalled when there's been no
             // activity for the threshold window (not merely time-in-stage), or
@@ -332,31 +364,7 @@ export async function listOpportunities(req: Request, res: Response) {
                 isStalled,
                 healthScore: finalHealth,
                 metadata: opp.metadata,
-                quote: (() => {
-                    // Final closure quote — what the salesperson committed to in the
-                    // GOM Calculator. Priority: finalRevenue (committed quote) →
-                    // totalRevenue → gomSummary.totalRevenue. presalesData is stored
-                    // in its own currency (typically INR); convert to the
-                    // opportunity's currency so the column/tooltip render correctly.
-                    const pd = opp.presalesData as any;
-                    let raw: number | null = null;
-                    if (pd?.finalRevenue != null) raw = Number(pd.finalRevenue);
-                    else if (pd?.totalRevenue != null) raw = Number(pd.totalRevenue);
-                    else if (pd?.gomSummary?.totalRevenue != null) raw = Number(pd.gomSummary.totalRevenue);
-                    if (raw == null) return null;
-
-                    const oppCurr = opp.currency || 'INR';
-                    const presalesCurr = pd?.currency || oppCurr;
-                    if (presalesCurr === oppCurr) return raw;
-
-                    const snapshot = (opp.metadata as any)?.exchangeRatesSnapshot as Record<string, number> | undefined;
-                    const rateToOpp = snapshot?.[oppCurr];
-                    const rateFromPre = snapshot?.[presalesCurr];
-                    if (rateToOpp && rateFromPre) {
-                        return (raw * rateToOpp) / rateFromPre;
-                    }
-                    return raw;
-                })(),
+                quote: resolveCommittedQuote(opp),
                 monthlyRevenue: (() => {
                     // Per-month revenue breakdown from the GOM Calculator
                     // (presalesData.gomSummary.monthlyData). Keys are "YYYY-MM",
@@ -455,6 +463,132 @@ export async function getOpportunityFilterOptions(_req: Request, res: Response) 
     } catch (error) {
         console.error('Filter options error:', error);
         res.status(500).json({ error: 'Failed to load filter options' });
+    }
+}
+
+// Stage names that mean the deal is finished. `Stage.isClosed` is the primary
+// signal (set correctly for Closed Won / Closed Lost / Proposal Lost), and this
+// name list is the backstop for any stage added later without the flag — it
+// mirrors CLOSED_STAGE_NAMES in lib/opportunity-access.ts and
+// CLOSED_STAGES_FOR_REMINDER in lib/notification-engine.ts.
+const CLOSED_STAGE_NAMES = ['Closed Won', 'Closed-Won', 'Closed Lost', 'Proposal Lost', 'Delivered'];
+
+/**
+ * Render one CSV cell: escape quotes/commas/newlines per RFC 4180, and defuse
+ * spreadsheet formula injection — a cell starting with = + - @ or a control
+ * character is evaluated as a formula by Excel/Sheets, and these values are
+ * user-authored (opportunity titles, client names, technology lists).
+ */
+function csvCell(value: unknown): string {
+    if (value === null || value === undefined) return '';
+    let s = String(value);
+    if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+    if (/[",\r\n]/.test(s)) s = `"${s.replace(/"/g, '""')}"`;
+    return s;
+}
+
+// GET /api/opportunities/export
+// CSV of every open opportunity — any stage that is not closed, excluding
+// archived deals. Deliberately unpaginated and unfiltered: the "Download Open"
+// button on the Opportunities list always yields the whole open pipeline,
+// regardless of the search/column filters applied to the on-screen table.
+//
+// Money columns are exported in each opportunity's own currency (with the code
+// in its own column) rather than converted to the viewer's display currency, so
+// the file carries the stored figures with no implied exchange rate.
+export async function exportOpenOpportunities(_req: Request, res: Response) {
+    try {
+        const [opportunities, stalledConfig] = await Promise.all([
+            prisma.opportunity.findMany({
+                where: {
+                    isArchived: false,
+                    stage: { isClosed: false, name: { notIn: CLOSED_STAGE_NAMES } },
+                },
+                include: {
+                    client: true,
+                    stage: true,
+                    owner: true,
+                    stageHistory: { orderBy: { enteredAt: 'desc' }, take: 1 },
+                    notes: { orderBy: { createdAt: 'desc' }, take: 1, select: { createdAt: true } },
+                },
+                orderBy: { updatedAt: 'desc' },
+            }),
+            prisma.systemConfig.findUnique({ where: { key: 'budget_assumptions' } }),
+        ]);
+
+        const stalledDaysThreshold = (() => {
+            const raw = (stalledConfig?.value as any)?.stalledDaysThreshold;
+            const n = Number(raw);
+            return Number.isFinite(n) && n > 0 ? n : 30;
+        })();
+
+        const HEADERS = [
+            'Opportunity Name', 'Client', 'Owner', 'Stage', 'Status', 'Days in Stage',
+            'Currency', 'Estimated Value', 'Quote', 'Probability (%)',
+            'Sales Rep', 'Manager', 'Presales Assignee', 'Practice', 'Technology',
+            'Region', 'Country', 'Project Type', 'Pricing Model',
+            'Created', 'Start Date', 'Est. End Date', 'Expected Close Date',
+            'Days Since Last Activity', 'Stalled',
+        ];
+
+        const now = Date.now();
+        const asDate = (d: Date | null | undefined) => (d ? new Date(d).toISOString().slice(0, 10) : '');
+        // Match the list view's rounding: money to 2dp, no thousands separators
+        // so the cell stays numeric when the CSV is opened in a spreadsheet.
+        const asMoney = (n: number | null) => (n == null ? '' : n.toFixed(2));
+
+        const rows = opportunities.map((opp) => {
+            const stageEnteredAt = opp.stageHistory?.[0]?.enteredAt
+                ? new Date(opp.stageHistory[0].enteredAt)
+                : new Date(opp.createdAt);
+            const daysInStage = Math.floor((now - stageEnteredAt.getTime()) / 86400000);
+
+            const latestNoteAt = (opp as any).notes?.[0]?.createdAt;
+            const lastActivityAt = Math.max(
+                new Date(opp.updatedAt).getTime(),
+                latestNoteAt ? new Date(latestNoteAt).getTime() : 0,
+            );
+            const daysSinceActivity = Math.max(0, Math.floor((now - lastActivityAt) / 86400000));
+
+            return [
+                opp.title,
+                opp.client.name,
+                opp.owner.name,
+                opp.stage?.name || opp.currentStage || '',
+                opp.detailedStatus || '',
+                daysInStage,
+                opp.currency || '',
+                asMoney(opp.value == null ? null : Number(opp.value)),
+                asMoney(resolveCommittedQuote(opp)),
+                calculateOpportunityProbability(opp as any),
+                opp.salesRepName || '',
+                opp.managerName || '',
+                opp.presalesAssigneeName || '',
+                opp.practice || '',
+                opp.technology || '',
+                opp.region || '',
+                opp.country || '',
+                opp.projectType || '',
+                opp.pricingModel || '',
+                asDate(opp.createdAt),
+                asDate(opp.tentativeStartDate),
+                asDate(opp.tentativeEndDate),
+                asDate(opp.expectedCloseDate),
+                daysSinceActivity,
+                (opp.isStalled || daysSinceActivity > stalledDaysThreshold) ? 'Yes' : 'No',
+            ].map(csvCell).join(',');
+        });
+
+        // Leading BOM so Excel detects UTF-8 and renders non-ASCII client names.
+        const csv = '﻿' + [HEADERS.map(csvCell).join(','), ...rows].join('\r\n') + '\r\n';
+        const filename = `open-opportunities-${new Date().toISOString().slice(0, 10)}.csv`;
+
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.send(csv);
+    } catch (error) {
+        console.error('Export open opportunities error:', error);
+        res.status(500).json({ error: 'Failed to export opportunities' });
     }
 }
 
