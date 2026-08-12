@@ -9,6 +9,7 @@ import {
     Clock,
     AlertTriangle,
     CheckCircle2,
+    XCircle,
     Briefcase,
     Loader2,
     RefreshCw,
@@ -678,11 +679,29 @@ export default function DashboardPage() {
     };
     const openPipeline = opportunities.filter(isOpenStage);
     const projectedRevenue = sumValue(openPipeline);
-    // Closed Revenue — drill filter: Project stage or Closed Won
-    const closedRevenue = sumValue(opportunities.filter(o => {
-        const s = STAGE_DISPLAY[o.currentStage] || o.currentStage;
-        return s === 'Project' || o.currentStage === 'Closed Won' || o.currentStage === 'Closed-Won';
-    }));
+
+    // Won and lost are reported as their own headline tiles rather than a single
+    // "Closed Revenue" figure, so the outcome split is visible without opening a
+    // drill-down. Both are derived here once and reused by the tiles, their
+    // drill-downs, and the workflow-phase tiles below.
+    const WON_STAGES = ['Closed Won', 'Closed-Won', 'Delivered'];
+    const LOST_STAGES = ['Closed Lost', 'Proposal Lost'];
+    const closedWonOpps = opportunities.filter(o => WON_STAGES.includes(o.currentStage));
+    const closedLostOpps = opportunities.filter(o => LOST_STAGES.includes(o.currentStage));
+    const closedWonValue = sumValue(closedWonOpps);
+    const closedLostValue = sumValue(closedLostOpps);
+
+    const CLOSED_DEAL_COLUMNS: { key: string; label: string; format?: 'currency' | 'percent' | 'number' | 'text' }[] = [
+        { key: "name", label: "Opportunity", format: "text" },
+        { key: "client", label: "Client", format: "text" },
+        { key: "value", label: "Value", format: "currency" },
+        { key: "currentStage", label: "Stage", format: "text" },
+        { key: "practice", label: "Practice", format: "text" },
+        { key: "actualCloseDate", label: "Closed On", format: "text" },
+        { key: "owner", label: "Owner", format: "text" },
+        { key: "salesRepName", label: "Sales Rep", format: "text" },
+        { key: "technology", label: "Technology", format: "text" },
+    ];
     // Pipeline Value — same open set, so the two tiles reconcile by construction.
     const pipelineValueSum = sumValue(openPipeline);
 
@@ -801,12 +820,20 @@ export default function DashboardPage() {
             iconColor: "text-indigo-600",
         },
         {
-            title: "Closed Revenue",
-            value: fmtCurrency(closedRevenue),
-            subtitle: `${sales?.wonCount || 0} deals won`,
+            title: "Closed Won",
+            value: fmtCurrency(closedWonValue),
+            subtitle: `${closedWonOpps.length} ${closedWonOpps.length === 1 ? 'deal' : 'deals'} won`,
             icon: CheckCircle2,
             iconBg: "bg-emerald-100",
             iconColor: "text-emerald-600",
+        },
+        {
+            title: "Closed Lost",
+            value: fmtCurrency(closedLostValue),
+            subtitle: `${closedLostOpps.length} ${closedLostOpps.length === 1 ? 'deal' : 'deals'} lost`,
+            icon: XCircle,
+            iconBg: "bg-rose-100",
+            iconColor: "text-rose-600",
         },
         {
             title: "Opportunities",
@@ -1072,13 +1099,16 @@ export default function DashboardPage() {
     };
 
     // Stage tiles — bucketed counts/values + drill-down to project-level table
+    // Row 2 — one tile per REAL stage from the stages table, open stages only.
+    // Won/Lost are headline tiles in row 1, so they are deliberately absent here.
+    // These use the stage's own name (Discovery, Qualification, …) rather than
+    // the workflow-phase wording, so the row agrees with the Stage column, the
+    // stage filter and the opportunity timeline.
     const STAGE_BUCKETS: { label: string; stages: string[]; iconBg: string; iconColor: string; badgeColor: string }[] = [
-        { label: 'Pipeline',    stages: ['Discovery', 'Pipeline'],                  iconBg: 'bg-sky-100',     iconColor: 'text-sky-600',     badgeColor: 'bg-sky-50 text-sky-700 border-sky-200' },
-        { label: 'Presales',    stages: ['Qualification', 'Presales'],              iconBg: 'bg-amber-100',   iconColor: 'text-amber-600',   badgeColor: 'bg-amber-50 text-amber-700 border-amber-200' },
-        { label: 'Sales',       stages: ['Proposal', 'Sales'],                       iconBg: 'bg-purple-100',  iconColor: 'text-purple-600',  badgeColor: 'bg-purple-50 text-purple-700 border-purple-200' },
-        { label: 'Negotiation', stages: ['Negotiation'],                             iconBg: 'bg-indigo-100',  iconColor: 'text-indigo-600',  badgeColor: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
-        { label: 'Closed Won',  stages: ['Closed Won', 'Closed-Won', 'Delivered'],   iconBg: 'bg-emerald-100', iconColor: 'text-emerald-600', badgeColor: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
-        { label: 'Closed Lost', stages: ['Closed Lost', 'Proposal Lost'],            iconBg: 'bg-rose-100',    iconColor: 'text-rose-600',    badgeColor: 'bg-rose-50 text-rose-700 border-rose-200' },
+        { label: 'Discovery',     stages: ['Discovery', 'Pipeline'],      iconBg: 'bg-sky-100',    iconColor: 'text-sky-600',    badgeColor: 'bg-sky-50 text-sky-700 border-sky-200' },
+        { label: 'Qualification', stages: ['Qualification', 'Presales'],  iconBg: 'bg-amber-100',  iconColor: 'text-amber-600',  badgeColor: 'bg-amber-50 text-amber-700 border-amber-200' },
+        { label: 'Proposal',      stages: ['Proposal', 'Sales'],          iconBg: 'bg-purple-100', iconColor: 'text-purple-600', badgeColor: 'bg-purple-50 text-purple-700 border-purple-200' },
+        { label: 'Negotiation',   stages: ['Negotiation'],                iconBg: 'bg-indigo-100', iconColor: 'text-indigo-600', badgeColor: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
     ];
 
     const stageProjectColumns: { key: string; label: string; format?: 'currency' | 'percent' | 'number' | 'text' }[] = [
@@ -1143,18 +1173,34 @@ export default function DashboardPage() {
         ...stageProjectColumns,
         { key: 'lastActivity', label: 'Last Activity', format: 'text' as const },
     ];
+    // Row 3 — by workflow PHASE, which is a different question from row 2's
+    // per-stage split: Sales covers the whole sales motion (Proposal through
+    // Negotiation), so the two rows never simply repeat each other's numbers.
+    const PHASE_BUCKETS: { label: string; hint: string; stages: string[]; badgeColor: string }[] = [
+        { label: 'Pipeline', hint: 'Qualifying',      stages: ['Discovery', 'Pipeline'],                    badgeColor: 'bg-sky-50 text-sky-700 border-sky-200' },
+        { label: 'Presales', hint: 'Being estimated', stages: ['Qualification', 'Presales'],                badgeColor: 'bg-amber-50 text-amber-700 border-amber-200' },
+        { label: 'Sales',    hint: 'Quoted, in play', stages: ['Proposal', 'Sales', 'Negotiation'],         badgeColor: 'bg-purple-50 text-purple-700 border-purple-200' },
+    ];
+
     const portfolioTiles: {
         label: string; hint: string; count: number; totalValue: number;
         badgeColor: string; drill: DrillDownConfig;
     }[] = [
-        {
-            label: 'Open',
-            hint: 'Not yet won or lost',
-            badgeColor: 'bg-blue-50 text-blue-700 border-blue-200',
-            count: openOpps.length,
-            totalValue: openOpps.reduce((s, o) => s + (Number(o.value) || 0), 0),
-            drill: { title: 'Open Opportunities — Still In Play', columns: portfolioColumns, data: openOpps },
-        },
+        ...PHASE_BUCKETS.map(phase => {
+            const rows = opportunities.filter(o => phase.stages.includes(o.currentStage));
+            return {
+                label: phase.label,
+                hint: phase.hint,
+                badgeColor: phase.badgeColor,
+                count: rows.length,
+                totalValue: rows.reduce((s, o) => s + (Number(o.value) || 0), 0),
+                drill: {
+                    title: `${phase.label} — ${phase.hint}`,
+                    columns: portfolioColumns,
+                    data: rows,
+                } as DrillDownConfig,
+            };
+        }),
         {
             label: 'Closed',
             hint: 'Won or lost',
@@ -1254,23 +1300,17 @@ export default function DashboardPage() {
             ],
             data: openPipeline,
         },
-        { // Closed Revenue
-            title: "Closed Revenue – Won Deals",
-            columns: [
-                { key: "name", label: "Opportunity", format: "text" },
-                { key: "client", label: "Client", format: "text" },
-                { key: "value", label: "Value", format: "currency" },
-                { key: "currentStage", label: "Stage", format: "text" },
-                { key: "expectedCloseDate", label: "Opportunity Close Date", format: "text" },
-                { key: "actualCloseDate", label: "Actual Close", format: "text" },
-                { key: "owner", label: "Owner", format: "text" },
-                { key: "salesRepName", label: "Sales Rep", format: "text" },
-                { key: "technology", label: "Technology", format: "text" },
-            ],
-            data: opportunities.filter(o => {
-                const s = STAGE_DISPLAY[o.currentStage] || o.currentStage;
-                return s === 'Project' || o.currentStage === 'Closed Won' || o.currentStage === 'Closed-Won';
-            }),
+        { // Closed Won — must stay index-aligned with `stats` above
+            title: "Closed Won – Deals Won",
+            columns: CLOSED_DEAL_COLUMNS,
+            data: closedWonOpps,
+            dateKey: 'actualCloseDate',
+        },
+        { // Closed Lost
+            title: "Closed Lost – Deals Lost",
+            columns: CLOSED_DEAL_COLUMNS,
+            data: closedLostOpps,
+            dateKey: 'actualCloseDate',
         },
         { // Opportunities
             title: "All Opportunities",
@@ -1376,8 +1416,9 @@ export default function DashboardPage() {
                 </button>
             </div>
 
-            {/* Stats Grid — tight 7-col, each expandable */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-1.5">
+            {/* Stats Grid — 8 headline figures; Closed Won / Closed Lost are
+                separate tiles so the outcome split reads without a drill-down. */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-1.5">
                 {stats.map((stat, idx) => (
                     <ExpandableCard key={idx} drillConfig={statDrills[idx]} className="bg-white rounded-md px-2 py-1.5 border border-slate-100 hover:border-slate-200 transition-colors">
                         <div className="flex items-center gap-1 mb-0.5">
@@ -1392,8 +1433,8 @@ export default function DashboardPage() {
                 ))}
             </div>
 
-            {/* Stage Tiles — click to view project-level details */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1.5">
+            {/* Stage Tiles — one per open stage, using the real stage names */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 gap-1.5">
                 {stageTiles.map(tile => (
                     <ExpandableCard key={tile.label} drillConfig={tile.drill} className="bg-white rounded-md px-2 py-1.5 border border-slate-100 hover:border-slate-200 transition-colors">
                         <div className="flex items-center gap-1 mb-0.5">
@@ -1406,8 +1447,9 @@ export default function DashboardPage() {
                 ))}
             </div>
 
-            {/* Portfolio Tiles — Open/Closed split the whole book; Hot/Cold split the open ones */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-1.5">
+            {/* Portfolio Tiles — workflow phase (Pipeline/Presales/Sales),
+                then Closed, then Hot/Cold activity split */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1.5">
                 {portfolioTiles.map(tile => (
                     <ExpandableCard key={tile.label} drillConfig={tile.drill} className="bg-white rounded-md px-2 py-1.5 border border-slate-100 hover:border-slate-200 transition-colors">
                         <div className="flex items-center gap-1 mb-0.5">
