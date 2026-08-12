@@ -39,3 +39,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Scratch/rollback dirs from scripts/build-and-swap.sh
+/.next.build/
+/.next.prev/
+/.next.old/

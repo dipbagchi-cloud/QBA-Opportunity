@@ -43,7 +43,7 @@ jobs:
             git checkout Opportunity_MVC
             git reset --hard origin/Opportunity_MVC
 
-            chmod +x scripts/pm2-safe-restart.sh scripts/verify-frontend-build.sh
+            chmod +x scripts/pm2-safe-restart.sh scripts/verify-frontend-build.sh scripts/build-and-swap.sh
 
             echo "=== Backend: install + generate + compile ==="
             cd $APP_DIR/backend
@@ -60,10 +60,12 @@ jobs:
             echo "=== Frontend: install + build ==="
             cd $APP_DIR/agentic-crm
             npm ci 2>&1 | tail -5
-            # Build first, THEN swap the process — avoids leaving the site
-            # down for the duration of `next build` (~3 min).
+            # Build into a scratch dir and swap it in, so the live .next is
+            # untouched during the build. Building in place deletes the assets
+            # the running server is still advertising, which 404s every
+            # /_next/static/* request for the ~3 min the build takes.
             sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches' || true
-            NODE_OPTIONS='--max-old-space-size=3072' npm run build 2>&1 | tail -10
+            NODE_OPTIONS='--max-old-space-size=3072' bash $APP_DIR/scripts/build-and-swap.sh $APP_DIR npm run build 2>&1 | tail -12
 
             echo "=== Restart frontend safely ==="
             bash $APP_DIR/scripts/pm2-safe-restart.sh qcrm-frontend 3000 $ECO
@@ -103,7 +105,7 @@ jobs:
             git checkout uat
             git reset --hard origin/uat
 
-            chmod +x scripts/pm2-safe-restart.sh scripts/verify-frontend-build.sh
+            chmod +x scripts/pm2-safe-restart.sh scripts/verify-frontend-build.sh scripts/build-and-swap.sh
 
             echo "=== Backend: install + generate + compile ==="
             cd $APP_DIR/backend
@@ -120,8 +122,9 @@ jobs:
             echo "=== Frontend: install + build ==="
             cd $APP_DIR/agentic-crm
             npm ci 2>&1 | tail -5
+            # Scratch-dir build + swap; see the production job for why.
             sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches' || true
-            NEXT_PUBLIC_API_URL='https://uat-qcrm.qbadvisory.com' NODE_OPTIONS='--max-old-space-size=3072' npm run build 2>&1 | tail -10
+            NEXT_PUBLIC_API_URL='https://uat-qcrm.qbadvisory.com' NODE_OPTIONS='--max-old-space-size=3072' bash $APP_DIR/scripts/build-and-swap.sh $APP_DIR npm run build 2>&1 | tail -12
 
             echo "=== Restart UAT frontend safely ==="
             bash $APP_DIR/scripts/pm2-safe-restart.sh qcrm-uat-frontend 3002 $ECO
@@ -161,7 +164,7 @@ jobs:
             git checkout qa
             git reset --hard origin/qa
 
-            chmod +x scripts/pm2-safe-restart.sh scripts/verify-frontend-build.sh
+            chmod +x scripts/pm2-safe-restart.sh scripts/verify-frontend-build.sh scripts/build-and-swap.sh
 
             echo "=== Backend: install + generate + compile ==="
             cd $APP_DIR/backend
@@ -178,8 +181,9 @@ jobs:
             echo "=== Frontend: install + build ==="
             cd $APP_DIR/agentic-crm
             npm ci 2>&1 | tail -5
+            # Scratch-dir build + swap; see the production job for why.
             sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches' || true
-            NEXT_PUBLIC_API_URL='https://qa-qcrm.qbadvisory.com' NODE_OPTIONS='--max-old-space-size=3072' npm run build 2>&1 | tail -10
+            NEXT_PUBLIC_API_URL='https://qa-qcrm.qbadvisory.com' NODE_OPTIONS='--max-old-space-size=3072' bash $APP_DIR/scripts/build-and-swap.sh $APP_DIR npm run build 2>&1 | tail -12
 
             echo "=== Restart QA frontend safely ==="
             bash $APP_DIR/scripts/pm2-safe-restart.sh qcrm-qa-frontend 3004 $ECO
