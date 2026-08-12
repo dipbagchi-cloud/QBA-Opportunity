@@ -25,6 +25,20 @@ NAME="${1:?pm2-name is required}"
 PORT="${2:?port is required}"
 ECO="${3:-/home/azureuser/app/ecosystem.config.js}"
 
+# Fail fast on a bad ecosystem path. Passing one that does not exist makes
+# `pm2 startOrReload` error *after* the process has already been stopped and
+# its port killed — so the app stays down while the surrounding output still
+# looks like a normal restart. That happened on QA (a path missing the
+# environment directory) and left the frontend stopped.
+# The one config defines all six processes, so any environment's copy is
+# equivalent; what matters is that the file is really there.
+if [ ! -f "$ECO" ]; then
+    echo "[safe-restart] ERROR: ecosystem config not found: $ECO"
+    echo "[safe-restart] expected /home/azureuser/{app,qa,uat}/ecosystem.config.js"
+    echo "[safe-restart] refusing to stop $NAME — the app is still running"
+    exit 1
+fi
+
 echo "[safe-restart] $NAME (port $PORT)"
 
 pm2 stop "$NAME" 2>&1 | tail -3 || true
