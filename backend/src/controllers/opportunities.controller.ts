@@ -849,6 +849,77 @@ export async function deleteOpportunity(req: Request, res: Response) {
     }
 }
 
+/**
+ * When each stage was first entered, for the detail page's stage timeline.
+ *
+ * `stage_history` is the natural source but is only written by the chatbot —
+ * the UI transitions never populated it, so it is empty for essentially every
+ * existing deal. The audit log, however, has recorded every transition all
+ * along, so the timeline is reconstructed from both: history rows win where
+ * they exist, and audit entries fill in the rest.
+ *
+ * Only the FIRST entry into a stage is kept, so a deal sent back for
+ * re-estimation still reports when it originally reached that stage.
+ */
+async function buildStageTimeline(
+    opportunityId: string,
+    opportunity: { createdAt: Date; actualCloseDate?: Date | null; stage?: { name?: string | null } | null; currentStage?: string | null },
+    stageHistory: { enteredAt: Date; stage?: { name?: string | null; order?: number | null } | null }[],
+) {
+    const earliest = new Map<string, Date>();
+    const record = (stageName: unknown, at: unknown) => {
+        const name = typeof stageName === 'string' ? stageName.trim() : '';
+        if (!name || !at) return;
+        const when = at instanceof Date ? at : new Date(at as string);
+        if (isNaN(when.getTime())) return;
+        const existing = earliest.get(name);
+        if (!existing || when < existing) earliest.set(name, when);
+    };
+
+    // 1. Real stage-history rows, where they exist.
+    stageHistory.forEach((h) => record(h.stage?.name, h.enteredAt));
+
+    // 2. Reconstruct from the audit trail.
+    const auditRows = await prisma.auditLog.findMany({
+        where: { entity: 'Opportunity', entityId: opportunityId },
+        orderBy: { timestamp: 'asc' },
+        select: { action: true, changes: true, timestamp: true },
+    });
+
+    // "Stage changed from 'X' to 'Y'" — the shape written by every UI transition.
+    const TRANSITION_RE = /from\s+'([^']+)'\s+to\s+'([^']+)'/i;
+    // "Marked as Proposal Lost via Chat: …" — the one chatbot-authored variant.
+    const CHAT_MARK_RE = /marked as\s+([A-Za-z][A-Za-z ]*?)\s+via chat/i;
+
+    for (const row of auditRows) {
+        const changes: any = row.changes;
+        if (changes && typeof changes === 'object') {
+            // CREATE stores the opening stage; CONVERT_TO_PROJECT stores { stage: { from, to } }.
+            if (typeof changes.stage === 'string') record(changes.stage, row.timestamp);
+            else if (changes.stage && typeof changes.stage === 'object') record(changes.stage.to, row.timestamp);
+            continue;
+        }
+        if (typeof changes !== 'string') continue;
+        const moved = TRANSITION_RE.exec(changes);
+        if (moved) { record(moved[2], row.timestamp); continue; }
+        const marked = CHAT_MARK_RE.exec(changes);
+        if (marked) record(marked[1], row.timestamp);
+    }
+
+    // 3. Backstops for records that predate auditing: every deal opens in
+    //    Discovery, and a closed deal reached its closing stage on its close date.
+    if (!earliest.has('Discovery')) record('Discovery', opportunity.createdAt);
+    const finalStage = opportunity.stage?.name || opportunity.currentStage || '';
+    if (opportunity.actualCloseDate && CLOSED_STAGE_NAMES.includes(finalStage)) {
+        record(finalStage, opportunity.actualCloseDate);
+    }
+
+    // Same shape as stageHistory so the client can read either.
+    return Array.from(earliest.entries())
+        .map(([name, enteredAt]) => ({ enteredAt, stage: { name } }))
+        .sort((a, b) => a.enteredAt.getTime() - b.enteredAt.getTime());
+}
+
 // GET /api/opportunities/:id
 export async function getOpportunity(req: Request, res: Response) {
     try {
@@ -911,7 +982,8 @@ export async function getOpportunity(req: Request, res: Response) {
 
         // Include project info if exists
         const project = await prisma.project.findFirst({ where: { opportunityId: id } });
-        res.json({ ...opportunity, sowDocuments, project: project || null, access });
+        const stageTimeline = await buildStageTimeline(id, opportunity, opportunity.stageHistory || []);
+        res.json({ ...opportunity, sowDocuments, project: project || null, access, stageTimeline });
     } catch (error) {
         res.status(500).json({ error: 'Failed to fetch opportunity' });
     }

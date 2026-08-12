@@ -662,18 +662,29 @@ export default function DashboardPage() {
     // reconciles with the drill-down detailed listing + monthly breakdown
     // instead of drifting from the backend aggregate (different FX/filter basis).
     const sumValue = (rows: typeof opportunities) => rows.reduce((s, o) => s + (Number(o.value) || 0), 0);
-    // Projected Revenue — drill filter: status not won/lost
-    const projectedRevenue = sumValue(opportunities.filter(o => o.status !== "won" && o.status !== "lost"));
+    // The single definition of "still in play", shared by Projected Revenue and
+    // Pipeline Value and by both of their drill-downs.
+    //
+    // Projected Revenue used to filter on `o.status !== "won" && !== "lost"`,
+    // but the API never emits those values for `status` (it returns
+    // closed/stalled/healthy/at-risk/critical), so the condition was always
+    // true and the tile silently summed closed deals too — reading exactly
+    // Pipeline Value + Closed Won + Closed Lost. Both tiles now measure the
+    // open book, matching the analytics API, which defines projectedRevenue
+    // and pipelineValue with the same expression.
+    const isOpenStage = (o: Opportunity) => {
+        const s = o.currentStage;
+        return s !== 'Closed Won' && s !== 'Closed-Won' && s !== 'Closed Lost' && s !== 'Proposal Lost';
+    };
+    const openPipeline = opportunities.filter(isOpenStage);
+    const projectedRevenue = sumValue(openPipeline);
     // Closed Revenue — drill filter: Project stage or Closed Won
     const closedRevenue = sumValue(opportunities.filter(o => {
         const s = STAGE_DISPLAY[o.currentStage] || o.currentStage;
         return s === 'Project' || o.currentStage === 'Closed Won' || o.currentStage === 'Closed-Won';
     }));
-    // Pipeline Value — drill filter: any non-closed stage
-    const pipelineValueSum = sumValue(opportunities.filter(o => {
-        const s = o.currentStage;
-        return s !== 'Closed Won' && s !== 'Closed-Won' && s !== 'Closed Lost' && s !== 'Proposal Lost';
-    }));
+    // Pipeline Value — same open set, so the two tiles reconcile by construction.
+    const pipelineValueSum = sumValue(openPipeline);
 
     // Recompute revenue-by-X charts directly from the opportunities array so the
     // charts match the drill-down table. The /api/analytics revenueByClient and
@@ -784,7 +795,7 @@ export default function DashboardPage() {
         {
             title: "Projected Revenue",
             value: fmtCurrency(projectedRevenue),
-            subtitle: `${pipeline?.totalOpps || 0} opportunities`,
+            subtitle: `${openPipeline.length} open ${openPipeline.length === 1 ? 'opportunity' : 'opportunities'}`,
             icon: IndianRupee,
             iconBg: "bg-indigo-100",
             iconColor: "text-indigo-600",
@@ -1121,10 +1132,10 @@ export default function DashboardPage() {
      * Hold. So Hot = open and not stalled, Cold = open and stalled. Closed
      * deals are in neither, matching Open/Closed above.
      */
-    const CLOSED_STAGE_SET = ['Closed Won', 'Closed-Won', 'Closed Lost', 'Proposal Lost', 'Delivered'];
-    const isClosedOpp = (o: Opportunity) => CLOSED_STAGE_SET.includes(o.currentStage);
-    const openOpps = opportunities.filter(o => !isClosedOpp(o));
-    const closedOpps = opportunities.filter(isClosedOpp);
+    // Same open/closed line as Projected Revenue and Pipeline Value, so the
+    // Open tile always agrees with them.
+    const openOpps = openPipeline;
+    const closedOpps = opportunities.filter(o => !isOpenStage(o));
     const hotOpps = openOpps.filter(o => !o.isStalled);
     const coldOpps = openOpps.filter(o => !!o.isStalled);
 
@@ -1241,7 +1252,7 @@ export default function DashboardPage() {
                 { key: "owner", label: "Owner", format: "text" },
                 { key: "salesRepName", label: "Sales Rep", format: "text" },
             ],
-            data: opportunities.filter(o => o.status !== "won" && o.status !== "lost"),
+            data: openPipeline,
         },
         { // Closed Revenue
             title: "Closed Revenue – Won Deals",
@@ -1288,10 +1299,7 @@ export default function DashboardPage() {
                 { key: "owner", label: "Owner", format: "text" },
                 { key: "expectedCloseDate", label: "Opportunity Close Date", format: "text" },
             ],
-            data: opportunities.filter(o => {
-                const s = o.currentStage;
-                return s !== 'Closed Won' && s !== 'Closed-Won' && s !== 'Closed Lost' && s !== 'Proposal Lost';
-            }),
+            data: openPipeline,
         },
         { // Win Rate
             title: "Win/Loss Analysis",

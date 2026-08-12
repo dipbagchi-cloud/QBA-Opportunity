@@ -1016,7 +1016,15 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 // Update active step based on stage
                 const stageName = data.stage?.name || data.currentStage || '';
                 setCurrentStageName(stageName);
-                setStageHistory(Array.isArray(data.stageHistory) ? data.stageHistory : []);
+                // `stageTimeline` is the reconstructed first-entry date per stage
+                // (stage_history rows plus the audit trail, which is where the
+                // UI transitions were actually recorded). Fall back to the raw
+                // history rows if an older backend is serving this page.
+                setStageHistory(
+                    Array.isArray(data.stageTimeline) && data.stageTimeline.length > 0
+                        ? data.stageTimeline
+                        : Array.isArray(data.stageHistory) ? data.stageHistory : []
+                );
                 setOpportunityCreatedAt(data.createdAt || '');
                 let stageIdx = 0;
                 if (stageName === 'Closed Lost' || stageName === 'Proposal Lost') {

@@ -64,6 +64,17 @@ const fmtDate = (raw?: string | null) => {
     return d.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: '2-digit' });
 };
 
+// Consecutive transitions often land on the same day, so the tooltip carries
+// the time to tell them apart.
+const fmtDateTime = (raw?: string | null) => {
+    if (!raw) return null;
+    const d = new Date(raw);
+    if (isNaN(d.getTime())) return null;
+    return d.toLocaleString(undefined, {
+        day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+    });
+};
+
 export function StageTimeline({
     currentStageName,
     stageHistory = [],
@@ -106,16 +117,19 @@ export function StageTimeline({
 
     // Build the node list. A lost deal ends at a red terminal after the last
     // stage it actually reached, replacing the remaining happy-path nodes.
-    const nodes: { key: string; label: string; state: NodeState; date: string | null }[] = [];
+    const nodes: { key: string; label: string; state: NodeState; date: string | null; exact: string | null }[] = [];
     const lastLiveIdx = isLost ? Math.min(reachedIdx, HAPPY_PATH.length - 2) : HAPPY_PATH.length - 1;
 
     for (let i = 0; i <= lastLiveIdx; i++) {
         const name = HAPPY_PATH[i];
+        const state: NodeState = isLost || i < reachedIdx ? 'done' : i === reachedIdx ? 'current' : 'future';
         nodes.push({
             key: name,
             label: DISPLAY_LABEL[name] || name,
-            state: isLost || i < reachedIdx ? 'done' : i === reachedIdx ? 'current' : 'future',
-            date: fmtDate(enteredAtByStage[name]),
+            state,
+            // A stage still ahead has not been entered, so it carries no date.
+            date: state === 'future' ? null : fmtDate(enteredAtByStage[name]),
+            exact: state === 'future' ? null : fmtDateTime(enteredAtByStage[name]),
         });
     }
 
@@ -125,6 +139,7 @@ export function StageTimeline({
             label: DISPLAY_LABEL[stage] || stage,
             state: 'lost',
             date: fmtDate(enteredAtByStage[stage]),
+            exact: fmtDateTime(enteredAtByStage[stage]),
         });
     }
 
@@ -178,7 +193,9 @@ export function StageTimeline({
                             <li className="flex flex-col items-center gap-1 px-1.5 shrink-0">
                                 <div
                                     className={`w-7 h-7 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors ${style.circle}`}
-                                    title={node.date ? `${node.label} — entered ${node.date}` : node.label}
+                                    title={node.exact
+                                        ? `${node.label} — entered ${node.exact}`
+                                        : `${node.label} — not reached yet`}
                                 >
                                     {node.state === 'lost'
                                         ? <XCircle className="w-4 h-4" />
@@ -189,7 +206,14 @@ export function StageTimeline({
                                 <span className={`text-[10px] text-center leading-tight whitespace-nowrap ${style.label}`}>
                                     {node.label}
                                 </span>
-                                <span className="text-[9px] text-slate-400 leading-none h-3">{node.date || ''}</span>
+                                {/* Fixed height keeps every node's label on the
+                                    same baseline whether or not it has a date. */}
+                                <span
+                                    className={`text-[10px] leading-none h-3.5 whitespace-nowrap ${node.state === 'lost' ? 'text-red-500' : node.date ? 'text-slate-500' : 'text-slate-300'}`}
+                                    title={node.exact || undefined}
+                                >
+                                    {node.date || (node.state === 'future' ? '—' : '')}
+                                </span>
                             </li>
                         </Fragment>
                     );
