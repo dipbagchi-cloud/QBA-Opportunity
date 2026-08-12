@@ -29,6 +29,7 @@ import { useAuthStore } from "@/lib/auth-store";
 import { canAccessDashboardRoute, hasAnyGrantedPermission } from "@/lib/access-control";
 import { AccessDenied } from "@/components/auth/AccessDenied";
 import GlobalSearch from "@/components/ui/GlobalSearch";
+import ChatBot from "@/components/chatbot/ChatBot";
 
 interface NavItem {
     icon: any;
@@ -296,6 +297,12 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
                     )}
                 </main>
             </div>
+
+            {/* AI assistant launcher. Sits at z-30 — below dialogs (z-50) and
+                toasts (z-[100]) — so it can never cover a modal's buttons, and
+                clears the mobile thumb zone. Users can dismiss it per session
+                with the small x on the button. */}
+            <ChatBot />
 
         </div>
     );
