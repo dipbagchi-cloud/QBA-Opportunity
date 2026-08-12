@@ -72,6 +72,7 @@ function resetConversation(userId: string) {
 
 interface MasterDataCache {
     clients: { id: string; name: string }[];
+    practices: { id: string; name: string }[];
     stages: { id: string; name: string; order: number; probability: number; isClosed: boolean; isWon: boolean }[];
     regions: { id: string; name: string }[];
     technologies: { id: string; name: string }[];
@@ -87,7 +88,7 @@ const CACHE_TTL = 5 * 60 * 1000;
 
 async function getMasterData(): Promise<MasterDataCache> {
     if (_masterCache && Date.now() - _masterCache.lastLoaded < CACHE_TTL) return _masterCache;
-    const [clients, stages, regions, technologies, pricingModels, projectTypes, salespersons, currencies] = await Promise.all([
+    const [clients, stages, regions, technologies, pricingModels, projectTypes, salespersons, currencies, practiceRows] = await Promise.all([
         prisma.client.findMany({ where: { isActive: true }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
         prisma.stage.findMany({ select: { id: true, name: true, order: true, probability: true, isClosed: true, isWon: true }, orderBy: { order: 'asc' } }),
         prisma.region.findMany({ where: { isActive: true }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
@@ -96,9 +97,16 @@ async function getMasterData(): Promise<MasterDataCache> {
         prisma.projectType.findMany({ where: { isActive: true }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
         prisma.user.findMany({ where: { isActive: true }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
         prisma.currencyRate.findMany({ where: { isActive: true }, select: { id: true, code: true, name: true, symbol: true }, orderBy: { code: 'asc' } }),
+        // Practice is a free-text column rather than a lookup table, so the
+        // vocabulary comes from the values actually in use. Without this the
+        // bot could never match a practice at all — "ADM opportunities"
+        // returned all 136 rows.
+        prisma.opportunity.findMany({ where: { practice: { not: null } }, select: { practice: true }, distinct: ['practice'] }),
     ]);
-    _masterCache = { clients, stages, regions, technologies, pricingModels, projectTypes, salespersons, currencies, lastLoaded: Date.now() };
-    console.log(`[Chatbot] Master cache loaded: ${clients.length} clients, ${stages.length} stages, ${regions.length} regions, ${technologies.length} techs, ${pricingModels.length} pricing, ${projectTypes.length} projTypes, ${salespersons.length} users, ${currencies.length} currencies`);
+    const practices = Array.from(new Set((practiceRows as any[]).map(r => (r.practice || '').trim()).filter(Boolean)))
+        .map((name, i) => ({ id: `practice-${i}`, name }));
+    _masterCache = { clients, stages, regions, technologies, pricingModels, projectTypes, salespersons, currencies, practices, lastLoaded: Date.now() };
+    console.log(`[Chatbot] Master cache loaded: ${clients.length} clients, ${stages.length} stages, ${regions.length} regions, ${technologies.length} techs, ${pricingModels.length} pricing, ${projectTypes.length} projTypes, ${salespersons.length} users, ${currencies.length} currencies, ${practices.length} practices`);
     return _masterCache;
 }
 
@@ -906,70 +914,131 @@ function extractListParams(lower: string): Record<string, any> {
  * Explicit params always win: anything the caller already determined is left
  * untouched.
  */
+/** Initials of a multi-word name, ignoring connectors and the org suffix. */
+function acronymOf(name: string): string {
+    const IGNORE = new Set(['and', 'of', 'the', 'for', '&', '-', 'qbapl', 'qbalux', 'ltd', 'pvt', 'inc', 'llc']);
+    const words = name.toLowerCase().split(/[^a-z0-9]+/).filter(w => w && !IGNORE.has(w));
+    return words.map(w => w[0]).join('').toUpperCase();
+}
+
+/**
+ * Damerau-Levenshtein distance — like Levenshtein but counts a transposition as
+ * ONE edit, which matters because transposition is the commonest typo: plain
+ * Levenshtein scores "Salesfroce" against "Salesforce" as 2 edits and the match
+ * falls below the threshold, even though a person reads it as obviously the
+ * same word.
+ */
+function editDistance(a: string, b: string): number {
+    const m = a.length, n = b.length;
+    if (!m) return n;
+    if (!n) return m;
+    const d: number[][] = Array.from({ length: m + 1 }, (_, i) =>
+        Array.from({ length: n + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)));
+    for (let i = 1; i <= m; i++) {
+        for (let j = 1; j <= n; j++) {
+            const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+            d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
+            if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+                d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);   // transposition
+            }
+        }
+    }
+    return d[m][n];
+}
+
+/**
+ * Resolve the entities named in a question against the CRM's own vocabulary.
+ *
+ * Three passes, most trustworthy first, because both extremes have already
+ * caused real wrong answers:
+ *
+ *   1. EXACT phrase   — the name appears verbatim.
+ *   2. ACRONYM        — "ADM" for "App Dev & Maintenance - QBAPL". People
+ *                       overwhelmingly type the acronym, and without this the
+ *                       filter was silently dropped and all 136 rows returned.
+ *   3. NEAR-MISS      — one or two typos ("Indorma", "Salesfroce"), gated at
+ *                       ~85% similarity and 5+ characters.
+ *
+ * The old 0.6 fuzzy match was far too loose — it read "as" in "... as a pie" as
+ * the client "Asian Paints" and cut 136 rows to 3. A filter that quietly
+ * answers a different question is worse than one that does not fire, so the
+ * tolerance here is deliberately narrow and always reports what it matched.
+ */
 async function enrichFiltersFromMasterData(text: string, params: Record<string, any>): Promise<Record<string, any>> {
     try {
         const master = await getMasterData();
 
-        // Words that are part of HOW the question is phrased, never part of the
-        // answer. Left in, they get matched against master data and invent
-        // filters — "show opportunities ... as a pie" once matched "as" to the
-        // client "Asian Paints" and silently narrowed 136 rows to 3.
         const COMMAND_WORDS = new RegExp(
-            '\\b(' + [
+            '\b(' + [
                 'give','me','show','list','find','search','get','display','view','all','the','a','an','of','in','for',
                 'and','or','with','to','by','per','across','grouped','group','split','as','is','are','what','which',
                 'chart','charts','graph','graphs','pie','donut','bar','bars','plot','diagram','visualise','visualize',
                 'breakdown','distribution','trend','over','time','count','number','total','revenue','value','worth',
                 'opportunity','opportunities','opp','opps','deal','deals','pipeline','project','projects','please',
-                'my','our','their','this','that','top','highest','lowest','best','worst','many','much','how',
-            ].join('|') + ')\\b', 'gi');
+                'my','our','their','this','that','top','highest','lowest','best','worst','many','much','how','there',
+                'win','rate','won','lost','stage','status','client','customer','practice','region','technology',
+            ].join('|') + ')\b', 'gi');
 
-        const haystack = ' ' + text.toLowerCase().replace(COMMAND_WORDS, ' ').replace(/[^a-z0-9&/\-. ]+/g, ' ').replace(/\s+/g, ' ') + ' ';
+        const cleaned = ' ' + text.toLowerCase().replace(COMMAND_WORDS, ' ')
+            .replace(/[^a-z0-9&/\-. ]+/g, ' ').replace(/\s+/g, ' ') + ' ';
+        const tokens = cleaned.trim().split(' ').filter(t => t.length >= 2);
+        const upperTokens = (text.match(/\b[A-Z0-9]{2,8}\b/g) || []).map(t => t.toUpperCase());
 
-        /**
-         * Exact, whole-phrase matching only — deliberately NOT fuzzy.
-         *
-         * smartExtractFromMasterData matches at 0.6 similarity, which suits
-         * building a record from a free description. A filter is different: a
-         * near-miss does not degrade the answer, it answers a DIFFERENT question
-         * while looking correct. Longest name wins so "SAP HANA" beats "SAP".
-         */
-        const pick = (items: { name: string }[]): string | null => {
-            const hits = items
-                .map(i => (i.name || '').trim())
-                .filter(name => name.length >= 3 && haystack.includes(' ' + name.toLowerCase() + ' '))
+        const resolve = (items: { name: string }[], opts?: { allowAcronym?: boolean }): string | null => {
+            const names = (items || []).map(i => (i.name || '').trim()).filter(Boolean);
+
+            // 1. exact phrase, longest first ("SAP HANA" beats "SAP")
+            const exact = names
+                .filter(n => n.length >= 3 && cleaned.includes(' ' + n.toLowerCase() + ' '))
                 .sort((a, b) => b.length - a.length);
-            return hits[0] || null;
+            if (exact[0]) return exact[0];
+
+            // 2. acronym, e.g. ADM -> App Dev & Maintenance - QBAPL.
+            //    NOT applied to people: someone's initials collide constantly —
+            //    "ADM" is also Abhasita Das Munshi, and matching both filtered
+            //    practice AND sales rep, returning nothing.
+            if (opts?.allowAcronym !== false) {
+                for (const n of names) {
+                    const ac = acronymOf(n);
+                    if (ac.length >= 2 && upperTokens.includes(ac)) return n;
+                }
+            }
+
+            // 3. a close typo. Compared against each WORD of the name as well as
+            //    the whole thing — "Indorma" is one edit from "Indorama" but far
+            //    from the full "Indorama IIPL", so whole-name-only never matched.
+            let best: { name: string; score: number } | null = null;
+            for (const n of names) {
+                const variants = [n.toLowerCase(), ...n.toLowerCase().split(/[^a-z0-9]+/)].filter(v => v.length >= 5);
+                for (const variant of variants) {
+                    for (const t of tokens) {
+                        if (t.length < 5) continue;
+                        const score = 1 - editDistance(t, variant) / Math.max(t.length, variant.length);
+                        if (score >= 0.85 && (!best || score > best.score)) best = { name: n, score };
+                    }
+                }
+            }
+            return best ? best.name : null;
         };
 
         const candidates: [string, { name: string }[]][] = [
             ['client', master.clients],
             ['technology', master.technologies],
+            ['practice', master.practices],
             ['region', master.regions],
             ['pricingModel', master.pricingModels],
             ['projectType', master.projectTypes],
         ];
         for (const [key, items] of candidates) {
             if (params[key] == null) {
-                const hit = pick(items || []);
+                const hit = resolve(items || []);
                 if (hit) params[key] = hit;
             }
         }
 
-        // A named person filters by sales rep, unless the caller said "my".
         if (params.owner == null && params.salesRep == null) {
-            const person = pick(master.salespersons || []);
+            const person = resolve(master.salespersons || [], { allowAcronym: false });
             if (person) params.salesRep = person;
-        }
-
-        // Technology is stored as a CSV, so a bare token like "SAP" should match
-        // any deal listing it — fall back to the raw word when no catalogue
-        // entry matched exactly.
-        if (params.technology == null) {
-            const token = (master.technologies || [])
-                .map(t => (t.name || '').trim())
-                .find(name => name.length >= 2 && new RegExp('\\b' + name.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b').test(haystack));
-            if (token) params.technology = token;
         }
     } catch (error) {
         console.error('[Chatbot] master-data filter enrichment failed', error);
