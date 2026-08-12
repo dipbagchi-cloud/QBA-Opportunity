@@ -342,9 +342,13 @@ model Opportunity {
   adjustedEstimatedValue Decimal?
   
   // Pipeline, Presales, Sales
-  currentStage      String   @default("Pipeline") 
+  currentStage      String   @default("Pipeline")
   detailedStatus    String?
   isStalled         Boolean  @default(false)
+  // Flagged by Sales in Pipeline, by the offshore manager in Presales, and by
+  // either once the deal reaches Sales. See escalationEditable in
+  // lib/opportunity-access.ts for who may change it at which stage.
+  eligibleForEscalation Boolean @default(false)
   reEstimateCount   Int      @default(0)    // Number of times sent back for re-estimation
   gomApproved       Boolean  @default(false) // GOM must be approved before moving to Sales
   

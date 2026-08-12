@@ -21,12 +21,16 @@ import { Check, XCircle } from "lucide-react";
 // Happy path, matching Stage.order 1–5 in the database.
 const HAPPY_PATH = ['Discovery', 'Qualification', 'Proposal', 'Negotiation', 'Closed Won'] as const;
 
-// Stage names the DB uses vs. the labels the rest of the app shows the user.
+// The timeline names the real stages from the `stages` table and nothing else.
+// It used to relabel Qualification as "Presales", borrowing the wording of the
+// workflow tabs — but Presales is a phase of work, not a stage a deal can be
+// in, so the timeline disagreed with the Stage column and the stage filter.
+// This map only normalises legacy/alias values onto their canonical stage.
 const DISPLAY_LABEL: Record<string, string> = {
     Discovery: 'Discovery',
     Pipeline: 'Discovery',
-    Qualification: 'Presales',
-    Presales: 'Presales',
+    Qualification: 'Qualification',
+    Presales: 'Qualification',
     Proposal: 'Proposal',
     Sales: 'Proposal',
     Negotiation: 'Negotiation',

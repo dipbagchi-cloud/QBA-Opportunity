@@ -7,6 +7,7 @@ import {
     ComposedChart, Line,
 } from "recharts";
 import { useCurrency } from "@/components/providers/currency-provider";
+import { MultiSelectFilter } from "@/components/ui/multi-select-filter";
 
 /* ------------------------------------------------------------------ */
 /* Types                                                               */
@@ -84,26 +85,17 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
     const [filterVal, setFilterVal] = useState("");
     const [showFilter, setShowFilter] = useState(false);
 
-    // Role filters (apply to monthly chart, monthly list, and detail list)
-    const [ownerFilter, setOwnerFilter] = useState("");
-    const [salesRepFilter, setSalesRepFilter] = useState("");
-    const [presalesFilter, setPresalesFilter] = useState("");
-    // Attribute filters
-    const [clientFilter, setClientFilter] = useState("");
-    const [countryFilter, setCountryFilter] = useState("");
-    const [regionFilter, setRegionFilter] = useState("");
-    const [practiceFilter, setPracticeFilter] = useState("");
-    const [stageFilter, setStageFilter] = useState("");
-    const [technologyFilter, setTechnologyFilter] = useState("");
-    const [projectTypeFilter, setProjectTypeFilter] = useState("");
-    const [fundingTypeFilter, setFundingTypeFilter] = useState("");
-    const [pricingModelFilter, setPricingModelFilter] = useState("");
-    const [departmentFilter, setDepartmentFilter] = useState("");
-    // Date range filter (Opportunity Close Date)
+    // Every attribute filter is multi-select: pick several values in a column
+    // and they OR together, while separate columns AND against each other —
+    // the same semantics as the Opportunities list filters.
+    //
+    // One config table drives the state, the option lists, the matching and the
+    // rendering, so the fourteen filters cannot drift apart from one another
+    // and adding another one is a single entry.
+    const [filters, setFilters] = useState<Record<string, string[]>>({});
+    // Date range filter (Opportunity Close Date) — a range, not a value list.
     const [dateFromFilter, setDateFromFilter] = useState("");
     const [dateToFilter, setDateToFilter] = useState("");
-    // Status filter
-    const [statusFilter, setStatusFilter] = useState("");
 
     // Currency context for formatting
     let currencyFormat: ((v: number, opts?: any) => string) | undefined;
@@ -130,135 +122,70 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
         return null;
     }, [dateKey]);
 
-    // Unique values for role filter dropdowns
-    const uniqueOwners = useMemo(() => {
-        const s = new Set<string>();
-        config.data.forEach(r => { const v = r.owner; if (v) s.add(String(v)); });
-        return Array.from(s).sort();
-    }, [config.data]);
+    /**
+     * The filter catalogue. Each entry knows how to pull its value(s) out of a
+     * row, which drives the option list, the matching and the rendering alike.
+     * `multi` marks columns that hold several values in one cell (a CSV), where
+     * a row matches if ANY of its values is picked.
+     */
+    const FILTER_DEFS: { key: string; label: string; short: string; get: (r: Record<string, any>) => string[] }[] = useMemo(() => {
+        const one = (v: unknown) => (v == null || v === "" ? [] : [String(v)]);
+        const csv = (v: unknown) =>
+            v == null ? [] : String(v).split(",").map(s => s.trim()).filter(Boolean);
+        return [
+            { key: "owner", label: "Owner", short: "Owner", get: r => one(r.owner) },
+            { key: "salesRep", label: "Sales Rep", short: "Sales", get: r => one(r.salesRepName) },
+            { key: "presales", label: "Presales", short: "Presales", get: r => csv(r.presalesAssigneeName) },
+            { key: "client", label: "Client", short: "Client", get: r => one(r.client) },
+            { key: "country", label: "Country", short: "Country", get: r => one(r.country) },
+            { key: "region", label: "Region", short: "Region", get: r => one(r.region) },
+            { key: "practice", label: "Practice", short: "Practice", get: r => one(r.practice) },
+            // Rows carry the raw stage on currentStage; some callers set only stage.
+            { key: "stage", label: "Stage", short: "Stage", get: r => one(r.currentStage ?? r.stage) },
+            { key: "technology", label: "Technology", short: "Tech", get: r => csv(r.technology) },
+            { key: "projectType", label: "Project Type", short: "Project", get: r => one(r.projectType) },
+            { key: "fundingType", label: "Funding Type", short: "Funding", get: r => one(r.fundingType) },
+            { key: "pricingModel", label: "Pricing Model", short: "Pricing", get: r => one(r.pricingModel) },
+            { key: "department", label: "Department", short: "Dept", get: r => one(r.department) },
+            { key: "status", label: "Status", short: "Status", get: r => one(r.status) },
+        ];
+    }, []);
 
-    const uniqueSalesReps = useMemo(() => {
-        const s = new Set<string>();
-        config.data.forEach(r => { const v = r.salesRepName; if (v) s.add(String(v)); });
-        return Array.from(s).sort();
-    }, [config.data]);
+    // Distinct values per filter, from the unfiltered data so the choices stay
+    // stable as selections are made.
+    const filterOptions = useMemo(() => {
+        const out: Record<string, string[]> = {};
+        for (const def of FILTER_DEFS) {
+            const s = new Set<string>();
+            config.data.forEach(r => def.get(r).forEach(v => s.add(v)));
+            out[def.key] = Array.from(s).sort((a, b) => a.localeCompare(b));
+        }
+        return out;
+    }, [config.data, FILTER_DEFS]);
 
-    const uniquePresales = useMemo(() => {
-        const s = new Set<string>();
-        config.data.forEach(r => {
-            const v = r.presalesAssigneeName;
-            if (v) String(v).split(",").map(p => p.trim()).filter(Boolean).forEach(p => s.add(p));
-        });
-        return Array.from(s).sort();
-    }, [config.data]);
+    const activeFilterCount = useMemo(
+        () => FILTER_DEFS.reduce((n, d) => n + (filters[d.key]?.length || 0), 0),
+        [filters, FILTER_DEFS]
+    );
 
-    const uniqueClients = useMemo(() => {
-        const s = new Set<string>();
-        config.data.forEach(r => { const v = r.client; if (v) s.add(String(v)); });
-        return Array.from(s).sort();
-    }, [config.data]);
+    const hasRoleFilters = FILTER_DEFS.some(d => (filterOptions[d.key] || []).length > 0);
 
-    const uniqueCountries = useMemo(() => {
-        const s = new Set<string>();
-        config.data.forEach(r => { const v = r.country; if (v) s.add(String(v)); });
-        return Array.from(s).sort();
-    }, [config.data]);
-
-    const uniqueRegions = useMemo(() => {
-        const s = new Set<string>();
-        config.data.forEach(r => { const v = r.region; if (v) s.add(String(v)); });
-        return Array.from(s).sort();
-    }, [config.data]);
-
-    const uniquePractices = useMemo(() => {
-        const s = new Set<string>();
-        config.data.forEach(r => { const v = r.practice; if (v) s.add(String(v)); });
-        return Array.from(s).sort();
-    }, [config.data]);
-
-    // Stage rows carry the raw stage on `currentStage`; some callers only set
-    // `stage`, so accept either.
-    const rowStage = useCallback((r: Record<string, any>) => String(r.currentStage ?? r.stage ?? "").trim(), []);
-
-    const uniqueStages = useMemo(() => {
-        const s = new Set<string>();
-        config.data.forEach(r => { const v = rowStage(r); if (v) s.add(v); });
-        return Array.from(s).sort();
-    }, [config.data, rowStage]);
-
-    // Technology is a CSV per row — split into individual tokens
-    const uniqueTechnologies = useMemo(() => {
-        const s = new Set<string>();
-        config.data.forEach(r => {
-            const v = r.technology;
-            if (v) String(v).split(",").map(t => t.trim()).filter(Boolean).forEach(t => s.add(t));
-        });
-        return Array.from(s).sort();
-    }, [config.data]);
-
-    const uniqueProjectTypes = useMemo(() => {
-        const s = new Set<string>();
-        config.data.forEach(r => { const v = r.projectType; if (v) s.add(String(v)); });
-        return Array.from(s).sort();
-    }, [config.data]);
-
-    const uniqueFundingTypes = useMemo(() => {
-        const s = new Set<string>();
-        config.data.forEach(r => { const v = r.fundingType; if (v) s.add(String(v)); });
-        return Array.from(s).sort();
-    }, [config.data]);
-
-    const uniquePricingModels = useMemo(() => {
-        const s = new Set<string>();
-        config.data.forEach(r => { const v = r.pricingModel; if (v) s.add(String(v)); });
-        return Array.from(s).sort();
-    }, [config.data]);
-
-    const uniqueDepartments = useMemo(() => {
-        const s = new Set<string>();
-        config.data.forEach(r => { const v = r.department; if (v) s.add(String(v)); });
-        return Array.from(s).sort();
-    }, [config.data]);
-
-    const uniqueStatuses = useMemo(() => {
-        const s = new Set<string>();
-        config.data.forEach(r => { const v = r.status; if (v) s.add(String(v)); });
-        return Array.from(s).sort();
-    }, [config.data]);
-
-    const hasRoleFilters =
-        uniqueOwners.length > 0 || uniqueSalesReps.length > 0 || uniquePresales.length > 0 ||
-        uniqueClients.length > 0 || uniqueCountries.length > 0 || uniqueRegions.length > 0 || uniqueTechnologies.length > 0 ||
-        uniquePractices.length > 0 || uniqueStages.length > 0 ||
-        uniqueProjectTypes.length > 0 || uniqueFundingTypes.length > 0 || uniquePricingModels.length > 0 || uniqueDepartments.length > 0 ||
-        uniqueStatuses.length > 0;
-
-    // Apply role + attribute filters first — used by every section below
+    // Apply attribute + date filters first — used by every section below.
     const roleFiltered = useMemo(() => {
-        if (!ownerFilter && !salesRepFilter && !presalesFilter && !clientFilter && !countryFilter && !regionFilter && !practiceFilter && !stageFilter && !technologyFilter && !projectTypeFilter && !fundingTypeFilter && !pricingModelFilter && !departmentFilter && !dateFromFilter && !dateToFilter && !statusFilter) return config.data;
+        const active = FILTER_DEFS
+            .map(d => ({ def: d, picked: filters[d.key] || [] }))
+            .filter(x => x.picked.length > 0);
+        if (active.length === 0 && !dateFromFilter && !dateToFilter) return config.data;
+
         const from = dateFromFilter ? new Date(dateFromFilter).getTime() : null;
         const to = dateToFilter ? new Date(dateToFilter + "T23:59:59").getTime() : null;
+
         return config.data.filter(r => {
-            if (ownerFilter && r.owner !== ownerFilter) return false;
-            if (salesRepFilter && r.salesRepName !== salesRepFilter) return false;
-            if (presalesFilter) {
-                const names = String(r.presalesAssigneeName || "").split(",").map(p => p.trim()).filter(Boolean);
-                if (!names.includes(presalesFilter)) return false;
+            // Values OR within a filter; filters AND against each other.
+            for (const { def, picked } of active) {
+                const values = def.get(r);
+                if (!values.some(v => picked.includes(v))) return false;
             }
-            if (clientFilter && r.client !== clientFilter) return false;
-            if (countryFilter && r.country !== countryFilter) return false;
-            if (regionFilter && r.region !== regionFilter) return false;
-            if (practiceFilter && r.practice !== practiceFilter) return false;
-            if (stageFilter && rowStage(r) !== stageFilter) return false;
-            if (technologyFilter) {
-                const techs = String(r.technology || "").split(",").map(t => t.trim()).filter(Boolean);
-                if (!techs.includes(technologyFilter)) return false;
-            }
-            if (projectTypeFilter && r.projectType !== projectTypeFilter) return false;
-            if (fundingTypeFilter && r.fundingType !== fundingTypeFilter) return false;
-            if (pricingModelFilter && r.pricingModel !== pricingModelFilter) return false;
-            if (departmentFilter && r.department !== departmentFilter) return false;
-            if (statusFilter && r.status !== statusFilter) return false;
             if (from != null || to != null) {
                 const raw = r.expectedCloseDate || r.actualCloseDate || r.createdAt;
                 if (!raw) return false;
@@ -269,7 +196,7 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
             }
             return true;
         });
-    }, [config.data, ownerFilter, salesRepFilter, presalesFilter, clientFilter, countryFilter, regionFilter, practiceFilter, stageFilter, rowStage, technologyFilter, projectTypeFilter, fundingTypeFilter, pricingModelFilter, departmentFilter, dateFromFilter, dateToFilter, statusFilter]);
+    }, [config.data, FILTER_DEFS, filters, dateFromFilter, dateToFilter]);
 
     // Monthly buckets — adaptive 12-month window.
     //
@@ -414,7 +341,7 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
     }, [sortedData, page, pageSize]);
 
     // Reset page when search/filter changes
-    useEffect(() => { setPage(1); }, [search, filterCol, filterVal, pageSize, ownerFilter, salesRepFilter, presalesFilter, clientFilter, countryFilter, regionFilter, practiceFilter, stageFilter, technologyFilter, projectTypeFilter, fundingTypeFilter, pricingModelFilter, departmentFilter, statusFilter, dateFromFilter, dateToFilter]);
+    useEffect(() => { setPage(1); }, [search, filterCol, filterVal, pageSize, filters, dateFromFilter, dateToFilter]);
 
     const handleSort = (key: string) => {
         if (sortKey === key) {
@@ -454,150 +381,25 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
                     </div>
                 </div>
 
-                {/* Role filter bar — Owner / Sales Rep / Presales */}
+                {/* Attribute filter bar — every filter is multi-select */}
                 {hasRoleFilters && (
                     <div className="px-5 py-2 border-b border-slate-100 bg-white flex items-center gap-2 flex-wrap">
                         <span className="text-[10px] uppercase tracking-wide text-slate-400 font-semibold mr-1">Filter by</span>
-                        {uniqueOwners.length > 0 && (
-                            <select
-                                value={ownerFilter}
-                                onChange={e => setOwnerFilter(e.target.value)}
-                                className="px-2 py-1 text-xs border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
-                            >
-                                <option value="">Owner: All</option>
-                                {uniqueOwners.map(o => <option key={o} value={o}>Owner: {o}</option>)}
-                            </select>
-                        )}
-                        {uniqueSalesReps.length > 0 && (
-                            <select
-                                value={salesRepFilter}
-                                onChange={e => setSalesRepFilter(e.target.value)}
-                                className="px-2 py-1 text-xs border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
-                            >
-                                <option value="">Sales Rep: All</option>
-                                {uniqueSalesReps.map(s => <option key={s} value={s}>Sales: {s}</option>)}
-                            </select>
-                        )}
-                        {uniquePresales.length > 0 && (
-                            <select
-                                value={presalesFilter}
-                                onChange={e => setPresalesFilter(e.target.value)}
-                                className="px-2 py-1 text-xs border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
-                            >
-                                <option value="">Presales: All</option>
-                                {uniquePresales.map(p => <option key={p} value={p}>Presales: {p}</option>)}
-                            </select>
-                        )}
-                        {uniqueClients.length > 0 && (
-                            <select
-                                value={clientFilter}
-                                onChange={e => setClientFilter(e.target.value)}
-                                className="px-2 py-1 text-xs border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
-                            >
-                                <option value="">Client: All</option>
-                                {uniqueClients.map(c => <option key={c} value={c}>Client: {c}</option>)}
-                            </select>
-                        )}
-                        {uniqueCountries.length > 0 && (
-                            <select
-                                value={countryFilter}
-                                onChange={e => setCountryFilter(e.target.value)}
-                                className="px-2 py-1 text-xs border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
-                            >
-                                <option value="">Country: All</option>
-                                {uniqueCountries.map(c => <option key={c} value={c}>Country: {c}</option>)}
-                            </select>
-                        )}
-                        {uniqueRegions.length > 0 && (
-                            <select
-                                value={regionFilter}
-                                onChange={e => setRegionFilter(e.target.value)}
-                                className="px-2 py-1 text-xs border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
-                            >
-                                <option value="">Region: All</option>
-                                {uniqueRegions.map(r => <option key={r} value={r}>Region: {r}</option>)}
-                            </select>
-                        )}
-                        {uniqueStages.length > 0 && (
-                            <select
-                                value={stageFilter}
-                                onChange={e => setStageFilter(e.target.value)}
-                                className="px-2 py-1 text-xs border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
-                            >
-                                <option value="">Stage: All</option>
-                                {uniqueStages.map(s => <option key={s} value={s}>Stage: {s}</option>)}
-                            </select>
-                        )}
-                        {uniquePractices.length > 0 && (
-                            <select
-                                value={practiceFilter}
-                                onChange={e => setPracticeFilter(e.target.value)}
-                                className="px-2 py-1 text-xs border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
-                            >
-                                <option value="">Practice: All</option>
-                                {uniquePractices.map(p => <option key={p} value={p}>Practice: {p}</option>)}
-                            </select>
-                        )}
-                        {uniqueTechnologies.length > 0 && (
-                            <select
-                                value={technologyFilter}
-                                onChange={e => setTechnologyFilter(e.target.value)}
-                                className="px-2 py-1 text-xs border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
-                            >
-                                <option value="">Technology: All</option>
-                                {uniqueTechnologies.map(t => <option key={t} value={t}>Tech: {t}</option>)}
-                            </select>
-                        )}
-                        {uniqueProjectTypes.length > 0 && (
-                            <select
-                                value={projectTypeFilter}
-                                onChange={e => setProjectTypeFilter(e.target.value)}
-                                className="px-2 py-1 text-xs border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
-                            >
-                                <option value="">Project Type: All</option>
-                                {uniqueProjectTypes.map(p => <option key={p} value={p}>Project: {p}</option>)}
-                            </select>
-                        )}
-                        {uniqueFundingTypes.length > 0 && (
-                            <select
-                                value={fundingTypeFilter}
-                                onChange={e => setFundingTypeFilter(e.target.value)}
-                                className="px-2 py-1 text-xs border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
-                            >
-                                <option value="">Funding Type: All</option>
-                                {uniqueFundingTypes.map(f => <option key={f} value={f}>Funding: {f}</option>)}
-                            </select>
-                        )}
-                        {uniquePricingModels.length > 0 && (
-                            <select
-                                value={pricingModelFilter}
-                                onChange={e => setPricingModelFilter(e.target.value)}
-                                className="px-2 py-1 text-xs border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
-                            >
-                                <option value="">Pricing Model: All</option>
-                                {uniquePricingModels.map(p => <option key={p} value={p}>Pricing: {p}</option>)}
-                            </select>
-                        )}
-                        {uniqueDepartments.length > 0 && (
-                            <select
-                                value={departmentFilter}
-                                onChange={e => setDepartmentFilter(e.target.value)}
-                                className="px-2 py-1 text-xs border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
-                            >
-                                <option value="">Department: All</option>
-                                {uniqueDepartments.map(d => <option key={d} value={d}>Dept: {d}</option>)}
-                            </select>
-                        )}
-                        {uniqueStatuses.length > 0 && (
-                            <select
-                                value={statusFilter}
-                                onChange={e => setStatusFilter(e.target.value)}
-                                className="px-2 py-1 text-xs border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
-                            >
-                                <option value="">Status: All</option>
-                                {uniqueStatuses.map(s => <option key={s} value={s}>Status: {s}</option>)}
-                            </select>
-                        )}
+                        {FILTER_DEFS.map(def => {
+                            const options = filterOptions[def.key] || [];
+                            if (options.length === 0) return null;
+                            const picked = filters[def.key] || [];
+                            return (
+                                <MultiSelectFilter
+                                    key={def.key}
+                                    values={picked}
+                                    onChange={vals => setFilters(prev => ({ ...prev, [def.key]: vals }))}
+                                    options={options}
+                                    placeholder={`${def.label}: All`}
+                                    triggerClassName={`flex items-center justify-between gap-1 min-w-[104px] max-w-[190px] px-2 py-1 text-xs border rounded-md bg-white text-left focus:outline-none focus:ring-2 focus:ring-indigo-500/30 ${picked.length ? "border-indigo-300" : "border-slate-200"}`}
+                                />
+                            );
+                        })}
                         <span className="text-[10px] text-slate-400 ml-1">Close date:</span>
                         <input
                             type="date"
@@ -614,18 +416,12 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
                             className="px-2 py-1 text-xs border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
                             title="To"
                         />
-                        {(ownerFilter || salesRepFilter || presalesFilter || clientFilter || countryFilter || regionFilter || practiceFilter || stageFilter || technologyFilter || projectTypeFilter || fundingTypeFilter || pricingModelFilter || departmentFilter || statusFilter || dateFromFilter || dateToFilter) && (
+                        {(activeFilterCount > 0 || dateFromFilter || dateToFilter) && (
                             <button
-                                onClick={() => {
-                                    setOwnerFilter(""); setSalesRepFilter(""); setPresalesFilter("");
-                                    setClientFilter(""); setCountryFilter(""); setRegionFilter(""); setTechnologyFilter("");
-                                    setPracticeFilter(""); setStageFilter("");
-                                    setProjectTypeFilter(""); setFundingTypeFilter(""); setPricingModelFilter(""); setDepartmentFilter("");
-                                    setStatusFilter(""); setDateFromFilter(""); setDateToFilter("");
-                                }}
+                                onClick={() => { setFilters({}); setDateFromFilter(""); setDateToFilter(""); }}
                                 className="text-[10px] text-red-500 hover:text-red-700 underline"
                             >
-                                Clear all
+                                Clear all{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
                             </button>
                         )}
                         <span className="ml-auto text-[10px] text-slate-400">
@@ -809,7 +605,7 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
                                     {pagedData.length === 0 && (
                                         <tr>
                                             <td colSpan={config.columns.length + 1} className="py-8 text-center text-slate-400">
-                                                {search || filterVal || ownerFilter || salesRepFilter || presalesFilter || clientFilter || countryFilter || regionFilter || technologyFilter || projectTypeFilter || fundingTypeFilter || pricingModelFilter || departmentFilter || dateFromFilter || dateToFilter ? "No matching results" : "No data available"}
+                                                {search || filterVal || activeFilterCount > 0 || dateFromFilter || dateToFilter ? "No matching results" : "No data available"}
                                             </td>
                                         </tr>
                                     )}

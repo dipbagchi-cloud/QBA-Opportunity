@@ -397,6 +397,7 @@ export async function listOpportunities(req: Request, res: Response) {
                 daysInStage,
                 daysSinceActivity,
                 isStalled,
+                eligibleForEscalation: (opp as any).eligibleForEscalation === true,
                 healthScore: finalHealth,
                 metadata: opp.metadata,
                 quote: resolveCommittedQuote(opp),
@@ -1018,6 +1019,26 @@ export async function updateOpportunity(req: Request, res: Response) {
             });
         }
 
+        // "Eligible for Escalation" has its own owner per stage, so a caller
+        // with general edit rights still may not move it. Only treat it as a
+        // change when the value actually differs — a full PATCH body resending
+        // the current value must not be rejected.
+        const escalationSubmitted =
+            body.eligibleForEscalation !== undefined &&
+            !!body.eligibleForEscalation !== !!(previous as any).eligibleForEscalation;
+        if (escalationSubmitted && !access.workflow.escalationEditable) {
+            const stageNow = previous?.stage?.name || previous?.currentStage || '';
+            const owner = (stageNow === 'Discovery' || stageNow === 'Pipeline')
+                ? 'the assigned sales rep'
+                : (stageNow === 'Qualification' || stageNow === 'Presales')
+                    ? 'the assigned offshore manager'
+                    : 'the assigned sales rep or offshore manager';
+            return res.status(403).json({
+                error: `Only ${owner} can change "Eligible for Escalation" while this opportunity is in ${stageNow || 'its current stage'}.`,
+            });
+        }
+        const escalationChangeRequested = escalationSubmitted;
+
         // D2 rule enforcement: Client / Country / Region freeze the moment the
         // opportunity moves out of Pipeline (Discovery). Compare by value so a
         // full PATCH body resending unchanged values is not rejected.
@@ -1433,6 +1454,12 @@ export async function updateOpportunity(req: Request, res: Response) {
                 clientId: clientId,
                 ...(body.detailedStatus !== undefined ? { detailedStatus: body.detailedStatus } : {}),
                 ...(body.isStalled !== undefined ? { isStalled: body.isStalled } : {}),
+                // Only whoever owns the escalation flag at the current stage may
+                // move it (Sales in Pipeline, offshore manager in Presales,
+                // either in Sales). The 403 above covers general edit rights;
+                // this is the narrower per-field gate, enforced server-side so a
+                // crafted PATCH cannot set it.
+                ...(escalationChangeRequested ? { eligibleForEscalation: !!body.eligibleForEscalation } : {}),
                 ...stageUpdate,
                 // Extended-status auto-transition overrides (applied last so they
                 // win over any other stage/status fields in the same PATCH).
@@ -1476,6 +1503,8 @@ export async function updateOpportunity(req: Request, res: Response) {
             changes.push(`Technology changed from '${previous?.technology || ''}' to '${body.technology}'`);
         if (body.pricingModel !== undefined && body.pricingModel !== previous?.pricingModel)
             changes.push(`Pricing Model changed from '${previous?.pricingModel || ''}' to '${body.pricingModel}'`);
+        if (escalationChangeRequested)
+            changes.push(`Eligible for Escalation changed from '${(previous as any).eligibleForEscalation ? 'Yes' : 'No'}' to '${body.eligibleForEscalation ? 'Yes' : 'No'}'`);
         if (salesRepChanged)
             changes.push(`Sales Rep changed from '${previous?.salesRepName || ''}' to '${submittedSalesRepName}'`);
         if (managerChanged)

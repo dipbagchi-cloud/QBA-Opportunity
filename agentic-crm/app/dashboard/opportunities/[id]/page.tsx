@@ -431,7 +431,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         pricingModel: "",
         expectedDayRate: "",
         description: "",
-        value: 0
+        value: 0,
+        eligibleForEscalation: false
     });
 
     useEffect(() => {
@@ -965,7 +966,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             loadedValue = Math.round(loadedValue * 100) / 100;
                         }
                         return loadedValue;
-                    })()
+                    })(),
+                    eligibleForEscalation: data.eligibleForEscalation === true
                 });
 
                 setOriginalData({ value: data.value || 0, currency: data.currency || 'USD' });
@@ -2519,6 +2521,45 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     : 'When the deal is expected to close. Must be before the Tentative Start Date.'}
                             </p>
                         </div>
+
+                        {/* Eligible for Escalation — ownership moves with the stage:
+                            Sales raises it in Pipeline, the offshore manager owns it
+                            through Presales, and either may adjust it once in Sales.
+                            The gate comes from the server (access.workflow) rather
+                            than being re-derived here, so the UI can never offer an
+                            edit the API would reject. */}
+                        {(() => {
+                            const canEditEscalation = opportunityAccess?.workflow?.escalationEditable === true;
+                            const stageOwnerHint =
+                                currentStageName === 'Discovery' || currentStageName === 'Pipeline'
+                                    ? 'Only the assigned sales rep can change this while the deal is in Discovery.'
+                                    : currentStageName === 'Qualification' || currentStageName === 'Presales'
+                                        ? 'Only the assigned offshore manager can change this while the deal is in Qualification.'
+                                        : currentStageName === 'Proposal' || currentStageName === 'Negotiation'
+                                            ? 'The assigned sales rep or offshore manager can change this at this stage.'
+                                            : 'This is read-only once the opportunity is closed.';
+                            return (
+                                <div className="col-span-1 md:col-span-2">
+                                    <label
+                                        className={`flex items-start gap-2.5 p-3 rounded-md border ${formData.eligibleForEscalation ? 'border-amber-300 bg-amber-50' : 'border-slate-300 bg-white'} ${canEditEscalation ? 'cursor-pointer' : 'cursor-not-allowed opacity-70'}`}
+                                        title={stageOwnerHint}
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            name="eligibleForEscalation"
+                                            checked={!!formData.eligibleForEscalation}
+                                            disabled={!canEditEscalation}
+                                            onChange={(e) => setFormData(prev => ({ ...prev, eligibleForEscalation: e.target.checked }))}
+                                            className="mt-0.5 w-4 h-4 accent-amber-600 disabled:cursor-not-allowed"
+                                        />
+                                        <span>
+                                            <span className="block text-sm font-bold text-slate-700">Eligible for Escalation</span>
+                                            <span className="block text-xs text-slate-500 mt-0.5">{stageOwnerHint}</span>
+                                        </span>
+                                    </label>
+                                </div>
+                            );
+                        })()}
 
                         {/* Row 5: Description & Attachments */}
                         <div className="col-span-1 md:col-span-2 space-y-1.5">

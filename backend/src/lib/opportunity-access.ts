@@ -150,6 +150,31 @@ export function buildOpportunityAccess(params: {
   // also qualify — they act like admin on any open opportunity.
   const canEditPresalesContent = isAdmin || editAllActive || (isAssignedPresales && canEditAssignedOpportunity);
 
+  // "Eligible for Escalation" changes hands as the deal progresses: the sales
+  // rep raises it while the deal is still in Pipeline, the offshore manager
+  // owns it through Presales, and once it reaches Sales either of them can
+  // adjust it. Anyone else — including other sales reps and presales
+  // assignees — sees it read-only. Closed deals freeze like everything else.
+  const escalationOwnedAtThisStage = (() => {
+    if (isClosedStage) return false;
+    switch (stageName) {
+      case 'Discovery':
+      case 'Pipeline':
+        return isSalesRep;
+      case 'Qualification':
+      case 'Presales':
+        return isManager;
+      case 'Proposal':
+      case 'Sales':
+      case 'Negotiation':
+        return isSalesRep || isManager;
+      default:
+        return false;
+    }
+  })();
+  const escalationEditable =
+    isAdmin || editAllActive || (escalationOwnedAtThisStage && canEditAssignedOpportunity);
+
   return {
     viewOnlyReason,
     assignment: {
@@ -176,6 +201,7 @@ export function buildOpportunityAccess(params: {
       projectDetailsEditable:
         (isAdmin || editAllActive || permissionState.pipeline.edit || permissionState.presales.edit) && canEditAssignedOpportunity,
       sowEditable: (isAdmin || editAllActive || permissionState.sow.edit) && canEditAssignedOpportunity,
+      escalationEditable,
     },
   };
 }
