@@ -29,7 +29,7 @@ import { useAuthStore } from "@/lib/auth-store";
 import { canAccessDashboardRoute, hasAnyGrantedPermission } from "@/lib/access-control";
 import { AccessDenied } from "@/components/auth/AccessDenied";
 import GlobalSearch from "@/components/ui/GlobalSearch";
-import ChatBot from "@/components/chatbot/ChatBot";
+// import ChatBot from "@/components/chatbot/ChatBot";   // re-enable with the <ChatBot /> line below
 
 interface NavItem {
     icon: any;
@@ -298,11 +298,13 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
                 </main>
             </div>
 
-            {/* AI assistant launcher. Sits at z-30 — below dialogs (z-50) and
-                toasts (z-[100]) — so it can never cover a modal's buttons, and
-                clears the mobile thumb zone. Users can dismiss it per session
-                with the small x on the button. */}
-            <ChatBot />
+            {/* AI assistant launcher — HIDDEN.
+                Commented out rather than deleted: the component, its styling and
+                the whole deterministic query engine behind it are intact, so
+                re-enabling is uncommenting this one line.
+                Re-enable once a model endpoint is available; until then the bot
+                answers from the rule-based engine only. */}
+            {/* <ChatBot /> */}
 
         </div>
     );

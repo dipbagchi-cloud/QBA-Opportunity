@@ -327,7 +327,7 @@ function money(n: unknown): string {
  * answers most questions anyway, so failing fast to it is strictly better than
  * waiting.
  */
-const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || 8000);
+const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || 15000);
 
 /** Reject if a model call outruns the ceiling, so a stalled socket cannot block a reply. */
 function withTimeout<T>(work: Promise<T>, label: string): Promise<T> {
@@ -351,6 +351,10 @@ let ollamaClient: OpenAI | null = null;
 
 function getPrimaryLLMClient(): OpenAI | null {
     if (!LLM_ENABLED) return null;
+    // Lets a host skip the hosted provider entirely and go straight to the local
+    // model. Without it an unfunded key costs a doomed round trip on every
+    // rescue — the 429 is returned, not free.
+    if (process.env.LLM_PRIMARY_ENABLED === 'false') return null;
     if (!LLM_API_KEY) return null;
     // Circuit breaker open?
     if (primaryLLMFailureCount >= LLM_CIRCUIT_THRESHOLD && Date.now() < primaryLLMCircuitOpenUntil) {
@@ -1090,6 +1094,65 @@ async function enrichFiltersFromMasterData(text: string, params: Record<string, 
     return params;
 }
 
+// ─── LLM SLOT RESCUE ────────────────────────────────────────────────────────
+
+/**
+ * Ask the model for SLOTS, not an intent — used only when the rules failed.
+ *
+ * The main intent prompt enumerates thirty-odd intents and their parameters.
+ * On a CPU-only host that costs ~23s with a 1.5B model, because generation
+ * scales with how much the model must read and write. This prompt asks for five
+ * short fields and caps the output, which is the difference between ~23s and
+ * ~10s on the same hardware.
+ *
+ * Crucially the model is NOT trusted with values. It only says which words look
+ * like an entity; that string is then resolved against master data by the same
+ * exact/acronym/typo matcher the rules use. So the model contributes
+ * understanding of PHRASING, while the database remains the only source of
+ * facts — it cannot invent a client that does not exist, or a number.
+ */
+async function llmSlotRescue(message: string): Promise<Record<string, any> | null> {
+    const client = getPrimaryLLMClient() || getOllamaClient();
+    if (!client) return null;
+    const model = getPrimaryLLMClient() ? LLM_MODEL : OLLAMA_MODEL;
+
+    const system = [
+        'Extract query slots from a CRM question. Reply with JSON only.',
+        'groupBy: one of client, technology, stage, practice, region, salesRep, month, projectType, pricingModel, status — or "" if none.',
+        'measure: value or count.',
+        'chart: bar, pie, or none.',
+        'outcome: open, closed, won, lost, or "".',
+        'entity: any company, technology, practice or person named in the question, else "".',
+    ].join(' ');
+
+    try {
+        const res: any = await withTimeout(client.chat.completions.create({
+            model,
+            messages: [{ role: 'system', content: system }, { role: 'user', content: message }],
+            response_format: { type: 'json_object' },
+            temperature: 0,
+            max_tokens: 80,
+        }) as any, 'LLM slot rescue');
+
+        const raw = res?.choices?.[0]?.message?.content;
+        if (!raw) return null;
+        const slots = JSON.parse(raw.replace(/^```json?\n?/, '').replace(/\n?```$/, '').trim());
+
+        const params: Record<string, any> = {};
+        const DIMS = ['client', 'technology', 'stage', 'practice', 'region', 'salesRep', 'month', 'projectType', 'pricingModel', 'status'];
+        if (typeof slots.groupBy === 'string' && DIMS.includes(slots.groupBy)) params.groupBy = slots.groupBy;
+        params.measure = slots.measure === 'count' ? 'count' : 'value';
+        if (slots.chart === 'pie' || slots.chart === 'bar') params.chartType = slots.chart;
+        if (['open', 'closed', 'won', 'lost'].includes(slots.outcome)) params.outcome = slots.outcome;
+        // Passed through the master-data matcher below, never used verbatim.
+        if (typeof slots.entity === 'string' && slots.entity.trim()) params.__entityHint = slots.entity.trim();
+        return params;
+    } catch (error) {
+        console.error('[Chatbot] slot rescue failed:', (error as Error).message);
+        return null;
+    }
+}
+
 // ─── CUSTOM CHARTS (no LLM) ─────────────────────────────────────────────────
 
 /** Dimensions a chart can be grouped by, and the words people use for each. */
@@ -1140,12 +1203,25 @@ function extractChartParams(lower: string): Record<string, any> {
     // A chart was asked for but no dimension named ("draw me a chart",
     // "visualise the pipeline"). Answer with the most useful default rather
     // than refusing — stage is the shape people mean by "the pipeline".
-    if (!params.groupBy) params.groupBy = 'stage';
+    //
+    // The flag matters: a defaulted groupBy is not evidence that the sentence
+    // was understood. Without it every unparsed question looks like a valid
+    // chart request and gets answered with the same by-stage chart, which is
+    // both wrong and hides the fact that nothing was understood.
+    if (!params.groupBy) {
+        params.groupBy = 'stage';
+        params.__groupByDefaulted = true;
+    }
 
     // Measure: money unless they clearly asked for a count.
-    params.measure = /\b(count|number|how many|deals?\s*count|volume)\b/i.test(lower) &&
-                     !/\b(value|revenue|worth|amount|₹|\$)\b/i.test(lower)
-        ? 'count' : 'value';
+    const wantsCount = /\b(count|number|how many|deals?\s*count|volume)\b/i.test(lower);
+    const wantsValue = /\b(value|revenue|worth|amount|money|₹|\$)\b/i.test(lower);
+    params.measure = wantsCount && !wantsValue ? 'count' : 'value';
+    // Same reasoning as the dimension: record whether the sentence actually said
+    // which measure it wanted, so the model is consulted only where it is silent.
+    // Asked for "the most money" the rules are already right, and the model's
+    // guess of "count" must not be allowed to overrule them.
+    if (!wantsCount && !wantsValue) params.__measureDefaulted = true;
 
     params.chartType = /\b(pie|donut|share|proportion|percentage|%)\b/i.test(lower) ? 'pie' : 'bar';
     return params;
@@ -2400,8 +2476,24 @@ export async function processChat(message: string, ctx: UserContext): Promise<Ch
         ? `Mode: ${conv.mode}, Collected: ${JSON.stringify(conv.collectedFields)}, Waiting for: ${conv.missingRequired[0] || conv.optionalRemaining[0] || 'confirmation'}`
         : '';
 
-    let intent = await callLLM(message, convContext);
-    if (!intent) intent = nlpParseIntent(message, conv);
+    // Rules first, model second — deliberately the reverse of the obvious order.
+    //
+    // The deterministic parser answers in 18-308ms and is exactly right for the
+    // shapes it knows (filters, counts, charts, win rate, follow-ups). The local
+    // model takes 4.5-7s on this CPU-only box. Asking the model first would put
+    // a 5-second wait in front of every question, including the ones already
+    // answered perfectly without it.
+    //
+    // So the model is the rescue path: it runs only when the rules did not
+    // understand the sentence, which is precisely where it earns its latency.
+    let intent = nlpParseIntent(message, conv);
+    // The heavy thirty-intent classification is deliberately NOT used here. On
+    // this hardware it cost ~23s, and worse, it guessed: "which of our accounts
+    // are we doing best with?" came back as list_contacts, answering "No
+    // contacts found" to a question about clients. The compact slot rescue in
+    // the salvage path is both faster and constrained to fields that map onto
+    // real queries, so a miss degrades to the help text instead of to a
+    // confident wrong answer.
 
     conv.history.push({ role: 'user', content: message });
 
@@ -2614,6 +2706,24 @@ export async function processChat(message: string, ctx: UserContext): Promise<Ch
     if (intent.intent === 'custom_chart') {
         if (!canExecute('list_opportunities', ctx.permissions)) return reply('You don\'t have permission to view opportunities.');
         const chartParams = inheritFilters(await enrichFiltersFromMasterData(message, { ...intent.params }), conv);
+
+        // "a picture of the money split up by whoever sells it" reaches here as a
+        // chart request whose dimension is only the by-stage default — the rules
+        // saw "picture" and "by" but could not name what to group on. Rather than
+        // draw the same default chart for every such sentence, ask the model which
+        // dimension was meant. It picks from a fixed list, so the worst case is the
+        // wrong dimension, never an invented one.
+        if (chartParams.__groupByDefaulted) {
+            const hinted = await llmSlotRescue(message);
+            if (hinted?.groupBy) {
+                chartParams.groupBy = hinted.groupBy;
+                if (hinted.measure && chartParams.__measureDefaulted) chartParams.measure = hinted.measure;
+                if (hinted.chartType) chartParams.chartType = hinted.chartType;
+                if (hinted.outcome && !chartParams.outcome) chartParams.outcome = hinted.outcome;
+                delete chartParams.__groupByDefaulted;
+                delete chartParams.__measureDefaulted;
+            }
+        }
         conv.lastFilters = { ...chartParams };
         const result = await execCustomChart(chartParams, ctx);
         return reply(result.summary, result.data, undefined, [result]);
@@ -2882,12 +2992,41 @@ export async function processChat(message: string, ctx: UserContext): Promise<Ch
     // menu. Naming the filter back in the reply keeps a wrong guess visible
     // rather than silent.
     if (intent.intent === 'general_chat' && canExecute('list_opportunities', ctx.permissions)) {
-        const salvaged = inheritFilters(await enrichFiltersFromMasterData(message, extractChartParams(message.toLowerCase())), conv);
+        // What THIS sentence resolves to on its own, before any inherited
+        // context is layered on. The distinction matters: filters carried over
+        // from the previous question say nothing about whether the current one
+        // was understood, and treating them as evidence would skip the rescue
+        // and answer a brand-new question with the last one's shape.
+        const own = await enrichFiltersFromMasterData(message, extractChartParams(message.toLowerCase()));
+        let salvaged = inheritFilters({ ...own }, conv);
+
+        // Rules found nothing usable — ask the model for slots. Its entity guess
+        // is resolved against master data, so a hallucinated name simply fails
+        // to match rather than producing a confident wrong answer.
+        const noRealDimension = !own.groupBy || own.__groupByDefaulted;
+        if (noRealDimension && !CARRYABLE_FILTERS.some(k => own[k])) {
+            const hinted = await llmSlotRescue(message);
+            if (hinted) {
+                if (hinted.__entityHint) {
+                    const resolved = await enrichFiltersFromMasterData(String(hinted.__entityHint), {});
+                    Object.assign(salvaged, resolved);
+                    delete hinted.__entityHint;
+                }
+                const sentenceNamedMeasure = !own.__measureDefaulted;
+                salvaged = { ...salvaged, ...hinted };
+                if (sentenceNamedMeasure) salvaged.measure = own.measure;
+                // The model named a dimension, so it is no longer a default.
+                if (hinted.groupBy) delete salvaged.__groupByDefaulted;
+            }
+        }
         const namedFilter = ['client', 'technology', 'practice', 'region', 'projectType', 'pricingModel', 'salesRep', 'stage']
             .some(k => salvaged[k]);
-        const namedDimension = /\b(?:by|per|across|split|grouped)\b/i.test(message) || /\b[a-z]+\s*[- ]?wise\b/i.test(message);
+        const namedDimension = /\b(?:by|per|across|split|grouped)\b/i.test(message)
+            || /\b[a-z]+\s*[- ]?wise\b/i.test(message)
+            || (!!salvaged.groupBy && !salvaged.__groupByDefaulted);   // rules or model found a real one
 
         if (namedDimension && salvaged.groupBy) {
+            delete salvaged.__groupByDefaulted;
             const result = await execCustomChart(salvaged, ctx);
             return reply(result.summary, result.data, undefined, [result]);
         }
@@ -2898,7 +3037,18 @@ export async function processChat(message: string, ctx: UserContext): Promise<Ch
     }
 
     // ─── GENERAL CHAT (LLM-enriched conversational fallback) ───
-    if (intent.intent === 'general_chat') {
+    // This path has not queried anything, so it cannot know anything. Asked "is
+    // there anything worth worrying about right now?" the local model replied
+    // "everything seems to be running smoothly" — fluent, confident, and with no
+    // data behind it. A CRM assistant telling a manager the pipeline is fine when
+    // it never looked is worse than one that admits it did not understand.
+    //
+    // So prose is allowed only for talk ABOUT the assistant — greetings, thanks,
+    // "what can you do". Everything else falls through to the deterministic help
+    // text. Questions about the data are answered above from real rows, or not at
+    // all.
+    const CHITCHAT = /^\s*(hi|hello|hey|thanks|thank you|ok|okay|cool|bye|good\s+(morning|afternoon|evening)|who are you|what can you do|what do you do|how are you)\b/i;
+    if (intent.intent === 'general_chat' && CHITCHAT.test(message)) {
         const llmResponse = await llmGeneralChat(message, ctx, conv.history);
         if (llmResponse) return reply(llmResponse);
     }
