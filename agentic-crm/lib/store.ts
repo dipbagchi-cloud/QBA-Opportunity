@@ -36,19 +36,25 @@ export interface Opportunity {
     };
 }
 
+/**
+ * Column filters are multi-select: pass an array to match any of the values
+ * (OR within the column, AND across columns). A single string still works.
+ */
+export type ColumnFilterValue = string | string[];
+
 export interface PaginationParams {
     page?: number;
     limit?: number;
     search?: string;
-    stage?: string;
+    stage?: ColumnFilterValue;
     stages?: string[];
-    client?: string;
-    owner?: string;
-    salesRep?: string;
-    manager?: string;
-    name?: string;
-    practice?: string;
-    technology?: string;
+    client?: ColumnFilterValue;
+    owner?: ColumnFilterValue;
+    salesRep?: ColumnFilterValue;
+    manager?: ColumnFilterValue;
+    name?: ColumnFilterValue;
+    practice?: ColumnFilterValue;
+    technology?: ColumnFilterValue;
     sortKey?: string;
     sortDir?: 'asc' | 'desc';
 }
@@ -78,18 +84,25 @@ export const useOpportunityStore = create<OpportunityStore>((set, get) => ({
         set({ isLoading: true });
         try {
             const qp = new URLSearchParams();
+            // Multi-select filters repeat the key once per value
+            // (?practice=A&practice=B) instead of joining with a delimiter, so
+            // a value containing a comma survives the round trip intact.
+            const appendFilter = (key: string, value?: ColumnFilterValue) => {
+                const list = value === undefined ? [] : Array.isArray(value) ? value : [value];
+                list.map(v => (v ?? '').trim()).filter(Boolean).forEach(v => qp.append(key, v));
+            };
             if (params?.page) qp.set('page', String(params.page));
             if (params?.limit) qp.set('limit', String(params.limit));
             if (params?.search) qp.set('search', params.search);
-            if (params?.stage) qp.set('stage', params.stage);
+            appendFilter('stage', params?.stage);
             if (params?.stages?.length) qp.set('stages', params.stages.join(','));
-            if (params?.client) qp.set('client', params.client);
-            if (params?.owner) qp.set('owner', params.owner);
-            if (params?.salesRep) qp.set('salesRep', params.salesRep);
-            if (params?.manager) qp.set('manager', params.manager);
-            if (params?.name) qp.set('name', params.name);
-            if (params?.practice) qp.set('practice', params.practice);
-            if (params?.technology) qp.set('technology', params.technology);
+            appendFilter('client', params?.client);
+            appendFilter('owner', params?.owner);
+            appendFilter('salesRep', params?.salesRep);
+            appendFilter('manager', params?.manager);
+            appendFilter('name', params?.name);
+            appendFilter('practice', params?.practice);
+            appendFilter('technology', params?.technology);
             if (params?.sortKey) qp.set('sortKey', params.sortKey);
             if (params?.sortDir) qp.set('sortDir', params.sortDir);
             const qs = qp.toString();

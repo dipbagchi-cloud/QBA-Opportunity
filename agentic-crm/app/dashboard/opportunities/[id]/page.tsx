@@ -45,6 +45,7 @@ import { AuditLogPane } from "./components/AuditLogPane";
 import { AssignmentPane } from "./components/AssignmentPane";
 import { AssignPresalesModal } from "./components/AssignPresalesModal";
 import { SowStudio } from "./components/SowStudio";
+import { StageTimeline, StageHistoryEntry } from "./components/StageTimeline";
 
 // Static dropdowns (not master-data driven)
 const DURATION_UNITS = ["days", "weeks", "months"];
@@ -496,6 +497,9 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const [activeStep, setActiveStep] = useState(0); // 0: Pipeline, 1: Presales
     const [opportunityStage, setOpportunityStage] = useState(0); // actual DB stage (0-3), stays fixed when navigating steps
     const [currentStageName, setCurrentStageName] = useState(''); // actual Kanban stage name (Discovery, Qualification, Proposal, Negotiation, Closed Won, Closed Lost)
+    // Stage timeline source data — which stages the deal has been through, and when.
+    const [stageHistory, setStageHistory] = useState<StageHistoryEntry[]>([]);
+    const [opportunityCreatedAt, setOpportunityCreatedAt] = useState<string>('');
     const steps = ["Pipeline", "Presales", "Sales", "SOW", "Project"];
     const isManagerOrAdmin = !!opportunityAccess?.permissions?.approvals?.manage;
     const canApproveGom = !!opportunityAccess?.permissions?.approvals?.manage;
@@ -1012,6 +1016,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 // Update active step based on stage
                 const stageName = data.stage?.name || data.currentStage || '';
                 setCurrentStageName(stageName);
+                setStageHistory(Array.isArray(data.stageHistory) ? data.stageHistory : []);
+                setOpportunityCreatedAt(data.createdAt || '');
                 let stageIdx = 0;
                 if (stageName === 'Closed Lost' || stageName === 'Proposal Lost') {
                     stageIdx = 2; // keep on Sales tab view
@@ -1923,6 +1929,13 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     )}
                 </div>
             </div>
+
+            {/* Stage timeline — where the deal has been and where it is now. */}
+            <StageTimeline
+                currentStageName={currentStageName}
+                stageHistory={stageHistory}
+                createdAt={opportunityCreatedAt}
+            />
 
             {/* Statement of Work (SOW) — mandatory, versioned. Hidden in Pipeline;
                 shown from Pre-sales onward (editable in Pre-sales, read-only after). */}

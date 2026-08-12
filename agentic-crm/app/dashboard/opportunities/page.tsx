@@ -37,7 +37,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import KanbanBoard from "@/components/opportunities/KanbanBoard";
 import { useCurrency } from "@/components/providers/currency-provider";
 import { ByOwnerBoard } from "./components/ByOwnerBoard";
-import { FilterCombobox } from "@/components/ui/filter-combobox";
+import { MultiSelectFilter } from "@/components/ui/multi-select-filter";
 import { useToast } from "@/hooks/use-toast";
 
 // Column model for the list. `serverSort` columns are sorted in the DB (so the
@@ -75,7 +75,10 @@ const SERVER_SORT_KEYS = LIST_COLUMNS.filter(c => c.sort === 'server').map(c => 
 // Columns with an inline server-side filter input.
 const FILTER_KEYS = LIST_COLUMNS.filter(c => c.filter).map(c => c.key);
 
-type ColFilters = Record<string, string>;
+// Each filterable column holds a list of picked values. Within a column the
+// values are OR'd, and columns are AND'd against each other — both resolved
+// server-side so the filter covers the whole dataset, not just this page.
+type ColFilters = Record<string, string[]>;
 const EMPTY_FILTERS: ColFilters = {};
 
 export default function OpportunitiesPage() {
@@ -182,9 +185,10 @@ export default function OpportunitiesPage() {
     const [sortKey, setSortKey] = useState<string | null>(null);
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
     const [showFilters, setShowFilters] = useState(false);
-    // One case-insensitive "contains" value per filterable column. Empty/absent
-    // = no filter. Mirrors the dashboard "Your Pending Actions" panel, but the
-    // matching happens server-side so it covers the whole paginated dataset.
+    // Case-insensitive "contains" values per filterable column, multi-select.
+    // Empty/absent = no filter. Mirrors the dashboard "Your Pending Actions"
+    // panel, but the matching happens server-side so it covers the whole
+    // paginated dataset.
     const [colFilters, setColFilters] = useState<ColFilters>(EMPTY_FILTERS);
     // Distinct values per filterable column for the type-ahead dropdowns.
     const [filterOptions, setFilterOptions] = useState<Record<string, string[]>>({});
@@ -196,8 +200,9 @@ export default function OpportunitiesPage() {
             .catch(() => { /* suggestions are best-effort; filtering still works via free text */ });
     }, []);
 
+    // Count picked values, not columns — "Practice: A, B" reads as 2 filters.
     const activeFilterCount = useMemo(
-        () => FILTER_KEYS.reduce((n, k) => n + ((colFilters[k] || '').trim() ? 1 : 0), 0),
+        () => FILTER_KEYS.reduce((n, k) => n + (colFilters[k]?.length || 0), 0),
         [colFilters]
     );
 
@@ -222,8 +227,8 @@ export default function OpportunitiesPage() {
             search,
         };
         FILTER_KEYS.forEach((k) => {
-            const v = (filters[k] || '').trim();
-            if (v) params[k] = v;
+            const picked = (filters[k] || []).map(v => v.trim()).filter(Boolean);
+            if (picked.length) params[k] = picked;
         });
         if (sortKey && SERVER_SORT_KEYS.includes(sortKey)) {
             params.sortKey = sortKey;
@@ -272,8 +277,13 @@ export default function OpportunitiesPage() {
         return () => clearTimeout(timer);
     }, [searchTerm, colFilters, sortKey, sortDir]);
 
-    const setColFilter = (key: string, val: string) =>
-        setColFilters((prev) => ({ ...prev, [key]: val }));
+    const setColFilter = (key: string, vals: string[]) =>
+        setColFilters((prev) => ({ ...prev, [key]: vals }));
+
+    // Drop one picked value from the chip row, clearing the column when it was
+    // the last one.
+    const removeColFilterValue = (key: string, val: string) =>
+        setColFilters((prev) => ({ ...prev, [key]: (prev[key] || []).filter(v => v !== val) }));
 
     const handleClearFilters = () => {
         setColFilters(EMPTY_FILTERS);
@@ -365,7 +375,7 @@ export default function OpportunitiesPage() {
                 <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
                 <input
                     type="text"
-                    placeholder="Search opportunities by name, client, or owner..."
+                    placeholder="Search across all columns — name, client, owner, stage, sales rep, manager, practice, technology, region…"
                     className="w-full pl-10 pr-4 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 shadow-sm"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
@@ -374,11 +384,20 @@ export default function OpportunitiesPage() {
 
             {activeFilterCount > 0 && (
                 <div className="flex flex-wrap gap-2">
-                    {LIST_COLUMNS.filter(c => c.filter && (colFilters[c.key] || '').trim()).map(c => (
-                        <span key={c.key} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-slate-50 text-slate-700 border border-slate-200 text-xs font-medium">
-                            {c.label}: {colFilters[c.key].trim()}
-                        </span>
-                    ))}
+                    {LIST_COLUMNS.filter(c => c.filter && colFilters[c.key]?.length).map(c =>
+                        colFilters[c.key].map(val => (
+                            <span key={`${c.key}:${val}`} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-slate-50 text-slate-700 border border-slate-200 text-xs font-medium">
+                                {c.label}: {val}
+                                <button
+                                    onClick={() => removeColFilterValue(c.key, val)}
+                                    className="text-slate-400 hover:text-red-600"
+                                    title={`Remove ${c.label} filter "${val}"`}
+                                >
+                                    <X className="w-3 h-3" />
+                                </button>
+                            </span>
+                        ))
+                    )}
                     <button
                         onClick={handleClearFilters}
                         className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-red-50 text-red-700 border border-red-200 text-xs font-medium hover:bg-red-100"
@@ -413,12 +432,12 @@ export default function OpportunitiesPage() {
                                         {LIST_COLUMNS.map((col) => (
                                             <th key={col.key} className="px-3 pb-2 pt-1 align-top">
                                                 {col.filter ? (
-                                                    <FilterCombobox
-                                                        value={colFilters[col.key] || ''}
-                                                        onChange={(v) => setColFilter(col.key, v)}
+                                                    <MultiSelectFilter
+                                                        values={colFilters[col.key] || []}
+                                                        onChange={(vals) => setColFilter(col.key, vals)}
                                                         options={filterOptions[col.key] || []}
                                                         placeholder="filter…"
-                                                        inputClassName="w-full min-w-[90px] px-2 py-1 text-[11px] font-normal border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                                                        triggerClassName={`flex items-center justify-between gap-1 w-full min-w-[90px] px-2 py-1 text-[11px] font-normal border rounded bg-white text-left focus:outline-none focus:ring-1 focus:ring-indigo-400 ${colFilters[col.key]?.length ? 'border-indigo-300' : 'border-slate-200'}`}
                                                     />
                                                 ) : null}
                                             </th>

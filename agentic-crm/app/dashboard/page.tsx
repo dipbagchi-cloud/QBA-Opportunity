@@ -1075,6 +1075,7 @@ export default function DashboardPage() {
         { key: 'client',             label: 'Client',          format: 'text' },
         { key: 'value',              label: 'Value',           format: 'currency' },
         { key: 'currentStage',       label: 'Stage',           format: 'text' },
+        { key: 'practice',           label: 'Practice',        format: 'text' },
         { key: 'probability',        label: 'Probability',     format: 'percent' },
         { key: 'tentativeStartDate', label: 'Est. Start',      format: 'text' },
         { key: 'tentativeEndDate',   label: 'Est. End',        format: 'text' },
@@ -1106,6 +1107,76 @@ export default function DashboardPage() {
         };
         return { ...bucket, count: oppsInStage.length, totalValue, drill };
     });
+
+    /* ── Portfolio tiles: Open / Closed and Hot / Cold ─────────────────
+     *
+     * Open vs Closed partitions the whole book by stage, so the two counts
+     * always add up to the "Opportunities" tile.
+     *
+     * Hot vs Cold splits the OPEN deals by whether they have been touched
+     * recently. `isStalled` already carries exactly that signal from the
+     * backend: it is set when the last real activity — a field edit OR a new
+     * comment — is older than the configurable stale threshold (Admin >
+     * Budget Assumptions, default 30 days), or when someone put the deal On
+     * Hold. So Hot = open and not stalled, Cold = open and stalled. Closed
+     * deals are in neither, matching Open/Closed above.
+     */
+    const CLOSED_STAGE_SET = ['Closed Won', 'Closed-Won', 'Closed Lost', 'Proposal Lost', 'Delivered'];
+    const isClosedOpp = (o: Opportunity) => CLOSED_STAGE_SET.includes(o.currentStage);
+    const openOpps = opportunities.filter(o => !isClosedOpp(o));
+    const closedOpps = opportunities.filter(isClosedOpp);
+    const hotOpps = openOpps.filter(o => !o.isStalled);
+    const coldOpps = openOpps.filter(o => !!o.isStalled);
+
+    const portfolioColumns = [
+        ...stageProjectColumns,
+        { key: 'lastActivity', label: 'Last Activity', format: 'text' as const },
+    ];
+    const portfolioTiles: {
+        label: string; hint: string; count: number; totalValue: number;
+        badgeColor: string; drill: DrillDownConfig;
+    }[] = [
+        {
+            label: 'Open',
+            hint: 'Not yet won or lost',
+            badgeColor: 'bg-blue-50 text-blue-700 border-blue-200',
+            count: openOpps.length,
+            totalValue: openOpps.reduce((s, o) => s + (Number(o.value) || 0), 0),
+            drill: { title: 'Open Opportunities — Still In Play', columns: portfolioColumns, data: openOpps },
+        },
+        {
+            label: 'Closed',
+            hint: 'Won or lost',
+            badgeColor: 'bg-slate-100 text-slate-700 border-slate-300',
+            count: closedOpps.length,
+            totalValue: closedOpps.reduce((s, o) => s + (Number(o.value) || 0), 0),
+            drill: {
+                title: 'Closed Opportunities — Won & Lost',
+                columns: [
+                    ...portfolioColumns.filter(c => c.key !== 'expectedCloseDate'),
+                    { key: 'actualCloseDate', label: 'Closed On', format: 'text' as const },
+                ],
+                data: closedOpps,
+                dateKey: 'actualCloseDate',
+            },
+        },
+        {
+            label: 'Hot',
+            hint: 'Touched recently',
+            badgeColor: 'bg-orange-50 text-orange-700 border-orange-200',
+            count: hotOpps.length,
+            totalValue: hotOpps.reduce((s, o) => s + (Number(o.value) || 0), 0),
+            drill: { title: 'Hot Opportunities — Edited or Commented Recently', columns: portfolioColumns, data: hotOpps },
+        },
+        {
+            label: 'Cold',
+            hint: 'Gone quiet or on hold',
+            badgeColor: 'bg-cyan-50 text-cyan-700 border-cyan-200',
+            count: coldOpps.length,
+            totalValue: coldOpps.reduce((s, o) => s + (Number(o.value) || 0), 0),
+            drill: { title: 'Cold Opportunities — No Recent Edit or Comment', columns: portfolioColumns, data: coldOpps },
+        },
+    ];
 
     const insightsDrill: DrillDownConfig = {
         title: "Pipeline Insights & Deal Health",
@@ -1319,6 +1390,21 @@ export default function DashboardPage() {
                     <ExpandableCard key={tile.label} drillConfig={tile.drill} className="bg-white rounded-md px-2 py-1.5 border border-slate-100 hover:border-slate-200 transition-colors">
                         <div className="flex items-center gap-1 mb-0.5">
                             <span className={`px-1.5 py-0.5 rounded text-[9px] font-semibold border ${tile.badgeColor}`}>{tile.label}</span>
+                            <span className="text-[10px] text-slate-400 ml-auto">{tile.count}</span>
+                        </div>
+                        <p className="text-sm font-bold text-slate-900 leading-tight">{fmtCurrency(tile.totalValue)}</p>
+                        <p className="text-[10px] text-slate-400 truncate leading-tight">{tile.count} {tile.count === 1 ? 'opportunity' : 'opportunities'}</p>
+                    </ExpandableCard>
+                ))}
+            </div>
+
+            {/* Portfolio Tiles — Open/Closed split the whole book; Hot/Cold split the open ones */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-1.5">
+                {portfolioTiles.map(tile => (
+                    <ExpandableCard key={tile.label} drillConfig={tile.drill} className="bg-white rounded-md px-2 py-1.5 border border-slate-100 hover:border-slate-200 transition-colors">
+                        <div className="flex items-center gap-1 mb-0.5">
+                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-semibold border ${tile.badgeColor}`}>{tile.label}</span>
+                            <span className="text-[10px] text-slate-400 truncate">{tile.hint}</span>
                             <span className="text-[10px] text-slate-400 ml-auto">{tile.count}</span>
                         </div>
                         <p className="text-sm font-bold text-slate-900 leading-tight">{fmtCurrency(tile.totalValue)}</p>

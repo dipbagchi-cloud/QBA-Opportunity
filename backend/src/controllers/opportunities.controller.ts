@@ -90,18 +90,7 @@ export async function listOpportunities(req: Request, res: Response) {
         const page = Math.max(1, parseInt(req.query.page as string) || 1);
         const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 10));
         const search = (req.query.search as string || '').trim();
-        const stageFilter = req.query.stage as string || '';
         const stagesFilter = (req.query.stages as string || '').trim();
-        const clientFilter = (req.query.client as string || '').trim();
-        const ownerFilter = (req.query.owner as string || '').trim();
-        const salesRepFilter = (req.query.salesRep as string || '').trim();
-        const managerFilter = (req.query.manager as string || '').trim();
-        // Per-column inline filters (Pending Actions–style). All are
-        // case-insensitive "contains" matches resolved in the database so
-        // they apply across the whole dataset, not just the current page.
-        const nameFilter = (req.query.name as string || '').trim();
-        const practiceFilter = (req.query.practice as string || '').trim();
-        const technologyFilter = (req.query.technology as string || '').trim();
         // Server-side sort: sortKey maps to a DB-backed orderBy below.
         const sortKey = (req.query.sortKey as string || '').trim();
         const sortDir = (req.query.sortDir as string) === 'desc' ? 'desc' : 'asc';
@@ -112,16 +101,61 @@ export async function listOpportunities(req: Request, res: Response) {
                 .map((item) => item.trim())
                 .filter(Boolean);
 
+        // Per-column inline filters (Pending Actions–style). Each is
+        // multi-select: the UI repeats the query param once per picked value
+        // (?practice=A&practice=B) rather than joining with a delimiter, so a
+        // value containing a comma still filters correctly. A single value
+        // still arrives as a plain string, which keeps older callers working.
+        const readMulti = (raw: unknown): string[] => {
+            const list = Array.isArray(raw) ? raw : [raw];
+            return list
+                .map((v) => (typeof v === 'string' ? v.trim() : ''))
+                .filter(Boolean);
+        };
+
+        // Picked values are OR'd within a column and AND'd across columns.
+        // Matching stays a case-insensitive "contains" so CSV-valued columns
+        // (technology) keep matching a single token out of the list.
+        const anyOf = (values: string[], clause: (value: string) => any) =>
+            values.length === 1 ? clause(values[0]) : { OR: values.map(clause) };
+
+        const stageFilters = readMulti(req.query.stage);
+        const clientFilters = readMulti(req.query.client);
+        const ownerFilters = readMulti(req.query.owner);
+        const salesRepFilters = readMulti(req.query.salesRep);
+        const managerFilters = readMulti(req.query.manager);
+        const nameFilters = readMulti(req.query.name);
+        const practiceFilters = readMulti(req.query.practice);
+        const technologyFilters = readMulti(req.query.technology);
+
         const andFilters: any[] = [];
 
         const where: any = {};
+        // Global search spans every text-valued column the list can show —
+        // not just title/client/owner — so typing a stage, a rep, a practice,
+        // a technology or a region finds the matching rows.
         if (search) {
+            const like = { contains: search, mode: 'insensitive' as const };
             andFilters.push({
                 OR: [
-                { title: { contains: search, mode: 'insensitive' } },
-                { client: { name: { contains: search, mode: 'insensitive' } } },
-                { owner: { name: { contains: search, mode: 'insensitive' } } },
-                { description: { contains: search, mode: 'insensitive' } },
+                    { title: like },
+                    { client: { name: like } },
+                    { owner: { name: like } },
+                    { description: like },
+                    { stage: { name: like } },
+                    { currentStage: like },
+                    { detailedStatus: like },
+                    { salesRepName: like },
+                    { managerName: like },
+                    { presalesAssigneeName: like },
+                    { practice: like },
+                    { technology: like },
+                    { region: like },
+                    { country: like },
+                    { projectType: like },
+                    { pricingModel: like },
+                    { priority: like },
+                    { source: like },
                 ],
             });
         }
@@ -132,45 +166,45 @@ export async function listOpportunities(req: Request, res: Response) {
         } else if (stageNames.length > 1) {
             andFilters.push({ stage: { name: { in: stageNames } } });
         }
-        // Inline single-column stage filter — contains match.
-        if (stageFilter) {
-            andFilters.push({ stage: { name: { contains: stageFilter, mode: 'insensitive' } } });
+        // Inline stage column filter — contains match.
+        if (stageFilters.length) {
+            andFilters.push(anyOf(stageFilters, (v) => ({ stage: { name: { contains: v, mode: 'insensitive' } } })));
         }
 
-        if (clientFilter) {
-            andFilters.push({ client: { name: { contains: clientFilter, mode: 'insensitive' } } });
+        if (clientFilters.length) {
+            andFilters.push(anyOf(clientFilters, (v) => ({ client: { name: { contains: v, mode: 'insensitive' } } })));
         }
 
-        if (ownerFilter) {
-            andFilters.push({ owner: { name: { contains: ownerFilter, mode: 'insensitive' } } });
+        if (ownerFilters.length) {
+            andFilters.push(anyOf(ownerFilters, (v) => ({ owner: { name: { contains: v, mode: 'insensitive' } } })));
         }
 
-        if (salesRepFilter) {
-            andFilters.push({ salesRepName: { contains: salesRepFilter, mode: 'insensitive' } });
+        if (salesRepFilters.length) {
+            andFilters.push(anyOf(salesRepFilters, (v) => ({ salesRepName: { contains: v, mode: 'insensitive' } })));
         }
 
-        if (managerFilter) {
-            andFilters.push({ managerName: { contains: managerFilter, mode: 'insensitive' } });
+        if (managerFilters.length) {
+            andFilters.push(anyOf(managerFilters, (v) => ({ managerName: { contains: v, mode: 'insensitive' } })));
         }
 
         // "Opportunity Name" column shows the title plus client • owner, so its
         // inline filter matches any of the three (mirrors the dashboard panel).
-        if (nameFilter) {
-            andFilters.push({
+        if (nameFilters.length) {
+            andFilters.push(anyOf(nameFilters, (v) => ({
                 OR: [
-                    { title: { contains: nameFilter, mode: 'insensitive' } },
-                    { client: { name: { contains: nameFilter, mode: 'insensitive' } } },
-                    { owner: { name: { contains: nameFilter, mode: 'insensitive' } } },
+                    { title: { contains: v, mode: 'insensitive' } },
+                    { client: { name: { contains: v, mode: 'insensitive' } } },
+                    { owner: { name: { contains: v, mode: 'insensitive' } } },
                 ],
-            });
+            })));
         }
 
-        if (practiceFilter) {
-            andFilters.push({ practice: { contains: practiceFilter, mode: 'insensitive' } });
+        if (practiceFilters.length) {
+            andFilters.push(anyOf(practiceFilters, (v) => ({ practice: { contains: v, mode: 'insensitive' } })));
         }
 
-        if (technologyFilter) {
-            andFilters.push({ technology: { contains: technologyFilter, mode: 'insensitive' } });
+        if (technologyFilters.length) {
+            andFilters.push(anyOf(technologyFilters, (v) => ({ technology: { contains: v, mode: 'insensitive' } })));
         }
 
         if (andFilters.length > 0) {
@@ -828,6 +862,18 @@ export async function getOpportunity(req: Request, res: Response) {
                 attachments: {
                     select: { id: true, fileName: true, fileType: true, fileSize: true, uploadedAt: true, category: true },
                     orderBy: { uploadedAt: 'desc' },
+                },
+                // Drives the stage timeline at the top of the detail page —
+                // which stages the deal has actually been through, and when.
+                stageHistory: {
+                    orderBy: { enteredAt: 'asc' },
+                    select: {
+                        id: true,
+                        enteredAt: true,
+                        exitedAt: true,
+                        durationHours: true,
+                        stage: { select: { name: true, order: true } },
+                    },
                 },
             }
         });
