@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useMemo, ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import { X, Download, Maximize2, Search, ChevronLeft, ChevronRight, Filter, ArrowUpDown, ArrowUp, ArrowDown, Calendar } from "lucide-react";
 import {
     Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
@@ -71,6 +72,113 @@ function downloadCSV(columns: DrillColumn[], data: Record<string, any>[], title:
 
 const PAGE_SIZES = [10, 25, 50, 100];
 
+/** One opportunity's contribution to one month's bar. */
+interface MonthSlice {
+    id: string;
+    name: string;
+    client: string;
+    value: number;
+    rowIdx: number;
+}
+
+interface MonthBucket {
+    key: string;
+    label: string;
+    count: number;
+    value: number;
+    slices: MonthSlice[];
+}
+
+/**
+ * Segment colours.
+ *
+ * Each bar is split one segment per opportunity, so a busy month can carry
+ * dozens of segments and the palette necessarily repeats — no palette can make
+ * 47 categories distinguishable. Colour here is therefore a visual separator
+ * between neighbouring segments, NOT a legend you can decode; identity comes
+ * from the hover tooltip, which names the deal.
+ *
+ * The base ramp is colourblind-safe between adjacent entries, and the colour is
+ * keyed to the opportunity id rather than its rank, so a segment keeps its
+ * colour as filters change the ordering around it.
+ */
+// Validated with the palette checker (light surface): lightness band, chroma
+// floor, adjacent-pair CVD separation, normal-vision floor and contrast all
+// pass. Ordered so neighbouring entries separate as far as possible, since
+// adjacent stack segments are what a reader has to tell apart.
+const SEGMENT_COLORS = [
+    "#4f46e5", "#c2410c", "#0891b2", "#a21caf", "#4d7c0f",
+    "#1d4ed8", "#be123c", "#059669", "#7c3aed", "#b45309",
+];
+
+function segmentColor(id: string): string {
+    // Stable hash so an opportunity keeps its colour across renders/filters.
+    let h = 0;
+    for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+    return SEGMENT_COLORS[h % SEGMENT_COLORS.length];
+}
+
+
+/* ------------------------------------------------------------------ */
+/* Segmented month bar                                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Draws one month's bar as a stack of per-opportunity segments.
+ *
+ * Rendered as a Recharts `shape` rather than one <Bar> per opportunity: a busy
+ * popup carries well over a hundred deals, and that many Bar series makes the
+ * chart crawl. One shape draws every segment as a plain <rect>, which also lets
+ * each segment own its hover and click handling directly.
+ *
+ * A 2px gap is left between segments so neighbours stay separable even where
+ * the cycling palette repeats a colour; segments too thin to show a gap are
+ * drawn solid rather than disappearing.
+ */
+function SegmentedBar(props: any) {
+    const { x, y, width, height, payload, onHover, onPick } = props;
+    const slices: MonthSlice[] = payload?.slices || [];
+    const total: number = payload?.value || 0;
+    if (!(height > 0) && slices.length === 0) return null;
+
+    // Nothing to break up — draw the plain bar.
+    if (slices.length === 0 || total <= 0) {
+        return <rect x={x} y={y} width={width} height={height} fill={SEGMENT_COLORS[0]} rx={3} />;
+    }
+
+    let cursorY = y + height;   // stack upward from the baseline
+    return (
+        <g>
+            {slices.map((slice, i) => {
+                const h = Math.max((slice.value / total) * height, 0);
+                const gap = h > 4 ? 2 : 0;             // keep hairline slices visible
+                const drawH = Math.max(h - gap, h > 0 ? 1 : 0);
+                cursorY -= h;
+                const isTop = i === slices.length - 1;
+                return (
+                    <rect
+                        key={`${slice.id}-${i}`}
+                        x={x}
+                        y={cursorY}
+                        width={width}
+                        height={drawH}
+                        fill={segmentColor(slice.id)}
+                        rx={isTop ? 3 : 0}
+                        style={{ cursor: "pointer" }}
+                        onMouseEnter={e => onHover?.({ slice, month: payload.label, x: e.clientX, y: e.clientY })}
+                        onMouseMove={e => onHover?.({ slice, month: payload.label, x: e.clientX, y: e.clientY })}
+                        onMouseLeave={() => onHover?.(null)}
+                        onClick={() => onPick?.(slice)}
+                    >
+                        {/* Native tooltip as a fallback for touch/keyboard users. */}
+                        <title>{`${slice.name} — ${slice.client}`}</title>
+                    </rect>
+                );
+            })}
+        </g>
+    );
+}
+
 /* ------------------------------------------------------------------ */
 /* Modal component                                                     */
 /* ------------------------------------------------------------------ */
@@ -84,6 +192,24 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
     const [filterCol, setFilterCol] = useState<string | null>(null);
     const [filterVal, setFilterVal] = useState("");
     const [showFilter, setShowFilter] = useState(false);
+    // Which bar segment the pointer is over, for the identity tooltip. Colour
+    // repeats across a long stack, so the name here is what actually tells the
+    // reader which deal they are looking at.
+    const [hoveredSlice, setHoveredSlice] = useState<
+        { slice: MonthSlice; month: string; x: number; y: number } | null
+    >(null);
+    const router = useRouter();
+
+    /** Open an opportunity from a bar segment or a table row. */
+    const openOpportunity = useCallback((row: { id?: string } | null | undefined) => {
+        const id = row?.id;
+        if (!id) return;
+        // Close first, or the modal lingers over the destination during the
+        // route transition.
+        setHoveredSlice(null);
+        onClose();
+        router.push(`/dashboard/opportunities/${id}`);
+    }, [router, onClose]);
 
     // Every attribute filter is multi-select: pick several values in a column
     // and they OR together, while separate columns AND against each other —
@@ -246,7 +372,7 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
         });
 
         if (contributions.length === 0) {
-            return [] as { key: string; label: string; count: number; value: number }[];
+            return [] as MonthBucket[];
         }
 
         // 2. Adaptive 12-month window covering the contribution months.
@@ -266,7 +392,7 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
             windowStart = new Date(minDate.getFullYear(), minDate.getMonth(), 1);
         }
 
-        const buckets: { key: string; label: string; count: number; value: number }[] = [];
+        const buckets: MonthBucket[] = [];
         for (let i = 0; i < 12; i++) {
             const d = new Date(windowStart.getFullYear(), windowStart.getMonth() + i, 1);
             buckets.push({
@@ -274,6 +400,7 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
                 label: d.toLocaleDateString(undefined, { month: "short", year: "2-digit" }),
                 count: 0,
                 value: 0,
+                slices: [],
             });
         }
         const idx = new Map(buckets.map((b, i) => [b.key, i]));
@@ -284,13 +411,31 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
         //    listing (rather than being silently dropped).
         const bucketRows: Set<number>[] = buckets.map(() => new Set<number>());
         const firstKey = buckets[0].key;
+        // Per-opportunity slices, so each bar can be drawn segment-by-segment and
+        // every segment can carry its own identity, tooltip and click target.
+        const bucketSlices: MonthSlice[][] = buckets.map(() => []);
         contributions.forEach(c => {
             let i = idx.get(c.monthKey);
             if (i == null) i = c.monthKey < firstKey ? 0 : buckets.length - 1;
             buckets[i].value += c.value;
             bucketRows[i].add(c.rowIdx);
+            if (c.value > 0) {
+                const row = roleFiltered[c.rowIdx] as Record<string, any>;
+                bucketSlices[i].push({
+                    id: String(row?.id ?? `row-${c.rowIdx}`),
+                    name: String(row?.name ?? row?.opportunity ?? "(untitled)"),
+                    client: String(row?.client ?? ""),
+                    value: c.value,
+                    rowIdx: c.rowIdx,
+                });
+            }
         });
-        buckets.forEach((b, i) => { b.count = bucketRows[i].size; });
+        buckets.forEach((b, i) => {
+            b.count = bucketRows[i].size;
+            // Largest first so the biggest contributors sit at the base of the
+            // stack and stay easiest to hit.
+            b.slices = bucketSlices[i].sort((x, y) => y.value - x.value);
+        });
         return buckets;
     }, [roleFiltered, valueKey, resolveRowDate]);
 
@@ -388,6 +533,28 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
         <div className="fixed inset-0 z-[100] flex items-center justify-center">
             {/* Backdrop */}
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+
+            {/* Segment identity tooltip. Fixed-positioned and pointer-events-none
+                so it follows the cursor without ever swallowing the click that
+                opens the deal. */}
+            {hoveredSlice && (
+                <div
+                    className="fixed z-[120] pointer-events-none bg-slate-900 text-white rounded-md shadow-xl px-2.5 py-1.5 max-w-[280px]"
+                    style={{ left: Math.min(hoveredSlice.x + 14, window.innerWidth - 300), top: hoveredSlice.y + 14 }}
+                >
+                    <div className="flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-sm shrink-0" style={{ background: segmentColor(hoveredSlice.slice.id) }} />
+                        <span className="text-[11px] font-semibold truncate">{hoveredSlice.slice.name}</span>
+                    </div>
+                    {hoveredSlice.slice.client && (
+                        <div className="text-[10px] text-slate-300 truncate">{hoveredSlice.slice.client}</div>
+                    )}
+                    <div className="text-[10px] text-slate-300 mt-0.5">
+                        {hoveredSlice.month} · {formatCell(hoveredSlice.slice.value, "currency", currencyFormat)}
+                    </div>
+                    <div className="text-[9px] text-indigo-300 mt-1">Click to open this opportunity</div>
+                </div>
+            )}
 
             {/* Panel */}
             <div className="relative bg-white rounded-xl shadow-2xl border border-slate-200 w-[95vw] max-w-6xl max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
@@ -495,6 +662,7 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
                                             allowDecimals={false}
                                         />
                                         <Tooltip
+                                            cursor={{ fill: "rgba(148,163,184,0.08)" }}
                                             contentStyle={{ fontSize: "11px", borderRadius: "8px", border: "1px solid #e2e8f0", padding: "6px 10px" }}
                                             formatter={(value: number, name: string) => {
                                                 if (name === "Total Value") return [formatCell(value, "currency", currencyFormat), name];
@@ -502,7 +670,19 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
                                             }}
                                         />
                                         <Legend wrapperStyle={{ fontSize: "10px" }} iconSize={8} />
-                                        <Bar yAxisId="left" dataKey="value" name="Total Value" fill="#6366f1" radius={[4, 4, 0, 0]} />
+                                        <Bar
+                                            yAxisId="left"
+                                            dataKey="value"
+                                            name="Total Value"
+                                            isAnimationActive={false}
+                                            shape={(props: any) => (
+                                                <SegmentedBar
+                                                    {...props}
+                                                    onHover={setHoveredSlice}
+                                                    onPick={openOpportunity}
+                                                />
+                                            )}
+                                        />
                                         <Line yAxisId="right" type="monotone" dataKey="count" name="Deal Count" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3, fill: "#f59e0b" }} />
                                     </ComposedChart>
                                 </ResponsiveContainer>
@@ -620,16 +800,30 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {pagedData.map((row, idx) => (
-                                        <tr key={idx} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/50 transition-colors">
-                                            <td className="py-2 px-3 text-slate-400 font-mono">{(page - 1) * pageSize + idx + 1}</td>
-                                            {columns.map(col => (
-                                                <td key={col.key} className="py-2 px-3 text-slate-700 whitespace-nowrap">
-                                                    {formatCell(row[col.key], col.format, currencyFormat)}
-                                                </td>
-                                            ))}
-                                        </tr>
-                                    ))}
+                                    {pagedData.map((row, idx) => {
+                                        // Rows carry the opportunity id, so the whole row opens
+                                        // the deal. Keyboard-reachable, since a click target that
+                                        // is not a link or button is invisible to tab navigation.
+                                        const openable = !!row.id;
+                                        return (
+                                            <tr
+                                                key={row.id ?? idx}
+                                                className={`border-b border-slate-50 last:border-0 transition-colors ${openable ? "cursor-pointer hover:bg-indigo-50/60" : "hover:bg-slate-50/50"}`}
+                                                onClick={openable ? () => openOpportunity(row) : undefined}
+                                                onKeyDown={openable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openOpportunity(row); } } : undefined}
+                                                tabIndex={openable ? 0 : undefined}
+                                                role={openable ? "link" : undefined}
+                                                title={openable ? "Open this opportunity" : undefined}
+                                            >
+                                                <td className="py-2 px-3 text-slate-400 font-mono">{(page - 1) * pageSize + idx + 1}</td>
+                                                {columns.map(col => (
+                                                    <td key={col.key} className="py-2 px-3 text-slate-700 whitespace-nowrap">
+                                                        {formatCell(row[col.key], col.format, currencyFormat)}
+                                                    </td>
+                                                ))}
+                                            </tr>
+                                        );
+                                    })}
                                     {pagedData.length === 0 && (
                                         <tr>
                                             <td colSpan={columns.length + 1} className="py-8 text-center text-slate-400">
