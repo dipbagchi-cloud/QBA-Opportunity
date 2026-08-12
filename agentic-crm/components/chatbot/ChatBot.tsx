@@ -264,9 +264,17 @@ export default function ChatBot() {
 
     return (
         <>
-            {/* Floating toggle button */}
+            {/* Floating toggle button.
+                z-30 deliberately sits BELOW the app's dialog layer (z-50) and
+                the toast layer (z-[100]) so the launcher can never cover a
+                modal's action buttons — it is the least important thing on
+                screen whenever a dialog is open. It stays above page chrome
+                (sticky table headers are z-20).
+                Offsets are viewport-safe: bottom-20 on mobile clears the
+                thumb zone and any bottom-anchored page controls, dropping to
+                bottom-4 once there is room. */}
             {!isOpen && !isHidden && (
-                <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end group animate-in fade-in duration-300">
+                <div className="fixed bottom-20 right-4 sm:bottom-4 sm:right-4 z-30 flex flex-col items-end group animate-in fade-in duration-300">
                     <button
                         onClick={(e) => { e.stopPropagation(); setIsHidden(true); }}
                         className="opacity-0 group-hover:opacity-100 transition-opacity p-1 bg-white border border-slate-200 rounded-full shadow-sm text-slate-400 hover:text-slate-600 hover:bg-slate-50 absolute -top-2 -right-2 z-10"
@@ -284,9 +292,15 @@ export default function ChatBot() {
                 </div>
             )}
 
-            {/* Chat panel */}
+            {/* Chat panel.
+                z-40 keeps it above page content but still under dialogs, so a
+                confirmation modal opened behind it always wins. Sized against
+                the viewport rather than fixed pixels: on a phone the old
+                w-[420px] h-[600px] overflowed the screen and pushed its own
+                input off-screen. dvh (not vh) accounts for mobile browser
+                chrome that shrinks the visible area. */}
             {isOpen && (
-                <div className="fixed bottom-6 right-6 z-50 w-[420px] h-[600px] bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden animate-in slide-in-from-bottom-5 duration-200">
+                <div className="fixed bottom-4 right-4 left-4 sm:left-auto z-40 w-auto sm:w-[420px] h-[min(600px,calc(100dvh-2rem))] max-h-[calc(100dvh-2rem)] bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden animate-in slide-in-from-bottom-5 duration-200">
                     {/* Header */}
                     <div className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white">
                         <div className="flex items-center gap-2">
