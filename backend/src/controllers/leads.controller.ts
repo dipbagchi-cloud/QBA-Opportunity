@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
+import { recordStageEntry } from '../lib/stage-history';
 
 // Helper: Calculate Lead Score (Epic 2 Logic)
 function calculateLeadScore(data: any): { score: number, factors: any, explanation: string } {
@@ -169,6 +170,9 @@ export async function ingestLead(req: Request, res: Response) {
                 changes: { title: newLead.title, value: newLead.value, client: newLead.client?.name, source: body.source, leadScore: qualification.score },
             },
         });
+
+        // Open the stage timeline at the stage the lead landed in.
+        await recordStageEntry(newLead.id, stage?.id, newLead.createdAt);
 
         res.json({
             status: 'success',

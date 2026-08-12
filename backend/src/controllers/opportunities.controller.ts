@@ -4,6 +4,7 @@ import { sendNotificationEmail } from '../lib/email';
 import { evaluateStageChangeRules, evaluateDataConditionRules, evaluateOpportunityCreatedRules, evaluateAssignmentChangeRules, evaluateOpportunityChangeNotice, evaluateExtendedNotification, evaluateStartDateChangedNotification, evaluateCommentNotification, resolveCalculatedFields } from '../lib/notification-engine';
 import { calculateOpportunityProbability } from '../lib/opportunity-probability';
 import { buildOpportunityAccess } from '../lib/opportunity-access';
+import { recordStageEntry } from '../lib/stage-history';
 import path from 'path';
 import fs from 'fs';
 
@@ -761,6 +762,9 @@ export async function createOpportunity(req: Request, res: Response) {
             },
         });
 
+        // Open the stage timeline at the stage the deal was created in.
+        await recordStageEntry(newOpp.id, (newOpp as any).stageId, newOpp.createdAt);
+
         // Fire-and-forget: notify configured recipients about the new opportunity
         try {
             const creator = await prisma.user.findUnique({ where: { id: ownerId }, select: { name: true, email: true } });
@@ -877,21 +881,23 @@ async function buildStageTimeline(
     };
 
     // 1. Real stage-history rows, where they exist.
-    stageHistory.forEach((h) => record(h.stage?.name, h.enteredAt));
+    (Array.isArray(stageHistory) ? stageHistory : []).forEach((h) => record(h.stage?.name, h.enteredAt));
 
-    // 2. Reconstruct from the audit trail.
+    // 2. Reconstruct from the audit trail. The timeline is a presentational
+    //    extra, so never let a surprising result here fail the whole detail
+    //    fetch — fall back to an empty trail and keep the backstops below.
     const auditRows = await prisma.auditLog.findMany({
         where: { entity: 'Opportunity', entityId: opportunityId },
         orderBy: { timestamp: 'asc' },
         select: { action: true, changes: true, timestamp: true },
-    });
+    }).catch(() => []);
 
     // "Stage changed from 'X' to 'Y'" — the shape written by every UI transition.
     const TRANSITION_RE = /from\s+'([^']+)'\s+to\s+'([^']+)'/i;
     // "Marked as Proposal Lost via Chat: …" — the one chatbot-authored variant.
     const CHAT_MARK_RE = /marked as\s+([A-Za-z][A-Za-z ]*?)\s+via chat/i;
 
-    for (const row of auditRows) {
+    for (const row of (Array.isArray(auditRows) ? auditRows : [])) {
         const changes: any = row.changes;
         if (changes && typeof changes === 'object') {
             // CREATE stores the opening stage; CONVERT_TO_PROJECT stores { stage: { from, to } }.
@@ -1439,6 +1445,14 @@ export async function updateOpportunity(req: Request, res: Response) {
                 } : {}),
             }
         });
+
+        // Stage timeline. Comparing the stored stageId before/after catches every
+        // path that can move the deal — the normal `stageUpdate`, the
+        // extended-status auto-transition, and anything added later — without
+        // each one having to remember to log.
+        if (updatedOpp.stageId && updatedOpp.stageId !== previous?.stageId) {
+            await recordStageEntry(id, updatedOpp.stageId);
+        }
 
         // Audit log — capture what actually changed (human-readable)
         const changes: string[] = [];
@@ -2050,6 +2064,10 @@ export async function convertOpportunity(req: Request, res: Response) {
                 changes: { projectId: project.id, projectCode: project.code, stage: { from: opportunity.currentStage, to: 'Closed Won' } },
             },
         });
+
+        // Project conversion is a stage move too — close out Negotiation and
+        // open Closed Won on the timeline.
+        await recordStageEntry(id, closedWonStage?.id);
 
         res.json({
             status: 'success',

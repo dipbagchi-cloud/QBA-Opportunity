@@ -1,6 +1,7 @@
 ﻿import { PrismaClient } from '@prisma/client';
 import OpenAI from 'openai';
 import * as chrono from 'chrono-node';
+import { recordStageEntry } from './stage-history';
 
 const prisma = new PrismaClient();
 
@@ -998,7 +999,7 @@ async function execUpdateOpportunity(params: any, ctx: UserContext): Promise<Act
             update.actualCloseDate = new Date();
             update.detailedStatus = newStage.isWon ? 'SOW Approved' : 'Lost';
         }
-        await prisma.stageHistory.create({ data: { opportunityId: opp.id, stageId: newStage.id } });
+        await recordStageEntry(opp.id, newStage.id);
     }
 
     const fieldMap: Record<string, string> = {
@@ -1085,6 +1086,7 @@ async function execCreateOpportunity(params: any, ctx: UserContext): Promise<Act
 
     const opp = await prisma.opportunity.create({ data });
     await prisma.auditLog.create({ data: { entity: 'Opportunity', entityId: opp.id, action: 'CREATE', changes: `Created via AI Chat: ${params.title} (value: ${params.value || 0})`, userId: ctx.userId } });
+    await recordStageEntry(opp.id, discoveryStage.id, opp.createdAt);
     return {
         tool: 'create_opportunity', success: true,
         summary: `Created opportunity **"${params.title}"** in Discovery stage.\n- Client: ${params.client || 'Default'}\n- Value: ${cur} ${Number(params.value || 0).toLocaleString()}\n- Technology: ${params.technology || '-'}\n- Region: ${params.region || '-'}\n- Pricing: ${params.pricingModel || '-'}\n- Sales Rep: ${params.salesRepName || '-'}`,
@@ -1271,6 +1273,8 @@ async function execCreateLead(params: any, ctx: UserContext): Promise<ActionResu
     });
 
     await prisma.auditLog.create({ data: { entity: 'Opportunity', entityId: lead.id, action: 'LEAD_INGESTED', userId: ctx.userId, changes: `Lead created via Chat: ${params.title}, Score: ${score}` } });
+
+    await recordStageEntry(lead.id, stage.id, lead.createdAt);
 
     let scoreLabel = 'Cold';
     if (score > 70) scoreLabel = 'Hot';
@@ -1460,7 +1464,7 @@ async function execConvertOpportunity(params: any, ctx: UserContext): Promise<Ac
     if (!closedWon) return { tool: 'convert_opportunity', success: false, summary: 'System config error: Closed Won stage not found.' };
 
     await prisma.opportunity.update({ where: { id: opp.id }, data: { stageId: closedWon.id, currentStage: 'Closed Won', detailedStatus: 'SOW Approved', actualCloseDate: new Date(), probability: 100 } });
-    await prisma.stageHistory.create({ data: { opportunityId: opp.id, stageId: closedWon.id } });
+    await recordStageEntry(opp.id, closedWon.id);
     await prisma.auditLog.create({ data: { entity: 'Opportunity', entityId: opp.id, action: 'CONVERT_TO_PROJECT', userId: ctx.userId, changes: `Converted to Closed Won via Chat` } });
     return {
         tool: 'convert_opportunity', success: true,
@@ -1495,7 +1499,7 @@ async function execMoveToPresales(params: any, ctx: UserContext): Promise<Action
     if (!qualStage) return { tool: 'move_to_presales', success: false, summary: 'System error: Qualification stage not found.' };
 
     await prisma.opportunity.update({ where: { id: opp.id }, data: { stageId: qualStage.id, currentStage: qualStage.name, probability: qualStage.probability || 30 } });
-    await prisma.stageHistory.create({ data: { opportunityId: opp.id, stageId: qualStage.id } });
+    await recordStageEntry(opp.id, qualStage.id);
     await prisma.auditLog.create({ data: { entity: 'Opportunity', entityId: opp.id, action: 'STAGE_CHANGE', userId: ctx.userId, changes: `Moved to Presales (Qualification) via Chat — from Discovery` } });
     return {
         tool: 'move_to_presales', success: true,
@@ -1522,7 +1526,7 @@ async function execMoveToSales(params: any, ctx: UserContext): Promise<ActionRes
     if (!proposalStage) return { tool: 'move_to_sales', success: false, summary: 'System error: Proposal stage not found.' };
 
     await prisma.opportunity.update({ where: { id: opp.id }, data: { stageId: proposalStage.id, currentStage: proposalStage.name, probability: proposalStage.probability || 50 } });
-    await prisma.stageHistory.create({ data: { opportunityId: opp.id, stageId: proposalStage.id } });
+    await recordStageEntry(opp.id, proposalStage.id);
     await prisma.auditLog.create({ data: { entity: 'Opportunity', entityId: opp.id, action: 'STAGE_CHANGE', userId: ctx.userId, changes: `Moved to Sales (Proposal) via Chat — from Qualification` } });
     return {
         tool: 'move_to_sales', success: true,
@@ -1545,7 +1549,7 @@ async function execProposalSent(params: any, ctx: UserContext): Promise<ActionRe
     if (!negStage) return { tool: 'proposal_sent', success: false, summary: 'System error: Negotiation stage not found.' };
 
     await prisma.opportunity.update({ where: { id: opp.id }, data: { stageId: negStage.id, currentStage: negStage.name, probability: negStage.probability || 80 } });
-    await prisma.stageHistory.create({ data: { opportunityId: opp.id, stageId: negStage.id } });
+    await recordStageEntry(opp.id, negStage.id);
     await prisma.auditLog.create({ data: { entity: 'Opportunity', entityId: opp.id, action: 'STAGE_CHANGE', userId: ctx.userId, changes: `Proposal sent — moved to Negotiation via Chat` } });
     return {
         tool: 'proposal_sent', success: true,
@@ -1582,7 +1586,7 @@ async function execMarkLost(params: any, ctx: UserContext): Promise<ActionResult
             salesData: { lostRemarks: remarks },
         },
     });
-    await prisma.stageHistory.create({ data: { opportunityId: opp.id, stageId: lostStage.id } });
+    await recordStageEntry(opp.id, lostStage.id);
     await prisma.auditLog.create({ data: { entity: 'Opportunity', entityId: opp.id, action: 'STAGE_CHANGE', userId: ctx.userId, changes: `Marked as ${lostType} via Chat: ${remarks}` } });
     return {
         tool: 'mark_lost', success: true,
@@ -1618,7 +1622,7 @@ async function execReestimate(params: any, ctx: UserContext): Promise<ActionResu
     }
 
     await prisma.opportunity.update({ where: { id: opp.id }, data: update });
-    await prisma.stageHistory.create({ data: { opportunityId: opp.id, stageId: qualStage.id } });
+    await recordStageEntry(opp.id, qualStage.id);
     // Add a comment/note for the re-estimate reason
     await prisma.note.create({ data: { content: `[Re-estimate] ${comment}`, mentions: '', opportunityId: opp.id, authorId: ctx.userId } as any });
     await prisma.auditLog.create({ data: { entity: 'Opportunity', entityId: opp.id, action: 'STAGE_CHANGE', userId: ctx.userId, changes: `Sent back for re-estimation via Chat — from ${currentStage}: ${comment}` } });

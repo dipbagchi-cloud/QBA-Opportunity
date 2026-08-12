@@ -1,6 +1,7 @@
 import { prisma } from './prisma';
 import { sendNotificationEmail, sendRawEmail } from './email';
 import { calculateOpportunityProbability } from './opportunity-probability';
+import { recordStageEntry } from './stage-history';
 
 // Roles that are "global" - all users with these roles get notified regardless of assignment
 const GLOBAL_ROLES = ['Admin'];
@@ -1516,6 +1517,8 @@ export async function evaluateStartDateOverdueWorkflow(): Promise<StartDateOverd
             reEstimateCount: (opp.reEstimateCount ?? 0) + 1,
           },
         });
+        // The auto-revert is a real stage move — keep the timeline honest.
+        await recordStageEntry(opp.id, qualStage.id);
         result.reverted += 1;
         console.log(`[StartDateOverdue] reverted opp=${opp.id} "${opp.title}" prev=${previousStage} overdueBy=${daysOverdue}d`);
       }

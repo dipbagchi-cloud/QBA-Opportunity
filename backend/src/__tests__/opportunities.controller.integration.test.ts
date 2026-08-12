@@ -23,6 +23,7 @@ jest.mock('../lib/prisma', () => ({
     note: { create: jest.fn(), findMany: jest.fn() },
     auditLog: { create: jest.fn(), findMany: jest.fn() },
     stage: { findFirst: jest.fn() },
+    stageHistory: { findFirst: jest.fn(), create: jest.fn(), update: jest.fn() },
     systemConfig: { findUnique: jest.fn() },
     currencyRate: { findMany: jest.fn() },
     client: { findFirst: jest.fn(), create: jest.fn() },
@@ -43,6 +44,7 @@ jest.mock('../lib/notification-engine', () => ({
   evaluateOpportunityChangeNotice: jest.fn().mockResolvedValue(undefined),
   evaluateExtendedNotification: jest.fn().mockResolvedValue(undefined),
   evaluateStartDateChangedNotification: jest.fn().mockResolvedValue(undefined),
+  evaluateCommentNotification: jest.fn().mockResolvedValue(undefined),
   resolveCalculatedFields: jest.fn((x: unknown) => x),
 }));
 
@@ -118,6 +120,12 @@ beforeEach(() => {
   p.systemConfig.findUnique.mockResolvedValue(null);
   p.client.findFirst.mockResolvedValue({ id: 'client-1', name: 'Acme' });
   p.auditLog.create.mockResolvedValue({});
+  // Real Prisma always returns an array here; the detail endpoint reconstructs
+  // the stage timeline from these rows, so the default must be a list.
+  p.auditLog.findMany.mockResolvedValue([]);
+  p.stageHistory.findFirst.mockResolvedValue(null);
+  p.stageHistory.create.mockResolvedValue({});
+  p.stageHistory.update.mockResolvedValue({});
   p.opportunity.update.mockImplementation(async ({ data }: any) => openOpportunity(data));
   p.note.create.mockResolvedValue({ id: 'note-1', content: 'hi', author: { id: 'admin-1', name: 'Admin User' } });
 });
