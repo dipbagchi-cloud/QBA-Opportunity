@@ -273,6 +273,56 @@ const OLLAMA_API_URL = process.env.OLLAMA_API_URL || 'http://localhost:11434/v1'
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.2';
 const OLLAMA_ENABLED = process.env.OLLAMA_ENABLED !== 'false'; // enabled by default if available
 
+/**
+ * Master switch for the external model.
+ *
+ * With LLM_ENABLED=false the bot never dials out at all and answers purely from
+ * the deterministic path — filters, counts and charts resolved against the
+ * database. Set it when there is no funded key, or when the host's outbound
+ * network is unreliable.
+ *
+ * That second case is not hypothetical: on this VM a chat request sat waiting on
+ * an OpenAI connect timeout, then an Ollama timeout, before ever reaching the
+ * working offline path — long enough that the UI showed "Thinking…" forever.
+ */
+const LLM_ENABLED = process.env.LLM_ENABLED !== 'false';
+
+/**
+ * Emit a money amount as a token the client substitutes.
+ *
+ * The bot must never bake in a currency: the amount shown has to follow the
+ * global currency picker in the header, which is a client-side preference, and
+ * the rate table lives there too. Summaries previously hardcoded "$" and raw
+ * thousands, so an INR user saw dollar signs on rupee figures.
+ *
+ * The frontend rewrites {{money:N}} through the same format() every other
+ * screen uses, so the bot's numbers match the dashboard's exactly.
+ */
+/** Stage names that mean a deal is finished; mirrors CLOSED_STAGE_NAMES elsewhere. */
+const CLOSED_STAGE_NAMES_BOT = ['Closed Won', 'Closed-Won', 'Closed Lost', 'Proposal Lost', 'Delivered'];
+
+function money(n: unknown): string {
+    const v = Number(n);
+    return `{{money:${Number.isFinite(v) ? Math.round(v) : 0}}}`;
+}
+
+/**
+ * Hard ceiling on any model call. Even when a model IS configured, a hung
+ * network must not hold the user's question open — the deterministic path
+ * answers most questions anyway, so failing fast to it is strictly better than
+ * waiting.
+ */
+const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || 8000);
+
+/** Reject if a model call outruns the ceiling, so a stalled socket cannot block a reply. */
+function withTimeout<T>(work: Promise<T>, label: string): Promise<T> {
+    return Promise.race([
+        work,
+        new Promise<T>((_, reject) =>
+            setTimeout(() => reject(new Error(`${label} timed out after ${LLM_TIMEOUT_MS}ms`)), LLM_TIMEOUT_MS)),
+    ]);
+}
+
 // Circuit breakers: separate for primary and Ollama
 let primaryLLMFailureCount = 0;
 let primaryLLMCircuitOpenUntil = 0;
@@ -285,6 +335,7 @@ let primaryClient: OpenAI | null = null;
 let ollamaClient: OpenAI | null = null;
 
 function getPrimaryLLMClient(): OpenAI | null {
+    if (!LLM_ENABLED) return null;
     if (!LLM_API_KEY) return null;
     // Circuit breaker open?
     if (primaryLLMFailureCount >= LLM_CIRCUIT_THRESHOLD && Date.now() < primaryLLMCircuitOpenUntil) {
@@ -300,6 +351,7 @@ function getPrimaryLLMClient(): OpenAI | null {
 }
 
 function getOllamaClient(): OpenAI | null {
+    if (!LLM_ENABLED) return null;
     if (!OLLAMA_ENABLED) return null;
     // Circuit breaker open?
     if (ollamaFailureCount >= LLM_CIRCUIT_THRESHOLD && Date.now() < ollamaCircuitOpenUntil) {
@@ -439,11 +491,15 @@ async function callLLMWithClient(client: OpenAI, model: string, userMessage: str
 }
 
 async function callLLM(userMessage: string, conversationContext: string): Promise<LLMParsedIntent | null> {
+    // Deterministic-only mode: go straight to the rule-based parser without
+    // touching the network, so replies are instant.
+    if (!LLM_ENABLED) return null;
+
     // Try primary LLM first
     const primaryClient = getPrimaryLLMClient();
     if (primaryClient) {
         try {
-            const result = await callLLMWithClient(primaryClient, LLM_MODEL, userMessage, conversationContext);
+            const result = await withTimeout(callLLMWithClient(primaryClient, LLM_MODEL, userMessage, conversationContext), 'primary LLM');
             recordPrimaryLLMSuccess();
             return result;
         } catch (e) {
@@ -457,7 +513,7 @@ async function callLLM(userMessage: string, conversationContext: string): Promis
     if (ollamaClientInstance) {
         try {
             console.log('[Chatbot] Falling back to Ollama...');
-            const result = await callLLMWithClient(ollamaClientInstance, OLLAMA_MODEL, userMessage, conversationContext);
+            const result = await withTimeout(callLLMWithClient(ollamaClientInstance, OLLAMA_MODEL, userMessage, conversationContext), 'Ollama');
             recordOllamaSuccess();
             return result;
         } catch (e) {
@@ -619,12 +675,20 @@ function nlpParseIntent(message: string, conv: ConversationState): LLMParsedInte
         return { intent: 'get_details', params: { nameOrId: nameMatch?.[1]?.trim() || '' }, confidence: nameMatch ? 0.9 : 0.6 };
     }
 
+    // WIN RATE — won vs lost. Checked before the generic chart rule because
+    // "win" is an outcome, not one of the group-by dimensions, so that rule
+    // would find nothing to group by and fall through.
+    if (/\b(win\s*rate|winning\s*rate|rate\s*of\s*win|win\/loss|win\s*loss|won\s*vs\.?\s*lost|success\s*rate|conversion\s*rate|hit\s*rate)\b/i.test(lower)) {
+        const p: Record<string, any> = extractListParams(lower);
+        p.chartType = /\b(bar|column)\b/i.test(lower) && !/\b(pie|donut)\b/i.test(lower) ? 'bar' : 'pie';
+        return { intent: 'win_rate', params: p, confidence: 0.95 };
+    }
+
     // CUSTOM CHART — any "chart/graph/pie/breakdown by X" request. Checked
     // before the generic list rule so "show a pie chart of deals by client"
     // draws a chart rather than listing rows.
     if (/\b(chart|graph|pie|donut|bar\s*(?:chart|graph|diagram)?|plot|visuali[sz]e|breakdown|distribution|split)\b/i.test(lower)) {
-        const p = extractChartParams(lower);
-        if (p.groupBy) return { intent: 'custom_chart', params: p, confidence: 0.9 };
+        return { intent: 'custom_chart', params: extractChartParams(lower), confidence: 0.9 };
     }
 
     // ANALYTICS: Pipeline (before list)
@@ -650,6 +714,14 @@ function nlpParseIntent(message: string, conv: ConversationState): LLMParsedInte
     if (/\b(forecast|predict|expected\s*revenue|weighted\s*pipeline|projection)\b/i.test(lower))
         return { intent: 'forecast', params: {}, confidence: 0.9 };
 
+    // COUNT — "how many SAP opportunities are there?". Shares the list query
+    // and its filters; only the phrasing of the answer differs, so a count and
+    // a list of the same thing can never disagree.
+    if (/\b(how many|number of|count of|count the|total number)\b/i.test(lower) &&
+        /\b(opportunit(?:y|ies)|deals?|opps?|leads?)\b/i.test(lower)) {
+        return { intent: 'count_opportunities', params: extractListParams(lower), confidence: 0.9 };
+    }
+
     // LIST / SEARCH (after analytics)
     if (/\b(list|show|find|search|get|display|what are|give me|view)\b/i.test(lower) &&
         /\b(opportunit(?:y|ies)|deals?|pipeline|opps?)\b/i.test(lower)) {
@@ -670,7 +742,7 @@ function nlpParseIntent(message: string, conv: ConversationState): LLMParsedInte
     if (/\b(create|add|new)\b/i.test(lower) && /\b(contacts?)\b/i.test(lower)) {
         return { intent: 'create_contact', params: {}, confidence: 0.9 };
     }
-    if (/(delete|remove|deactivate)\b/i.test(lower) && /\b(contacts?)\b/i.test(lower)) {
+    if (/\b(delete|remove|deactivate)\b/i.test(lower) && /\b(contacts?)\b/i.test(lower)) {
         return { intent: 'delete_contact', params: { nameOrId: extractEntityName(lower) }, confidence: 0.85 };
     }
     if (/\b(update|edit|change|modify)\b/i.test(lower) && /\b(contacts?)\b/i.test(lower)) {
@@ -725,9 +797,12 @@ function nlpParseIntent(message: string, conv: ConversationState): LLMParsedInte
     }
 
     // ─── MY PROFILE ───
-    if (/\b(my|me|who am i|profile|my role|my permissions?|what can i do)\b/i.test(lower) &&
-        /\b(profile|role|permissions?|info|details?|who|what)\b/i.test(lower)) {
-        return { intent: 'my_profile', params: {}, confidence: 0.85 };
+    // Deliberately narrow. The old rule fired on any sentence containing "me"
+    // AND "what", so "what is the rate of win, show me in a pie chart" returned
+    // the user's profile. A profile request has to actually name the profile.
+    if (/\b(who am i|my profile|my role|my permission|my access|what can i do|about me)\b/i.test(lower) ||
+        (/\bprofile\b/i.test(lower) && /\b(my|show|get|view)\b/i.test(lower))) {
+        return { intent: 'my_profile', params: {}, confidence: 0.9 };
     }
 
     // ─── RESOURCES ───
@@ -906,16 +981,19 @@ async function enrichFiltersFromMasterData(text: string, params: Record<string, 
 
 /** Dimensions a chart can be grouped by, and the words people use for each. */
 const CHART_DIMENSIONS: { key: string; label: string; match: RegExp }[] = [
-    { key: 'month',        label: 'Month',         match: /\b(month|monthly|over time|by date|timeline|trend|per month)\b/i },
-    { key: 'client',       label: 'Client',        match: /\b(client|customer|account)s?\b/i },
-    { key: 'technology',   label: 'Technology',    match: /\b(tech(nology)?|stack|platform)s?\b/i },
-    { key: 'stage',        label: 'Stage',         match: /\b(stage|status|pipeline stage)s?\b/i },
-    { key: 'practice',     label: 'Practice',      match: /\b(practice|department|division)s?\b/i },
-    { key: 'region',       label: 'Region',        match: /\b(region|geography|location|country)s?\b/i },
-    { key: 'salesRep',     label: 'Sales Rep',     match: /\b(sales\s*rep|salesperson|rep|owner|manager)s?\b/i },
-    { key: 'projectType',  label: 'Project Type',  match: /\b(project\s*type)s?\b/i },
-    { key: 'pricingModel', label: 'Pricing Model', match: /\b(pricing(\s*model)?|billing)s?\b/i },
+    { key: 'month',        label: 'Month',         match: /\b(months?|monthly|dates?|over time|timelines?|trends?|periods?|quarters?|years?|when)\b/i },
+    { key: 'client',       label: 'Client',        match: /\b(clients?|customers?|accounts?|companies|company|logos?)\b/i },
+    { key: 'technology',   label: 'Technology',    match: /\b(tech|technology|technologies|stacks?|platforms?|skills?|tools?)\b/i },
+    { key: 'status',       label: 'Status',        match: /\b(status|statuses|detailed\s*status|deal\s*status)\b/i },
+    { key: 'stage',        label: 'Stage',         match: /\b(stages?|phases?|funnels?|pipeline\s*stages?|workflows?)\b/i },
+    { key: 'practice',     label: 'Practice',      match: /\b(practices?|departments?|depts?|divisions?|verticals?|business\s*units?)\b/i },
+    { key: 'region',       label: 'Region',        match: /\b(regions?|geo|geography|locations?|countr(?:y|ies)|territor(?:y|ies)|markets?)\b/i },
+    { key: 'salesRep',     label: 'Sales Rep',     match: /\b(sales\s*reps?|salespersons?|sales\s*persons?|reps?|owners?|managers?|persons?|people|team\s*members?|employees?)\b/i },
+    { key: 'pricingModel', label: 'Pricing Model', match: /\b(pricing(\s*model)?s?|billing(\s*model)?s?|commercial\s*models?|contract\s*types?)\b/i },
+    { key: 'projectType',  label: 'Project Type',  match: /\b(project\s*types?|engagement\s*types?|work\s*types?|types?)\b/i },
 ];
+
+
 
 /**
  * Work out what chart the user asked for: what to group by, what to measure,
@@ -936,6 +1014,10 @@ function extractChartParams(lower: string): Record<string, any> {
         const hit = CHART_DIMENSIONS.find(d => d.match.test(lower));
         if (hit) params.groupBy = hit.key;
     }
+    // A chart was asked for but no dimension named ("draw me a chart",
+    // "visualise the pipeline"). Answer with the most useful default rather
+    // than refusing — stage is the shape people mean by "the pipeline".
+    if (!params.groupBy) params.groupBy = 'stage';
 
     // Measure: money unless they clearly asked for a count.
     params.measure = /\b(count|number|how many|deals?\s*count|volume)\b/i.test(lower) &&
@@ -953,6 +1035,95 @@ function extractChartParams(lower: string): Record<string, any> {
  * master data, the grouping is a real query, and the numbers are sums of real
  * rows — so a chart can never show a figure the database does not contain.
  */
+/** Shared filter builder, so list, count and chart can never disagree. */
+function buildOpportunityWhere(params: any, ctx: UserContext): any {
+    const where: any = { isArchived: false };
+    if (params.client) where.client = { name: { contains: params.client, mode: 'insensitive' } };
+    if (params.owner === '__SELF__') where.ownerId = ctx.userId;
+    if (params.salesRep) where.salesRepName = { contains: params.salesRep, mode: 'insensitive' };
+    if (params.technology) where.technology = { contains: params.technology, mode: 'insensitive' };
+    if (params.region) where.region = { contains: params.region, mode: 'insensitive' };
+    if (params.practice) where.practice = { contains: params.practice, mode: 'insensitive' };
+    if (params.projectType) where.projectType = { contains: params.projectType, mode: 'insensitive' };
+    if (params.pricingModel) where.pricingModel = { contains: params.pricingModel, mode: 'insensitive' };
+    if (params.minValue) where.value = { gte: params.minValue };
+    if (params.maxValue) where.value = { ...(where.value || {}), lte: params.maxValue };
+    return where;
+}
+
+/** Answer "how many …" with a real count plus the total value behind it. */
+async function execCountOpportunities(params: any, ctx: UserContext): Promise<ActionResult> {
+    const where = buildOpportunityWhere(params, ctx);
+    if (params.stage) {
+        const stage = await prisma.stage.findFirst({ where: { name: { contains: params.stage, mode: 'insensitive' } } });
+        if (stage) where.stageId = stage.id;
+    }
+    const [count, agg] = await Promise.all([
+        prisma.opportunity.count({ where }),
+        prisma.opportunity.aggregate({ where, _sum: { value: true } }),
+    ]);
+    const total = Number(agg._sum.value || 0);
+    const bits = ['client', 'technology', 'region', 'practice', 'stage', 'salesRep', 'projectType', 'pricingModel']
+        .filter(k => params[k]).map(k => `${k}: ${params[k]}`);
+    const scope = bits.length ? ` matching ${bits.join(', ')}` : '';
+    return {
+        tool: 'count_opportunities', success: true,
+        summary: count === 0
+            ? `No opportunities found${scope}.`
+            : `**${count}** opportunit${count === 1 ? 'y' : 'ies'}${scope}, worth **${money(total)}** in total.`,
+    };
+}
+
+/**
+ * Win rate — won against lost, over closed deals only.
+ *
+ * Open deals are excluded deliberately: a deal still in flight has not been won
+ * or lost, and counting it as "not won" would understate the rate. This is one
+ * of the few genuine part-to-whole questions in the CRM, which is why a pie is
+ * actually the right shape here.
+ */
+async function execWinRate(params: any, ctx: UserContext): Promise<ActionResult> {
+    const where = buildOpportunityWhere(params, ctx);
+    const opps = await prisma.opportunity.findMany({
+        where, include: { stage: true },
+    });
+
+    let won = 0, lost = 0, wonValue = 0, lostValue = 0;
+    for (const o of opps) {
+        const closed = o.stage?.isClosed === true || CLOSED_STAGE_NAMES_BOT.includes(o.stage?.name || o.currentStage || '');
+        if (!closed) continue;
+        const isWon = o.stage?.isWon === true || /closed[\s-]?won|delivered/i.test(o.stage?.name || o.currentStage || '');
+        if (isWon) { won++; wonValue += Number(o.value) || 0; }
+        else { lost++; lostValue += Number(o.value) || 0; }
+    }
+
+    const closedTotal = won + lost;
+    if (closedTotal === 0) {
+        return {
+            tool: 'win_rate', success: true,
+            summary: 'No closed deals yet, so there is no win rate to report.',
+        };
+    }
+
+    const rate = (won / closedTotal) * 100;
+    const bits = ['client', 'technology', 'region', 'practice', 'salesRep', 'projectType', 'pricingModel']
+        .filter(k => params[k]).map(k => `${k}: ${params[k]}`);
+    const scope = bits.length ? ` (${bits.join(', ')})` : '';
+
+    return {
+        tool: 'win_rate', success: true,
+        summary: `**Win rate: ${rate.toFixed(1)}%**${scope} — **${won}** won vs **${lost}** lost across ${closedTotal} closed deal${closedTotal === 1 ? '' : 's'}. Won ${money(wonValue)}, lost ${money(lostValue)}.`,
+        data: {
+            type: 'chart',
+            chartType: params.chartType === 'bar' ? 'bar' : 'pie',
+            title: `Win rate — ${rate.toFixed(1)}%${scope}`,
+            measure: 'count',
+            labels: ['Won', 'Lost'],
+            datasets: [{ label: 'Deals', data: [won, lost] }],
+        },
+    };
+}
+
 async function execCustomChart(params: any, ctx: UserContext): Promise<ActionResult> {
     const where: any = { isArchived: false };
     if (params.stage) {
@@ -995,6 +1166,7 @@ async function execCustomChart(params: any, ctx: UserContext): Promise<ActionRes
             case 'salesRep': return o.salesRepName || o.owner?.name || 'Unassigned';
             case 'projectType': return o.projectType || 'Unspecified';
             case 'pricingModel': return o.pricingModel || 'Unspecified';
+            case 'status': return o.detailedStatus || '(none)';
             case 'month': {
                 const d = o.expectedCloseDate || o.actualCloseDate || o.createdAt;
                 if (!d) return 'Undated';
@@ -1033,7 +1205,7 @@ async function execCustomChart(params: any, ctx: UserContext): Promise<ActionRes
     const dimLabel = CHART_DIMENSIONS.find(d => d.key === groupBy)?.label || groupBy;
     const measureLabel = measure === 'count' ? 'Deal Count' : 'Total Value';
     const grand = values.reduce((s, v) => s + v, 0);
-    const fmt = (n: number) => measure === 'count' ? String(n) : n.toLocaleString('en-IN', { maximumFractionDigits: 0 });
+    const fmt = (n: number) => measure === 'count' ? String(n) : money(n);
 
     const filterBits = ['client', 'technology', 'region', 'practice', 'stage', 'salesRep', 'projectType', 'pricingModel']
         .filter(k => params[k]).map(k => `${k}: ${params[k]}`);
@@ -1114,6 +1286,7 @@ function canExecute(intent: string, permissions: string[]): boolean {
     switch (intent) {
         case 'list_opportunities': case 'get_details': case 'deal_health':
         case 'list_comments': case 'gom_status': case 'custom_chart':
+        case 'count_opportunities': case 'win_rate':
             return permissions.includes('pipeline:view');
         case 'update_opportunity': case 'create_opportunity':
         case 'add_comment': case 'convert_opportunity':
@@ -1358,7 +1531,7 @@ async function execPipelineAnalytics(): Promise<ActionResult> {
     const convRate = totalClosedCount > 0 ? ((wonCount / totalClosedCount) * 100).toFixed(1) : '0';
     return {
         tool: 'pipeline_analytics', success: true,
-        summary: `Pipeline: **${activeCount}** active deals worth **$${(pipelineValue / 1000).toFixed(0)}K**. Conversion rate: **${convRate}%**.`,
+        summary: `Pipeline: **${activeCount}** active deals worth **${money(pipelineValue)}**. Conversion rate: **${convRate}%**.`,
         data: {
             type: 'chart', chartType: 'bar', title: 'Pipeline by Stage',
             labels: Object.keys(countByStage),
@@ -1387,7 +1560,7 @@ async function execRevenueAnalytics(params: any): Promise<ActionResult> {
     const sorted = Object.entries(grouped).sort((a, b) => b[1].value - a[1].value).slice(0, 15);
     return {
         tool: 'revenue_analytics', success: true,
-        summary: `Revenue by ${groupBy}: **${sorted.length}** groups. Top: **${sorted[0]?.[0]}** ($${Math.round((sorted[0]?.[1]?.value || 0) / 1000)}K).`,
+        summary: `Revenue by ${groupBy}: **${sorted.length}** groups. Top: **${sorted[0]?.[0]}** (${money(sorted[0]?.[1]?.value || 0)}).`,
         data: {
             type: 'chart', chartType: groupBy === 'month' ? 'line' : 'bar',
             title: `Revenue by ${groupBy.charAt(0).toUpperCase() + groupBy.slice(1)}`,
@@ -1431,7 +1604,7 @@ async function execForecast(): Promise<ActionResult> {
     }
     return {
         tool: 'forecast', success: true,
-        summary: `Pipeline: **$${(pipelineValue / 1000).toFixed(0)}K** total, **$${(weightedValue / 1000).toFixed(0)}K** weighted forecast (${((weightedValue / (pipelineValue || 1)) * 100).toFixed(1)}% confidence).`,
+        summary: `Pipeline: **${money(pipelineValue)}** total, **${money(weightedValue)}** weighted forecast (${((weightedValue / (pipelineValue || 1)) * 100).toFixed(1)}% confidence).`,
         data: {
             type: 'chart', chartType: 'bar', title: 'Weighted Pipeline Forecast',
             labels: Object.keys(byStage),
@@ -1529,7 +1702,7 @@ async function execCreateLead(params: any, ctx: UserContext): Promise<ActionResu
 
     return {
         tool: 'create_lead', success: true,
-        summary: `Lead **"${params.title}"** created successfully!\n- Company: ${params.companyName || '-'}\n- Contact: ${params.contactFirstName} ${params.contactLastName} (${params.contactEmail})\n- Value: $${Number(params.value || 0).toLocaleString()}\n- Lead Score: **${score}** (${scoreLabel})\n- Factors: ${factors.join(', ') || 'None'}`,
+        summary: `Lead **"${params.title}"** created successfully!\n- Company: ${params.companyName || '-'}\n- Contact: ${params.contactFirstName} ${params.contactLastName} (${params.contactEmail})\n- Value: ${money(params.value || 0)}\n- Lead Score: **${score}** (${scoreLabel})\n- Factors: ${factors.join(', ') || 'None'}`,
         data: { opportunityId: lead.id, leadScore: score },
     };
 }
@@ -1715,7 +1888,7 @@ async function execConvertOpportunity(params: any, ctx: UserContext): Promise<Ac
     await prisma.auditLog.create({ data: { entity: 'Opportunity', entityId: opp.id, action: 'CONVERT_TO_PROJECT', userId: ctx.userId, changes: `Converted to Closed Won via Chat` } });
     return {
         tool: 'convert_opportunity', success: true,
-        summary: `**"${opp.title}"** has been converted to **Closed Won**!\n- Client: ${opp.client?.name}\n- Value: $${Number(opp.value).toLocaleString()}\n- Status: SOW Approved`,
+        summary: `**"${opp.title}"** has been converted to **Closed Won**!\n- Client: ${opp.client?.name}\n- Value: ${money(opp.value)}\n- Status: SOW Approved`,
     };
 }
 
@@ -1941,7 +2114,7 @@ async function execListResources(): Promise<ActionResult> {
     if (resources.length === 0) return { tool: 'list_resources', success: true, summary: 'No resources found.' };
     const data = resources.map(r => ({
         name: r.name, grade: r.grade || '-', skills: r.skills || '-',
-        availability: r.availability || '-', rate: r.standardRate ? `$${Number(r.standardRate).toLocaleString()}` : '-',
+        availability: r.availability || '-', rate: r.standardRate ? money(r.standardRate) : '-',
     }));
     return {
         tool: 'list_resources', success: true,
@@ -2206,7 +2379,7 @@ export async function processChat(message: string, ctx: UserContext): Promise<Ch
 
         const prefilled = Object.entries(conv.collectedFields).filter(([k]) => !k.startsWith('_')).map(([k, v]) => {
             const def = OPPORTUNITY_FIELDS.find(f => f.key === k);
-            return `- **${def?.label || k}:** ${k === 'value' ? `$${Number(v).toLocaleString()}` : v}`;
+            return `- **${def?.label || k}:** ${k === 'value' ? money(v) : v}`;
         });
 
         // Human-in-the-loop: if we extracted entities from plain language, confirm first
@@ -2257,7 +2430,7 @@ export async function processChat(message: string, ctx: UserContext): Promise<Ch
         conv.mode = 'updating';
         conv.targetOpportunityId = opp.id;
         conv.collectedFields = {};
-        return reply(`What would you like to update on **"${opp.title}"**?\n\nCurrent details:\n- Stage: ${opp.stage?.name}\n- Client: ${opp.client?.name}\n- Value: $${Number(opp.value).toLocaleString()}\n- Technology: ${opp.technology || '-'}\n- Region: ${opp.region || '-'}\n\nYou can say things like:\n- "Move to Negotiation"\n- "Change value to 500K"\n- "Set technology to AI/ML"\n\nOr say **"cancel"** to abort.`);
+        return reply(`What would you like to update on **"${opp.title}"**?\n\nCurrent details:\n- Stage: ${opp.stage?.name}\n- Client: ${opp.client?.name}\n- Value: ${money(opp.value)}\n- Technology: ${opp.technology || '-'}\n- Region: ${opp.region || '-'}\n\nYou can say things like:\n- "Move to Negotiation"\n- "Change value to 500K"\n- "Set technology to AI/ML"\n\nOr say **"cancel"** to abort.`);
     }
 
     // LIST
@@ -2268,6 +2441,22 @@ export async function processChat(message: string, ctx: UserContext): Promise<Ch
         // data — this is what makes "all SAP opportunities" filter by SAP.
         const listParams = await enrichFiltersFromMasterData(message, { ...intent.params });
         const result = await execListOpportunities(listParams, ctx);
+        return reply(result.summary, result.data, undefined, [result]);
+    }
+
+    // COUNT
+    if (intent.intent === 'count_opportunities') {
+        if (!canExecute('count_opportunities', ctx.permissions)) return reply('You don\'t have permission to view opportunities.');
+        const countParams = await enrichFiltersFromMasterData(message, { ...intent.params });
+        const result = await execCountOpportunities(countParams, ctx);
+        return reply(result.summary, result.data, undefined, [result]);
+    }
+
+    // WIN RATE
+    if (intent.intent === 'win_rate') {
+        if (!canExecute('win_rate', ctx.permissions)) return reply('You don\'t have permission to view opportunities.');
+        const winParams = await enrichFiltersFromMasterData(message, { ...intent.params });
+        const result = await execWinRate(winParams, ctx);
         return reply(result.summary, result.data, undefined, [result]);
     }
 
@@ -2293,7 +2482,7 @@ export async function processChat(message: string, ctx: UserContext): Promise<Ch
         const r = await execPipelineAnalytics();
         const m = r.data?.metrics;
         let extra = '';
-        if (m) extra = `\n\n**Pipeline Summary:**\n- Active: ${m.activeCount} | Won: ${m.wonCount} | Lost: ${m.lostCount}\n- Conversion: ${m.conversionRate}\n- Pipeline value: $${(m.pipelineValue / 1000).toFixed(0)}K\n- Weighted: $${(m.weightedPipeline / 1000).toFixed(0)}K\n- Avg deal: $${(m.avgDealValue / 1000).toFixed(0)}K`;
+        if (m) extra = `\n\n**Pipeline Summary:**\n- Active: ${m.activeCount} | Won: ${m.wonCount} | Lost: ${m.lostCount}\n- Conversion: ${m.conversionRate}\n- Pipeline value: ${money(m.pipelineValue)}\n- Weighted: ${money(m.weightedPipeline)}\n- Avg deal: ${money(m.avgDealValue)}`;
         return reply(r.summary + extra, r.data, undefined, [r]);
     }
     if (intent.intent === 'revenue_analytics') {
@@ -2305,8 +2494,8 @@ export async function processChat(message: string, ctx: UserContext): Promise<Ch
         if (!canExecute('deal_health', ctx.permissions)) return reply('No permission.');
         const r = await execDealHealth();
         let extra = '';
-        if (r.data?.stalled?.length > 0) { extra += '\n\n**Stalled (30+ days):**'; r.data.stalled.slice(0, 5).forEach((s: any) => extra += `\n  - ${s.title} (${s.client}) - ${s.daysSinceUpdate}d, $${(s.value / 1000).toFixed(0)}K`); }
-        if (r.data?.atRisk?.length > 0) { extra += '\n\n**At Risk (14-30 days):**'; r.data.atRisk.slice(0, 5).forEach((s: any) => extra += `\n  - ${s.title} (${s.client}) - ${s.daysSinceUpdate}d, $${(s.value / 1000).toFixed(0)}K`); }
+        if (r.data?.stalled?.length > 0) { extra += '\n\n**Stalled (30+ days):**'; r.data.stalled.slice(0, 5).forEach((s: any) => extra += `\n  - ${s.title} (${s.client}) - ${s.daysSinceUpdate}d, ${money(s.value)}`); }
+        if (r.data?.atRisk?.length > 0) { extra += '\n\n**At Risk (14-30 days):**'; r.data.atRisk.slice(0, 5).forEach((s: any) => extra += `\n  - ${s.title} (${s.client}) - ${s.daysSinceUpdate}d, ${money(s.value)}`); }
         return reply(r.summary + extra, r.data, undefined, [r]);
     }
     if (intent.intent === 'forecast') {
@@ -2314,7 +2503,7 @@ export async function processChat(message: string, ctx: UserContext): Promise<Ch
         const r = await execForecast();
         const m = r.data?.metrics;
         let extra = '';
-        if (m) extra = `\n\n**Forecast:**\n- Total pipeline: $${(m.totalPipeline / 1000).toFixed(0)}K\n- Weighted: $${(m.weightedForecast / 1000).toFixed(0)}K\n- Confidence: ${m.confidence}\n- Active deals: ${m.dealCount}`;
+        if (m) extra = `\n\n**Forecast:**\n- Total pipeline: ${money(m.totalPipeline)}\n- Weighted: ${money(m.weightedForecast)}\n- Confidence: ${m.confidence}\n- Active deals: ${m.dealCount}`;
         return reply(r.summary + extra, r.data, undefined, [r]);
     }
 

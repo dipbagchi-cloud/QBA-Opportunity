@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { MessageSquare, X, Send, Sparkles, ChevronDown, BarChart3, Table, AlertTriangle, FileText, Loader2, CheckCircle2, XCircle, RotateCcw } from "lucide-react";
 import { apiClient } from "@/lib/api";
+import { useCurrency } from "@/components/providers/currency-provider";
 
 // ───── Types ─────
 
@@ -26,6 +27,17 @@ const CHART_COLORS = [
     "#1d4ed8", "#be123c", "#059669", "#7c3aed",
 ];
 
+/**
+ * Replace the backend's {{money:N}} tokens with the global currency.
+ *
+ * The bot deliberately sends amounts untyped so the header's currency picker
+ * decides how they read — the same format() every other screen uses, so the
+ * bot's figures match the dashboard rather than showing a hardcoded "$".
+ */
+function renderMoneyTokens(text: string, format: (n: number, o?: any) => string): string {
+    return (text || "").replace(/\{\{money:(-?\d+)\}\}/g, (_m, n) => format(Number(n)));
+}
+
 /** Compact money/count formatting so long figures don't blow out the panel. */
 function fmtChartValue(n: number, measure?: string): string {
     if (measure === "count") return String(n);
@@ -37,6 +49,7 @@ function fmtChartValue(n: number, measure?: string): string {
 }
 
 function BarChart({ data }: { data: any }) {
+    const { format } = useCurrency();
     if (!data?.labels?.length) return null;
     const dataset = data.datasets?.[0];
     if (!dataset?.data?.length) return null;
@@ -58,7 +71,7 @@ function BarChart({ data }: { data: any }) {
                         />
                     </div>
                     <span className="w-14 text-right text-slate-600 font-medium tabular-nums">
-                        {fmtChartValue(dataset.data[i], data.measure)}
+                        {data.measure === 'count' ? fmtChartValue(dataset.data[i], 'count') : format(dataset.data[i], { compact: true })}
                     </span>
                 </div>
             ))}
@@ -74,6 +87,7 @@ function BarChart({ data }: { data: any }) {
  * needs far more than a bar does.
  */
 function PieChart({ data }: { data: any }) {
+    const { format } = useCurrency();
     if (!data?.labels?.length) return null;
     const values: number[] = data.datasets?.[0]?.data || [];
     const total = values.reduce((s, v) => s + (Number(v) || 0), 0);
@@ -105,7 +119,7 @@ function PieChart({ data }: { data: any }) {
                             <div key={`${label}-${i}`} className="flex items-center gap-1.5 text-[10px]">
                                 <span className="w-2 h-2 rounded-sm shrink-0" style={{ background: CHART_COLORS[i % CHART_COLORS.length] }} />
                                 <span className="text-slate-600 truncate flex-1" title={label}>{label}</span>
-                                <span className="text-slate-500 tabular-nums">{fmtChartValue(v, data.measure)}</span>
+                                <span className="text-slate-500 tabular-nums">{data.measure === 'count' ? fmtChartValue(v, 'count') : format(v, { compact: true })}</span>
                                 <span className="text-slate-400 tabular-nums w-9 text-right">{((v / total) * 100).toFixed(0)}%</span>
                             </div>
                         );
@@ -118,6 +132,7 @@ function PieChart({ data }: { data: any }) {
 
 
 function DataTable({ data }: { data: any }) {
+    const { format } = useCurrency();
     if (!data?.rows?.length) return null;
     return (
         <div className="mt-2 border border-slate-200 rounded-lg overflow-hidden">
@@ -141,7 +156,7 @@ function DataTable({ data }: { data: any }) {
                                     'bg-indigo-50 text-indigo-600'
                                 }`}>{row.stage}</span>
                             </td>
-                            <td className="px-2 py-1 text-slate-600 font-medium">${(row.value / 1000).toFixed(0)}K</td>
+                            <td className="px-2 py-1 text-slate-600 font-medium">{format(row.value, { compact: true })}</td>
                             <td className="px-2 py-1 text-slate-500">{row.owner}</td>
                             <td className="px-2 py-1 text-slate-400">{row.technology}</td>
                         </tr>
@@ -158,12 +173,13 @@ function DataTable({ data }: { data: any }) {
 }
 
 function OpportunityDetail({ data }: { data: any }) {
+    const { format } = useCurrency();
     const opp = data?.opportunity;
     if (!opp) return null;
     const fields = [
         ['Client', opp.client],
         ['Stage', opp.stage],
-        ['Value', `${opp.currency || 'USD'} ${Number(opp.value).toLocaleString()}`],
+        ['Value', format(Number(opp.value) || 0)],
         ['Owner', opp.owner],
         ['Technology', opp.technology],
         ['Region', opp.region],
@@ -173,7 +189,7 @@ function OpportunityDetail({ data }: { data: any }) {
         ['Pricing Model', opp.pricingModel],
         ['Sales Rep', opp.salesRepName],
         ['Manager', opp.managerName],
-        ['Day Rate', opp.expectedDayRate ? `$${Number(opp.expectedDayRate).toLocaleString()}` : null],
+        ['Day Rate', opp.expectedDayRate ? format(Number(opp.expectedDayRate)) : null],
         ['Start Date', opp.tentativeStartDate ? new Date(opp.tentativeStartDate).toLocaleDateString() : null],
         ['Duration', opp.tentativeDuration ? `${opp.tentativeDuration} ${opp.tentativeDurationUnit || ''}` : null],
         ['Close Date', opp.expectedCloseDate ? new Date(opp.expectedCloseDate).toLocaleDateString() : null],
@@ -252,6 +268,8 @@ function DataBlock({ data }: { data: any }) {
 // ───── Main ChatBot Component ─────
 
 export default function ChatBot() {
+    // Money in replies follows the header's currency picker, like every other screen.
+    const { format } = useCurrency();
     const [isOpen, setIsOpen] = useState(false);
     const [isHidden, setIsHidden] = useState(false);
     const [messages, setMessages] = useState<ChatMsg[]>([]);
@@ -424,7 +442,7 @@ export default function ChatBot() {
                                         </div>
                                     )}
                                     <div className="text-xs whitespace-pre-wrap leading-relaxed">
-                                        {msg.content.split('\n').map((line, j) => {
+                                        {renderMoneyTokens(msg.content, format).split('\n').map((line, j) => {
                                             // Bold text + bullet rendering
                                             const parts = line.split(/(\*\*[^*]+\*\*)/g);
                                             const isBullet = line.trimStart().startsWith('•') || line.trimStart().startsWith('-');
