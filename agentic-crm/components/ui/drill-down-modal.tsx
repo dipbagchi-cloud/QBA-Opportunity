@@ -140,14 +140,24 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
             { key: "country", label: "Country", short: "Country", get: r => one(r.country) },
             { key: "region", label: "Region", short: "Region", get: r => one(r.region) },
             { key: "practice", label: "Practice", short: "Practice", get: r => one(r.practice) },
+            // The deal's own status (Extended, Sent for Re-estimate, On Hold,
+            // Estimation Submitted, SOW Approved …). These values are inherently
+            // stage-specific, and because options are derived from each popup's
+            // OWN rows, a workflow-stage tile only ever offers the statuses that
+            // actually apply at that stage. Deals carrying no status are grouped
+            // under "(none)" so they stay selectable rather than invisible.
+            { key: "status", label: "Status", short: "Status", get: r => [String(r.detailedStatus || "").trim() || "(none)"] },
             // Rows carry the raw stage on currentStage; some callers set only stage.
-            { key: "stage", label: "Stage", short: "Stage", get: r => one(r.currentStage ?? r.stage) },
+            { key: "workflowStage", label: "Workflow Stage", short: "Stage", get: r => one(r.currentStage ?? r.stage) },
             { key: "technology", label: "Technology", short: "Tech", get: r => csv(r.technology) },
             { key: "projectType", label: "Project Type", short: "Project", get: r => one(r.projectType) },
             { key: "fundingType", label: "Funding Type", short: "Funding", get: r => one(r.fundingType) },
             { key: "pricingModel", label: "Pricing Model", short: "Pricing", get: r => one(r.pricingModel) },
             { key: "department", label: "Department", short: "Dept", get: r => one(r.department) },
-            { key: "status", label: "Status", short: "Status", get: r => one(r.status) },
+            // Derived deal health (healthy / at-risk / critical / stalled), which
+            // is a different thing from the workflow status above — it used to be
+            // labelled "Status", which made the two indistinguishable.
+            { key: "health", label: "Health", short: "Health", get: r => one(r.status) },
         ];
     }, []);
 
@@ -298,13 +308,31 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
         return roleFiltered.some(r => resolveRowDate(r) != null);
     }, [roleFiltered, resolveRowDate]);
 
+    /**
+     * Columns actually rendered. The deal's own status is filterable in every
+     * popup, so it must be visible in every popup too — filtering on a column
+     * you cannot see makes the result impossible to interpret. Callers that
+     * already show it keep their own placement.
+     */
+    const columns = useMemo(() => {
+        const shown = config.columns;
+        const alreadyHasStatus = shown.some(c => c.key === "detailedStatus");
+        const rowsCarryStatus = config.data.some(r => String((r as any).detailedStatus || "").trim());
+        if (alreadyHasStatus || !rowsCarryStatus) return shown;
+        // After the stage column when there is one, so status reads next to it.
+        const stageIdx = shown.findIndex(c => c.key === "currentStage" || c.key === "stage");
+        const statusCol: DrillColumn = { key: "detailedStatus", label: "Status", format: "text" };
+        if (stageIdx === -1) return [...shown, statusCol];
+        return [...shown.slice(0, stageIdx + 1), statusCol, ...shown.slice(stageIdx + 1)];
+    }, [config.columns, config.data]);
+
     // Search & filter — operates on roleFiltered so detail list reflects role filters
     const filteredData = useMemo(() => {
         let d = roleFiltered;
         // Global search across all columns
         if (search.trim()) {
             const q = search.toLowerCase();
-            d = d.filter(row => config.columns.some(col => String(row[col.key] ?? "").toLowerCase().includes(q)));
+            d = d.filter(row => columns.some(col => String(row[col.key] ?? "").toLowerCase().includes(q)));
         }
         // Column filter
         if (filterCol && filterVal.trim()) {
@@ -312,12 +340,12 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
             d = d.filter(row => String(row[filterCol] ?? "").toLowerCase().includes(fv));
         }
         return d;
-    }, [roleFiltered, config.columns, search, filterCol, filterVal]);
+    }, [roleFiltered, columns, search, filterCol, filterVal]);
 
     // Sort
     const sortedData = useMemo(() => {
         if (!sortKey) return filteredData;
-        const col = config.columns.find(c => c.key === sortKey);
+        const col = columns.find(c => c.key === sortKey);
         return [...filteredData].sort((a, b) => {
             let va = a[sortKey], vb = b[sortKey];
             if (col?.format === "currency" || col?.format === "number" || col?.format === "percent") {
@@ -331,7 +359,7 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
             if (va > vb) return sortDir === "asc" ? 1 : -1;
             return 0;
         });
-    }, [filteredData, sortKey, sortDir, config.columns]);
+    }, [filteredData, sortKey, sortDir, columns]);
 
     // Pagination
     const totalPages = Math.max(1, Math.ceil(sortedData.length / pageSize));
@@ -353,8 +381,8 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
     };
 
     const handleDownload = useCallback(() => {
-        downloadCSV(config.columns, sortedData, config.title, currencyFormat);
-    }, [config, sortedData, currencyFormat]);
+        downloadCSV(columns, sortedData, config.title, currencyFormat);
+    }, [config, columns, sortedData, currencyFormat]);
 
     return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center">
@@ -552,13 +580,13 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
                                         className="px-2 py-1.5 text-xs border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
                                     >
                                         <option value="">Column...</option>
-                                        {config.columns.map(col => <option key={col.key} value={col.key}>{col.label}</option>)}
+                                        {columns.map(col => <option key={col.key} value={col.key}>{col.label}</option>)}
                                     </select>
                                     {filterCol && (
                                         <input
                                             value={filterVal}
                                             onChange={e => setFilterVal(e.target.value)}
-                                            placeholder={`Filter ${config.columns.find(c => c.key === filterCol)?.label}...`}
+                                            placeholder={`Filter ${columns.find(c => c.key === filterCol)?.label}...`}
                                             className="px-2 py-1.5 text-xs border border-slate-200 rounded-md flex-1 min-w-[120px] focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
                                         />
                                     )}
@@ -573,7 +601,7 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
                                 <thead>
                                     <tr className="border-b border-slate-200 text-left">
                                         <th className="pb-2 px-3 font-semibold text-slate-500 whitespace-nowrap w-12">Sl No</th>
-                                        {config.columns.map(col => (
+                                        {columns.map(col => (
                                             <th
                                                 key={col.key}
                                                 className="pb-2 px-3 font-semibold text-slate-500 whitespace-nowrap cursor-pointer hover:text-slate-700 select-none"
@@ -595,7 +623,7 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
                                     {pagedData.map((row, idx) => (
                                         <tr key={idx} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/50 transition-colors">
                                             <td className="py-2 px-3 text-slate-400 font-mono">{(page - 1) * pageSize + idx + 1}</td>
-                                            {config.columns.map(col => (
+                                            {columns.map(col => (
                                                 <td key={col.key} className="py-2 px-3 text-slate-700 whitespace-nowrap">
                                                     {formatCell(row[col.key], col.format, currencyFormat)}
                                                 </td>
@@ -604,7 +632,7 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
                                     ))}
                                     {pagedData.length === 0 && (
                                         <tr>
-                                            <td colSpan={config.columns.length + 1} className="py-8 text-center text-slate-400">
+                                            <td colSpan={columns.length + 1} className="py-8 text-center text-slate-400">
                                                 {search || filterVal || activeFilterCount > 0 || dateFromFilter || dateToFilter ? "No matching results" : "No data available"}
                                             </td>
                                         </tr>

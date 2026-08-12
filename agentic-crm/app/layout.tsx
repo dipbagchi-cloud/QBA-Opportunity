@@ -1,11 +1,24 @@
 import type { Metadata } from "next";
-import { Plus_Jakarta_Sans } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import { ThemeProvider } from "@/components/providers/theme-provider";
 import { Toaster } from "@/components/ui/toaster";
 
-const jakarta = Plus_Jakarta_Sans({
-  subsets: ["latin"],
+// Self-hosted rather than next/font/google.
+//
+// `next/font/google` downloads the font from fonts.googleapis.com AT BUILD
+// TIME, which makes every deploy depend on outbound network access from the
+// build host. That dependency broke frontend builds on the VM — the build died
+// with "Failed to fetch `Plus Jakarta Sans` from Google Fonts" even while a
+// plain HTTPS request to the same host from that box returned 200 — so no
+// deploy could complete there.
+//
+// This is the same variable font (weights 200-800, latin subset) served from
+// the repo, so builds are hermetic and no longer reach the network. It also
+// means no per-visitor request to Google.
+const jakarta = localFont({
+  src: "./fonts/PlusJakartaSans-Variable.woff2",
+  weight: "200 800",
   variable: "--font-jakarta",
   display: "swap",
 });
