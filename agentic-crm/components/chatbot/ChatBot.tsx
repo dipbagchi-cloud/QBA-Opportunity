@@ -17,6 +17,25 @@ interface ChatMsg {
 
 // ───── Mini chart components ─────
 
+// Categorical palette, validated for the lightness band, chroma floor,
+// adjacent-pair CVD separation, normal-vision floor and contrast on both light
+// and dark surfaces. Assigned in fixed order — never cycled for a 9th slice,
+// which is why the backend rolls the tail into "Other".
+const CHART_COLORS = [
+    "#4f46e5", "#c2410c", "#0891b2", "#a21caf", "#4d7c0f",
+    "#1d4ed8", "#be123c", "#059669", "#7c3aed",
+];
+
+/** Compact money/count formatting so long figures don't blow out the panel. */
+function fmtChartValue(n: number, measure?: string): string {
+    if (measure === "count") return String(n);
+    const abs = Math.abs(n);
+    if (abs >= 1e7) return `${(n / 1e7).toFixed(2)}Cr`;
+    if (abs >= 1e5) return `${(n / 1e5).toFixed(2)}L`;
+    if (abs >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
+    return n.toLocaleString();
+}
+
 function BarChart({ data }: { data: any }) {
     if (!data?.labels?.length) return null;
     const dataset = data.datasets?.[0];
@@ -27,30 +46,76 @@ function BarChart({ data }: { data: any }) {
         <div className="mt-2 space-y-1">
             <p className="text-[11px] font-semibold text-slate-600 mb-1">{data.title}</p>
             {data.labels.map((label: string, i: number) => (
-                <div key={label} className="flex items-center gap-2 text-[10px]">
+                <div key={`${label}-${i}`} className="flex items-center gap-2 text-[10px]">
                     <span className="w-20 text-right text-slate-500 truncate" title={label}>{label}</span>
                     <div className="flex-1 h-4 bg-slate-100 rounded-sm overflow-hidden">
                         <div
-                            className="h-full bg-indigo-400 rounded-sm transition-all duration-500"
-                            style={{ width: `${(dataset.data[i] / maxVal) * 100}%` }}
+                            className="h-full rounded-sm transition-all duration-500"
+                            style={{
+                                width: `${(dataset.data[i] / maxVal) * 100}%`,
+                                background: CHART_COLORS[i % CHART_COLORS.length],
+                            }}
                         />
                     </div>
-                    <span className="w-12 text-right text-slate-600 font-medium">{dataset.data[i]}</span>
+                    <span className="w-14 text-right text-slate-600 font-medium tabular-nums">
+                        {fmtChartValue(dataset.data[i], data.measure)}
+                    </span>
                 </div>
             ))}
-            {data.datasets?.length > 1 && (
-                <div className="flex gap-3 mt-1 text-[9px] text-slate-400">
-                    {data.datasets.map((ds: any, i: number) => (
-                        <span key={i} className="flex items-center gap-1">
-                            <span className={`w-2 h-2 rounded-full ${i === 0 ? 'bg-indigo-400' : 'bg-emerald-400'}`} />
-                            {ds.label}
-                        </span>
-                    ))}
-                </div>
-            )}
         </div>
     );
 }
+
+/**
+ * Pie rendered as a conic-gradient disc with a labelled legend.
+ *
+ * The legend carries the identity and the value, so the slice colours are never
+ * the only way to read the chart — and every slice is labelled, which a pie
+ * needs far more than a bar does.
+ */
+function PieChart({ data }: { data: any }) {
+    if (!data?.labels?.length) return null;
+    const values: number[] = data.datasets?.[0]?.data || [];
+    const total = values.reduce((s, v) => s + (Number(v) || 0), 0);
+    if (!(total > 0)) return null;
+
+    let cursor = 0;
+    const stops: string[] = [];
+    values.forEach((v, i) => {
+        const pct = (Number(v) || 0) / total * 100;
+        const color = CHART_COLORS[i % CHART_COLORS.length];
+        stops.push(`${color} ${cursor}% ${cursor + pct}%`);
+        cursor += pct;
+    });
+
+    return (
+        <div className="mt-2">
+            <p className="text-[11px] font-semibold text-slate-600 mb-1.5">{data.title}</p>
+            <div className="flex items-center gap-3">
+                <div
+                    className="w-24 h-24 rounded-full shrink-0 border border-slate-200"
+                    style={{ background: `conic-gradient(${stops.join(", ")})` }}
+                    role="img"
+                    aria-label={data.title}
+                />
+                <div className="flex-1 min-w-0 space-y-0.5">
+                    {data.labels.map((label: string, i: number) => {
+                        const v = Number(values[i]) || 0;
+                        return (
+                            <div key={`${label}-${i}`} className="flex items-center gap-1.5 text-[10px]">
+                                <span className="w-2 h-2 rounded-sm shrink-0" style={{ background: CHART_COLORS[i % CHART_COLORS.length] }} />
+                                <span className="text-slate-600 truncate flex-1" title={label}>{label}</span>
+                                <span className="text-slate-500 tabular-nums">{fmtChartValue(v, data.measure)}</span>
+                                <span className="text-slate-400 tabular-nums w-9 text-right">{((v / total) * 100).toFixed(0)}%</span>
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+        </div>
+    );
+}
+
 
 function DataTable({ data }: { data: any }) {
     if (!data?.rows?.length) return null;
@@ -177,7 +242,7 @@ function HealthReport({ data }: { data: any }) {
 
 function DataBlock({ data }: { data: any }) {
     if (!data) return null;
-    if (data.type === 'chart') return <BarChart data={data} />;
+    if (data.type === 'chart') return data.chartType === 'pie' ? <PieChart data={data} /> : <BarChart data={data} />;
     if (data.type === 'table') return <DataTable data={data} />;
     if (data.type === 'detail') return <OpportunityDetail data={data} />;
     if (data.type === 'health') return <HealthReport data={data} />;

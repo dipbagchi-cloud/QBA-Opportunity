@@ -619,6 +619,14 @@ function nlpParseIntent(message: string, conv: ConversationState): LLMParsedInte
         return { intent: 'get_details', params: { nameOrId: nameMatch?.[1]?.trim() || '' }, confidence: nameMatch ? 0.9 : 0.6 };
     }
 
+    // CUSTOM CHART — any "chart/graph/pie/breakdown by X" request. Checked
+    // before the generic list rule so "show a pie chart of deals by client"
+    // draws a chart rather than listing rows.
+    if (/\b(chart|graph|pie|donut|bar\s*(?:chart|graph|diagram)?|plot|visuali[sz]e|breakdown|distribution|split)\b/i.test(lower)) {
+        const p = extractChartParams(lower);
+        if (p.groupBy) return { intent: 'custom_chart', params: p, confidence: 0.9 };
+    }
+
     // ANALYTICS: Pipeline (before list)
     if (/\b(pipeline|funnel|stage\s*breakdown|conversion\s*rate|how\s*(?:is|are)\s*(?:our|the)\s*pipeline|stage\s*distribution)\b/i.test(lower) &&
         /\b(analytics?|stats?|summary|overview|report|breakdown|show|get|how)\b/i.test(lower))
@@ -799,11 +807,250 @@ function extractListParams(lower: string): Record<string, any> {
         }
     }
     if (/\bmy\b/.test(lower)) params.owner = '__SELF__';
+    // Quoted client is still honoured, but it is no longer the only way — see
+    // enrichFiltersFromMasterData, which matches unquoted names too.
     const clientMatch = lower.match(/(?:for|from|client)\s+["']([^"']+)["']/i);
     if (clientMatch) params.client = clientMatch[1].trim();
     const valMatch = lower.match(/(?:above|over|more than|greater than|>)\s+\$?([\d,.]+)\s*(k|m)?/i);
     if (valMatch) params.minValue = parseMoneyValue(valMatch[0].replace(/^(above|over|more than|greater than|>)\s+/i, ''));
+    const maxMatch = lower.match(/(?:below|under|less than|<)\s+\$?([\d,.]+)\s*(k|m)?/i);
+    if (maxMatch) params.maxValue = parseMoneyValue(maxMatch[0].replace(/^(below|under|less than|<)\s+/i, ''));
     return params;
+}
+
+/**
+ * Fill in filters the regex rules cannot see, by matching the question against
+ * the master-data vocabulary the bot already caches (clients, technologies,
+ * regions, practices, pricing models, project types, people).
+ *
+ * This is what lets "list all SAP opportunities" actually filter by SAP. The
+ * CRM's vocabulary is closed — every client, technology and stage is a known
+ * row — so a question can be resolved by matching against it, with no language
+ * model involved and no possibility of an invented value.
+ *
+ * Explicit params always win: anything the caller already determined is left
+ * untouched.
+ */
+async function enrichFiltersFromMasterData(text: string, params: Record<string, any>): Promise<Record<string, any>> {
+    try {
+        const master = await getMasterData();
+
+        // Words that are part of HOW the question is phrased, never part of the
+        // answer. Left in, they get matched against master data and invent
+        // filters — "show opportunities ... as a pie" once matched "as" to the
+        // client "Asian Paints" and silently narrowed 136 rows to 3.
+        const COMMAND_WORDS = new RegExp(
+            '\\b(' + [
+                'give','me','show','list','find','search','get','display','view','all','the','a','an','of','in','for',
+                'and','or','with','to','by','per','across','grouped','group','split','as','is','are','what','which',
+                'chart','charts','graph','graphs','pie','donut','bar','bars','plot','diagram','visualise','visualize',
+                'breakdown','distribution','trend','over','time','count','number','total','revenue','value','worth',
+                'opportunity','opportunities','opp','opps','deal','deals','pipeline','project','projects','please',
+                'my','our','their','this','that','top','highest','lowest','best','worst','many','much','how',
+            ].join('|') + ')\\b', 'gi');
+
+        const haystack = ' ' + text.toLowerCase().replace(COMMAND_WORDS, ' ').replace(/[^a-z0-9&/\-. ]+/g, ' ').replace(/\s+/g, ' ') + ' ';
+
+        /**
+         * Exact, whole-phrase matching only — deliberately NOT fuzzy.
+         *
+         * smartExtractFromMasterData matches at 0.6 similarity, which suits
+         * building a record from a free description. A filter is different: a
+         * near-miss does not degrade the answer, it answers a DIFFERENT question
+         * while looking correct. Longest name wins so "SAP HANA" beats "SAP".
+         */
+        const pick = (items: { name: string }[]): string | null => {
+            const hits = items
+                .map(i => (i.name || '').trim())
+                .filter(name => name.length >= 3 && haystack.includes(' ' + name.toLowerCase() + ' '))
+                .sort((a, b) => b.length - a.length);
+            return hits[0] || null;
+        };
+
+        const candidates: [string, { name: string }[]][] = [
+            ['client', master.clients],
+            ['technology', master.technologies],
+            ['region', master.regions],
+            ['pricingModel', master.pricingModels],
+            ['projectType', master.projectTypes],
+        ];
+        for (const [key, items] of candidates) {
+            if (params[key] == null) {
+                const hit = pick(items || []);
+                if (hit) params[key] = hit;
+            }
+        }
+
+        // A named person filters by sales rep, unless the caller said "my".
+        if (params.owner == null && params.salesRep == null) {
+            const person = pick(master.salespersons || []);
+            if (person) params.salesRep = person;
+        }
+
+        // Technology is stored as a CSV, so a bare token like "SAP" should match
+        // any deal listing it — fall back to the raw word when no catalogue
+        // entry matched exactly.
+        if (params.technology == null) {
+            const token = (master.technologies || [])
+                .map(t => (t.name || '').trim())
+                .find(name => name.length >= 2 && new RegExp('\\b' + name.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b').test(haystack));
+            if (token) params.technology = token;
+        }
+    } catch (error) {
+        console.error('[Chatbot] master-data filter enrichment failed', error);
+    }
+    return params;
+}
+
+// ─── CUSTOM CHARTS (no LLM) ─────────────────────────────────────────────────
+
+/** Dimensions a chart can be grouped by, and the words people use for each. */
+const CHART_DIMENSIONS: { key: string; label: string; match: RegExp }[] = [
+    { key: 'month',        label: 'Month',         match: /\b(month|monthly|over time|by date|timeline|trend|per month)\b/i },
+    { key: 'client',       label: 'Client',        match: /\b(client|customer|account)s?\b/i },
+    { key: 'technology',   label: 'Technology',    match: /\b(tech(nology)?|stack|platform)s?\b/i },
+    { key: 'stage',        label: 'Stage',         match: /\b(stage|status|pipeline stage)s?\b/i },
+    { key: 'practice',     label: 'Practice',      match: /\b(practice|department|division)s?\b/i },
+    { key: 'region',       label: 'Region',        match: /\b(region|geography|location|country)s?\b/i },
+    { key: 'salesRep',     label: 'Sales Rep',     match: /\b(sales\s*rep|salesperson|rep|owner|manager)s?\b/i },
+    { key: 'projectType',  label: 'Project Type',  match: /\b(project\s*type)s?\b/i },
+    { key: 'pricingModel', label: 'Pricing Model', match: /\b(pricing(\s*model)?|billing)s?\b/i },
+];
+
+/**
+ * Work out what chart the user asked for: what to group by, what to measure,
+ * and which shape to draw. Everything here is keyword matching over a closed
+ * vocabulary — no model call.
+ */
+function extractChartParams(lower: string): Record<string, any> {
+    const params: Record<string, any> = extractListParams(lower);
+
+    // "by X" is the strongest signal; otherwise take the first dimension named.
+    const byMatch = lower.match(/\b(?:by|per|across|grouped?\s+by|split\s+by)\s+([a-z\s]{3,25})/i);
+    if (byMatch) {
+        const phrase = byMatch[1];
+        const hit = CHART_DIMENSIONS.find(d => d.match.test(phrase));
+        if (hit) params.groupBy = hit.key;
+    }
+    if (!params.groupBy) {
+        const hit = CHART_DIMENSIONS.find(d => d.match.test(lower));
+        if (hit) params.groupBy = hit.key;
+    }
+
+    // Measure: money unless they clearly asked for a count.
+    params.measure = /\b(count|number|how many|deals?\s*count|volume)\b/i.test(lower) &&
+                     !/\b(value|revenue|worth|amount|₹|\$)\b/i.test(lower)
+        ? 'count' : 'value';
+
+    params.chartType = /\b(pie|donut|share|proportion|percentage|%)\b/i.test(lower) ? 'pie' : 'bar';
+    return params;
+}
+
+/**
+ * Build a chart by aggregating opportunities in the database.
+ *
+ * Deterministic end to end: the filters come from matching the question against
+ * master data, the grouping is a real query, and the numbers are sums of real
+ * rows — so a chart can never show a figure the database does not contain.
+ */
+async function execCustomChart(params: any, ctx: UserContext): Promise<ActionResult> {
+    const where: any = { isArchived: false };
+    if (params.stage) {
+        const stage = await prisma.stage.findFirst({ where: { name: { contains: params.stage, mode: 'insensitive' } } });
+        if (stage) where.stageId = stage.id;
+    }
+    if (params.client) where.client = { name: { contains: params.client, mode: 'insensitive' } };
+    if (params.owner === '__SELF__') where.ownerId = ctx.userId;
+    if (params.salesRep) where.salesRepName = { contains: params.salesRep, mode: 'insensitive' };
+    if (params.technology) where.technology = { contains: params.technology, mode: 'insensitive' };
+    if (params.region) where.region = { contains: params.region, mode: 'insensitive' };
+    if (params.practice) where.practice = { contains: params.practice, mode: 'insensitive' };
+    if (params.projectType) where.projectType = { contains: params.projectType, mode: 'insensitive' };
+    if (params.pricingModel) where.pricingModel = { contains: params.pricingModel, mode: 'insensitive' };
+    if (params.minValue) where.value = { gte: params.minValue };
+    if (params.maxValue) where.value = { ...(where.value || {}), lte: params.maxValue };
+
+    const opps = await prisma.opportunity.findMany({
+        where,
+        include: { client: true, stage: true, owner: { select: { name: true } } },
+    });
+
+    if (opps.length === 0) {
+        return {
+            tool: 'custom_chart', success: true,
+            summary: 'No opportunities match that, so there is nothing to chart.',
+        };
+    }
+
+    const groupBy: string = params.groupBy || 'stage';
+    const measure: string = params.measure === 'count' ? 'count' : 'value';
+
+    const keyOf = (o: any): string => {
+        switch (groupBy) {
+            case 'client': return o.client?.name || 'Unknown';
+            case 'stage': return o.stage?.name || o.currentStage || 'Unknown';
+            case 'technology': return (o.technology || 'Unspecified').split(',')[0].trim() || 'Unspecified';
+            case 'practice': return o.practice || 'Unspecified';
+            case 'region': return o.region || 'Unspecified';
+            case 'salesRep': return o.salesRepName || o.owner?.name || 'Unassigned';
+            case 'projectType': return o.projectType || 'Unspecified';
+            case 'pricingModel': return o.pricingModel || 'Unspecified';
+            case 'month': {
+                const d = o.expectedCloseDate || o.actualCloseDate || o.createdAt;
+                if (!d) return 'Undated';
+                const dt = new Date(d);
+                return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
+            }
+            default: return 'Unknown';
+        }
+    };
+
+    const totals = new Map<string, number>();
+    for (const o of opps) {
+        const k = keyOf(o);
+        const add = measure === 'count' ? 1 : Number(o.value) || 0;
+        totals.set(k, (totals.get(k) || 0) + add);
+    }
+
+    // Months read chronologically; everything else biggest-first.
+    let entries = Array.from(totals.entries());
+    entries = groupBy === 'month'
+        ? entries.sort((a, b) => a[0].localeCompare(b[0]))
+        : entries.sort((a, b) => b[1] - a[1]);
+
+    // A chart with fifty slices communicates nothing — keep the leaders and
+    // roll the tail into one "Other" so the total still reconciles.
+    const MAX_SLICES = params.chartType === 'pie' ? 8 : 15;
+    let labels = entries.map(e => e[0]);
+    let values = entries.map(e => e[1]);
+    if (entries.length > MAX_SLICES && groupBy !== 'month') {
+        const head = entries.slice(0, MAX_SLICES);
+        const tail = entries.slice(MAX_SLICES);
+        labels = [...head.map(e => e[0]), `Other (${tail.length})`];
+        values = [...head.map(e => e[1]), tail.reduce((s, e) => s + e[1], 0)];
+    }
+
+    const dimLabel = CHART_DIMENSIONS.find(d => d.key === groupBy)?.label || groupBy;
+    const measureLabel = measure === 'count' ? 'Deal Count' : 'Total Value';
+    const grand = values.reduce((s, v) => s + v, 0);
+    const fmt = (n: number) => measure === 'count' ? String(n) : n.toLocaleString('en-IN', { maximumFractionDigits: 0 });
+
+    const filterBits = ['client', 'technology', 'region', 'practice', 'stage', 'salesRep', 'projectType', 'pricingModel']
+        .filter(k => params[k]).map(k => `${k}: ${params[k]}`);
+    const scope = filterBits.length ? ` (${filterBits.join(', ')})` : '';
+
+    return {
+        tool: 'custom_chart', success: true,
+        summary: `**${measureLabel} by ${dimLabel}**${scope} — ${opps.length} opportunit${opps.length === 1 ? 'y' : 'ies'}, total ${fmt(grand)}.`,
+        data: {
+            type: 'chart',
+            chartType: params.chartType === 'pie' ? 'pie' : 'bar',
+            title: `${measureLabel} by ${dimLabel}${scope}`,
+            measure,
+            labels,
+            datasets: [{ label: measureLabel, data: values }],
+        },
+    };
 }
 
 // ─── SMART ENTITY EXTRACTION FROM PLAIN LANGUAGE ────────────────────────────
@@ -866,7 +1113,7 @@ function canExecute(intent: string, permissions: string[]): boolean {
     if (permissions.includes('*')) return true;
     switch (intent) {
         case 'list_opportunities': case 'get_details': case 'deal_health':
-        case 'list_comments': case 'gom_status':
+        case 'list_comments': case 'gom_status': case 'custom_chart':
             return permissions.includes('pipeline:view');
         case 'update_opportunity': case 'create_opportunity':
         case 'add_comment': case 'convert_opportunity':
@@ -2016,7 +2263,19 @@ export async function processChat(message: string, ctx: UserContext): Promise<Ch
     // LIST
     if (intent.intent === 'list_opportunities') {
         if (!canExecute('list_opportunities', ctx.permissions)) return reply('You don\'t have permission to view opportunities.');
-        const result = await execListOpportunities(intent.params, ctx);
+        // Pick up filters the regex rules cannot see (technology, practice, an
+        // unquoted client or rep name) by matching the question against master
+        // data — this is what makes "all SAP opportunities" filter by SAP.
+        const listParams = await enrichFiltersFromMasterData(message, { ...intent.params });
+        const result = await execListOpportunities(listParams, ctx);
+        return reply(result.summary, result.data, undefined, [result]);
+    }
+
+    // CUSTOM CHART
+    if (intent.intent === 'custom_chart') {
+        if (!canExecute('list_opportunities', ctx.permissions)) return reply('You don\'t have permission to view opportunities.');
+        const chartParams = await enrichFiltersFromMasterData(message, { ...intent.params });
+        const result = await execCustomChart(chartParams, ctx);
         return reply(result.summary, result.data, undefined, [result]);
     }
 
