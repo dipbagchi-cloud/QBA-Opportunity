@@ -718,12 +718,24 @@ function nlpParseIntent(message: string, conv: ConversationState): LLMParsedInte
 
     // ANALYTICS: Revenue (before list)
     if (/\b(revenue|top\s*clients?|revenue\s*by|monthly\s*revenue|earning|income|sales\s*by)\b/i.test(lower)) {
-        let groupBy = 'technology';
-        if (/\b(tech(nology)?|stack)\b/i.test(lower)) groupBy = 'technology';
-        else if (/\b(clients?|customers?|accounts?)\b/i.test(lower)) groupBy = 'client';
-        else if (/\b(owners?|reps?|sales\s*reps?)\b/i.test(lower)) groupBy = 'owner';
-        else if (/\b(months?|monthly|trend)\b/i.test(lower)) groupBy = 'month';
-        return { intent: 'revenue_analytics', params: { groupBy }, confidence: 0.85 };
+        // This used to run its own four-way dimension check with a much narrower
+        // vocabulary than the chart parser, and fell back to technology whenever
+        // it recognised nothing — so "revenue by people" quietly returned revenue
+        // by technology. It now uses the same matcher as everything else.
+        const dim = matchDimension(lower);
+        const asRevenueDimension: Record<string, string> = {
+            technology: 'technology', client: 'client', salesRep: 'owner', month: 'month',
+        };
+        if (dim && asRevenueDimension[dim]) {
+            return { intent: 'revenue_analytics', params: { groupBy: asRevenueDimension[dim] }, confidence: 0.85 };
+        }
+        // Revenue analytics only knows those four. The sentence named one of the
+        // other six (region, practice, pricing model…), so answer it as a chart,
+        // which can group by any of them, rather than charting the wrong thing.
+        if (dim) {
+            return { intent: 'custom_chart', params: { ...extractChartParams(lower), groupBy: dim }, confidence: 0.85 };
+        }
+        return { intent: 'revenue_analytics', params: { groupBy: 'technology' }, confidence: 0.85 };
     }
 
     // ANALYTICS: Deal Health (before list)
@@ -1220,15 +1232,39 @@ const CHART_DIMENSIONS: { key: string; label: string; match: RegExp }[] = [
     { key: 'stage',        label: 'Stage',         match: /\b(stages?|phases?|funnels?|pipeline\s*stages?|workflows?)\b/i },
     { key: 'practice',     label: 'Practice',      match: /\b(practices?|departments?|depts?|divisions?|verticals?|business\s*units?)\b/i },
     { key: 'region',       label: 'Region',        match: /\b(regions?|geo|geography|locations?|countr(?:y|ies)|territor(?:y|ies)|markets?)\b/i },
-    // "who" lands here rather than needing the model: a who-question is about
-    // people by definition. Client sits earlier in this list, so "who is our
-    // biggest client" still resolves to client — the first dimension named wins.
-    { key: 'salesRep',     label: 'Sales Rep',     match: /\b(sales\s*reps?|salespersons?|sales\s*persons?|reps?|owners?|managers?|persons?|people|team\s*members?|employees?|sells|sellers?|who|whom)\b/i },
-    { key: 'pricingModel', label: 'Pricing Model', match: /\b(pricing(\s*model)?s?|billing(\s*model)?s?|commercial\s*models?|contract\s*types?)\b/i },
+    { key: 'salesRep',     label: 'Sales Rep',     match: /\b(sales\s*reps?|salespersons?|sales\s*persons?|reps?|owners?|managers?|persons?|people|team\s*members?|employees?|sells|sellers?)\b/i },
+    { key: 'pricingModel', label: 'Pricing Model', match: /\b(pricing(\s*model)?s?|billing(\s*model)?s?|commercial\s*models?|contract\s*types?|charges?|charging|charged|bills?|billed|rate\s*cards?)\b/i },
     { key: 'projectType',  label: 'Project Type',  match: /\b(project\s*types?|engagement\s*types?|work\s*types?|types?)\b/i },
 ];
 
 
+
+/**
+ * Pick the dimension a phrase is about.
+ *
+ * This used to be `CHART_DIMENSIONS.find(...)`, which returns the first entry in
+ * *list order* that appears anywhere in the text — so the answer depended on how
+ * the table happened to be sorted rather than on the sentence. "the way we
+ * charge people" resolved to Sales Rep, because salesRep is listed above
+ * pricingModel and matched on "people", even though "charge" came first and is
+ * what the question was about.
+ *
+ * The head of a grouping phrase is what names the dimension, so the earliest
+ * match in the text wins and list order only breaks an exact tie.
+ */
+function matchDimension(phrase: string): string | null {
+    let bestKey: string | null = null;
+    let bestAt = Infinity;
+    for (const d of CHART_DIMENSIONS) {
+        const m = phrase.match(d.match);
+        if (!m || m.index === undefined) continue;
+        if (m.index < bestAt) {
+            bestAt = m.index;
+            bestKey = d.key;
+        }
+    }
+    return bestKey;
+}
 
 /**
  * Work out what chart the user asked for: what to group by, what to measure,
@@ -1243,22 +1279,27 @@ function extractChartParams(lower: string): Record<string, any> {
     // Checked first because "wise" trails its noun, so the generic "by X" rule
     // below cannot see it.
     const wiseMatch = lower.match(/([a-z][a-z\s]{2,24}?)\s*[- ]?wise\b/i);
-    if (wiseMatch) {
-        const hit = CHART_DIMENSIONS.find(d => d.match.test(wiseMatch[1]));
-        if (hit) params.groupBy = hit.key;
+    if (wiseMatch) params.groupBy = matchDimension(wiseMatch[1]) || undefined;
+
+    // A grouping phrase is the strongest signal, so it is read on its own before
+    // the sentence at large. "the way we ..." and "how we ..." belong here with
+    // "by" and "per": they introduce the thing being grouped on just as plainly,
+    // and without them "break the numbers down the way we charge" had to fall
+    // back to scanning the whole sentence for any dimension word at all.
+    if (!params.groupBy) {
+        const byMatch = lower.match(/\b(?:by|per|across|grouped?\s+by|split\s+by|the\s+way\s+we|how\s+we|based\s+on|according\s+to|in\s+terms\s+of)\s+([a-z\s]{3,25})/i);
+        if (byMatch) params.groupBy = matchDimension(byMatch[1]) || undefined;
     }
 
-    // "by X" is the strongest signal; otherwise take the first dimension named.
-    const byMatch = params.groupBy ? null : lower.match(/\b(?:by|per|across|grouped?\s+by|split\s+by)\s+([a-z\s]{3,25})/i);
-    if (byMatch) {
-        const phrase = byMatch[1];
-        const hit = CHART_DIMENSIONS.find(d => d.match.test(phrase));
-        if (hit) params.groupBy = hit.key;
-    }
-    if (!params.groupBy) {
-        const hit = CHART_DIMENSIONS.find(d => d.match.test(lower));
-        if (hit) params.groupBy = hit.key;
-    }
+    // Nothing said "by X", so take whichever dimension the sentence names first.
+    if (!params.groupBy) params.groupBy = matchDimension(lower) || undefined;
+
+    // "who" asks about people, but it is an interrogative rather than the name of
+    // a dimension, so it is the weakest evidence there is and only counts once
+    // nothing else has matched. Ranked with the real nouns it would win on
+    // position alone and turn "who is our biggest client" — plainly a question
+    // about clients — into a chart of sales reps.
+    if (!params.groupBy && /\bwho(m|se)?\b/i.test(lower)) params.groupBy = 'salesRep';
     // A chart was asked for but no dimension named ("draw me a chart",
     // "visualise the pipeline"). Answer with the most useful default rather
     // than refusing — stage is the shape people mean by "the pipeline".
