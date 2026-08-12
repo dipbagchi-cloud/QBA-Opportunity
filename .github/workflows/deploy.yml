@@ -43,7 +43,7 @@ jobs:
             git checkout Opportunity_MVC
             git reset --hard origin/Opportunity_MVC
 
-            chmod +x scripts/pm2-safe-restart.sh
+            chmod +x scripts/pm2-safe-restart.sh scripts/verify-frontend-build.sh
 
             echo "=== Backend: install + generate + compile ==="
             cd $APP_DIR/backend
@@ -67,6 +67,13 @@ jobs:
 
             echo "=== Restart frontend safely ==="
             bash $APP_DIR/scripts/pm2-safe-restart.sh qcrm-frontend 3000 $ECO
+
+            # A bound port is NOT proof the frontend is healthy: `next build`
+            # rewrites .next in place, so a process that was not restarted keeps
+            # serving deleted asset URLs and the page renders unstyled while still
+            # returning 200. Assert the served HTML matches the BUILD_ID on disk
+            # and that its assets resolve; repair and fail loudly otherwise.
+            bash $APP_DIR/scripts/verify-frontend-build.sh $APP_DIR 3000 qcrm-frontend $ECO
 
             echo "=== Production deployment complete ==="
             pm2 list | grep -E 'qcrm-(backend|frontend)\b' || true
@@ -96,7 +103,7 @@ jobs:
             git checkout uat
             git reset --hard origin/uat
 
-            chmod +x scripts/pm2-safe-restart.sh
+            chmod +x scripts/pm2-safe-restart.sh scripts/verify-frontend-build.sh
 
             echo "=== Backend: install + generate + compile ==="
             cd $APP_DIR/backend
@@ -118,6 +125,13 @@ jobs:
 
             echo "=== Restart UAT frontend safely ==="
             bash $APP_DIR/scripts/pm2-safe-restart.sh qcrm-uat-frontend 3002 $ECO
+
+            # A bound port is NOT proof the frontend is healthy: `next build`
+            # rewrites .next in place, so a process that was not restarted keeps
+            # serving deleted asset URLs and the page renders unstyled while still
+            # returning 200. Assert the served HTML matches the BUILD_ID on disk
+            # and that its assets resolve; repair and fail loudly otherwise.
+            bash $APP_DIR/scripts/verify-frontend-build.sh $APP_DIR 3002 qcrm-uat-frontend $ECO
 
             echo "=== UAT deployment complete ==="
             pm2 list | grep -E 'qcrm-uat-' || true
@@ -147,7 +161,7 @@ jobs:
             git checkout qa
             git reset --hard origin/qa
 
-            chmod +x scripts/pm2-safe-restart.sh
+            chmod +x scripts/pm2-safe-restart.sh scripts/verify-frontend-build.sh
 
             echo "=== Backend: install + generate + compile ==="
             cd $APP_DIR/backend
@@ -169,6 +183,13 @@ jobs:
 
             echo "=== Restart QA frontend safely ==="
             bash $APP_DIR/scripts/pm2-safe-restart.sh qcrm-qa-frontend 3004 $ECO
+
+            # A bound port is NOT proof the frontend is healthy: `next build`
+            # rewrites .next in place, so a process that was not restarted keeps
+            # serving deleted asset URLs and the page renders unstyled while still
+            # returning 200. Assert the served HTML matches the BUILD_ID on disk
+            # and that its assets resolve; repair and fail loudly otherwise.
+            bash $APP_DIR/scripts/verify-frontend-build.sh $APP_DIR 3004 qcrm-qa-frontend $ECO
 
             echo "=== QA deployment complete ==="
             pm2 list | grep -E 'qcrm-qa-' || true
