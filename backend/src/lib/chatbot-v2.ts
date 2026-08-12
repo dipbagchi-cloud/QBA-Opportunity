@@ -39,6 +39,13 @@ export interface ConversationState {
     missingRequired: string[];
     optionalRemaining: string[];
     history: { role: 'user' | 'assistant'; content: string }[];
+    /**
+     * Filters from the last data question, so a follow-up can inherit them.
+     * "how many are open?" straight after a chart of AI/ML deals means the
+     * AI/ML ones — without this the follow-up resolves to nothing and falls
+     * back to the help menu.
+     */
+    lastFilters?: Record<string, any>;
     lastActivity: number;
 }
 
@@ -726,8 +733,9 @@ function nlpParseIntent(message: string, conv: ConversationState): LLMParsedInte
     // COUNT — "how many SAP opportunities are there?". Shares the list query
     // and its filters; only the phrasing of the answer differs, so a count and
     // a list of the same thing can never disagree.
-    if (/\b(how many|number of|count of|count the|total number)\b/i.test(lower) &&
-        /\b(opportunit(?:y|ies)|deals?|opps?|leads?)\b/i.test(lower)) {
+    // The noun is optional: "how many are open?" is a follow-up and names no
+    // subject, but it is unambiguously a count of the thing just discussed.
+    if (/\b(how many|number of|count of|count the|total number)\b/i.test(lower)) {
         return { intent: 'count_opportunities', params: extractListParams(lower), confidence: 0.9 };
     }
 
@@ -899,6 +907,8 @@ function extractListParams(lower: string): Record<string, any> {
     if (valMatch) params.minValue = parseMoneyValue(valMatch[0].replace(/^(above|over|more than|greater than|>)\s+/i, ''));
     const maxMatch = lower.match(/(?:below|under|less than|<)\s+\$?([\d,.]+)\s*(k|m)?/i);
     if (maxMatch) params.maxValue = parseMoneyValue(maxMatch[0].replace(/^(below|under|less than|<)\s+/i, ''));
+    const outcome = extractOutcomeFilter(lower);
+    if (outcome) params.outcome = outcome;
     return params;
 }
 
@@ -965,6 +975,26 @@ function editDistance(a: string, b: string): number {
  * answers a different question is worse than one that does not fire, so the
  * tolerance here is deliberately narrow and always reports what it matched.
  */
+/** Filter keys that identify WHAT is being asked about, for carrying forward. */
+const CARRYABLE_FILTERS = ['client', 'technology', 'practice', 'region', 'projectType', 'pricingModel', 'salesRep', 'stage'];
+
+/**
+ * Let a follow-up inherit the previous question's subject.
+ *
+ * "how many are open?" straight after charting AI/ML deals means the AI/ML
+ * ones. Only applied when the follow-up names no subject of its own, so a new
+ * question always wins over stale context — and the inherited filter is echoed
+ * in the reply, so an inherited assumption is never invisible.
+ */
+function inheritFilters(params: Record<string, any>, conv: ConversationState): Record<string, any> {
+    const namesItsOwn = CARRYABLE_FILTERS.some(k => params[k] != null);
+    if (namesItsOwn || !conv.lastFilters) return params;
+    for (const k of CARRYABLE_FILTERS) {
+        if (params[k] == null && conv.lastFilters[k] != null) params[k] = conv.lastFilters[k];
+    }
+    return params;
+}
+
 async function enrichFiltersFromMasterData(text: string, params: Record<string, any>): Promise<Record<string, any>> {
     try {
         const master = await getMasterData();
@@ -1128,6 +1158,20 @@ function extractChartParams(lower: string): Record<string, any> {
  * master data, the grouping is a real query, and the numbers are sums of real
  * rows — so a chart can never show a figure the database does not contain.
  */
+/**
+ * "open", "closed", "won", "lost" describe a deal's OUTCOME rather than naming a
+ * stage, and people use them constantly ("how many are open?"). They map onto
+ * the stage's own isClosed/isWon flags, so they stay correct if stages are
+ * renamed or added.
+ */
+function extractOutcomeFilter(lower: string): 'open' | 'closed' | 'won' | 'lost' | null {
+    if (/\b(still\s+)?open|active|in\s*play|ongoing|live\b/i.test(lower) && !/\bopen\s*rate\b/i.test(lower)) return 'open';
+    if (/\bwon\b|\bwins?\b|closed[\s-]?won/i.test(lower)) return 'won';
+    if (/\blost\b|\blosses\b|closed[\s-]?lost/i.test(lower)) return 'lost';
+    if (/\bclosed\b|\bfinished\b|\bcompleted\b/i.test(lower)) return 'closed';
+    return null;
+}
+
 /** Shared filter builder, so list, count and chart can never disagree. */
 function buildOpportunityWhere(params: any, ctx: UserContext): any {
     const where: any = { isArchived: false };
@@ -1141,6 +1185,12 @@ function buildOpportunityWhere(params: any, ctx: UserContext): any {
     if (params.pricingModel) where.pricingModel = { contains: params.pricingModel, mode: 'insensitive' };
     if (params.minValue) where.value = { gte: params.minValue };
     if (params.maxValue) where.value = { ...(where.value || {}), lte: params.maxValue };
+    // Outcome is expressed through the stage's own flags rather than a name
+    // list, so renaming or adding a stage cannot silently break it.
+    if (params.outcome === 'open') where.stage = { isClosed: false };
+    else if (params.outcome === 'closed') where.stage = { isClosed: true };
+    else if (params.outcome === 'won') where.stage = { isWon: true };
+    else if (params.outcome === 'lost') where.stage = { isClosed: true, isWon: false };
     return where;
 }
 
@@ -1156,7 +1206,7 @@ async function execCountOpportunities(params: any, ctx: UserContext): Promise<Ac
         prisma.opportunity.aggregate({ where, _sum: { value: true } }),
     ]);
     const total = Number(agg._sum.value || 0);
-    const bits = ['client', 'technology', 'region', 'practice', 'stage', 'salesRep', 'projectType', 'pricingModel']
+    const bits = ['outcome', 'client', 'technology', 'region', 'practice', 'stage', 'salesRep', 'projectType', 'pricingModel']
         .filter(k => params[k]).map(k => `${k}: ${params[k]}`);
     const scope = bits.length ? ` matching ${bits.join(', ')}` : '';
     return {
@@ -1233,6 +1283,10 @@ async function execCustomChart(params: any, ctx: UserContext): Promise<ActionRes
     if (params.pricingModel) where.pricingModel = { contains: params.pricingModel, mode: 'insensitive' };
     if (params.minValue) where.value = { gte: params.minValue };
     if (params.maxValue) where.value = { ...(where.value || {}), lte: params.maxValue };
+    if (params.outcome === 'open') where.stage = { isClosed: false };
+    else if (params.outcome === 'closed') where.stage = { isClosed: true };
+    else if (params.outcome === 'won') where.stage = { isWon: true };
+    else if (params.outcome === 'lost') where.stage = { isClosed: true, isWon: false };
 
     const opps = await prisma.opportunity.findMany({
         where,
@@ -1300,7 +1354,7 @@ async function execCustomChart(params: any, ctx: UserContext): Promise<ActionRes
     const grand = values.reduce((s, v) => s + v, 0);
     const fmt = (n: number) => measure === 'count' ? String(n) : money(n);
 
-    const filterBits = ['client', 'technology', 'region', 'practice', 'stage', 'salesRep', 'projectType', 'pricingModel']
+    const filterBits = ['outcome', 'client', 'technology', 'region', 'practice', 'stage', 'salesRep', 'projectType', 'pricingModel']
         .filter(k => params[k]).map(k => `${k}: ${params[k]}`);
     const scope = filterBits.length ? ` (${filterBits.join(', ')})` : '';
 
@@ -2532,7 +2586,8 @@ export async function processChat(message: string, ctx: UserContext): Promise<Ch
         // Pick up filters the regex rules cannot see (technology, practice, an
         // unquoted client or rep name) by matching the question against master
         // data — this is what makes "all SAP opportunities" filter by SAP.
-        const listParams = await enrichFiltersFromMasterData(message, { ...intent.params });
+        const listParams = inheritFilters(await enrichFiltersFromMasterData(message, { ...intent.params }), conv);
+        conv.lastFilters = { ...listParams };
         const result = await execListOpportunities(listParams, ctx);
         return reply(result.summary, result.data, undefined, [result]);
     }
@@ -2540,7 +2595,8 @@ export async function processChat(message: string, ctx: UserContext): Promise<Ch
     // COUNT
     if (intent.intent === 'count_opportunities') {
         if (!canExecute('count_opportunities', ctx.permissions)) return reply('You don\'t have permission to view opportunities.');
-        const countParams = await enrichFiltersFromMasterData(message, { ...intent.params });
+        const countParams = inheritFilters(await enrichFiltersFromMasterData(message, { ...intent.params }), conv);
+        conv.lastFilters = { ...countParams };
         const result = await execCountOpportunities(countParams, ctx);
         return reply(result.summary, result.data, undefined, [result]);
     }
@@ -2548,7 +2604,8 @@ export async function processChat(message: string, ctx: UserContext): Promise<Ch
     // WIN RATE
     if (intent.intent === 'win_rate') {
         if (!canExecute('win_rate', ctx.permissions)) return reply('You don\'t have permission to view opportunities.');
-        const winParams = await enrichFiltersFromMasterData(message, { ...intent.params });
+        const winParams = inheritFilters(await enrichFiltersFromMasterData(message, { ...intent.params }), conv);
+        conv.lastFilters = { ...winParams };
         const result = await execWinRate(winParams, ctx);
         return reply(result.summary, result.data, undefined, [result]);
     }
@@ -2556,7 +2613,8 @@ export async function processChat(message: string, ctx: UserContext): Promise<Ch
     // CUSTOM CHART
     if (intent.intent === 'custom_chart') {
         if (!canExecute('list_opportunities', ctx.permissions)) return reply('You don\'t have permission to view opportunities.');
-        const chartParams = await enrichFiltersFromMasterData(message, { ...intent.params });
+        const chartParams = inheritFilters(await enrichFiltersFromMasterData(message, { ...intent.params }), conv);
+        conv.lastFilters = { ...chartParams };
         const result = await execCustomChart(chartParams, ctx);
         return reply(result.summary, result.data, undefined, [result]);
     }
@@ -2824,7 +2882,7 @@ export async function processChat(message: string, ctx: UserContext): Promise<Ch
     // menu. Naming the filter back in the reply keeps a wrong guess visible
     // rather than silent.
     if (intent.intent === 'general_chat' && canExecute('list_opportunities', ctx.permissions)) {
-        const salvaged = await enrichFiltersFromMasterData(message, extractChartParams(message.toLowerCase()));
+        const salvaged = inheritFilters(await enrichFiltersFromMasterData(message, extractChartParams(message.toLowerCase())), conv);
         const namedFilter = ['client', 'technology', 'practice', 'region', 'projectType', 'pricingModel', 'salesRep', 'stage']
             .some(k => salvaged[k]);
         const namedDimension = /\b(?:by|per|across|split|grouped)\b/i.test(message) || /\b[a-z]+\s*[- ]?wise\b/i.test(message);
