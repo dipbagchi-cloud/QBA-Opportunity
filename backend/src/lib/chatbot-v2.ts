@@ -695,7 +695,8 @@ function nlpParseIntent(message: string, conv: ConversationState): LLMParsedInte
     // CUSTOM CHART — any "chart/graph/pie/breakdown by X" request. Checked
     // before the generic list rule so "show a pie chart of deals by client"
     // draws a chart rather than listing rows.
-    if (/\b(chart|graph|pie|donut|bar\s*(?:chart|graph|diagram)?|plot|visuali[sz]e|breakdown|distribution|split)\b/i.test(lower)) {
+    if (/\b(chart|graph|pie|donut|bar\s*(?:chart|graph|diagram)?|plot|visuali[sz]e|breakdown|break\s*up|distribution|split|statistics|stats|summary|analysis|analytics|report)\b/i.test(lower) ||
+        /\b[a-z]+\s*[- ]?wise\b/i.test(lower)) {
         return { intent: 'custom_chart', params: extractChartParams(lower), confidence: 0.9 };
     }
 
@@ -969,7 +970,7 @@ async function enrichFiltersFromMasterData(text: string, params: Record<string, 
         const master = await getMasterData();
 
         const COMMAND_WORDS = new RegExp(
-            '\b(' + [
+            '\\b(' + [
                 'give','me','show','list','find','search','get','display','view','all','the','a','an','of','in','for',
                 'and','or','with','to','by','per','across','grouped','group','split','as','is','are','what','which',
                 'chart','charts','graph','graphs','pie','donut','bar','bars','plot','diagram','visualise','visualize',
@@ -977,7 +978,8 @@ async function enrichFiltersFromMasterData(text: string, params: Record<string, 
                 'opportunity','opportunities','opp','opps','deal','deals','pipeline','project','projects','please',
                 'my','our','their','this','that','top','highest','lowest','best','worst','many','much','how','there',
                 'win','rate','won','lost','stage','status','client','customer','practice','region','technology',
-            ].join('|') + ')\b', 'gi');
+                'sales','person','statistics','stats','summary','analysis','report','wise','breakup',
+            ].join('|') + ')\\b', 'gi');
 
         const cleaned = ' ' + text.toLowerCase().replace(COMMAND_WORDS, ' ')
             .replace(/[^a-z0-9&/\-. ]+/g, ' ').replace(/\s+/g, ' ') + ' ';
@@ -1009,11 +1011,23 @@ async function enrichFiltersFromMasterData(text: string, params: Record<string, 
             //    from the full "Indorama IIPL", so whole-name-only never matched.
             let best: { name: string; score: number } | null = null;
             for (const n of names) {
-                const variants = [n.toLowerCase(), ...n.toLowerCase().split(/[^a-z0-9]+/)].filter(v => v.length >= 5);
-                for (const variant of variants) {
-                    for (const t of tokens) {
-                        if (t.length < 5) continue;
-                        const score = 1 - editDistance(t, variant) / Math.max(t.length, variant.length);
+                const full = n.toLowerCase();
+                const words = full.split(/[^a-z0-9]+/).filter(w => w.length >= 5);
+                for (const t of tokens) {
+                    if (t.length < 5) continue;
+
+                    // Against the whole name — a typo OR an exact hit is fine.
+                    const dFull = editDistance(t, full);
+                    const sFull = 1 - dFull / Math.max(t.length, full.length);
+                    if (sFull >= 0.85 && (!best || sFull > best.score)) best = { name: n, score: sFull };
+
+                    // Against one word of a multi-word name, ONLY as a typo
+                    // (distance >= 1). Allowing distance 0 here means any common
+                    // word that happens to appear inside a name claims it.
+                    for (const w of words) {
+                        const d = editDistance(t, w);
+                        if (d === 0 && words.length > 1) continue;
+                        const score = 1 - d / Math.max(t.length, w.length);
                         if (score >= 0.85 && (!best || score > best.score)) best = { name: n, score };
                     }
                 }
@@ -1072,8 +1086,18 @@ const CHART_DIMENSIONS: { key: string; label: string; match: RegExp }[] = [
 function extractChartParams(lower: string): Record<string, any> {
     const params: Record<string, any> = extractListParams(lower);
 
+    // "sales person wise" / "client wise" — the "<dimension> wise" construction
+    // is extremely common in Indian English and means exactly "by <dimension>".
+    // Checked first because "wise" trails its noun, so the generic "by X" rule
+    // below cannot see it.
+    const wiseMatch = lower.match(/([a-z][a-z\s]{2,24}?)\s*[- ]?wise\b/i);
+    if (wiseMatch) {
+        const hit = CHART_DIMENSIONS.find(d => d.match.test(wiseMatch[1]));
+        if (hit) params.groupBy = hit.key;
+    }
+
     // "by X" is the strongest signal; otherwise take the first dimension named.
-    const byMatch = lower.match(/\b(?:by|per|across|grouped?\s+by|split\s+by)\s+([a-z\s]{3,25})/i);
+    const byMatch = params.groupBy ? null : lower.match(/\b(?:by|per|across|grouped?\s+by|split\s+by)\s+([a-z\s]{3,25})/i);
     if (byMatch) {
         const phrase = byMatch[1];
         const hit = CHART_DIMENSIONS.find(d => d.match.test(phrase));
@@ -2785,6 +2809,34 @@ export async function processChat(message: string, ctx: UserContext): Promise<Ch
             ? `\n\n*Powered by LLM (${status.provider} / ${status.model}) + NLP fallback*`
             : `\n\n*Running on built-in NLP engine${status.available ? ' (LLM temporarily unavailable)' : ''}*`;
         return reply(getHelpText(ctx) + llmInfo);
+    }
+
+    // ─── SALVAGE: infer the question from what it CONTAINS ───
+    //
+    // Rule matching asks "does this sentence use the words I expect?", which
+    // fails the moment someone phrases a question their own way — "show sales
+    // person wise ADM statistics" names a grouping and a filter, yet matched no
+    // rule and fell through to the help text.
+    //
+    // So before giving up, look at what the sentence actually resolves to. If
+    // it names a dimension to group by, or an entity to filter on, it is a data
+    // question regardless of the verbs used, and answering it beats reciting a
+    // menu. Naming the filter back in the reply keeps a wrong guess visible
+    // rather than silent.
+    if (intent.intent === 'general_chat' && canExecute('list_opportunities', ctx.permissions)) {
+        const salvaged = await enrichFiltersFromMasterData(message, extractChartParams(message.toLowerCase()));
+        const namedFilter = ['client', 'technology', 'practice', 'region', 'projectType', 'pricingModel', 'salesRep', 'stage']
+            .some(k => salvaged[k]);
+        const namedDimension = /\b(?:by|per|across|split|grouped)\b/i.test(message) || /\b[a-z]+\s*[- ]?wise\b/i.test(message);
+
+        if (namedDimension && salvaged.groupBy) {
+            const result = await execCustomChart(salvaged, ctx);
+            return reply(result.summary, result.data, undefined, [result]);
+        }
+        if (namedFilter) {
+            const result = await execCountOpportunities(salvaged, ctx);
+            return reply(result.summary, result.data, undefined, [result]);
+        }
     }
 
     // ─── GENERAL CHAT (LLM-enriched conversational fallback) ───
