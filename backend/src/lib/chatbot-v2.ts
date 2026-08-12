@@ -1112,23 +1112,55 @@ async function enrichFiltersFromMasterData(text: string, params: Record<string, 
  * facts — it cannot invent a client that does not exist, or a number.
  */
 async function llmSlotRescue(message: string): Promise<Record<string, any> | null> {
-    const client = getPrimaryLLMClient() || getOllamaClient();
+    if (!LLM_ENABLED) return null;
+
+    // The model always returns something, so it must only be asked about
+    // sentences that are actually asking for a breakdown. Given "is there
+    // anything worth worrying about right now?" it answered groupBy: practice,
+    // and the bot drew a Total Value by Practice chart — a confident answer to a
+    // question nobody asked. This gate is the difference between interpreting a
+    // question and inventing one. It also saves the ~4s call on sentences the
+    // rescue could never have helped with.
+    const ASKS_FOR_A_BREAKDOWN = /\b(by|per|across|split|breakdown|break\s*down|compare|each|wise|chart|graph|plot|picture|visuali[sz]e|top|best|biggest|highest|lowest|most|which|who|where|distribution|share|how\s+much|how\s+many)\b/i;
+    if (!ASKS_FOR_A_BREAKDOWN.test(message)) return null;
+    const primary = getPrimaryLLMClient();
+    const client = primary || getOllamaClient();
     if (!client) return null;
-    const model = getPrimaryLLMClient() ? LLM_MODEL : OLLAMA_MODEL;
+    const model = primary ? LLM_MODEL : OLLAMA_MODEL;
 
     const system = [
         'Extract query slots from a CRM question. Reply with JSON only.',
         'groupBy: one of client, technology, stage, practice, region, salesRep, month, projectType, pricingModel, status — or "" if none.',
-        'measure: value or count.',
         'chart: bar, pie, or none.',
         'outcome: open, closed, won, lost, or "".',
         'entity: any company, technology, practice or person named in the question, else "".',
+        'A question asking "who" means salesRep unless it names a company.',
     ].join(' ');
+
+    // Four worked examples, because a 1.5B model follows a demonstration far
+    // better than a description. Each one teaches a distinction that was
+    // observed going wrong: informal words for a company mean client, "who
+    // sells it" means salesRep, and a named company belongs in entity rather
+    // than in groupBy.
+    const shots: [string, Record<string, string>][] = [
+        ['which outfits are we winning the most money from',
+            { groupBy: 'client', chart: 'none', outcome: 'won', entity: '' }],
+        ['i want a picture of the money split up by whoever sells it',
+            { groupBy: 'salesRep', chart: 'bar', outcome: '', entity: '' }],
+        ['how are things going month to month',
+            { groupBy: 'month', chart: 'none', outcome: '', entity: '' }],
+        ['how much have we lost on Acme',
+            { groupBy: '', chart: 'none', outcome: 'lost', entity: 'Acme' }],
+    ];
+    const shotMessages = shots.flatMap(([q, a]) => ([
+        { role: 'user' as const, content: q },
+        { role: 'assistant' as const, content: JSON.stringify(a) },
+    ]));
 
     try {
         const res: any = await withTimeout(client.chat.completions.create({
             model,
-            messages: [{ role: 'system', content: system }, { role: 'user', content: message }],
+            messages: [{ role: 'system', content: system }, ...shotMessages, { role: 'user', content: message }],
             response_format: { type: 'json_object' },
             temperature: 0,
             max_tokens: 80,
@@ -1141,7 +1173,6 @@ async function llmSlotRescue(message: string): Promise<Record<string, any> | nul
         const params: Record<string, any> = {};
         const DIMS = ['client', 'technology', 'stage', 'practice', 'region', 'salesRep', 'month', 'projectType', 'pricingModel', 'status'];
         if (typeof slots.groupBy === 'string' && DIMS.includes(slots.groupBy)) params.groupBy = slots.groupBy;
-        params.measure = slots.measure === 'count' ? 'count' : 'value';
         if (slots.chart === 'pie' || slots.chart === 'bar') params.chartType = slots.chart;
         if (['open', 'closed', 'won', 'lost'].includes(slots.outcome)) params.outcome = slots.outcome;
         // Passed through the master-data matcher below, never used verbatim.
@@ -1153,18 +1184,46 @@ async function llmSlotRescue(message: string): Promise<Record<string, any> | nul
     }
 }
 
+/**
+ * Prime the rescue prompt's prefix once, shortly after boot.
+ *
+ * Keeping the model resident removed the load cost but not the first-call cost:
+ * the opening rescue still took ~11.5s against ~3.4s for the next one. The
+ * difference is prompt evaluation. llama.cpp caches the evaluated prefix, and
+ * every rescue shares the same system message and examples, so that work is
+ * paid once — by whoever happens to ask first.
+ *
+ * This makes that first caller the server rather than a user. The question is
+ * discarded; only the cached prefix matters. It never touches the database, and
+ * any failure is ignored, since a cold prefix costs latency and nothing else.
+ */
+let slotRescueWarmed = false;
+function warmSlotRescuePrefix(): void {
+    if (slotRescueWarmed || !LLM_ENABLED) return;
+    slotRescueWarmed = true;
+    setTimeout(() => {
+        llmSlotRescue('which regions are doing best')
+            .then(() => console.log('[Chatbot] slot rescue prefix warmed'))
+            .catch(() => { /* cold prefix is a latency cost, not an error */ });
+    }, 20_000).unref();
+}
+warmSlotRescuePrefix();
+
 // ─── CUSTOM CHARTS (no LLM) ─────────────────────────────────────────────────
 
 /** Dimensions a chart can be grouped by, and the words people use for each. */
 const CHART_DIMENSIONS: { key: string; label: string; match: RegExp }[] = [
-    { key: 'month',        label: 'Month',         match: /\b(months?|monthly|dates?|over time|timelines?|trends?|periods?|quarters?|years?|when)\b/i },
-    { key: 'client',       label: 'Client',        match: /\b(clients?|customers?|accounts?|companies|company|logos?)\b/i },
+    { key: 'month',        label: 'Month',         match: /\b(months?|monthly|dates?|over time|timelines?|trend(?:s|ing)?|periods?|quarters?|years?|when)\b/i },
+    { key: 'client',       label: 'Client',        match: /\b(clients?|customers?|accounts?|companies|company|logos?|outfits?|firms?|organi[sz]ations?|orgs?|brands?|businesses)\b/i },
     { key: 'technology',   label: 'Technology',    match: /\b(tech|technology|technologies|stacks?|platforms?|skills?|tools?)\b/i },
     { key: 'status',       label: 'Status',        match: /\b(status|statuses|detailed\s*status|deal\s*status)\b/i },
     { key: 'stage',        label: 'Stage',         match: /\b(stages?|phases?|funnels?|pipeline\s*stages?|workflows?)\b/i },
     { key: 'practice',     label: 'Practice',      match: /\b(practices?|departments?|depts?|divisions?|verticals?|business\s*units?)\b/i },
     { key: 'region',       label: 'Region',        match: /\b(regions?|geo|geography|locations?|countr(?:y|ies)|territor(?:y|ies)|markets?)\b/i },
-    { key: 'salesRep',     label: 'Sales Rep',     match: /\b(sales\s*reps?|salespersons?|sales\s*persons?|reps?|owners?|managers?|persons?|people|team\s*members?|employees?)\b/i },
+    // "who" lands here rather than needing the model: a who-question is about
+    // people by definition. Client sits earlier in this list, so "who is our
+    // biggest client" still resolves to client — the first dimension named wins.
+    { key: 'salesRep',     label: 'Sales Rep',     match: /\b(sales\s*reps?|salespersons?|sales\s*persons?|reps?|owners?|managers?|persons?|people|team\s*members?|employees?|sells|sellers?|who|whom)\b/i },
     { key: 'pricingModel', label: 'Pricing Model', match: /\b(pricing(\s*model)?s?|billing(\s*model)?s?|commercial\s*models?|contract\s*types?)\b/i },
     { key: 'projectType',  label: 'Project Type',  match: /\b(project\s*types?|engagement\s*types?|work\s*types?|types?)\b/i },
 ];
@@ -2487,13 +2546,27 @@ export async function processChat(message: string, ctx: UserContext): Promise<Ch
     // So the model is the rescue path: it runs only when the rules did not
     // understand the sentence, which is precisely where it earns its latency.
     let intent = nlpParseIntent(message, conv);
-    // The heavy thirty-intent classification is deliberately NOT used here. On
-    // this hardware it cost ~23s, and worse, it guessed: "which of our accounts
-    // are we doing best with?" came back as list_contacts, answering "No
-    // contacts found" to a question about clients. The compact slot rescue in
-    // the salvage path is both faster and constrained to fields that map onto
-    // real queries, so a miss degrades to the help text instead of to a
-    // confident wrong answer.
+
+    // The thirty-intent classification is no longer asked about questions. It
+    // cost ~23s here, and it guessed: "which of our accounts are we doing best
+    // with?" came back as list_contacts, answering "No contacts found" to a
+    // question about clients. Reading questions is now the slot rescue's job —
+    // smaller, faster, and constrained to fields that map onto real queries.
+    //
+    // Writing is the one place the big prompt still earns its keep. "Spin up a
+    // deal for Acme on Azure worth 2 crore" has no dimension and no measure, so
+    // the slot rescue cannot represent it, and without this it would fall to the
+    // help text. Three conditions keep the cost where it belongs: the rules must
+    // have failed, the sentence must contain a write verb, and it must not look
+    // analytical — otherwise "add up revenue by client" would pay 20s for the
+    // word "add". Whatever it proposes still goes through the existing
+    // confirmation step, so a bad guess is shown to the user, not saved.
+    const WRITE_VERB = /\b(create|add|new|open|start|update|change|edit|set|move|mark|convert|log|record|delete|remove|assign|rename)\b/i;
+    const LOOKS_ANALYTICAL = /\b(chart|graph|plot|pie|bar|revenue|value|worth|count|how many|list|show|top|trend|wise|by|per|split)\b/i;
+    if (intent.intent === 'general_chat' && WRITE_VERB.test(message) && !LOOKS_ANALYTICAL.test(message)) {
+        const llmIntent = await callLLM(message, convContext);
+        if (llmIntent && llmIntent.intent !== 'general_chat') intent = llmIntent;
+    }
 
     conv.history.push({ role: 'user', content: message });
 
@@ -2717,7 +2790,11 @@ export async function processChat(message: string, ctx: UserContext): Promise<Ch
             const hinted = await llmSlotRescue(message);
             if (hinted?.groupBy) {
                 chartParams.groupBy = hinted.groupBy;
-                if (hinted.measure && chartParams.__measureDefaulted) chartParams.measure = hinted.measure;
+                // The model's measure is deliberately ignored. Where the sentence
+                // says which it wants, the rules already read it correctly; where it
+                // is silent, value is the more useful default for a CRM. Every time
+                // the model disagreed with the rules here it was wrong, answering
+                // "the most money" with a deal count.
                 if (hinted.chartType) chartParams.chartType = hinted.chartType;
                 if (hinted.outcome && !chartParams.outcome) chartParams.outcome = hinted.outcome;
                 delete chartParams.__groupByDefaulted;
@@ -3012,9 +3089,7 @@ export async function processChat(message: string, ctx: UserContext): Promise<Ch
                     Object.assign(salvaged, resolved);
                     delete hinted.__entityHint;
                 }
-                const sentenceNamedMeasure = !own.__measureDefaulted;
                 salvaged = { ...salvaged, ...hinted };
-                if (sentenceNamedMeasure) salvaged.measure = own.measure;
                 // The model named a dimension, so it is no longer a default.
                 if (hinted.groupBy) delete salvaged.__groupByDefaulted;
             }
