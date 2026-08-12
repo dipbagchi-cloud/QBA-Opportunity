@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth';
+import { auditMutations } from '../lib/audit';
 import {
     listClients,
     createClient,
@@ -21,6 +22,11 @@ const router = Router();
 
 // All routes require authentication
 router.use(authenticate);
+
+// Master data is reference data the whole CRM keys off, so changes here are
+// audited on the same terms as the admin surface. (`validate-countries` is a
+// POST that reads only, so it is excluded — auditing it would be noise.)
+router.use(auditMutations({ source: 'MasterData', skipPaths: /^\/validate-countries/ }));
 
 router.get('/clients', listClients);
 router.post('/clients', createClient);

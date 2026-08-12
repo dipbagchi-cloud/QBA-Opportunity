@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authenticate, authorize, authorizeAny } from '../middleware/auth';
 import { PERMISSIONS } from '../lib/permissions';
+import { auditMutations } from '../lib/audit';
 import {
   listUsers,
   createUser,
@@ -130,6 +131,12 @@ const router = Router();
 
 // All admin routes require authentication
 router.use(authenticate);
+
+// Every successful change made through the admin surface is audit-logged and
+// surfaces in Settings → Audit Log. Controllers that know exactly what changed
+// call recordAudit() themselves; this net catches everything else — including
+// endpoints added later — so no admin mutation can go unrecorded.
+router.use(auditMutations({ source: 'Admin' }));
 
 // User management (requires users:manage)
 router.get('/users', authorize(PERMISSIONS.USERS_MANAGE), listUsers);

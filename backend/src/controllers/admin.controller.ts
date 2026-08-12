@@ -3,6 +3,7 @@ import { prisma } from '../lib/prisma';
 import { DEFAULT_ROLE_PERMISSIONS, validatePermissions } from '../lib/permissions';
 import { hashPassword } from '../services/auth.service';
 import { isSSOUser, getAuthMode } from './auth.controller';
+import { recordAudit } from '../lib/audit';
 
 // GET /api/admin/users
 export async function listUsers(req: Request, res: Response) {
@@ -1012,6 +1013,7 @@ export async function deleteQPeopleMapping(req: Request, res: Response) {
 
     // Reset affected users (with this designation) back to Read-Only
     const readOnlyRole = await prisma.role.findFirst({ where: { name: 'Read-Only' } });
+    const demoted: string[] = [];
     if (readOnlyRole) {
       const affectedUsers = await prisma.user.findMany({
         where: { designation: mapping.qpeopleDesignation },
@@ -1024,8 +1026,24 @@ export async function deleteQPeopleMapping(req: Request, res: Response) {
             activeRoleId: readOnlyRole.id,
           },
         });
+        demoted.push(user.email);
       }
     }
+
+    // This silently strips roles from every user holding the designation, so
+    // name them — the request body alone would not reveal who was affected.
+    await recordAudit({
+      req,
+      entity: 'QPeopleMapping',
+      entityId: req.params.id,
+      action: 'DELETE',
+      changes: {
+        designation: mapping.qpeopleDesignation,
+        role: mapping.roleName ?? null,
+        usersResetToReadOnly: demoted.length,
+        affectedUsers: demoted.slice(0, 100),
+      },
+    });
 
     res.json({ success: true, resetUsers: mapping.qpeopleDesignation });
   } catch (error) {
@@ -1094,6 +1112,8 @@ export async function applyQPeopleMappings(req: Request, res: Response) {
 
     let applied = 0;
     let cleaned = 0;
+    // Track who was actually touched, so the audit entry can name them.
+    const changedUsers: { email: string; roles: string[]; jobBand?: string | null }[] = [];
     for (const user of users) {
       const mappedRoleIds = designationToRoleIds.get(user.designation || '') || [];
       const mappedJobBand = designationToJobBand.get(user.designation || '') || null;
@@ -1111,6 +1131,11 @@ export async function applyQPeopleMappings(req: Request, res: Response) {
           } as any,
         });
         applied++;
+        changedUsers.push({
+          email: user.email,
+          roles: mappedRoleIds,
+          ...(mappedJobBand ? { jobBand: mappedJobBand } : {}),
+        });
       } else if (readOnlyRole) {
         // No mapping for this designation — clean stale roles, reset to Read-Only
         const hasNonReadOnlyRoles = user.roles.some(r => r.name !== 'Read-Only');
@@ -1127,9 +1152,26 @@ export async function applyQPeopleMappings(req: Request, res: Response) {
             } as any,
           });
           applied++;
+          changedUsers.push({ email: user.email, roles: [], jobBand: mappedJobBand });
         }
       }
     }
+
+    // A bulk role rewrite across the whole user base. The request carries no
+    // body, so without naming the users the audit entry would say nothing
+    // about what actually changed.
+    await recordAudit({
+      req,
+      entity: 'User',
+      entityId: '(bulk)',
+      action: 'APPLY_QPEOPLE_MAPPINGS',
+      changes: {
+        usersUpdated: applied,
+        usersConsidered: users.length,
+        mappingsInEffect: mappings.length,
+        updatedUsers: changedUsers.slice(0, 200),
+      },
+    });
 
     res.json({ message: `Applied role/job-band mappings to ${applied} users`, applied, total: users.length });
   } catch (error) {
