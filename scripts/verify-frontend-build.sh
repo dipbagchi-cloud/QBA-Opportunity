@@ -68,7 +68,25 @@ check() {
     fi
 
     # 1. Is the running process on the build that is on disk?
-    if ! echo "$body" | grep -q "$disk_id"; then
+    #
+    # Matched on everything after the first character, for two reasons, both of
+    # which this script hit for real on a BUILD_ID of "-Xb30TwrqO2ds70amKTqD":
+    #
+    #   * a leading "-" makes grep read the id as OPTIONS, so the check failed
+    #     no matter what the page contained — hence the "--" below;
+    #   * the App Router prints the id as an HTML comment, "<!--<id>-->", and
+    #     escapes a leading "-" to "_" because "<!---" would be malformed. The
+    #     literal id is therefore genuinely absent from the page.
+    #
+    # It reported STALE against a perfectly good build and restarted the
+    # frontend on every run. A verification that cries wolf is worse than none:
+    # it trains you to ignore it, and it restarts a healthy process.
+    local id_tail="${disk_id:1}"
+    if [ ${#disk_id} -lt 8 ] || [ -z "$id_tail" ]; then
+        log "FAIL: BUILD_ID '$disk_id' is too short to verify against"
+        return 1
+    fi
+    if ! echo "$body" | grep -qF -- "$id_tail"; then
         log "STALE: disk BUILD_ID=$disk_id is not referenced by the served HTML"
         return 1
     fi
