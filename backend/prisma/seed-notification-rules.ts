@@ -103,20 +103,6 @@ const rules = [
     messageTemplate: '"{{opportunityTitle}}" for {{clientName}} has been marked as Closed Lost.',
   },
 
-  // ── stage_change: → Proposal Lost ──
-  {
-    name: 'Proposal Lost → Admin & Manager',
-    description: 'Notifies Admin and Managers when a proposal is lost.',
-    triggerType: 'stage_change',
-    toStage: 'Proposal Lost',
-    recipientRoles: ['Admin', 'Manager'],
-    recipientRolesCc: ['Sales'],
-    channels: ['in_app', 'email'],
-    emailTemplateKey: 'proposal_lost',
-    titleTemplate: 'Proposal Lost: {{opportunityTitle}}',
-    messageTemplate: '"{{opportunityTitle}}" for {{clientName}} has been marked as Proposal Lost.',
-  },
-
   // ── stage_change: sent_to_client (generic — any stage where proposal goes to client) ──
   {
     name: 'Proposal Sent to Client → All Teams',

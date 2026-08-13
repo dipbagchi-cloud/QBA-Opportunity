@@ -16,7 +16,7 @@
 export interface OpportunityEditAccessInput {
   /** Current user is an Admin (wildcard permission / "admin" role). */
   isActiveAdmin: boolean;
-  /** Deal is Closed Lost / Proposal Lost. */
+  /** Deal is Closed Lost. */
   isLost: boolean;
   /** Deal is On Hold (stalled) — still an OPEN state. */
   isStalled: boolean;

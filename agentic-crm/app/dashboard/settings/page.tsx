@@ -4170,7 +4170,7 @@ const ASSIGNMENT_FIELDS = [
     { value: "presales", label: "Presales Assignee" },
 ];
 
-const STAGES = ["Discovery", "Qualification", "Re-estimation", "Proposal", "Negotiation", "Closed Won", "Closed Lost", "Proposal Lost"];
+const STAGES = ["Discovery", "Qualification", "Re-estimation", "Proposal", "Negotiation", "Closed Won", "Closed Lost" ];
 
 const CONDITION_FIELDS = [
     { value: "value", label: "Deal Value", type: "number" },

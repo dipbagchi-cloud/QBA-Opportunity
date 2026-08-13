@@ -314,7 +314,7 @@ const LLM_ENABLED = process.env.LLM_ENABLED !== 'false';
  * screen uses, so the bot's numbers match the dashboard's exactly.
  */
 /** Stage names that mean a deal is finished; mirrors CLOSED_STAGE_NAMES elsewhere. */
-const CLOSED_STAGE_NAMES_BOT = ['Closed Won', 'Closed-Won', 'Closed Lost', 'Proposal Lost', 'Delivered'];
+const CLOSED_STAGE_NAMES_BOT = ['Closed Won', 'Closed-Won', 'Closed Lost', 'Delivered'];
 
 function money(n: unknown): string {
     const v = Number(n);
@@ -474,7 +474,7 @@ For convert_opportunity: nameOrId (deal name)
 For move_to_presales: nameOrId (deal name) — moves from Pipeline/Discovery to Presales/Qualification
 For move_to_sales: nameOrId (deal name) — moves from Presales/Qualification to Sales/Proposal (requires GOM approval)
 For proposal_sent: nameOrId (deal name) — marks proposal as sent, moves from Proposal to Negotiation
-For mark_lost: nameOrId (deal name), lostType ("Closed Lost" or "Proposal Lost"), remarks (reason for losing)
+For mark_lost: nameOrId (deal name), remarks (reason for losing)
 For reestimate: nameOrId (deal name), comment (why re-estimation needed), adjustedValue (optional new value)
 For revenue_analytics: groupBy (technology, client, owner, month)
 For provide_field_value: fieldName, fieldValue
@@ -668,7 +668,7 @@ function nlpParseIntent(message: string, conv: ConversationState): LLMParsedInte
 
     // Mark as Lost (before generic UPDATE)
     if (/\b(mark|set|move|close)\b/i.test(lower) && /\b(lost|close.?lost|proposal.?lost|dead|rejected|declined)\b/i.test(lower)) {
-        const lostType = /\bproposal.?lost\b/i.test(lower) ? 'Proposal Lost' : 'Closed Lost';
+        const lostType = 'Closed Lost';   // the only lost stage there is
         const remarksMatch = lower.match(/(?:reason|because|remark|due to|:\s*)[:\s,]*["']?(.{5,})["']?\s*$/i);
         return { intent: 'mark_lost', params: { nameOrId: extractEntityName(lower), lostType, remarks: remarksMatch?.[1]?.trim() || '' }, confidence: 0.9 };
     }
@@ -2300,22 +2300,22 @@ async function execProposalSent(params: any, ctx: UserContext): Promise<ActionRe
     };
 }
 
-/** Mark as Lost (→ Closed Lost or Proposal Lost) */
+/** Mark as Lost (→ Closed Lost) */
 async function execMarkLost(params: any, ctx: UserContext): Promise<ActionResult> {
     if (!params.nameOrId) return { tool: 'mark_lost', success: false, summary: 'Which opportunity? Provide the name in quotes (e.g., mark "Project Alpha" as lost).' };
     const opp = await findOpportunity(params.nameOrId);
     if (!opp) return { tool: 'mark_lost', success: false, summary: `Opportunity "${params.nameOrId}" not found.` };
 
     const currentStage = opp.stage?.name || '';
-    if (currentStage === 'Closed Won' || currentStage === 'Closed Lost' || currentStage === 'Proposal Lost') {
+    if (currentStage === 'Closed Won' || currentStage === 'Closed Lost') {
         return { tool: 'mark_lost', success: false, summary: `**"${opp.title}"** is already in **${currentStage}** — cannot change.` };
     }
 
-    // Determine lost type based on current stage
-    let lostType = params.lostType || 'Closed Lost';
-    if (currentStage === 'Qualification' || currentStage === 'Proposal') {
-        lostType = 'Proposal Lost';
-    }
+    // One lost stage, whatever the deal was doing when it died. "Proposal Lost"
+    // used to be chosen here for deals dying at Qualification or Proposal, but it
+    // duplicated Closed Lost — same isClosed, isWon and probability — and every
+    // report already treated the two identically.
+    const lostType = 'Closed Lost';
 
     const lostStage = await prisma.stage.findFirst({ where: { name: { equals: lostType, mode: 'insensitive' } } });
     if (!lostStage) return { tool: 'mark_lost', success: false, summary: `System error: ${lostType} stage not found.` };

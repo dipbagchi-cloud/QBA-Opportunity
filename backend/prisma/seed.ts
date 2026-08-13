@@ -20,7 +20,6 @@ async function main() {
         { name: 'Negotiation', order: 4, probability: 80, color: '#f97316' },
         { name: 'Closed Won', order: 5, probability: 100, color: '#10b981', isClosed: true, isWon: true },
         { name: 'Closed Lost', order: 6, probability: 0, color: '#ef4444', isClosed: true, isWon: false },
-        { name: 'Proposal Lost', order: 7, probability: 0, color: '#e11d48', isClosed: true, isWon: false },
     ];
 
     for (const stage of stages) {
@@ -548,20 +547,6 @@ async function main() {
 <p><strong>Re-estimate Count:</strong> {{reEstimateCount}}</p>
 <p><strong>Sent by:</strong> {{updatedBy}}</p>
 <p>Please review the estimation and make necessary adjustments.</p>
-<p style="color:#64748b;font-size:12px;margin-top:24px">This is an automated notification from Q-CRM.</p>
-</div>`,
-        },
-        {
-            eventKey: 'proposal_lost',
-            name: 'Proposal Lost',
-            subject: 'Q-CRM: "{{opportunityTitle}}" — Proposal Lost',
-            body: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
-<h2 style="color:#e11d48">Proposal Lost</h2>
-<p>Hi {{recipientName}},</p>
-<p>Unfortunately, the opportunity <strong>{{opportunityTitle}}</strong> for <strong>{{clientName}}</strong> has been marked as <strong>Proposal Lost</strong>.</p>
-<p><strong>Value:</strong> {{currency}} {{value}}</p>
-<p><strong>Loss Reason:</strong> {{lossReason}}</p>
-<p><strong>Updated by:</strong> {{updatedBy}}</p>
 <p style="color:#64748b;font-size:12px;margin-top:24px">This is an automated notification from Q-CRM.</p>
 </div>`,
         },

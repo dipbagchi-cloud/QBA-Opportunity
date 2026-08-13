@@ -12,7 +12,6 @@ const STAGE_GROUP: Record<string, string> = {
     'Negotiation': 'Negotiation',
     'Closed Won': 'Closed Won',
     'Closed Lost': 'Closed Lost',
-    'Proposal Lost': 'Proposal Lost',
 };
 
 // Dynamic probability based on stage
@@ -24,7 +23,6 @@ function getStageProbability(stageName: string): number {
         case 'Negotiation': return 75;
         case 'Closed Won': return 100;
         case 'Closed Lost': return 0;
-        case 'Proposal Lost': return 0;
         default: return 10;
     }
 }
@@ -144,7 +142,7 @@ export async function getAnalytics(req: Request, res: Response) {
                 for (const [monthKey, monthRev] of Object.entries(monthlyRevMap)) {
                     if (!revenueByMonth[monthKey]) revenueByMonth[monthKey] = { name: monthKey, proposed: 0, actual: 0, lost: 0 };
                     if (stageName === 'Closed Won') revenueByMonth[monthKey].actual += monthRev;
-                    else if (stageName === 'Closed Lost' || stageName === 'Proposal Lost') revenueByMonth[monthKey].lost += monthRev;
+                    else if (stageName === 'Closed Lost') revenueByMonth[monthKey].lost += monthRev;
                     else revenueByMonth[monthKey].proposed += monthRev;
                 }
             }
@@ -155,7 +153,7 @@ export async function getAnalytics(req: Request, res: Response) {
                 const monthKey = `${MONTH_NAMES[closeDate.getMonth()]} ${closeDate.getFullYear()}`;
                 if (!revenueByMonth[monthKey]) revenueByMonth[monthKey] = { name: monthKey, proposed: 0, actual: 0, lost: 0 };
                 if (stageName === 'Closed Won') revenueByMonth[monthKey].actual += rev;
-                else if (stageName === 'Closed Lost' || stageName === 'Proposal Lost') revenueByMonth[monthKey].lost += rev;
+                else if (stageName === 'Closed Lost') revenueByMonth[monthKey].lost += rev;
                 else revenueByMonth[monthKey].proposed += rev;
             }
 
@@ -173,7 +171,7 @@ export async function getAnalytics(req: Request, res: Response) {
             }
             countByOwner[ownerName].total += 1;
             if (stageName === 'Closed Won') countByOwner[ownerName].won += 1;
-            else if (stageName !== 'Closed Lost' && stageName !== 'Proposal Lost') countByOwner[ownerName].active += 1;
+            else if (stageName !== 'Closed Lost') countByOwner[ownerName].active += 1;
 
             // Revenue by Technology (Tech Stack) — split comma-separated into individual techs
             // Count all deals for pipeline revenue visibility
@@ -203,7 +201,7 @@ export async function getAnalytics(req: Request, res: Response) {
             }
             countBySalesRep[salesRepName].total += 1;
             if (stageName === 'Closed Won') countBySalesRep[salesRepName].won += 1;
-            else if (stageName !== 'Closed Lost' && stageName !== 'Proposal Lost') countBySalesRep[salesRepName].active += 1;
+            else if (stageName !== 'Closed Lost') countBySalesRep[salesRepName].active += 1;
 
             // Revenue by Sales Rep — only Closed Won deals
             if (stageName === 'Closed Won') {
@@ -234,7 +232,7 @@ export async function getAnalytics(req: Request, res: Response) {
         // 4. Pipeline Metrics
         const activeOpps = opportunities.filter(o => {
             const sn = o.stage?.name || o.currentStage;
-            return sn !== 'Closed Won' && sn !== 'Closed Lost' && sn !== 'Proposal Lost';
+            return sn !== 'Closed Won' && sn !== 'Closed Lost';
         });
 
         const wonOpps = opportunities.filter(o => {
@@ -243,7 +241,7 @@ export async function getAnalytics(req: Request, res: Response) {
         });
         const lostOpps = opportunities.filter(o => {
             const sn = o.stage?.name || o.currentStage;
-            return sn === 'Closed Lost' || sn === 'Proposal Lost';
+            return sn === 'Closed Lost';
         });
         const closedOpps = wonOpps.length + lostOpps.length;
         const conversionRate = closedOpps > 0 ? (wonOpps.length / closedOpps) * 100 : 0;
@@ -362,7 +360,7 @@ export async function getAnalytics(req: Request, res: Response) {
         const presalesCount = presalesOpps.length;
         const salesPhaseCount = opportunities.filter(o => {
             const sn = o.stage?.name || o.currentStage;
-            return sn === 'Negotiation' || sn === 'Closed Won' || sn === 'Closed Lost' || sn === 'Proposal Lost';
+            return sn === 'Negotiation' || sn === 'Closed Won' || sn === 'Closed Lost';
         }).length;
         const pipelineToPresales = pipelineCount > 0 ? (presalesCount / pipelineCount) * 100 : 0;
         const presalesToSales = presalesCount > 0 ? (salesPhaseCount / presalesCount) * 100 : 0;
@@ -398,7 +396,7 @@ export async function getAnalytics(req: Request, res: Response) {
             if (sn === 'Closed Won') {
                 managerStats[mgr].wonCount += 1;
                 managerStats[mgr].totalRevenue += getRevenue(o, ratesToBase, { quoteOnly: true });
-            } else if (sn === 'Closed Lost' || sn === 'Proposal Lost') {
+            } else if (sn === 'Closed Lost') {
                 managerStats[mgr].lostCount += 1;
             }
             // Avg days to close for won deals

@@ -27,7 +27,6 @@ const CLOSED_STAGE_NAMES = new Set<string>([
   'Closed Won',
   'Closed-Won',
   'Closed Lost',
-  'Proposal Lost',
   'Delivered',
 ]);
 

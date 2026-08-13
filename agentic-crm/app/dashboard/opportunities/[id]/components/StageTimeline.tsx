@@ -13,7 +13,7 @@ import { Check, XCircle } from "lucide-react";
  *
  * The three closed stages are mutually exclusive terminals, so only one is
  * ever drawn: a live deal shows Closed Won as its (grey) end node, while a
- * lost deal replaces that node with a red Closed Lost / Proposal Lost. A deal
+ * lost deal replaces that node with a red Closed Lost. A deal
  * lost early also collapses the stages it never reached, so the timeline is
  * an honest record of where it actually stopped.
  */
@@ -38,10 +38,9 @@ const DISPLAY_LABEL: Record<string, string> = {
     'Closed-Won': 'Closed Won',
     Delivered: 'Closed Won',
     'Closed Lost': 'Closed Lost',
-    'Proposal Lost': 'Proposal Lost',
 };
 
-const LOST_STAGES = ['Closed Lost', 'Proposal Lost'];
+const LOST_STAGES = ['Closed Lost' ];
 
 // Map whatever the record carries onto a happy-path index.
 const HAPPY_PATH_INDEX: Record<string, number> = {
@@ -113,10 +112,9 @@ export function StageTimeline({
         const fromHistory = stageHistory
             .map(h => HAPPY_PATH_INDEX[(h.stage?.name || '').trim()])
             .filter(i => i != null) as number[];
-        // A Proposal Lost happens at/after Proposal; a Closed Lost can happen
         // anywhere. Use the deepest stage the record can evidence.
         const deepest = fromHistory.length ? Math.max(...fromHistory) : 0;
-        return stage === 'Proposal Lost' ? Math.max(deepest, 2) : deepest;
+        return deepest;
     })();
 
     // Build the node list. A lost deal ends at a red terminal after the last

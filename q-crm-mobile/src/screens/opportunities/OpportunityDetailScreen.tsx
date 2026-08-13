@@ -17,12 +17,12 @@ const STAGE_MAP: Record<string, number> = {
   Qualification: 1, Presales: 1,
   Proposal: 2, Negotiation: 2, Sales: 2,
   'Closed Won': 3, Delivered: 3, Project: 3,
-  'Closed Lost': 2, 'Proposal Lost': 2,
+  'Closed Lost': 2,
 };
 const STAGE_COLORS: Record<string, string> = {
   Pipeline: '#6366f1', Discovery: '#6366f1', Qualification: '#f59e0b',
   Proposal: '#8b5cf6', Negotiation: '#f97316',
-  'Closed Won': '#10b981', 'Closed Lost': '#ef4444', 'Proposal Lost': '#e11d48',
+  'Closed Won': '#10b981', 'Closed Lost': '#ef4444',
 };
 const DURATION_UNITS = ['days', 'weeks', 'months'];
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -119,7 +119,7 @@ export default function OpportunityDetailScreen() {
   // Modals
   const [presalesModalVisible, setPresalesModalVisible] = useState(false);
   const [lostModalVisible, setLostModalVisible] = useState(false);
-  const [lostType, setLostType] = useState<'Closed Lost' | 'Proposal Lost'>('Closed Lost');
+  const [lostType] = useState<'Closed Lost'>('Closed Lost');
   const [reEstimateModalVisible, setReEstimateModalVisible] = useState(false);
   const [rateCardModalVisible, setRateCardModalVisible] = useState(false);
   const [pickerVisible, setPickerVisible] = useState(false);
@@ -240,7 +240,7 @@ export default function OpportunityDetailScreen() {
 
   const currentStageName = opp?.currentStage || opp?.stage?.name || 'Pipeline';
   const oppStageStep = STAGE_MAP[currentStageName] ?? 0;
-  const isLost = currentStageName === 'Closed Lost' || currentStageName === 'Proposal Lost';
+  const isLost = currentStageName === 'Closed Lost';
   const hasProject = !!opp?.project;
   const canEditPresales = oppStageStep === 1 && !isLost;
   const canEditPipeline = oppStageStep === 0 && !isLost;
@@ -542,7 +542,7 @@ export default function OpportunityDetailScreen() {
         <TouchableOpacity onPress={() => nav.goBack()} style={st.backBtn}>
           <Text style={st.backText}>← Back</Text>
         </TouchableOpacity>
-        {isLost && <View style={[st.lostBadge, { backgroundColor: currentStageName === 'Proposal Lost' ? '#e11d48' : '#ef4444' }]}><Text style={st.lostBadgeText}>{currentStageName}</Text></View>}
+        {isLost && <View style={[st.lostBadge, { backgroundColor: '#ef4444' }]}><Text style={st.lostBadgeText}>{currentStageName}</Text></View>}
         {opp.gomApproved && <View style={st.gomBadge}><Text style={st.gomBadgeText}>GOM ✓</Text></View>}
       </View>
 
@@ -978,7 +978,7 @@ export default function OpportunityDetailScreen() {
             {/* Presales stage actions */}
             {canEditPresales && (
               <View style={[st.actionRow, { marginTop: 16 }]}>
-                <ActionBtn label="Proposal Lost" color="#e11d48" onPress={() => { setLostType('Proposal Lost'); setLostModalVisible(true); }} />
+                <ActionBtn label="Mark as Lost" color="#e11d48" onPress={() => setLostModalVisible(true)} />
                 <ActionBtn label="Move to Sales" color="#8b5cf6" onPress={handleMoveToSales} />
               </View>
             )}
@@ -1026,7 +1026,7 @@ export default function OpportunityDetailScreen() {
               <View style={st.actionColumn}>
                 {currentStageName === 'Proposal' && (
                   <>
-                    <ActionBtn label="Proposal Lost" color="#e11d48" onPress={() => { setLostType('Proposal Lost'); setLostModalVisible(true); }} />
+                    <ActionBtn label="Mark as Lost" color="#e11d48" onPress={() => setLostModalVisible(true)} />
                     <ActionBtn label="Send Back for Re-estimate" color="#f59e0b" onPress={() => setReEstimateModalVisible(true)} />
                     <ActionBtn label="Proposal Sent" color="#8b5cf6" onPress={handleProposalSent} />
                   </>
@@ -1131,7 +1131,7 @@ export default function OpportunityDetailScreen() {
 
       <Modal visible={lostModalVisible} transparent animationType="slide">
         <View style={st.modalOverlay}><View style={st.modalContent}>
-          <Text style={st.modalTitle}>{lostType === 'Proposal Lost' ? 'Proposal Lost' : 'Mark as Lost'}</Text>
+          <Text style={st.modalTitle}>{'Mark as Lost'}</Text>
           <Text style={st.editLabel}>Reason / Remarks *</Text>
           <TextInput style={[st.input, { height: 100 }]} placeholder="Enter reason..." value={lostRemarks} onChangeText={setLostRemarks} multiline placeholderTextColor="#94a3b8" />
           <View style={st.modalActions}>

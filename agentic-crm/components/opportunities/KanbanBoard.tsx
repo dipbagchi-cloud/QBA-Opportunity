@@ -12,7 +12,6 @@ const STAGES = [
     { id: 'Discovery', title: 'Discovery', color: 'bg-indigo-500' },
     { id: 'Qualification', title: 'Qualification', color: 'bg-purple-500' },
     { id: 'Proposal', title: 'Proposal', color: 'bg-pink-500' },
-    { id: 'Proposal Lost', title: 'Proposal Lost', color: 'bg-rose-600' },
     { id: 'Negotiation', title: 'Negotiation', color: 'bg-orange-500' },
     { id: 'Closed Won', title: 'Closed Won', color: 'bg-emerald-500' },
     { id: 'Closed Lost', title: 'Closed Lost', color: 'bg-red-500' }
@@ -50,7 +49,6 @@ export default function KanbanBoard() {
     // Valid forward transitions (stage order index)
     const STAGE_ORDER: Record<string, number> = {
         'Discovery': 0, 'Qualification': 1, 'Proposal': 2, 'Negotiation': 3, 'Closed Won': 4,
-        'Proposal Lost': -1, 'Closed Lost': -1
     };
 
     const onDragEnd = (result: DropResult) => {
@@ -70,13 +68,13 @@ export default function KanbanBoard() {
         // Block backward moves (except to Lost stages)
         const fromIdx = STAGE_ORDER[fromStage] ?? 0;
         const toIdx = STAGE_ORDER[toStage] ?? 0;
-        if (toStage !== 'Closed Lost' && toStage !== 'Proposal Lost' && toIdx < fromIdx) {
+        if (toStage !== 'Closed Lost' && toIdx < fromIdx) {
             setDragError(`Cannot move backward from ${fromStage} to ${toStage}. Use the detail page to send back for re-estimation.`);
             return;
         }
 
         // Block skipping stages (must go one step at a time)
-        if (toStage !== 'Closed Lost' && toStage !== 'Proposal Lost' && toIdx > fromIdx + 1) {
+        if (toStage !== 'Closed Lost' && toIdx > fromIdx + 1) {
             setDragError(`Cannot skip stages. Move one step at a time (${fromStage} must go to ${STAGES.find(s => STAGE_ORDER[s.id] === fromIdx + 1)?.title || 'next stage'}).`);
             return;
         }
@@ -116,7 +114,7 @@ export default function KanbanBoard() {
         }
 
         // Moving to Lost stages: allowed but requires remarks via detail page
-        if (toStage === 'Closed Lost' || toStage === 'Proposal Lost') {
+        if (toStage === 'Closed Lost') {
             setDragError(`To mark as lost, please open the opportunity detail page and use "Mark as Lost" button to provide required remarks.`);
             return;
         }

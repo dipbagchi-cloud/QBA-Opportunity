@@ -11,11 +11,11 @@ import { useCurrency } from '../../contexts/CurrencyContext';
 
 const { width } = Dimensions.get('window');
 
-const STAGES = ['All', 'Pipeline', 'Qualification', 'Proposal', 'Negotiation', 'Closed Won', 'Closed Lost', 'Proposal Lost'];
+const STAGES = ['All', 'Pipeline', 'Qualification', 'Proposal', 'Negotiation', 'Closed Won', 'Closed Lost' ];
 const STAGE_COLORS: Record<string, string> = {
   Pipeline: '#6366f1', Discovery: '#6366f1', Qualification: '#f59e0b', Presales: '#f59e0b',
   Proposal: '#8b5cf6', Sales: '#8b5cf6', Negotiation: '#f97316',
-  'Closed Won': '#10b981', 'Closed Lost': '#ef4444', 'Proposal Lost': '#e11d48', Project: '#10b981',
+  'Closed Won': '#10b981', 'Closed Lost': '#ef4444', Project: '#10b981',
 };
 
 export default function OpportunitiesListScreen() {
@@ -113,7 +113,7 @@ export default function OpportunitiesListScreen() {
   };
 
   // Kanban view
-  const kanbanStages = ['Pipeline', 'Qualification', 'Proposal', 'Negotiation', 'Closed Won', 'Closed Lost', 'Proposal Lost'];
+  const kanbanStages = ['Pipeline', 'Qualification', 'Proposal', 'Negotiation', 'Closed Won', 'Closed Lost' ];
   const renderKanban = () => {
     const allOpps = opps;
     return (

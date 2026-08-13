@@ -503,11 +503,11 @@ export async function getOpportunityFilterOptions(_req: Request, res: Response) 
 }
 
 // Stage names that mean the deal is finished. `Stage.isClosed` is the primary
-// signal (set correctly for Closed Won / Closed Lost / Proposal Lost), and this
+// signal (set correctly for Closed Won / Closed Lost), and this
 // name list is the backstop for any stage added later without the flag — it
 // mirrors CLOSED_STAGE_NAMES in lib/opportunity-access.ts and
 // CLOSED_STAGES_FOR_REMINDER in lib/notification-engine.ts.
-const CLOSED_STAGE_NAMES = ['Closed Won', 'Closed-Won', 'Closed Lost', 'Proposal Lost', 'Delivered'];
+const CLOSED_STAGE_NAMES = ['Closed Won', 'Closed-Won', 'Closed Lost', 'Delivered'];
 
 /**
  * Render one CSV cell: escape quotes/commas/newlines per RFC 4180, and defuse
@@ -895,7 +895,7 @@ async function buildStageTimeline(
 
     // "Stage changed from 'X' to 'Y'" — the shape written by every UI transition.
     const TRANSITION_RE = /from\s+'([^']+)'\s+to\s+'([^']+)'/i;
-    // "Marked as Proposal Lost via Chat: …" — the one chatbot-authored variant.
+    // "Marked as Closed Lost via Chat: …" — the one chatbot-authored variant.
     const CHAT_MARK_RE = /marked as\s+([A-Za-z][A-Za-z ]*?)\s+via chat/i;
 
     for (const row of (Array.isArray(auditRows) ? auditRows : [])) {
@@ -1065,7 +1065,7 @@ export async function updateOpportunity(req: Request, res: Response) {
         // Opportunity Close Date is editable only until the proposal is submitted
         // (stage moves to Proposal / Sales / Negotiation / Closed). The freeze
         // applies to non-admin actors; admins can correct it at any stage.
-        const SUBMITTED_STAGES = new Set(['Proposal', 'Sales', 'Negotiation', 'Closed Won', 'Closed-Won', 'Closed Lost', 'Proposal Lost', 'Delivered']);
+        const SUBMITTED_STAGES = new Set(['Proposal', 'Sales', 'Negotiation', 'Closed Won', 'Closed-Won', 'Closed Lost', 'Delivered']);
         const proposalSubmitted = SUBMITTED_STAGES.has(prevStageNameForRule);
         if (body.expectedCloseDate !== undefined) {
             const incoming = body.expectedCloseDate ? new Date(body.expectedCloseDate) : null;
@@ -1190,8 +1190,8 @@ export async function updateOpportunity(req: Request, res: Response) {
         const presalesAssigneeChanged = assignmentValueChanged(body.presalesAssigneeName, previous?.presalesAssigneeName);
 
         if (salesRepChanged || managerChanged || presalesAssigneeChanged) {
-            const lockedAssignmentStages = new Set(['Negotiation', 'Closed Won', 'Closed-Won', 'Closed Lost', 'Proposal Lost', 'Delivered']);
-            const managerClosedStages = new Set(['Closed Won', 'Closed-Won', 'Closed Lost', 'Proposal Lost', 'Delivered']);
+            const lockedAssignmentStages = new Set(['Negotiation', 'Closed Won', 'Closed-Won', 'Closed Lost', 'Delivered']);
+            const managerClosedStages = new Set(['Closed Won', 'Closed-Won', 'Closed Lost', 'Delivered']);
             const nonManagerChanged = salesRepChanged || presalesAssigneeChanged;
             if ((nonManagerChanged && (lockedAssignmentStages.has(previousStageName) || previous?.isStalled || previous?.detailedStatus === 'On Hold'))
                 || (managerChanged && managerClosedStages.has(previousStageName))) {

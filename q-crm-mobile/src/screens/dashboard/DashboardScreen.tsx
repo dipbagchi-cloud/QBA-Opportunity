@@ -15,7 +15,7 @@ const { width } = Dimensions.get('window');
 const STAGE_COLORS: Record<string, string> = {
   Pipeline: '#6366f1', Qualification: '#f59e0b', Presales: '#f59e0b',
   Proposal: '#8b5cf6', Sales: '#8b5cf6', Negotiation: '#f97316',
-  'Closed Won': '#10b981', 'Closed Lost': '#ef4444', 'Proposal Lost': '#e11d48',
+  'Closed Won': '#10b981', 'Closed Lost': '#ef4444',
   Discovery: '#06b6d4', Project: '#10b981',
 };
 

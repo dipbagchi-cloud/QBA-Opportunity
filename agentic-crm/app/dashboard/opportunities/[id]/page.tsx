@@ -1029,7 +1029,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 );
                 setOpportunityCreatedAt(data.createdAt || '');
                 let stageIdx = 0;
-                if (stageName === 'Closed Lost' || stageName === 'Proposal Lost') {
+                if (stageName === 'Closed Lost') {
                     stageIdx = 2; // keep on Sales tab view
                     setIsLost(true);
                     setLostRemarks(data.salesData?.lostRemarks || data.detailedStatus || '');
@@ -1623,7 +1623,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 setIsLost(true);
                 setCurrentStageName(lostModalType);
                 setShowLostModal(false);
-                const lostLabel = lostModalType === 'Proposal Lost' ? 'Proposal Lost' : 'Closed Lost';
+                const lostLabel = 'Closed Lost';
                 toast({ title: lostLabel, description: `Opportunity has been marked as ${lostLabel}.` });
             } else {
                 toast({ title: "Error", description: "Failed to mark as lost." });
@@ -1735,7 +1735,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
     const getBadgeText = () => {
         if (isStalled) return 'On Hold';
-        if (isLost) return currentStageName === 'Proposal Lost' ? 'Proposal Lost' : 'Closed Lost';
+        if (isLost) return 'Closed Lost';
         if (detailedStatus === 'Sent for Re-estimate' || detailedStatus === 'Re-estimation') return 'Sent for Re-estimate';
         if (detailedStatus === 'Estimation Submitted') return 'Estimation Submitted';
         if (opportunityStage === 3) return 'SOW Approved';
@@ -1839,11 +1839,11 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     {canWorkPresalesStage && opportunityStage === 1 && !isLost && (
                         <>
                             <button
-                                onClick={() => { setLostModalType('Proposal Lost'); setShowLostModal(true); }}
+                                onClick={() => { setLostModalType('Closed Lost'); setShowLostModal(true); }}
                                 disabled={isSaving || isStalled}
                                 className="px-4 py-2 bg-white border border-rose-300 text-rose-600 rounded-md font-medium hover:bg-rose-50 disabled:opacity-50"
                             >
-                                <span className="flex items-center gap-1.5"><XCircle className="w-4 h-4" /> Proposal Lost</span>
+                                <span className="flex items-center gap-1.5"><XCircle className="w-4 h-4" /> Mark as Lost</span>
                             </button>
                             {(() => {
                                 // A SOW must be attached, and a committed quote must exist
@@ -1877,11 +1877,11 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     {canWorkSalesStage && opportunityStage === 2 && !isLost && currentStageName === 'Proposal' && (
                         <>
                             <button
-                                onClick={() => { setLostModalType('Proposal Lost'); setShowLostModal(true); }}
+                                onClick={() => { setLostModalType('Closed Lost'); setShowLostModal(true); }}
                                 disabled={isSaving || isStalled}
                                 className="px-4 py-2 bg-white border border-rose-300 text-rose-600 rounded-md font-medium hover:bg-rose-50 disabled:opacity-50"
                             >
-                                <span className="flex items-center gap-1.5"><XCircle className="w-4 h-4" /> Proposal Lost</span>
+                                <span className="flex items-center gap-1.5"><XCircle className="w-4 h-4" /> Mark as Lost</span>
                             </button>
                             <button
                                 onClick={handleSendBackForReestimate}
@@ -2142,7 +2142,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                         )}
                         {isLost && (
                             <span className="px-3 py-1 rounded-full bg-red-100 text-red-600 text-xs font-semibold border border-red-200">
-                                {currentStageName === 'Proposal Lost' ? 'Proposal Lost' : 'Closed Lost'}
+                                {'Closed Lost'}
                             </span>
                         )}
                         {!isLost && opportunityStage === 0 && (
@@ -2679,7 +2679,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     <div className="bg-white rounded-lg shadow-sm border border-slate-200">
                         {isLost && (
                             <div className="mx-4 mt-3 px-3 py-1.5 bg-red-50 border border-red-200 rounded-md text-xs text-red-700 font-medium">
-                                {currentStageName === 'Proposal Lost' ? 'Proposal Lost' : 'Closed Lost'} - All fields are read-only.
+                                {'Closed Lost'} - All fields are read-only.
                             </div>
                         )}
                         {!isLost && opportunityStage >= 2 && !adminEditUnlocked && (
@@ -3242,7 +3242,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 <XCircle className="w-4 h-4 text-red-600" />
                             </div>
                             <div>
-                                <h3 className="font-bold text-red-800 text-sm">Opportunity Closed - {currentStageName === 'Proposal Lost' ? 'Proposal Lost' : 'Lost'}</h3>
+                                <h3 className="font-bold text-red-800 text-sm">Opportunity Closed - {'Lost'}</h3>
                                 <p className="text-sm text-red-700 mt-1"><span className="font-semibold">Remarks:</span> {lostRemarks || 'No remarks provided.'}</p>
                             </div>
                         </div>
@@ -3574,7 +3574,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                         ? 'bg-orange-50 text-orange-700 border-orange-300'
                                         : 'bg-amber-50 text-amber-700 border-amber-300'
                             }`}>
-                                {isLost ? (currentStageName === 'Proposal Lost' ? 'Proposal Lost' : 'Closed Lost') : opportunityStage === 3 ? 'SOW Approved' : currentStageName === 'Negotiation' ? 'Under Negotiation' : 'Proposal Submitted'}
+                                {isLost ? 'Closed Lost' : opportunityStage === 3 ? 'SOW Approved' : currentStageName === 'Negotiation' ? 'Under Negotiation' : 'Proposal Submitted'}
                             </span>
                         </div>
 
@@ -3827,7 +3827,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                         <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-white">
                             <div className="flex items-center gap-2">
                                 <AlertTriangle className="w-5 h-5 text-red-500" />
-                                <h3 className="font-bold text-lg text-slate-800">{lostModalType === 'Proposal Lost' ? 'Mark as Proposal Lost' : 'Mark as Lost'}</h3>
+                                <h3 className="font-bold text-lg text-slate-800">{'Mark as Lost'}</h3>
                             </div>
                             <button
                                 onClick={() => setShowLostModal(false)}
@@ -3839,9 +3839,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
                         <div className="p-5 space-y-4">
                             <p className="text-sm text-slate-600">
-                                {lostModalType === 'Proposal Lost'
-                                    ? 'Mark this opportunity as Proposal Lost - the proposal was not accepted. Please provide a reason.'
-                                    : 'Are you sure you want to mark this opportunity as lost? This action will close the opportunity.'}
+                                { 'Are you sure you want to mark this opportunity as lost? This action will close the opportunity.'}
                             </p>
 
                             <div className="space-y-1.5">

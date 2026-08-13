@@ -51,7 +51,6 @@ export default function AnalyticsPage() {
         'Discovery': 'Pipeline', 'Pipeline': 'Pipeline', 'Qualification': 'Qualification',
         'Presales': 'Qualification', 'Proposal': 'Proposal', 'Sales': 'Proposal',
         'Negotiation': 'Negotiation', 'Closed Won': 'Closed Won', 'Closed Lost': 'Closed Lost',
-        'Proposal Lost': 'Proposal Lost',
     };
     const techProjectsMap: Record<string, string[]> = {};
     const ownerProjectsMap: Record<string, string[]> = {};

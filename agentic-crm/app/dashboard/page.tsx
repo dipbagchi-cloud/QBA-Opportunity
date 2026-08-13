@@ -40,7 +40,6 @@ const STAGE_COLORS: Record<string, string> = {
     "Closed Won": "bg-emerald-50 text-emerald-700 border-emerald-200",
     "Closed-Won": "bg-emerald-50 text-emerald-700 border-emerald-200",
     "Closed Lost": "bg-red-50 text-red-700 border-red-200",
-    "Proposal Lost": "bg-rose-50 text-rose-700 border-rose-200",
     Delivered: "bg-emerald-50 text-emerald-700 border-emerald-200",
     Discovery: "bg-sky-50 text-sky-700 border-sky-200",
     Project: "bg-emerald-50 text-emerald-700 border-emerald-200",
@@ -56,7 +55,6 @@ const STAGE_DISPLAY: Record<string, string> = {
     "Closed Won": "Project",
     "Closed-Won": "Project",
     "Closed Lost": "Lost",
-    "Proposal Lost": "Proposal Lost",
     Delivered: "Project",
     Discovery: "Pipeline",
 };
@@ -69,7 +67,6 @@ const PIE_COLOR_MAP: Record<string, string> = {
     Negotiation: "#8b5cf6",
     "Closed Won": "#ef4444",
     "Closed Lost": "#94a3b8",
-    "Proposal Lost": "#e11d48",
 };
 const PIE_COLORS = ["#6366f1", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#94a3b8", "#06b6d4", "#ec4899"];
 
@@ -186,7 +183,7 @@ function PendingActionsPanel({
     const [showFilters, setShowFilters] = useState(false);
     const [colFilters, setColFilters] = useState<Record<string, string>>({});
 
-    const CLOSED = ['Closed Won', 'Closed-Won', 'Closed Lost', 'Proposal Lost', 'Delivered'];
+    const CLOSED = ['Closed Won', 'Closed-Won', 'Closed Lost', 'Delivered'];
     const actionForStage = (s: string) => {
         if (s === 'Pipeline' || s === 'Discovery') return 'Qualify & assign presales';
         if (s === 'Qualification' || s === 'Presales') return 'Complete presales estimation';
@@ -453,7 +450,7 @@ export default function DashboardPage() {
     const [refreshing, setRefreshing] = useState(false);
 
     const PRESALES_SALES_STAGES = ['Qualification', 'Presales', 'Proposal', 'Sales', 'Negotiation'];
-    const CLOSED_STAGES_ALL = ['Closed Won', 'Closed-Won', 'Closed Lost', 'Proposal Lost', 'Delivered'];
+    const CLOSED_STAGES_ALL = ['Closed Won', 'Closed-Won', 'Closed Lost', 'Delivered'];
 
     const opportunities = useMemo(() => {
         return rawOpportunities.map(o => {
@@ -577,7 +574,7 @@ export default function DashboardPage() {
     // "Aging" = days an opportunity has been open, counted from the day AFTER
     // it was created (creation day = 0). Only open deals age; closed ones are
     // done. Grouped by current stage, also surfacing days-in-stage.
-    const CLOSED_STAGES = ['Closed Won', 'Closed-Won', 'Closed Lost', 'Proposal Lost', 'Delivered'];
+    const CLOSED_STAGES = ['Closed Won', 'Closed-Won', 'Closed Lost', 'Delivered'];
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
     const computeAgingDays = (createdAt?: string) => {
@@ -675,7 +672,7 @@ export default function DashboardPage() {
     // and pipelineValue with the same expression.
     const isOpenStage = (o: Opportunity) => {
         const s = o.currentStage;
-        return s !== 'Closed Won' && s !== 'Closed-Won' && s !== 'Closed Lost' && s !== 'Proposal Lost';
+        return s !== 'Closed Won' && s !== 'Closed-Won' && s !== 'Closed Lost';
     };
     const openPipeline = opportunities.filter(isOpenStage);
     const projectedRevenue = sumValue(openPipeline);
@@ -685,7 +682,7 @@ export default function DashboardPage() {
     // drill-down. Both are derived here once and reused by the tiles, their
     // drill-downs, and the workflow-phase tiles below.
     const WON_STAGES = ['Closed Won', 'Closed-Won', 'Delivered'];
-    const LOST_STAGES = ['Closed Lost', 'Proposal Lost'];
+    const LOST_STAGES = ['Closed Lost' ];
     const closedWonOpps = opportunities.filter(o => WON_STAGES.includes(o.currentStage));
     const closedLostOpps = opportunities.filter(o => LOST_STAGES.includes(o.currentStage));
     const closedWonValue = sumValue(closedWonOpps);
@@ -730,7 +727,6 @@ export default function DashboardPage() {
         'Discovery': 'Pipeline', 'Pipeline': 'Pipeline', 'Qualification': 'Qualification',
         'Presales': 'Qualification', 'Proposal': 'Proposal', 'Sales': 'Proposal',
         'Negotiation': 'Negotiation', 'Closed Won': 'Closed Won', 'Closed Lost': 'Closed Lost',
-        'Proposal Lost': 'Proposal Lost',
     };
     const techProjectsMap: Record<string, string[]> = {};
     const ownerProjectsMap: Record<string, string[]> = {};
@@ -928,7 +924,7 @@ export default function DashboardPage() {
             { key: "healthScore", label: "Health %", format: "number" },
         ],
         data: [...opportunities].sort((a, b) => {
-            const order = ['Pipeline', 'Discovery', 'Qualification', 'Proposal', 'Negotiation', 'Closed Won', 'Closed-Won', 'Closed Lost', 'Proposal Lost'];
+            const order = ['Pipeline', 'Discovery', 'Qualification', 'Proposal', 'Negotiation', 'Closed Won', 'Closed-Won', 'Closed Lost' ];
             return (order.indexOf(a.currentStage) - order.indexOf(b.currentStage));
         }),
         chart: (
@@ -1354,7 +1350,7 @@ export default function DashboardPage() {
                 { key: "salesRepName", label: "Sales Rep", format: "text" },
                 { key: "technology", label: "Technology", format: "text" },
             ],
-            data: opportunities.filter(o => ['Closed Won', 'Closed-Won', 'Closed Lost', 'Proposal Lost'].includes(o.currentStage)),
+            data: opportunities.filter(o => ['Closed Won', 'Closed-Won', 'Closed Lost' ].includes(o.currentStage)),
         },
         { // Avg Close Time
             title: "Deals – Cycle Time (Closed Deals)",
@@ -1372,7 +1368,7 @@ export default function DashboardPage() {
             // Days to Close is fractional (based on the actual hours between
             // creation and close) so same-day closes don't read as "0".
             data: opportunities
-                .filter(o => ['Closed Won', 'Closed-Won', 'Closed Lost', 'Proposal Lost', 'Delivered'].includes(o.currentStage))
+                .filter(o => ['Closed Won', 'Closed-Won', 'Closed Lost', 'Delivered'].includes(o.currentStage))
                 .map(o => {
                     // daysToClose comes from the backend as a fractional number
                     // (full-timestamp precision). Format for display.

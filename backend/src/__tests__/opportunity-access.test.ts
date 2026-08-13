@@ -177,7 +177,7 @@ describe('buildOpportunityAccess — Read-Only role', () => {
 });
 
 describe('buildOpportunityAccess — closed-stage detection', () => {
-  const closedStages = ['Closed Won', 'Closed-Won', 'Closed Lost', 'Proposal Lost', 'Delivered'];
+  const closedStages = ['Closed Won', 'Closed-Won', 'Closed Lost', 'Delivered'];
 
   it.each(closedStages)('freezes a non-admin edit-all holder on stage "%s"', (stage) => {
     const access = build({

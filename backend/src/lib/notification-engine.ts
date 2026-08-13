@@ -911,7 +911,6 @@ const CLOSED_STAGES_FOR_REMINDER = new Set<string>([
   'Closed Won',
   'Closed-Won',
   'Closed Lost',
-  'Proposal Lost',
   'Delivered',
 ]);
 
@@ -1395,7 +1394,7 @@ export async function evaluateStartDateApproachingReminders(): Promise<StartDate
  * Daily scan. For every active rule with triggerType=start_date_overdue, find
  * every opportunity whose tentativeStartDate has slipped past today AND is
  * still open (any stage other than Closed Won / Closed-Won / Closed Lost /
- * Proposal Lost / Delivered).
+ * Delivered).
  *
  * Workflow actions when an overdue is detected and the opportunity is not
  * already in Qualification + Extended:

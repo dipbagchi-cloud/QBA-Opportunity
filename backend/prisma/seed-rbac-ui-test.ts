@@ -57,7 +57,6 @@ async function ensureBaseData() {
     { name: 'Negotiation', order: 4, probability: 80, color: '#f97316' },
     { name: 'Closed Won', order: 5, probability: 100, color: '#10b981', isClosed: true, isWon: true },
     { name: 'Closed Lost', order: 6, probability: 0, color: '#ef4444', isClosed: true, isWon: false },
-    { name: 'Proposal Lost', order: 7, probability: 0, color: '#e11d48', isClosed: true, isWon: false },
   ];
 
   for (const stage of stages) {

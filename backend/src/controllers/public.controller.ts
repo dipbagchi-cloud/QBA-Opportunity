@@ -17,7 +17,7 @@ export async function getPublicStats(req: Request, res: Response) {
         });
         const lostOpps = opportunities.filter(o => {
             const sn = o.stage?.name || o.currentStage;
-            return sn === 'Closed Lost' || sn === 'Proposal Lost';
+            return sn === 'Closed Lost';
         });
         const closedCount = wonOpps.length + lostOpps.length;
         const winRate = closedCount > 0 ? Math.round((wonOpps.length / closedCount) * 100) : 0;

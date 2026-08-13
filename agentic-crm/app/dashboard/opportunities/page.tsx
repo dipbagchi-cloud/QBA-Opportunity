@@ -540,8 +540,7 @@ export default function OpportunitiesPage() {
                                                         opp.stage === 'Negotiation' ? 'bg-purple-50 text-purple-700 border-purple-200' :
                                                         opp.stage === 'Closed Won' || opp.stage === 'Commit' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
                                                         opp.stage === 'Closed Lost' ? 'bg-red-50 text-red-700 border-red-200' :
-                                                        opp.stage === 'Proposal Lost' ? 'bg-rose-50 text-rose-700 border-rose-200' :
-                                                        opp.stage === 'Proposal' ? 'bg-pink-50 text-pink-700 border-pink-200' :
+                                                                                                                opp.stage === 'Proposal' ? 'bg-pink-50 text-pink-700 border-pink-200' :
                                                         'bg-slate-100 text-slate-700 border-slate-200'
                                                     }`}>
                                                         {opp.stage}
