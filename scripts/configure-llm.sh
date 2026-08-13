@@ -78,13 +78,20 @@ for ENV in "${ENVS[@]}"; do
     cp "$ENV_FILE" "$ENV_FILE.bak.$(date +%s)"
 
     if [ "$PROVIDER" = "off" ]; then
-        set_env "$ENV_FILE" LLM_ENABLED false
-        echo "[$ENV] external model DISABLED — answers come from the deterministic engine only"
+        # Only the hosted provider is switched off. The local model stays as the
+        # rescue path, so turning off a paid provider does not silently make the
+        # bot dumber than it was before anyone configured one.
+        set_env "$ENV_FILE" LLM_PRIMARY_ENABLED false
+        echo "[$ENV] hosted provider DISABLED — local model still answers the rescue path"
     else
         set_env "$ENV_FILE" LLM_ENABLED true
         set_env "$ENV_FILE" LLM_API_KEY "$API_KEY"
         set_env "$ENV_FILE" LLM_MODEL "$MODEL"
         [ -n "$URL" ] && set_env "$ENV_FILE" LLM_API_URL "$URL"
+        # Without this the key is written and then ignored: the hosted client is
+        # skipped whenever LLM_PRIMARY_ENABLED is false, which is how these
+        # environments were left when they ran local-only.
+        set_env "$ENV_FILE" LLM_PRIMARY_ENABLED true
         echo "[$ENV] provider=$PROVIDER model=$MODEL (key written, not shown)"
     fi
 

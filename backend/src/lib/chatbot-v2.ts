@@ -329,6 +329,15 @@ function money(n: unknown): string {
  */
 const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || 15000);
 
+/**
+ * Whether a hosted provider may receive conversation history.
+ *
+ * Off unless explicitly enabled. History includes previous answers, so it can
+ * contain client names and deal values; sending it to a third party is a
+ * disclosure decision, not a configuration detail.
+ */
+const HOSTED_PROVIDER_SEES_HISTORY = process.env.LLM_ALLOW_HISTORY === 'true';
+
 /** Reject if a model call outruns the ceiling, so a stalled socket cannot block a reply. */
 function withTimeout<T>(work: Promise<T>, label: string): Promise<T> {
     return Promise.race([
@@ -569,8 +578,16 @@ Keep responses under 3 sentences unless detail is needed. Use markdown for forma
 
 /** Use LLM for free-form conversational response (general_chat) */
 async function llmGeneralChat(userMessage: string, ctx: UserContext, conversationHistory: { role: string; content: string }[]): Promise<string | null> {
-    // Try primary LLM first
-    const primaryClient = getPrimaryLLMClient();
+    // This is the one path that sends conversation HISTORY, and history contains
+    // earlier replies — which carry client names and real figures. That is fine
+    // for a model running on this VM and not fine for a third party, so a hosted
+    // provider is deliberately skipped here even when one is configured.
+    //
+    // The rescue path is what a hosted key is for: it sends only the sentence
+    // the user typed and gets back a dimension. Keeping that split in code means
+    // configuring a key cannot start leaking pipeline data by accident, which is
+    // not something anyone should have to remember.
+    const primaryClient = HOSTED_PROVIDER_SEES_HISTORY ? getPrimaryLLMClient() : null;
     if (primaryClient) {
         try {
             const result = await generalChatWithClient(primaryClient, LLM_MODEL, userMessage, ctx, conversationHistory);
