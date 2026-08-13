@@ -271,7 +271,18 @@ export default function ChatBot() {
     // Money in replies follows the header's currency picker, like every other screen.
     const { format } = useCurrency();
     const [isOpen, setIsOpen] = useState(false);
-    const [isHidden, setIsHidden] = useState(false);
+
+    // Where the launcher sits. null means "docked bottom-centre", the default
+    // for anyone who has never dragged it — so the button does not need a stored
+    // position to appear, and a cleared browser simply returns to the dock.
+    const [launcherPos, setLauncherPos] = useState<{ x: number; y: number } | null>(null);
+    const launcherRef = useRef<HTMLDivElement>(null);
+    // Drag bookkeeping. `moved` is what separates a drag from a click: without
+    // it, every drag would also open the chat on release.
+    const dragRef = useRef<{ dx: number; dy: number; moved: boolean } | null>(null);
+    // Click fires after pointerup, by which time the drag record is gone, so the
+    // "was that a drag?" answer has to outlive it by one event.
+    const suppressClickRef = useRef(false);
     const [messages, setMessages] = useState<ChatMsg[]>([]);
     const [input, setInput] = useState("");
     const [loading, setLoading] = useState(false);
@@ -338,6 +349,72 @@ export default function ChatBot() {
         setTimeout(() => { inputRef.current?.focus(); }, 50);
     }, [loading]);
 
+    // ───── Draggable launcher ─────
+
+    const LAUNCHER_SIZE = 56;   // w-14 / h-14
+    const LAUNCHER_MARGIN = 8;
+    const LAUNCHER_POS_KEY = "qcrm.chatbot.launcherPosition";
+
+    /** Keep the button on screen — including after the window is resized. */
+    const clampToViewport = useCallback((p: { x: number; y: number }) => ({
+        x: Math.min(Math.max(p.x, LAUNCHER_MARGIN), Math.max(LAUNCHER_MARGIN, window.innerWidth - LAUNCHER_SIZE - LAUNCHER_MARGIN)),
+        y: Math.min(Math.max(p.y, LAUNCHER_MARGIN), Math.max(LAUNCHER_MARGIN, window.innerHeight - LAUNCHER_SIZE - LAUNCHER_MARGIN)),
+    }), []);
+
+    // Restore the saved spot on mount, and re-clamp when the window changes so a
+    // position saved on a wide monitor cannot strand the button off-screen on a
+    // laptop.
+    useEffect(() => {
+        try {
+            const raw = localStorage.getItem(LAUNCHER_POS_KEY);
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                if (typeof parsed?.x === "number" && typeof parsed?.y === "number") {
+                    setLauncherPos(clampToViewport(parsed));
+                }
+            }
+        } catch {
+            /* unreadable or disabled storage just means the default dock */
+        }
+        const onResize = () => setLauncherPos(p => (p ? clampToViewport(p) : p));
+        window.addEventListener("resize", onResize);
+        return () => window.removeEventListener("resize", onResize);
+    }, [clampToViewport]);
+
+    const handleLauncherPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+        const rect = launcherRef.current?.getBoundingClientRect();
+        if (!rect) return;
+        dragRef.current = { dx: e.clientX - rect.left, dy: e.clientY - rect.top, moved: false };
+        e.currentTarget.setPointerCapture(e.pointerId);
+    };
+
+    const handleLauncherPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+        const drag = dragRef.current;
+        if (!drag) return;
+        const next = clampToViewport({ x: e.clientX - drag.dx, y: e.clientY - drag.dy });
+        // A few pixels of slop, so a slightly shaky click still opens the chat
+        // rather than being swallowed as a drag.
+        if (!drag.moved) {
+            const rect = launcherRef.current?.getBoundingClientRect();
+            if (rect && Math.abs(next.x - rect.left) + Math.abs(next.y - rect.top) > 4) drag.moved = true;
+        }
+        if (drag.moved) setLauncherPos(next);
+    };
+
+    const handleLauncherPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+        const drag = dragRef.current;
+        dragRef.current = null;
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+        suppressClickRef.current = !!drag?.moved;
+        if (!drag?.moved) return;
+        // Persist only a real move, so the placement survives reloads and stays
+        // put until it is dragged somewhere else.
+        setLauncherPos(p => {
+            if (p) { try { localStorage.setItem(LAUNCHER_POS_KEY, JSON.stringify(p)); } catch { /* non-fatal */ } }
+            return p;
+        });
+    };
+
     const handleKeyDown = (e: React.KeyboardEvent) => {
         if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
@@ -357,19 +434,29 @@ export default function ChatBot() {
                 controls in: the opportunities footer holds the row count on the
                 left and the pagination buttons on the right, leaving the middle
                 clear. */}
-            {!isOpen && !isHidden && (
-                <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center group animate-in fade-in duration-300">
+            {!isOpen && (
+                <div
+                    ref={launcherRef}
+                    onPointerDown={handleLauncherPointerDown}
+                    onPointerMove={handleLauncherPointerMove}
+                    onPointerUp={handleLauncherPointerUp}
+                    onPointerCancel={handleLauncherPointerUp}
+                    style={launcherPos
+                        ? { left: launcherPos.x, top: launcherPos.y, touchAction: "none" }
+                        : { touchAction: "none" }}
+                    className={`fixed z-30 flex flex-col items-center animate-in fade-in duration-300 ${
+                        launcherPos ? "" : "bottom-4 left-1/2 -translate-x-1/2"
+                    }`}
+                >
                     <button
-                        onClick={(e) => { e.stopPropagation(); setIsHidden(true); }}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity p-1 bg-white border border-slate-200 rounded-full shadow-sm text-slate-400 hover:text-slate-600 hover:bg-slate-50 absolute -top-2 -right-2 z-10"
-                        title="Hide AI Assistant"
-                    >
-                        <X className="w-3 h-3" />
-                    </button>
-                    <button
-                        onClick={() => setIsOpen(true)}
-                        className="w-14 h-14 rounded-full bg-gradient-to-tr from-indigo-600 to-purple-600 text-white flex items-center justify-center shadow-lg hover:shadow-xl hover:scale-105 transition-all duration-200"
-                        title="AI Assistant"
+                        // Click is suppressed after a drag, so releasing the
+                        // button at its new home does not also open the chat.
+                        onClick={() => {
+                            if (suppressClickRef.current) { suppressClickRef.current = false; return; }
+                            setIsOpen(true);
+                        }}
+                        className="w-14 h-14 rounded-full bg-gradient-to-tr from-indigo-600 to-purple-600 text-white flex items-center justify-center shadow-lg hover:shadow-xl hover:scale-105 transition-all duration-200 cursor-grab active:cursor-grabbing"
+                        title="AI Assistant — drag to move"
                     >
                         <Sparkles className="w-6 h-6" />
                     </button>
