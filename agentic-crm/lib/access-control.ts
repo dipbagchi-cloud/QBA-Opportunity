@@ -46,6 +46,7 @@ export type SettingsTabKey =
   | "roles"
   | "qpeoplemapping"
   | "authconfig"
+  | "aiassistant"
   | "ratecards"
   | "budgetassumptions"
   | "currencyrates"
@@ -67,6 +68,7 @@ const SETTINGS_TAB_PERMISSION_RULES: Partial<Record<SettingsTabKey, string[]>> =
   roles: ["roles:manage"],
   qpeoplemapping: ["roles:manage"],
   authconfig: ["settings:manage"],
+  aiassistant: ["settings:manage"],
   ratecards: ["costcard:manage"],
   budgetassumptions: ["settings:manage"],
   currencyrates: ["settings:manage"],

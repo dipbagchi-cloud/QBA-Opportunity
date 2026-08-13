@@ -64,6 +64,8 @@ export default function DashboardLayout({
 
 function DashboardContent({ children }: { children: React.ReactNode }) {
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+    // null until the answer arrives — see the launcher below.
+    const [chatbotEnabled, setChatbotEnabled] = useState<boolean | null>(null);
     const [showRoleSwitcher, setShowRoleSwitcher] = useState(false);
     const [switchingRole, setSwitchingRole] = useState(false);
     const pathname = usePathname();
@@ -101,6 +103,26 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
     };
 
     const hasMultipleRoles = (user?.roles?.length || 0) > 1;
+
+    // Ask this environment whether the assistant is on offer. Each environment
+    // has its own database, so QA and UAT can enable it while production does
+    // not — and any of them can change without a rebuild. On any failure the
+    // launcher stays hidden, because appearing where it was switched off is the
+    // worse of the two mistakes.
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                const res = await fetch(`${API_URL}/api/admin/assistant-settings`, { headers: getAuthHeaders() });
+                if (!res.ok) throw new Error(String(res.status));
+                const data = await res.json();
+                if (!cancelled) setChatbotEnabled(!!data?.chatbotEnabled);
+            } catch {
+                if (!cancelled) setChatbotEnabled(false);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, []);
 
     return (
         <div className="min-h-screen bg-slate-50 text-slate-900 flex">
@@ -298,18 +320,14 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
                 </main>
             </div>
 
-            {/* AI assistant launcher — HIDDEN.
-                Commented out rather than deleted: the component, its styling and
-                the whole deterministic query engine behind it are intact, so
-                re-enabling is uncommenting this one line.
-                Re-enable once a model endpoint is available; until then the bot
-                answers from the rule-based engine only. */}
-            {/* Shown where NEXT_PUBLIC_CHATBOT_ENABLED is "true" — QA only for now.
-                A commented-out import cannot express this: one codebase builds all
-                three environments, so hiding it in the source hid it in QA too,
-                where it is meant to be reviewed. Absent variable means hidden, so
-                an environment that is never configured stays off by default. */}
-            {process.env.NEXT_PUBLIC_CHATBOT_ENABLED === "true" && <ChatBot />}
+            {/* AI assistant launcher — availability comes from Settings, per
+                environment, not from a build-time variable. Each environment has
+                its own database, so QA and UAT can offer it while production
+                does not, and any of them can be switched without a rebuild.
+                Null means "not known yet", which renders nothing: better a
+                launcher that appears a moment late than one that flashes on in
+                an environment where it is meant to be off. */}
+            {chatbotEnabled === true && <ChatBot />}
 
         </div>
     );

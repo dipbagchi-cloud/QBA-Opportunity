@@ -8,6 +8,8 @@ import {
   updateUser,
   resetUserPassword,
   syncQPeopleUsers,
+  getAssistantSettings,
+  updateAssistantSettings,
   getBudgetAssumptions,
   updateBudgetAssumptions,
   listRoles,
@@ -206,6 +208,11 @@ router.get('/project-roles', authorize(PERMISSIONS.METADATA_MANAGE), listAllProj
 router.post('/project-roles', authorize(PERMISSIONS.METADATA_MANAGE), createProjectRole);
 router.patch('/project-roles/:id', authorize(PERMISSIONS.METADATA_MANAGE), updateProjectRole);
 router.delete('/project-roles/:id', authorize(PERMISSIONS.METADATA_MANAGE), deleteProjectRole);
+
+// AI assistant availability (GET: any authenticated user, since the UI needs it
+// to decide whether to show the launcher; PUT: requires settings:manage)
+router.get('/assistant-settings', getAssistantSettings);
+router.put('/assistant-settings', authorize(PERMISSIONS.SETTINGS_MANAGE), updateAssistantSettings);
 
 // Budget assumptions (GET: any authenticated user, PUT: requires settings:manage)
 router.get('/budget-assumptions', getBudgetAssumptions);

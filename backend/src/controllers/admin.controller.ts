@@ -796,6 +796,70 @@ const DEFAULT_BUDGET_ASSUMPTIONS = {
   nonProdTimeDrivenReminderEmail: 'jaydeep.bandyopadhyay@qbadvisory.com',
 };
 
+const ASSISTANT_SETTINGS_KEY = 'assistant_settings';
+
+/**
+ * Whether the AI assistant is offered to users, per environment.
+ *
+ * This lived in NEXT_PUBLIC_CHATBOT_ENABLED, which is baked into the frontend
+ * at BUILD time — so turning the assistant off in production meant a rebuild
+ * and a deploy, during an incident, which is exactly when nobody wants one.
+ * It is a database row now: an admin toggles it in Settings and it takes effect
+ * on the next page load, in that environment only, because each environment has
+ * its own database.
+ *
+ * Default is OFF. An environment nobody has configured does not surprise its
+ * users with an assistant.
+ */
+const DEFAULT_ASSISTANT_SETTINGS = { chatbotEnabled: false };
+
+// GET /api/admin/assistant-settings  (any authenticated user — the UI needs it
+// to decide whether to render the launcher at all)
+export async function getAssistantSettings(req: Request, res: Response) {
+  try {
+    const config = await prisma.systemConfig.findUnique({ where: { key: ASSISTANT_SETTINGS_KEY } });
+    const value = (config?.value as any) || DEFAULT_ASSISTANT_SETTINGS;
+    res.json({ chatbotEnabled: !!value.chatbotEnabled });
+  } catch (error) {
+    console.error('Get assistant settings error:', error);
+    // A failure here must not take the assistant down for everyone, nor turn it
+    // on where it is meant to be off — report the safe default.
+    res.json(DEFAULT_ASSISTANT_SETTINGS);
+  }
+}
+
+// PUT /api/admin/assistant-settings  (requires settings:manage)
+export async function updateAssistantSettings(req: Request, res: Response) {
+  try {
+    const enabled = !!req.body?.chatbotEnabled;
+    const config = await prisma.systemConfig.upsert({
+      where: { key: ASSISTANT_SETTINGS_KEY },
+      update: { value: { chatbotEnabled: enabled } },
+      create: {
+        key: ASSISTANT_SETTINGS_KEY,
+        value: { chatbotEnabled: enabled },
+        category: 'assistant',
+        description: 'Whether the AI assistant is available to users in this environment',
+      },
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        entity: 'SystemConfig',
+        entityId: config.id,
+        action: 'UPDATE_ASSISTANT_SETTINGS',
+        userId: (req as any).user?.id || null,
+        changes: JSON.stringify({ chatbotEnabled: enabled }),
+      },
+    }).catch(() => { /* auditing must never fail the request */ });
+
+    res.json({ chatbotEnabled: enabled });
+  } catch (error) {
+    console.error('Update assistant settings error:', error);
+    res.status(500).json({ error: 'Failed to update assistant settings' });
+  }
+}
+
 // GET /api/admin/budget-assumptions
 export async function getBudgetAssumptions(req: Request, res: Response) {
   try {

@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
-import { User, Lock, Users, Shield, Plus, X, Check, AlertCircle, RotateCcw, Pencil, ToggleLeft, ToggleRight, DollarSign, Trash2, Globe, Cpu, Tag, Building2, Download, Settings2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, Search, Eye, EyeOff, FileText, Mail, Send, Briefcase, ShieldCheck, RefreshCw, Coins, UserPlus, UserMinus, Calculator, Percent, Info, Clock, Bell, Filter, Zap, ArrowRight, Calendar } from "lucide-react";
+import { User, Lock, Users, Shield, Plus, X, Check, AlertCircle, RotateCcw, Pencil, ToggleLeft, ToggleRight, DollarSign, Trash2, Globe, Cpu, Tag, Building2, Download, Settings2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, Search, Eye, EyeOff, FileText, Mail, Send, Briefcase, ShieldCheck, RefreshCw, Coins, UserPlus, UserMinus, Calculator, Percent, Info, Clock, Bell, Filter, Zap, ArrowRight, Calendar, Bot } from "lucide-react";
 import { useAuthStore } from "@/lib/auth-store";
 import { apiClient, API_URL, getAuthHeaders } from "@/lib/api";
 import { useCurrency } from "@/components/providers/currency-provider";
@@ -151,6 +151,7 @@ export default function SettingsPage() {
                 { key: "roles", label: "Roles", icon: Shield, permissionAny: ["roles:manage"] },
                 { key: "qpeoplemapping", label: "QPeople Role Mapping", icon: RefreshCw, permissionAny: ["roles:manage"] },
                 { key: "authconfig", label: "Authentication", icon: ShieldCheck, permissionAny: ["settings:manage"] },
+                { key: "aiassistant", label: "AI Assistant", icon: Bot, permissionAny: ["settings:manage"] },
             ],
         },
         {
@@ -304,6 +305,7 @@ export default function SettingsPage() {
                     {activeTab === "roles" && canShowTab("roles") && <RolesTab />}
                     {activeTab === "qpeoplemapping" && canShowTab("qpeoplemapping") && <QPeopleMappingTab />}
                     {activeTab === "authconfig" && canShowTab("authconfig") && <AuthConfigTab />}
+                    {activeTab === "aiassistant" && canShowTab("aiassistant") && <AiAssistantTab />}
                     {activeTab === "ratecards" && canShowTab("ratecards") && <RateCardsTab />}
                     {activeTab === "budgetassumptions" && canShowTab("budgetassumptions") && <BudgetAssumptionsTab />}
                     {activeTab === "currencyrates" && canShowTab("currencyrates") && <CurrencyRatesTab />}
@@ -3717,6 +3719,102 @@ function CurrencyRatesTab() {
 }
 
 /* ─────────────── Auth Configuration Tab ─────────────── */
+/**
+ * Turn the AI assistant on or off for THIS environment.
+ *
+ * It used to be a build-time variable, so switching it off in production meant
+ * a rebuild and a deploy — the last thing anyone wants when they need it off
+ * now. Each environment has its own database, so this toggle affects only the
+ * environment it is set in: QA and UAT can offer the assistant while production
+ * does not.
+ */
+function AiAssistantTab() {
+    const [enabled, setEnabled] = useState<boolean | null>(null);
+    const [saving, setSaving] = useState(false);
+    const [error, setError] = useState("");
+    const [savedAt, setSavedAt] = useState<Date | null>(null);
+
+    useEffect(() => {
+        (async () => {
+            try {
+                const data = await apiClient("/api/admin/assistant-settings");
+                setEnabled(!!data?.chatbotEnabled);
+            } catch {
+                setError("Could not read the current setting.");
+                setEnabled(false);
+            }
+        })();
+    }, []);
+
+    const save = async (next: boolean) => {
+        setSaving(true);
+        setError("");
+        const previous = enabled;
+        setEnabled(next);
+        try {
+            await apiClient("/api/admin/assistant-settings", {
+                method: "PUT",
+                body: JSON.stringify({ chatbotEnabled: next }),
+            });
+            setSavedAt(new Date());
+        } catch {
+            setEnabled(previous);   // put the switch back where it was
+            setError("Could not save. The setting is unchanged.");
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    if (enabled === null) {
+        return <div className="p-6 text-sm text-slate-500">Loading…</div>;
+    }
+
+    return (
+        <div className="p-6 max-w-2xl">
+            <h2 className="text-lg font-semibold text-slate-800 mb-1">AI Assistant</h2>
+            <p className="text-sm text-slate-500 mb-6">
+                Controls whether the assistant is offered to users <strong>in this environment only</strong>.
+                Each environment keeps its own setting.
+            </p>
+
+            <div className="flex items-start justify-between gap-6 p-4 border border-slate-200 rounded-lg bg-white">
+                <div>
+                    <p className="font-medium text-slate-800 text-sm">Show the assistant to users</p>
+                    <p className="text-xs text-slate-500 mt-1">
+                        When off, the launcher does not appear anywhere in the app. Takes effect on the
+                        next page load — no deployment needed.
+                    </p>
+                </div>
+                <button
+                    type="button"
+                    role="switch"
+                    aria-checked={enabled}
+                    aria-label="Show the assistant to users"
+                    disabled={saving}
+                    onClick={() => save(!enabled)}
+                    className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${
+                        enabled ? "bg-indigo-600" : "bg-slate-300"
+                    }`}
+                >
+                    <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                            enabled ? "translate-x-6" : "translate-x-1"
+                        }`}
+                    />
+                </button>
+            </div>
+
+            <p className="mt-3 text-xs text-slate-500">
+                Currently <strong className={enabled ? "text-emerald-600" : "text-slate-600"}>
+                    {enabled ? "visible to users" : "hidden"}
+                </strong>
+                {savedAt && <span> · saved {savedAt.toLocaleTimeString()}</span>}
+            </p>
+            {error && <p className="mt-2 text-xs text-rose-600">{error}</p>}
+        </div>
+    );
+}
+
 function AuthConfigTab() {
     const [config, setConfig] = useState<{ mode: string; ssoDomain: string } | null>(null);
     const [loading, setLoading] = useState(true);
