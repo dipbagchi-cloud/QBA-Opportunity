@@ -29,7 +29,7 @@ import { useAuthStore } from "@/lib/auth-store";
 import { canAccessDashboardRoute, hasAnyGrantedPermission } from "@/lib/access-control";
 import { AccessDenied } from "@/components/auth/AccessDenied";
 import GlobalSearch from "@/components/ui/GlobalSearch";
-// import ChatBot from "@/components/chatbot/ChatBot";   // re-enable with the <ChatBot /> line below
+import ChatBot from "@/components/chatbot/ChatBot";
 
 interface NavItem {
     icon: any;
@@ -304,7 +304,12 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
                 re-enabling is uncommenting this one line.
                 Re-enable once a model endpoint is available; until then the bot
                 answers from the rule-based engine only. */}
-            {/* <ChatBot /> */}
+            {/* Shown where NEXT_PUBLIC_CHATBOT_ENABLED is "true" — QA only for now.
+                A commented-out import cannot express this: one codebase builds all
+                three environments, so hiding it in the source hid it in QA too,
+                where it is meant to be reviewed. Absent variable means hidden, so
+                an environment that is never configured stays off by default. */}
+            {process.env.NEXT_PUBLIC_CHATBOT_ENABLED === "true" && <ChatBot />}
 
         </div>
     );
