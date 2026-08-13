@@ -809,7 +809,8 @@ export default function DashboardPage() {
     const stats = [
         {
             title: "Projected Revenue",
-            value: fmtCurrency(projectedRevenue),
+            value: fmtCurrency(projectedRevenue, { compact: true }),
+            valueExact: fmtCurrency(projectedRevenue),
             subtitle: `${openPipeline.length} open ${openPipeline.length === 1 ? 'opportunity' : 'opportunities'}`,
             icon: IndianRupee,
             iconBg: "bg-indigo-100",
@@ -817,7 +818,8 @@ export default function DashboardPage() {
         },
         {
             title: "Closed Won",
-            value: fmtCurrency(closedWonValue),
+            value: fmtCurrency(closedWonValue, { compact: true }),
+            valueExact: fmtCurrency(closedWonValue),
             subtitle: `${closedWonOpps.length} ${closedWonOpps.length === 1 ? 'deal' : 'deals'} won`,
             icon: CheckCircle2,
             iconBg: "bg-emerald-100",
@@ -825,7 +827,8 @@ export default function DashboardPage() {
         },
         {
             title: "Closed Lost",
-            value: fmtCurrency(closedLostValue),
+            value: fmtCurrency(closedLostValue, { compact: true }),
+            valueExact: fmtCurrency(closedLostValue),
             subtitle: `${closedLostOpps.length} ${closedLostOpps.length === 1 ? 'deal' : 'deals'} lost`,
             icon: XCircle,
             iconBg: "bg-rose-100",
@@ -841,8 +844,9 @@ export default function DashboardPage() {
         },
         {
             title: "Pipeline Value",
-            value: fmtCurrency(pipelineValueSum),
-            subtitle: `Avg ${fmtCurrency(pipeline?.avgDealValue || 0)} per deal`,
+            value: fmtCurrency(pipelineValueSum, { compact: true }),
+            valueExact: fmtCurrency(pipelineValueSum),
+            subtitle: `Avg ${fmtCurrency(pipeline?.avgDealValue || 0, { compact: true })} per deal`,
             icon: Target,
             iconBg: "bg-amber-100",
             iconColor: "text-amber-600",
@@ -1416,14 +1420,14 @@ export default function DashboardPage() {
                 separate tiles so the outcome split reads without a drill-down. */}
             <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-1.5">
                 {stats.map((stat, idx) => (
-                    <ExpandableCard key={idx} drillConfig={statDrills[idx]} className="bg-white rounded-md px-2 py-1.5 border border-slate-100 hover:border-slate-200 transition-colors">
+                    <ExpandableCard key={idx} drillConfig={statDrills[idx]} className="bg-white rounded-md px-2 py-1.5 border border-slate-100 hover:border-slate-200 transition-colors min-w-0 overflow-hidden">
                         <div className="flex items-center gap-1 mb-0.5">
                             <div className={`p-0.5 rounded ${stat.iconBg}`}>
                                 <stat.icon className={`w-2.5 h-2.5 ${stat.iconColor}`} />
                             </div>
                             <span className="text-[10px] text-slate-400 font-medium truncate">{stat.title}</span>
                         </div>
-                        <p className="text-sm font-bold text-slate-900 leading-tight">{stat.value}</p>
+                        <p className="text-sm font-bold text-slate-900 leading-tight truncate" title={(stat as any).valueExact || stat.value}>{stat.value}</p>
                         <p className="text-[10px] text-slate-400 truncate leading-tight">{stat.subtitle}</p>
                     </ExpandableCard>
                 ))}
@@ -1432,12 +1436,12 @@ export default function DashboardPage() {
             {/* Stage Tiles — one per open stage, using the real stage names */}
             <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 gap-1.5">
                 {stageTiles.map(tile => (
-                    <ExpandableCard key={tile.label} drillConfig={tile.drill} className="bg-white rounded-md px-2 py-1.5 border border-slate-100 hover:border-slate-200 transition-colors">
+                    <ExpandableCard key={tile.label} drillConfig={tile.drill} className="bg-white rounded-md px-2 py-1.5 border border-slate-100 hover:border-slate-200 transition-colors min-w-0 overflow-hidden">
                         <div className="flex items-center gap-1 mb-0.5">
                             <span className={`px-1.5 py-0.5 rounded text-[9px] font-semibold border ${tile.badgeColor}`}>{tile.label}</span>
                             <span className="text-[10px] text-slate-400 ml-auto">{tile.count}</span>
                         </div>
-                        <p className="text-sm font-bold text-slate-900 leading-tight">{fmtCurrency(tile.totalValue)}</p>
+                        <p className="text-sm font-bold text-slate-900 leading-tight truncate" title={fmtCurrency(tile.totalValue)}>{fmtCurrency(tile.totalValue, { compact: true })}</p>
                         <p className="text-[10px] text-slate-400 truncate leading-tight">{tile.count} {tile.count === 1 ? 'opportunity' : 'opportunities'}</p>
                     </ExpandableCard>
                 ))}
@@ -1447,13 +1451,13 @@ export default function DashboardPage() {
                 then Closed, then Hot/Cold activity split */}
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1.5">
                 {portfolioTiles.map(tile => (
-                    <ExpandableCard key={tile.label} drillConfig={tile.drill} className="bg-white rounded-md px-2 py-1.5 border border-slate-100 hover:border-slate-200 transition-colors">
+                    <ExpandableCard key={tile.label} drillConfig={tile.drill} className="bg-white rounded-md px-2 py-1.5 border border-slate-100 hover:border-slate-200 transition-colors min-w-0 overflow-hidden">
                         <div className="flex items-center gap-1 mb-0.5">
                             <span className={`px-1.5 py-0.5 rounded text-[9px] font-semibold border ${tile.badgeColor}`}>{tile.label}</span>
                             <span className="text-[10px] text-slate-400 truncate">{tile.hint}</span>
                             <span className="text-[10px] text-slate-400 ml-auto">{tile.count}</span>
                         </div>
-                        <p className="text-sm font-bold text-slate-900 leading-tight">{fmtCurrency(tile.totalValue)}</p>
+                        <p className="text-sm font-bold text-slate-900 leading-tight truncate" title={fmtCurrency(tile.totalValue)}>{fmtCurrency(tile.totalValue, { compact: true })}</p>
                         <p className="text-[10px] text-slate-400 truncate leading-tight">{tile.count} {tile.count === 1 ? 'opportunity' : 'opportunities'}</p>
                     </ExpandableCard>
                 ))}

@@ -135,8 +135,17 @@ function DataTable({ data }: { data: any }) {
     const { format } = useCurrency();
     if (!data?.rows?.length) return null;
     return (
+        // The outer box keeps the rounded corners; the inner one does the
+        // scrolling. Previously overflow-hidden sat on the only wrapper, so six
+        // columns in a 420px panel were CLIPPED rather than scrollable — the
+        // owner and technology columns simply could not be reached.
+        //
+        // min-w forces the table wider than the panel instead of letting w-full
+        // crush every column to illegibility, which is what makes the scroll
+        // both necessary and useful.
         <div className="mt-2 border border-slate-200 rounded-lg overflow-hidden">
-            <table className="w-full text-[10px]">
+            <div className="overflow-x-auto scrollbar-thin" style={{ WebkitOverflowScrolling: 'touch' }}>
+            <table className="min-w-[560px] w-full text-[10px]">
                 <thead className="bg-slate-50">
                     <tr>
                         {(data.columns || []).map((col: string) => (
@@ -163,6 +172,7 @@ function DataTable({ data }: { data: any }) {
                     ))}
                 </tbody>
             </table>
+            </div>
             {data.rows.length > 10 && (
                 <div className="px-2 py-1 text-center text-[9px] text-slate-400 bg-slate-50">
                     Showing 10 of {data.rows.length}
