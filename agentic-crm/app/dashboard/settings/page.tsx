@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
-import { User, Lock, Users, Shield, Plus, X, Check, AlertCircle, RotateCcw, Pencil, ToggleLeft, ToggleRight, DollarSign, Trash2, Globe, Cpu, Tag, Building2, Download, Settings2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, Search, Eye, EyeOff, FileText, Mail, Send, Briefcase, ShieldCheck, RefreshCw, Coins, UserPlus, UserMinus, Calculator, Percent, Info, Clock, Bell, Filter, Zap, ArrowRight, Calendar, Bot } from "lucide-react";
+import { User, Lock, Users, Shield, Plus, X, Check, AlertCircle, RotateCcw, Pencil, ToggleLeft, ToggleRight, DollarSign, Trash2, Globe, Cpu, Tag, Building2, Download, Settings2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, Search, Eye, EyeOff, FileText, Mail, Send, Briefcase, ShieldCheck, RefreshCw, Coins, UserPlus, UserMinus, Calculator, Percent, Info, Clock, Bell, Filter, Zap, ArrowRight, Calendar, Bot, Megaphone } from "lucide-react";
 import { useAuthStore } from "@/lib/auth-store";
 import { apiClient, API_URL, getAuthHeaders } from "@/lib/api";
 import { useCurrency } from "@/components/providers/currency-provider";
@@ -152,6 +152,7 @@ export default function SettingsPage() {
                 { key: "qpeoplemapping", label: "QPeople Role Mapping", icon: RefreshCw, permissionAny: ["roles:manage"] },
                 { key: "authconfig", label: "Authentication", icon: ShieldCheck, permissionAny: ["settings:manage"] },
                 { key: "aiassistant", label: "AI Assistant", icon: Bot, permissionAny: ["settings:manage"] },
+                { key: "announcement", label: "Announcement", icon: Megaphone, permissionAny: ["settings:manage"] },
             ],
         },
         {
@@ -306,6 +307,7 @@ export default function SettingsPage() {
                     {activeTab === "qpeoplemapping" && canShowTab("qpeoplemapping") && <QPeopleMappingTab />}
                     {activeTab === "authconfig" && canShowTab("authconfig") && <AuthConfigTab />}
                     {activeTab === "aiassistant" && canShowTab("aiassistant") && <AiAssistantTab />}
+                    {activeTab === "announcement" && canShowTab("announcement") && <AnnouncementTab />}
                     {activeTab === "ratecards" && canShowTab("ratecards") && <RateCardsTab />}
                     {activeTab === "budgetassumptions" && canShowTab("budgetassumptions") && <BudgetAssumptionsTab />}
                     {activeTab === "currencyrates" && canShowTab("currencyrates") && <CurrencyRatesTab />}
@@ -3728,6 +3730,125 @@ function CurrencyRatesTab() {
  * environment it is set in: QA and UAT can offer the assistant while production
  * does not.
  */
+/**
+ * The message shown in the banner across the top of the app.
+ *
+ * Switching it on with nothing to say is rejected rather than quietly showing an
+ * empty bar, and saving the same text again does not resurrect it for everyone
+ * who has already closed it — the server only bumps the version when what people
+ * see actually changes.
+ */
+function AnnouncementTab() {
+    const [enabled, setEnabled] = useState(false);
+    const [message, setMessage] = useState("");
+    const [loaded, setLoaded] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const [error, setError] = useState("");
+    const [savedAt, setSavedAt] = useState<Date | null>(null);
+
+    useEffect(() => {
+        (async () => {
+            try {
+                const data = await apiClient("/api/admin/announcement");
+                setEnabled(!!data?.enabled);
+                setMessage(String(data?.message || ""));
+            } catch {
+                setError("Could not read the current announcement.");
+            } finally {
+                setLoaded(true);
+            }
+        })();
+    }, []);
+
+    const save = async (nextEnabled: boolean, nextMessage: string) => {
+        if (nextEnabled && !nextMessage.trim()) {
+            setError("Enter a message before switching the announcement on.");
+            return;
+        }
+        setSaving(true);
+        setError("");
+        try {
+            const saved = await apiClient("/api/admin/announcement", {
+                method: "PUT",
+                body: JSON.stringify({ enabled: nextEnabled, message: nextMessage.trim() }),
+            });
+            setEnabled(!!saved?.enabled);
+            setMessage(String(saved?.message || ""));
+            setSavedAt(new Date());
+        } catch {
+            setError("Could not save. Nothing was changed.");
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    if (!loaded) return <div className="p-6 text-sm text-slate-500">Loading…</div>;
+
+    return (
+        <div className="p-6 max-w-2xl">
+            <h2 className="text-lg font-semibold text-slate-800 mb-1">Announcement</h2>
+            <p className="text-sm text-slate-500 mb-6">
+                Shows a message in a bar across the top of the app for everyone in this environment.
+                Users can close it; a new message reappears for them.
+            </p>
+
+            <label className="block text-xs font-medium text-slate-600 mb-1">Message</label>
+            <textarea
+                value={message}
+                onChange={(e) => setMessage(e.target.value.slice(0, 500))}
+                rows={3}
+                maxLength={500}
+                placeholder="e.g. Scheduled maintenance on Saturday 09:00–11:00 IST."
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400"
+            />
+            <p className="mt-1 text-[11px] text-slate-400">{message.length}/500</p>
+
+            <div className="flex items-center gap-3 mt-4">
+                <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => save(enabled, message)}
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-md text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
+                >
+                    {saving ? "Saving…" : "Save message"}
+                </button>
+                <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => save(!enabled, message)}
+                    className={`px-4 py-2 rounded-md text-sm font-medium border disabled:opacity-50 ${
+                        enabled
+                            ? "border-rose-300 text-rose-600 hover:bg-rose-50"
+                            : "border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                    }`}
+                >
+                    {enabled ? "Turn off" : "Turn on"}
+                </button>
+            </div>
+
+            <p className="mt-3 text-xs text-slate-500">
+                Currently{" "}
+                <strong className={enabled ? "text-emerald-600" : "text-slate-600"}>
+                    {enabled ? "showing to users" : "not showing"}
+                </strong>
+                {savedAt && <span> · saved {savedAt.toLocaleTimeString()}</span>}
+            </p>
+            {error && <p className="mt-2 text-xs text-rose-600">{error}</p>}
+
+            {message.trim() && (
+                <div className="mt-6">
+                    <p className="text-xs font-medium text-slate-600 mb-1">Preview</p>
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-indigo-600 text-white text-xs rounded">
+                        <Megaphone className="w-3.5 h-3.5 shrink-0" />
+                        <span className="flex-1 truncate">{message}</span>
+                        <X className="w-3.5 h-3.5 opacity-70" />
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
 function AiAssistantTab() {
     const [enabled, setEnabled] = useState<boolean | null>(null);
     const [saving, setSaving] = useState(false);

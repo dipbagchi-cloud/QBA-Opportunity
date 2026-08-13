@@ -8,6 +8,8 @@ import {
   updateUser,
   resetUserPassword,
   syncQPeopleUsers,
+  getAnnouncement,
+  updateAnnouncement,
   getAssistantSettings,
   updateAssistantSettings,
   getBudgetAssumptions,
@@ -208,6 +210,11 @@ router.get('/project-roles', authorize(PERMISSIONS.METADATA_MANAGE), listAllProj
 router.post('/project-roles', authorize(PERMISSIONS.METADATA_MANAGE), createProjectRole);
 router.patch('/project-roles/:id', authorize(PERMISSIONS.METADATA_MANAGE), updateProjectRole);
 router.delete('/project-roles/:id', authorize(PERMISSIONS.METADATA_MANAGE), deleteProjectRole);
+
+// Announcement banner (GET: any authenticated user, since every page shows it;
+// PUT: requires settings:manage)
+router.get('/announcement', getAnnouncement);
+router.put('/announcement', authorize(PERMISSIONS.SETTINGS_MANAGE), updateAnnouncement);
 
 // AI assistant availability (GET: any authenticated user, since the UI needs it
 // to decide whether to show the launcher; PUT: requires settings:manage)

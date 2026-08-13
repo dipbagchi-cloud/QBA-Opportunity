@@ -30,6 +30,7 @@ import { canAccessDashboardRoute, hasAnyGrantedPermission } from "@/lib/access-c
 import { AccessDenied } from "@/components/auth/AccessDenied";
 import GlobalSearch from "@/components/ui/GlobalSearch";
 import ChatBot from "@/components/chatbot/ChatBot";
+import AnnouncementTicker from "@/components/ui/AnnouncementTicker";
 
 interface NavItem {
     icon: any;
@@ -282,6 +283,7 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
 
             {/* Main Content Area */}
             <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
+                <AnnouncementTicker />
                 {/* Header */}
                 <header className="h-12 bg-white/50 backdrop-blur-md border-b border-slate-200 flex items-center justify-between px-4 sticky top-0 z-30">
                     <button
