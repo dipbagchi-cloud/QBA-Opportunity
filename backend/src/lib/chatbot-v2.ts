@@ -2,6 +2,7 @@
 import OpenAI from 'openai';
 import * as chrono from 'chrono-node';
 import { recordStageEntry } from './stage-history';
+import * as phraseMemory from './phrase-memory';
 
 const prisma = new PrismaClient();
 
@@ -347,51 +348,126 @@ function withTimeout<T>(work: Promise<T>, label: string): Promise<T> {
     ]);
 }
 
-// Circuit breakers: separate for primary and Ollama
+/**
+ * Providers, tried in order until one answers.
+ *
+ * Configured entirely by environment, so adding or reordering a provider is a
+ * .env edit and a restart — no rebuild. Each carries its own circuit breaker:
+ * one provider running out of credit must not spend three failed round trips
+ * on every question before the next one is tried.
+ *
+ *   LLM_*   primary      (currently Groq)
+ *   LLM2_*  secondary    (currently Kimi / Moonshot)
+ *   LLM3_*  tertiary     (currently Gemini)
+ *   OLLAMA_* local, last — free and offline, but slowest
+ */
+const LLM_CIRCUIT_THRESHOLD = 3;   // failures before opening circuit
+const LLM_CIRCUIT_COOLDOWN = 5 * 60 * 1000; // 5 min cooldown
+
+interface Provider {
+    name: string;
+    model: string;
+    client: OpenAI | null;
+    failures: number;
+    openUntil: number;
+    build: () => OpenAI | null;
+}
+
+function makeHostedProvider(name: string, keyVar: string, urlVar: string, modelVar: string, defaultModel: string): Provider {
+    return {
+        name,
+        model: process.env[modelVar] || defaultModel,
+        client: null,
+        failures: 0,
+        openUntil: 0,
+        build() {
+            const key = process.env[keyVar];
+            if (!key) return null;
+            const url = process.env[urlVar];
+            return new OpenAI({
+                apiKey: key,
+                ...(url ? { baseURL: url.replace(/\/chat\/completions\/?$/, '') } : {}),
+            });
+        },
+    };
+}
+
+const PROVIDERS: Provider[] = [
+    {
+        name: 'primary',
+        model: LLM_MODEL,
+        client: null,
+        failures: 0,
+        openUntil: 0,
+        build() {
+            if (process.env.LLM_PRIMARY_ENABLED === 'false' || !LLM_API_KEY) return null;
+            return new OpenAI({
+                apiKey: LLM_API_KEY,
+                ...(LLM_API_URL ? { baseURL: LLM_API_URL.replace(/\/chat\/completions\/?$/, '') } : {}),
+            });
+        },
+    },
+    makeHostedProvider('secondary', 'LLM2_API_KEY', 'LLM2_API_URL', 'LLM2_MODEL', 'kimi-k2-0711-preview'),
+    makeHostedProvider('tertiary', 'LLM3_API_KEY', 'LLM3_API_URL', 'LLM3_MODEL', 'gemini-2.0-flash'),
+    {
+        name: 'ollama',
+        model: OLLAMA_MODEL,
+        client: null,
+        failures: 0,
+        openUntil: 0,
+        build() {
+            if (!OLLAMA_ENABLED) return null;
+            return new OpenAI({ apiKey: 'ollama', baseURL: OLLAMA_API_URL });
+        },
+    },
+];
+
+/** Providers currently worth trying, in order. */
+function availableProviders(): Provider[] {
+    if (!LLM_ENABLED) return [];
+    const now = Date.now();
+    const usable: Provider[] = [];
+    for (const p of PROVIDERS) {
+        if (p.failures >= LLM_CIRCUIT_THRESHOLD && now < p.openUntil) continue;
+        if (!p.client) p.client = p.build();
+        if (p.client) usable.push(p);
+    }
+    return usable;
+}
+
+function noteSuccess(p: Provider): void {
+    p.failures = 0;
+    p.openUntil = 0;
+}
+
+function noteFailure(p: Provider): void {
+    p.failures++;
+    if (p.failures >= LLM_CIRCUIT_THRESHOLD) {
+        p.openUntil = Date.now() + LLM_CIRCUIT_COOLDOWN;
+        console.error(`[Chatbot] ${p.name} provider paused for 5 minutes after ${p.failures} failures`);
+    }
+}
+
+// Kept so the older call sites below keep working while they exist.
 let primaryLLMFailureCount = 0;
 let primaryLLMCircuitOpenUntil = 0;
 let ollamaFailureCount = 0;
 let ollamaCircuitOpenUntil = 0;
-const LLM_CIRCUIT_THRESHOLD = 3;   // failures before opening circuit
-const LLM_CIRCUIT_COOLDOWN = 5 * 60 * 1000; // 5 min cooldown
-
-let primaryClient: OpenAI | null = null;
-let ollamaClient: OpenAI | null = null;
 
 function getPrimaryLLMClient(): OpenAI | null {
+    const p = PROVIDERS[0];
     if (!LLM_ENABLED) return null;
-    // Lets a host skip the hosted provider entirely and go straight to the local
-    // model. Without it an unfunded key costs a doomed round trip on every
-    // rescue — the 429 is returned, not free.
-    if (process.env.LLM_PRIMARY_ENABLED === 'false') return null;
-    if (!LLM_API_KEY) return null;
-    // Circuit breaker open?
-    if (primaryLLMFailureCount >= LLM_CIRCUIT_THRESHOLD && Date.now() < primaryLLMCircuitOpenUntil) {
-        return null;
-    }
-    if (!primaryClient) {
-        primaryClient = new OpenAI({
-            apiKey: LLM_API_KEY,
-            ...(LLM_API_URL ? { baseURL: LLM_API_URL.replace(/\/chat\/completions\/?$/, '') } : {}),
-        });
-    }
-    return primaryClient;
+    if (p.failures >= LLM_CIRCUIT_THRESHOLD && Date.now() < p.openUntil) return null;
+    if (!p.client) p.client = p.build();
+    return p.client;
 }
 
 function getOllamaClient(): OpenAI | null {
+    const p = PROVIDERS[PROVIDERS.length - 1];
     if (!LLM_ENABLED) return null;
-    if (!OLLAMA_ENABLED) return null;
-    // Circuit breaker open?
-    if (ollamaFailureCount >= LLM_CIRCUIT_THRESHOLD && Date.now() < ollamaCircuitOpenUntil) {
-        return null;
-    }
-    if (!ollamaClient) {
-        ollamaClient = new OpenAI({
-            apiKey: 'ollama', // Ollama doesn't require API key, but SDK needs something
-            baseURL: OLLAMA_API_URL,
-        });
-    }
-    return ollamaClient;
+    if (p.failures >= LLM_CIRCUIT_THRESHOLD && Date.now() < p.openUntil) return null;
+    if (!p.client) p.client = p.build();
+    return p.client;
 }
 
 // For backward compatibility
@@ -1154,6 +1230,28 @@ async function enrichFiltersFromMasterData(text: string, params: Record<string, 
  * understanding of PHRASING, while the database remains the only source of
  * facts — it cannot invent a client that does not exist, or a number.
  */
+/**
+ * Work out what a question is asking, remembering the answer.
+ *
+ * A provider is asked only about phrasings never seen before. Everything else
+ * is served from memory in about a millisecond, including questions that merely
+ * resemble an earlier one — "revenue by client" and "show me the revenue per
+ * client please" are the same question wearing different clothes.
+ *
+ * Only the READING is remembered, never the figures: the database is queried
+ * fresh every time, so a remembered phrasing cannot serve a stale number.
+ */
+async function resolveSlots(message: string): Promise<Record<string, any> | null> {
+    const remembered = phraseMemory.recall(message);
+    if (remembered) {
+        console.log(`[Chatbot] phrasing recalled (${remembered.via}) — no model call`);
+        return remembered.slots;
+    }
+    const slots = await llmSlotRescue(message);
+    if (slots) phraseMemory.remember(message, slots);
+    return slots;
+}
+
 async function llmSlotRescue(message: string): Promise<Record<string, any> | null> {
     if (!LLM_ENABLED) return null;
 
@@ -1164,12 +1262,10 @@ async function llmSlotRescue(message: string): Promise<Record<string, any> | nul
     // question nobody asked. This gate is the difference between interpreting a
     // question and inventing one. It also saves the ~4s call on sentences the
     // rescue could never have helped with.
-    const ASKS_FOR_A_BREAKDOWN = /\b(by|per|across|split|breakdown|break\s*down|compare|each|wise|chart|graph|plot|picture|visuali[sz]e|top|best|biggest|highest|lowest|most|which|who|where|distribution|share|how\s+much|how\s+many)\b/i;
+    const ASKS_FOR_A_BREAKDOWN = /\b(by|per|across|split|breakdown|break\s*down|compare|each|wise|chart|graph|plot|picture|visuali[sz]e|top|best|worst|biggest|highest|lowest|most|strongest|weakest|leading|performing|which|who|where|distribution|share|how\s+much|how\s+many)\b/i;
     if (!ASKS_FOR_A_BREAKDOWN.test(message)) return null;
-    const primary = getPrimaryLLMClient();
-    const client = primary || getOllamaClient();
-    if (!client) return null;
-    const model = primary ? LLM_MODEL : OLLAMA_MODEL;
+    const providers = availableProviders();
+    if (!providers.length) return null;
 
     const system = [
         'Extract query slots from a CRM question. Reply with JSON only.',
@@ -1200,31 +1296,49 @@ async function llmSlotRescue(message: string): Promise<Record<string, any> | nul
         { role: 'assistant' as const, content: JSON.stringify(a) },
     ]));
 
-    try {
-        const res: any = await withTimeout(client.chat.completions.create({
-            model,
-            messages: [{ role: 'system', content: system }, ...shotMessages, { role: 'user', content: message }],
-            response_format: { type: 'json_object' },
-            temperature: 0,
-            max_tokens: 80,
-        }) as any, 'LLM slot rescue');
+    // Try each provider in turn. A key that has run out of credit answers with an
+    // error, not a shrug, so the next one must get a chance rather than the
+    // question falling through to the help text — which from the outside looks
+    // like the bot suddenly stopped understanding things.
+    let lastError = '';
+    for (const provider of providers) {
+        try {
+            const res: any = await withTimeout(provider.client!.chat.completions.create({
+                model: provider.model,
+                messages: [{ role: 'system', content: system }, ...shotMessages, { role: 'user', content: message }],
+                response_format: { type: 'json_object' },
+                temperature: 0,
+                // Generous because some providers spend tokens thinking before
+                // they write. Gemini returned a bare "```json" at 80 — the reply
+                // was truncated mid-fence, which reads as a broken provider
+                // rather than a budget that is too small. This is a ceiling, not
+                // a target: a provider that answers in 30 tokens still stops at
+                // 30, so raising it costs nothing on the ones that do.
+                max_tokens: 400,
+            }) as any, `${provider.name} slot rescue`);
 
-        const raw = res?.choices?.[0]?.message?.content;
-        if (!raw) return null;
-        const slots = JSON.parse(raw.replace(/^```json?\n?/, '').replace(/\n?```$/, '').trim());
+            const raw = res?.choices?.[0]?.message?.content;
+            if (!raw) throw new Error('empty response');
+            const slots = JSON.parse(raw.replace(/^```json?\n?/, '').replace(/\n?```$/, '').trim());
+            noteSuccess(provider);
 
-        const params: Record<string, any> = {};
-        const DIMS = ['client', 'technology', 'stage', 'practice', 'region', 'salesRep', 'month', 'projectType', 'pricingModel', 'status'];
-        if (typeof slots.groupBy === 'string' && DIMS.includes(slots.groupBy)) params.groupBy = slots.groupBy;
-        if (slots.chart === 'pie' || slots.chart === 'bar') params.chartType = slots.chart;
-        if (['open', 'closed', 'won', 'lost'].includes(slots.outcome)) params.outcome = slots.outcome;
-        // Passed through the master-data matcher below, never used verbatim.
-        if (typeof slots.entity === 'string' && slots.entity.trim()) params.__entityHint = slots.entity.trim();
-        return params;
-    } catch (error) {
-        console.error('[Chatbot] slot rescue failed:', (error as Error).message);
-        return null;
+            const params: Record<string, any> = {};
+            const DIMS = ['client', 'technology', 'stage', 'practice', 'region', 'salesRep', 'month', 'projectType', 'pricingModel', 'status'];
+            if (typeof slots.groupBy === 'string' && DIMS.includes(slots.groupBy)) params.groupBy = slots.groupBy;
+            if (slots.chart === 'pie' || slots.chart === 'bar') params.chartType = slots.chart;
+            if (['open', 'closed', 'won', 'lost'].includes(slots.outcome)) params.outcome = slots.outcome;
+            // Passed through the master-data matcher below, never used verbatim.
+            if (typeof slots.entity === 'string' && slots.entity.trim()) params.__entityHint = slots.entity.trim();
+            if (provider.name !== 'primary') console.log(`[Chatbot] answered by ${provider.name} provider`);
+            return params;
+        } catch (error) {
+            lastError = (error as Error).message;
+            noteFailure(provider);
+            console.error(`[Chatbot] ${provider.name} slot rescue failed: ${lastError}`);
+        }
     }
+    console.error(`[Chatbot] every provider failed (last: ${lastError})`);
+    return null;
 }
 
 /**
@@ -2963,7 +3077,7 @@ export async function processChat(message: string, ctx: UserContext): Promise<Ch
         // dimension was meant. It picks from a fixed list, so the worst case is the
         // wrong dimension, never an invented one.
         if (chartParams.__groupByDefaulted) {
-            const hinted = await llmSlotRescue(message);
+            const hinted = await resolveSlots(message);
             if (hinted?.groupBy) {
                 chartParams.groupBy = hinted.groupBy;
                 // The model's measure is deliberately ignored. Where the sentence
@@ -3266,7 +3380,7 @@ export async function processChat(message: string, ctx: UserContext): Promise<Ch
         // to match rather than producing a confident wrong answer.
         const noRealDimension = !own.groupBy || own.__groupByDefaulted;
         if (noRealDimension && !CARRYABLE_FILTERS.some(k => own[k])) {
-            const hinted = await llmSlotRescue(message);
+            const hinted = await resolveSlots(message);
             if (hinted) {
                 if (hinted.__entityHint) {
                     const resolved = await enrichFiltersFromMasterData(String(hinted.__entityHint), {});
