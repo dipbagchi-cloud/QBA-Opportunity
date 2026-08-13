@@ -796,6 +796,84 @@ const DEFAULT_BUDGET_ASSUMPTIONS = {
   nonProdTimeDrivenReminderEmail: 'jaydeep.bandyopadhyay@qbadvisory.com',
 };
 
+const ANNOUNCEMENT_KEY = 'announcement';
+
+/**
+ * The banner across the top of the app.
+ *
+ * `version` is the point of this shape. A user dismisses an announcement and
+ * should not see it again — but they MUST see the next one, and a plain
+ * "dismissed" flag in their browser would swallow it. The version changes
+ * whenever the message or its enabled state does, so dismissal is per
+ * announcement rather than per user, and a new message reappears for everyone
+ * who had hidden the last.
+ */
+const DEFAULT_ANNOUNCEMENT = { enabled: false, message: '', version: 0 };
+
+// GET /api/admin/announcement (any authenticated user — the banner needs it)
+export async function getAnnouncement(req: Request, res: Response) {
+  try {
+    const config = await prisma.systemConfig.findUnique({ where: { key: ANNOUNCEMENT_KEY } });
+    const value = (config?.value as any) || DEFAULT_ANNOUNCEMENT;
+    res.json({
+      enabled: !!value.enabled,
+      message: String(value.message || ''),
+      version: Number(value.version) || 0,
+    });
+  } catch (error) {
+    console.error('Get announcement error:', error);
+    // Never let a failure here put a banner on screen that nobody set.
+    res.json(DEFAULT_ANNOUNCEMENT);
+  }
+}
+
+// PUT /api/admin/announcement (requires settings:manage)
+export async function updateAnnouncement(req: Request, res: Response) {
+  try {
+    const enabled = !!req.body?.enabled;
+    const message = String(req.body?.message ?? '').trim().slice(0, 500);
+
+    if (enabled && !message) {
+      return res.status(400).json({ error: 'Enter a message before switching the announcement on.' });
+    }
+
+    const existing = await prisma.systemConfig.findUnique({ where: { key: ANNOUNCEMENT_KEY } });
+    const previous = (existing?.value as any) || DEFAULT_ANNOUNCEMENT;
+
+    // Only bump the version when what people SEE changes. Re-saving the same
+    // message must not resurrect it for everyone who dismissed it.
+    const changed = previous.message !== message || !!previous.enabled !== enabled;
+    const version = changed ? (Number(previous.version) || 0) + 1 : (Number(previous.version) || 0);
+
+    const value = { enabled, message, version };
+    const config = await prisma.systemConfig.upsert({
+      where: { key: ANNOUNCEMENT_KEY },
+      update: { value },
+      create: {
+        key: ANNOUNCEMENT_KEY,
+        value,
+        category: 'announcement',
+        description: 'Message shown in the banner across the top of the app',
+      },
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        entity: 'SystemConfig',
+        entityId: config.id,
+        action: 'UPDATE_ANNOUNCEMENT',
+        userId: (req as any).user?.id || null,
+        changes: JSON.stringify(value),
+      },
+    }).catch(() => { /* auditing must never fail the request */ });
+
+    res.json(value);
+  } catch (error) {
+    console.error('Update announcement error:', error);
+    res.status(500).json({ error: 'Failed to update the announcement' });
+  }
+}
+
 const ASSISTANT_SETTINGS_KEY = 'assistant_settings';
 
 /**
