@@ -557,6 +557,20 @@ For win_rate: any filters above
 outcome is one of open, closed, won, lost. Words for lost include rejected,
 declined, turned down, dropped. Words for won include secured and bagged.
 
+Use about_bot ONLY when the user asks about the ASSISTANT itself - "what can
+you do", "who are you", "how do you work". "Tell me about <name>" is asking
+about a DEAL, not about you: that is get_details with nameOrId set to the name.
+Use get_details whenever the user names one specific opportunity.
+
+Use deal_health for stalled, at-risk, inactive, dormant or ageing deals —
+"stalled" is a condition, not a stage.
+Use pipeline_analytics for "how is the pipeline", totals and overall health.
+Only set a client/technology/region/practice filter when the question is ABOUT
+that one thing. "Which clients have the most deals" is about clients in general
+and must NOT set a client filter.
+"Performing best", "strongest" and "biggest" mean value unless the question
+counts something.
+
 Questions naming a person or asking "who" are usually about salesRep. Informal
 words for a customer — outfits, firms, accounts, logos, orgs — mean client.
 A question asking for "the most rejects" or "the most wins" wants a COUNT.
@@ -1202,6 +1216,27 @@ function editDistance(a: string, b: string): number {
  * tolerance here is deliberately narrow and always reports what it matched.
  */
 /** Filter keys that identify WHAT is being asked about, for carrying forward. */
+/**
+ * The vocabulary the CRM is built from, which can never name a record in it.
+ *
+ * Entity matching tolerates a typo, and a typo away from a generic word is
+ * often a real record: "clients" is one edit from the "Client" in "NEW Client
+ * 29052026". That scored 0.857 and turned "which clients have the most deals"
+ * into a report about one client. These words are asking about a KIND of thing,
+ * never a particular one.
+ */
+const GENERIC_CRM_TERMS = new Set([
+    'client', 'clients', 'customer', 'customers', 'account', 'accounts',
+    'company', 'companies', 'opportunity', 'opportunities', 'deals', 'lead', 'leads',
+    'pipeline', 'proposal', 'proposals', 'revenue', 'value', 'values', 'amount',
+    'practice', 'practices', 'region', 'regions', 'market', 'markets',
+    'technology', 'technologies', 'stack', 'project', 'projects', 'stage', 'stages',
+    'sales', 'presales', 'manager', 'managers', 'owner', 'owners', 'person', 'people',
+    'quarter', 'month', 'months', 'year', 'years', 'today', 'total', 'totals',
+    'status', 'health', 'stalled', 'active', 'closed', 'open', 'won', 'lost',
+    'report', 'reports', 'chart', 'charts', 'graph', 'summary', 'count', 'number',
+]);
+
 const CARRYABLE_FILTERS = ['client', 'technology', 'practice', 'region', 'projectType', 'pricingModel', 'salesRep', 'stage'];
 
 /**
@@ -1271,6 +1306,13 @@ async function enrichFiltersFromMasterData(text: string, params: Record<string, 
                 const words = full.split(/[^a-z0-9]+/).filter(w => w.length >= 5);
                 for (const t of tokens) {
                     if (t.length < 5) continue;
+                    // The words the CRM itself is made of can never identify one
+                    // of its records. "Which clients have the most deals" is a
+                    // question about clients in general, but "clients" is one
+                    // edit from the word "Client" inside "NEW Client 29052026",
+                    // which scores 0.857 — over the threshold — and narrowed the
+                    // answer to that single client.
+                    if (GENERIC_CRM_TERMS.has(t)) continue;
 
                     // Against the whole name — a typo OR an exact hit is fine.
                     const dFull = editDistance(t, full);
@@ -1382,6 +1424,94 @@ const DISPATCHABLE_INTENTS = new Set([
     'confirm_yes', 'confirm_no', 'provide_field_value', 'cancel',
 ]);
 
+/**
+ * Keep only what the model is allowed to decide, and only where it is right.
+ *
+ * Trusting the returned parameters wholesale produced confident nonsense:
+ * "which clients have the most deals" came back with a client FILTER naming one
+ * client, and answered about that client alone. "What is the total pipeline
+ * value" came back with groupBy "none" and rendered "Total Value by none".
+ * "Which deals are stalled" asked for stage "stalled", which is not a stage, so
+ * the lookup quietly failed and every deal was listed under a heading claiming
+ * otherwise.
+ *
+ * The rule this enforces: the model may choose BETWEEN options the system
+ * offers, never invent one. A dimension must be a real dimension, a stage a real
+ * stage, and a named client one that exists — anything else is dropped, and the
+ * message is re-read locally for filters, which is where they were coming from
+ * reliably anyway.
+ */
+const MODEL_PARAM_KEYS = new Set([
+    'groupBy', 'measure', 'chartType', 'outcome', 'temperature', 'limit',
+    'client', 'technology', 'region', 'practice', 'salesRep', 'projectType', 'pricingModel',
+    'stage', 'owner', 'search', 'minValue', 'maxValue', 'nameOrId', 'comment', 'remarks',
+    'fieldName', 'fieldValue', 'title', 'value', 'currency', 'description',
+    'firstName', 'lastName', 'email', 'phone', 'department', 'companyName',
+    'contactFirstName', 'contactLastName', 'contactEmail', 'contactTitle',
+    'source', 'tags', 'priority', 'expectedCloseDate', 'tentativeStartDate',
+    'tentativeDuration', 'expectedDayRate', 'salesRepName', 'managerName',
+    'lostType', 'adjustedValue', 'entity', 'action', 'role', 'nameOrEmail',
+]);
+
+const KNOWN_DIMENSIONS = new Set([
+    'client', 'technology', 'stage', 'practice', 'region', 'salesRep',
+    'month', 'projectType', 'pricingModel', 'status',
+]);
+
+async function sanitiseModelParams(raw: Record<string, any>): Promise<Record<string, any>> {
+    const master = await getMasterData();
+    const out: Record<string, any> = {};
+    const nameList = (list: any[]): string[] =>
+        (list || []).map((x: any) => (typeof x === 'string' ? x : x?.name)).filter(Boolean);
+
+    for (const [key, value] of Object.entries(raw)) {
+        if (!MODEL_PARAM_KEYS.has(key)) continue;
+        if (value === null || value === undefined || value === '') continue;
+        out[key] = value;
+    }
+
+    // A dimension must be one the chart engine actually has.
+    if (out.groupBy && !KNOWN_DIMENSIONS.has(String(out.groupBy))) delete out.groupBy;
+    if (out.measure !== 'count' && out.measure !== 'value') delete out.measure;
+    if (out.chartType !== 'bar' && out.chartType !== 'pie') delete out.chartType;
+    if (!['open', 'closed', 'won', 'lost'].includes(String(out.outcome))) delete out.outcome;
+    if (out.temperature !== 'hot' && out.temperature !== 'cold') delete out.temperature;
+    if (out.limit !== undefined) {
+        const n = Number(out.limit);
+        if (Number.isFinite(n) && n >= 1 && n <= 50) out.limit = Math.floor(n); else delete out.limit;
+    }
+
+    // A stage must be a real stage. "Stalled" is a condition, not a stage, and
+    // asking for it as one listed everything under a false heading.
+    if (out.stage) {
+        const stages = nameList(master.stages);
+        const hit = stages.find(n => n.toLowerCase() === String(out.stage).toLowerCase())
+            || stages.find(n => n.toLowerCase().includes(String(out.stage).toLowerCase()));
+        if (hit) out.stage = hit; else delete out.stage;
+    }
+
+    // A named filter must exist. The model tends to fill these in from the
+    // question's SUBJECT — "which clients have the most deals" is about clients
+    // in general, not about a client — so an unmatched value is dropped rather
+    // than narrowing the answer to something nobody asked for.
+    const validated: [string, any[]][] = [
+        ['client', master.clients], ['technology', master.technologies],
+        ['region', master.regions], ['practice', master.practices],
+        ['projectType', master.projectTypes], ['pricingModel', master.pricingModels],
+        ['salesRep', master.salespersons],
+    ];
+    for (const [key, list] of validated) {
+        if (!out[key]) continue;
+        const names = nameList(list);
+        const needle = String(out[key]).toLowerCase();
+        const hit = names.find(n => n.toLowerCase() === needle)
+            || names.find(n => n.toLowerCase().includes(needle) || needle.includes(n.toLowerCase()));
+        if (hit) out[key] = hit; else delete out[key];
+    }
+
+    return out;
+}
+
 async function llmParseIntentFirst(message: string, conversationContext: string): Promise<LLMParsedIntent | null> {
     const providers = availableProviders();
     if (!providers.length) return null;
@@ -1408,7 +1538,8 @@ async function llmParseIntentFirst(message: string, conversationContext: string)
             noteSuccess(provider);
 
             if (!parsed?.intent || !DISPATCHABLE_INTENTS.has(parsed.intent)) return null;
-            const params = (parsed.params && typeof parsed.params === 'object') ? parsed.params : {};
+            const params = await sanitiseModelParams(
+                (parsed.params && typeof parsed.params === 'object') ? parsed.params : {});
 
             // Dates are computed here, not by the model. A model asked to work
             // out what "last quarter" means will occasionally be wrong, and a
@@ -3143,11 +3274,19 @@ export async function processChat(message: string, ctx: UserContext): Promise<Ch
         }
     }
 
+    if (process.env.CHATBOT_TRACE === 'true') {
+        console.log('[trace] model intent =', JSON.stringify(intent));
+    }
+
     // Rules answer when the model was not asked, could not be reached, or read
     // the question as small talk when it was not.
     if (!intent || intent.intent === 'general_chat') {
         const byRules = nlpParseIntent(message, conv);
         if (!intent || byRules.intent !== 'general_chat') intent = byRules;
+    }
+
+    if (process.env.CHATBOT_TRACE === 'true') {
+        console.log('[trace] final intent =', intent?.intent, JSON.stringify(intent?.params || {}).slice(0, 200));
     }
 
     conv.history.push({ role: 'user', content: message });
