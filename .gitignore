@@ -25,3 +25,7 @@ backend/uploads/sow-exports/
 backend/uploads/sow-templates/
 *.tar
 *.tar.gz
+
+# Chatbot phrase memory — runtime state, and it holds example question text
+# typed by users (which can name clients). Belongs on the server, not in git.
+backend/data/
