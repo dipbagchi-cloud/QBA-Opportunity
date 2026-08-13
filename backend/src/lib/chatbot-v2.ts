@@ -1575,7 +1575,11 @@ function extractChartParams(lower: string): Record<string, any> {
     }
 
     // Measure: money unless they clearly asked for a count.
-    const wantsCount = /\b(count|number|how many|deals?\s*count|volume)\b/i.test(lower);
+    // Outcomes named as countable things — "most rejects", "the most wins" — are
+    // asking how many, not how much. "Who is getting most rejects?" answered with
+    // a rupee total, which is not what the word "rejects" means.
+    const wantsCount = /\b(count|number|how many|deals?\s*count|volume)\b/i.test(lower)
+        || /\b(wins|losses|rejects|rejections|deals|opportunities)\b/i.test(lower) && /\b(most|fewest|least|top|highest|lowest)\b/i.test(lower);
     const wantsValue = /\b(value|revenue|worth|amount|money|₹|\$)\b/i.test(lower);
     params.measure = wantsCount && !wantsValue ? 'count' : 'value';
     // Same reasoning as the dimension: record whether the sentence actually said
@@ -1603,8 +1607,11 @@ function extractChartParams(lower: string): Record<string, any> {
  */
 function extractOutcomeFilter(lower: string): 'open' | 'closed' | 'won' | 'lost' | null {
     if (/\b(still\s+)?open|active|in\s*play|ongoing|live\b/i.test(lower) && !/\bopen\s*rate\b/i.test(lower)) return 'open';
-    if (/\bwon\b|\bwins?\b|closed[\s-]?won/i.test(lower)) return 'won';
-    if (/\blost\b|\blosses\b|closed[\s-]?lost/i.test(lower)) return 'lost';
+    if (/\bwon\b|\bwins?\b|closed[\s-]?won|\bsecured\b|\bbagged\b/i.test(lower)) return 'won';
+    // A lost deal is described far more often by what happened to it than by the
+    // stage name. "Who is getting most rejects?" was answered across every deal
+    // in the system because "rejects" meant nothing here.
+    if (/\blost\b|\blosses\b|closed[\s-]?lost|\breject(?:s|ed|ion|ions)?\b|\bdeclined\b|\bturned\s+down\b|\bdropped\b/i.test(lower)) return 'lost';
     if (/\bclosed\b|\bfinished\b|\bcompleted\b/i.test(lower)) return 'closed';
     return null;
 }
