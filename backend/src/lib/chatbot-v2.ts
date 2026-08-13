@@ -1514,6 +1514,50 @@ function extractOutcomeFilter(lower: string): 'open' | 'closed' | 'won' | 'lost'
     return null;
 }
 
+/**
+ * Constraints the user named that the data cannot satisfy.
+ *
+ * "Open opportunities for August in Luxembourg region" came back as twenty
+ * unfiltered deals: there is no Luxembourg region, so the filter was never
+ * built, and nothing noticed. Silently widening a question is the most
+ * dangerous failure a reporting tool has — the answer looks fine and is about
+ * something else entirely.
+ *
+ * So a named region, practice or technology that matches nothing known is
+ * reported back rather than ignored.
+ */
+async function unsatisfiableFilters(message: string): Promise<string[]> {
+    const master = await getMasterData();
+    const complaints: string[] = [];
+    // Master lists are a mix of {id,name} rows and plain strings, so both are
+    // flattened to names before comparing.
+    const namesOf = (list: any[]): string[] =>
+        (list || []).map(x => (typeof x === 'string' ? x : x?.name)).filter(Boolean);
+    // Take at most the two words immediately before the noun, then strip leading
+    // filler. Anchoring on "in|for" and reading forward swallowed the whole
+    // clause: "for the month of August in Luxembourg region" produced a region
+    // named "month of August in Luxembourg".
+    const LEADING_FILLER = /^(?:the|a|an|in|of|for|from|to|and|our|their|this|that|month|quarter|year)\s+/i;
+    const checks: { pattern: RegExp; known: any[]; label: string }[] = [
+        { pattern: /([a-z][a-z.&'-]{1,20}(?:\s+[a-z][a-z.&'-]{1,20})?)\s+(?:region|geography|market)\b/i, known: master.regions || [], label: 'region' },
+        { pattern: /([a-z][a-z.&'-]{1,20}(?:\s+[a-z][a-z.&'-]{1,20})?)\s+practice\b/i, known: master.practices || [], label: 'practice' },
+    ];
+    for (const { pattern, known, label } of checks) {
+        const m = message.match(pattern);
+        if (!m) continue;
+        let named = m[1].trim();
+        while (LEADING_FILLER.test(named)) named = named.replace(LEADING_FILLER, '').trim();
+        if (!named || named.length < 3) continue;
+        const knownNames = namesOf(known);
+        const hit = knownNames.some(k => k.toLowerCase().includes(named.toLowerCase()) || named.toLowerCase().includes(k.toLowerCase()));
+        if (!hit) {
+            const examples = knownNames.slice(0, 5).join(', ');
+            complaints.push(`I don't know a ${label} called **${named}**${examples ? ` — the ones on record are: ${examples}` : ''}.`);
+        }
+    }
+    return complaints;
+}
+
 /** Shared filter builder, so list, count and chart can never disagree. */
 function buildOpportunityWhere(params: any, ctx: UserContext): any {
     const where: any = { isArchived: false };
@@ -1809,17 +1853,17 @@ function canExecute(intent: string, permissions: string[]): boolean {
 // ─── TOOL EXECUTORS ─────────────────────────────────────────────────────────
 
 async function execListOpportunities(params: any, ctx: UserContext): Promise<ActionResult> {
-    const where: any = { isArchived: false };
+    // Built by the shared builder, which is the whole point of it existing.
+    // This function used to assemble its own where clause and, in doing so,
+    // quietly dropped every filter the builder knows about that it did not —
+    // outcome above all. Asked for "the open opportunities" it returned closed
+    // won and closed lost deals among them, because nothing here had ever
+    // looked at params.outcome.
+    const where: any = buildOpportunityWhere(params, ctx);
     if (params.stage) {
         const stage = await prisma.stage.findFirst({ where: { name: { contains: params.stage, mode: 'insensitive' } } });
         if (stage) where.stageId = stage.id;
     }
-    if (params.client) where.client = { name: { contains: params.client, mode: 'insensitive' } };
-    if (params.owner === '__SELF__') where.ownerId = ctx.userId;
-    if (params.technology) where.technology = { contains: params.technology, mode: 'insensitive' };
-    if (params.region) where.region = { contains: params.region, mode: 'insensitive' };
-    if (params.minValue) where.value = { gte: params.minValue };
-    if (params.maxValue) where.value = { ...where.value, lte: params.maxValue };
     if (params.search) where.OR = [
         { title: { contains: params.search, mode: 'insensitive' } },
         { client: { name: { contains: params.search, mode: 'insensitive' } } },
@@ -3042,6 +3086,14 @@ export async function processChat(message: string, ctx: UserContext): Promise<Ch
         // unquoted client or rep name) by matching the question against master
         // data — this is what makes "all SAP opportunities" filter by SAP.
         const listParams = inheritFilters(await enrichFiltersFromMasterData(message, { ...intent.params }), conv);
+
+        // If the question named something that does not exist, say so instead of
+        // answering a wider question than was asked. Returning every deal to
+        // someone who asked about one region is not a partial answer, it is a
+        // wrong one wearing a confident face.
+        const impossible = await unsatisfiableFilters(message);
+        if (impossible.length) return reply(impossible.join('\n\n'));
+
         conv.lastFilters = { ...listParams };
         const result = await execListOpportunities(listParams, ctx);
         return reply(result.summary, result.data, undefined, [result]);
