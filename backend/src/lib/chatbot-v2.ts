@@ -796,6 +796,17 @@ function nlpParseIntent(message: string, conv: ConversationState): LLMParsedInte
         return { intent: 'win_rate', params: p, confidence: 0.95 };
     }
 
+    // "Which ones aged throughout the month of August" asks for a LIST filtered
+    // by a period. It used to draw a chart of everything grouped by month,
+    // because the word "month" belongs to the period and was read as the
+    // dimension. A question naming a period and asking "which ones" is only a
+    // chart if it also says how to group — "by month", "month wise", "monthly".
+    if (/\b(which|what)\s+(?:ones|deals?|opportunit\w+|projects?)\b/i.test(lower)
+        && extractPeriod(lower)
+        && !/\b(?:by|per)\s+month\b|month\s*[- ]?wise|\bmonthly\b/i.test(lower)) {
+        return { intent: 'list_opportunities', params: extractListParams(lower), confidence: 0.85 };
+    }
+
     // CUSTOM CHART — any "chart/graph/pie/breakdown by X" request. Checked
     // before the generic list rule so "show a pie chart of deals by client"
     // draws a chart rather than listing rows.
@@ -1013,6 +1024,81 @@ function extractUpdateParams(lower: string): Record<string, any> {
     return params;
 }
 
+/**
+ * A month or quarter named in a question, and WHICH date it refers to.
+ *
+ * "In August" is three different questions depending on the verb, and answering
+ * the wrong one is invisible to the reader:
+ *
+ *   "how many came in August"          → created in August
+ *   "how many closed in August"        → finished in August
+ *   "which ones aged through August"   → alive at some point during August
+ *
+ * The last is not a date range on a single column: a deal created in March and
+ * still open in September was open throughout August without either of its
+ * dates falling inside it. So it is expressed as an overlap — started before the
+ * month ended, and had not finished before it began.
+ *
+ * A bare month name means the most recent one that has actually happened, so in
+ * August 2026 "December" means December 2025 rather than a month in the future.
+ */
+const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july',
+    'august', 'september', 'october', 'november', 'december'];
+const MONTH_ABBR = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
+export interface Period { start: Date; end: Date; label: string; sense: 'created' | 'closed' | 'active'; }
+
+function periodSense(lower: string): Period['sense'] {
+    if (/\b(closed|won|lost|signed|completed|finished|settled)\b/i.test(lower)) return 'closed';
+    if (/\b(came|come|created|added|new|logged|received|raised|opened|generated|booked)\b/i.test(lower)) return 'created';
+    // "which ones aged through August" — and the safest default, since a deal
+    // that merely existed during the month is the widest honest reading.
+    return 'active';
+}
+
+function extractPeriod(lower: string): Period | null {
+    const now = new Date();
+    const sense = periodSense(lower);
+    const make = (start: Date, end: Date, label: string): Period => ({ start, end, label, sense });
+
+    // "this month" / "last month" / "this quarter" / "last quarter" / "this year"
+    if (/\bthis month\b/i.test(lower)) {
+        const s = new Date(now.getFullYear(), now.getMonth(), 1);
+        return make(s, new Date(now.getFullYear(), now.getMonth() + 1, 1), 'this month');
+    }
+    if (/\blast month\b/i.test(lower)) {
+        const s = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        return make(s, new Date(now.getFullYear(), now.getMonth(), 1), 'last month');
+    }
+    if (/\bthis quarter\b/i.test(lower)) {
+        const q = Math.floor(now.getMonth() / 3);
+        return make(new Date(now.getFullYear(), q * 3, 1), new Date(now.getFullYear(), q * 3 + 3, 1), 'this quarter');
+    }
+    if (/\blast quarter\b/i.test(lower)) {
+        const q = Math.floor(now.getMonth() / 3) - 1;
+        return make(new Date(now.getFullYear(), q * 3, 1), new Date(now.getFullYear(), q * 3 + 3, 1), 'last quarter');
+    }
+    if (/\bthis year\b|\byear to date\b|\bytd\b/i.test(lower)) {
+        return make(new Date(now.getFullYear(), 0, 1), new Date(now.getFullYear() + 1, 0, 1), `${now.getFullYear()}`);
+    }
+    if (/\blast year\b/i.test(lower)) {
+        return make(new Date(now.getFullYear() - 1, 0, 1), new Date(now.getFullYear(), 0, 1), `${now.getFullYear() - 1}`);
+    }
+
+    // A named month, with an optional year.
+    for (let i = 0; i < 12; i++) {
+        const re = new RegExp(`\\b(?:${MONTHS[i]}|${MONTH_ABBR[i]})\\b\\.?\\s*(\\d{4})?`, 'i');
+        const m = lower.match(re);
+        if (!m) continue;
+        // "may" is also an ordinary word — require a date-ish context for it.
+        if (i === 4 && !/\b(?:in|of|during|month)\s+may\b|\bmay\s+\d{4}\b/i.test(lower)) continue;
+        const year = m[1] ? Number(m[1]) : (i <= now.getMonth() ? now.getFullYear() : now.getFullYear() - 1);
+        const label = `${MONTHS[i][0].toUpperCase()}${MONTHS[i].slice(1)} ${year}`;
+        return make(new Date(year, i, 1), new Date(year, i + 1, 1), label);
+    }
+    return null;
+}
+
 function extractListParams(lower: string): Record<string, any> {
     const params: Record<string, any> = {};
     for (const stage of STAGE_NAMES) {
@@ -1032,6 +1118,8 @@ function extractListParams(lower: string): Record<string, any> {
     if (maxMatch) params.maxValue = parseMoneyValue(maxMatch[0].replace(/^(below|under|less than|<)\s+/i, ''));
     const outcome = extractOutcomeFilter(lower);
     if (outcome) params.outcome = outcome;
+    const period = extractPeriod(lower);
+    if (period) params.period = period;
     return params;
 }
 
@@ -1466,6 +1554,13 @@ function extractChartParams(lower: string): Record<string, any> {
     // position alone and turn "who is our biggest client" — plainly a question
     // about clients — into a chart of sales reps.
     if (!params.groupBy && /\bwho(m|se)?\b/i.test(lower)) params.groupBy = 'salesRep';
+    // "the month of August" names a period, not a grouping. Without this, any
+    // question mentioning a month charted everything by month.
+    if (params.groupBy === 'month' && params.period
+        && !/(?:by|per)\s+month|month\s*[- ]?wise|monthly|trend/i.test(lower)) {
+        delete params.groupBy;
+    }
+
     // A chart was asked for but no dimension named ("draw me a chart",
     // "visualise the pipeline"). Answer with the most useful default rather
     // than refusing — stage is the shape people mean by "the pipeline".
@@ -1571,6 +1666,25 @@ function buildOpportunityWhere(params: any, ctx: UserContext): any {
     if (params.pricingModel) where.pricingModel = { contains: params.pricingModel, mode: 'insensitive' };
     if (params.minValue) where.value = { gte: params.minValue };
     if (params.maxValue) where.value = { ...(where.value || {}), lte: params.maxValue };
+    // A period applies to whichever date the question was about.
+    if (params.period) {
+        const { start, end, sense } = params.period as Period;
+        if (sense === 'created') {
+            where.createdAt = { gte: start, lt: end };
+        } else if (sense === 'closed') {
+            where.actualCloseDate = { gte: start, lt: end };
+        } else {
+            // Alive during the window: began before it ended, and had not
+            // finished before it started. A deal opened in March and still open
+            // today was open all through August without either date landing in it.
+            where.createdAt = { lt: end };
+            where.OR = [
+                { actualCloseDate: null },
+                { actualCloseDate: { gte: start } },
+            ];
+        }
+    }
+
     // Outcome is expressed through the stage's own flags rather than a name
     // list, so renaming or adding a stage cannot silently break it.
     if (params.outcome === 'open') where.stage = { isClosed: false };
@@ -1594,6 +1708,11 @@ async function execCountOpportunities(params: any, ctx: UserContext): Promise<Ac
     const total = Number(agg._sum.value || 0);
     const bits = ['outcome', 'client', 'technology', 'region', 'practice', 'stage', 'salesRep', 'projectType', 'pricingModel']
         .filter(k => params[k]).map(k => `${k}: ${params[k]}`);
+    if (params.period) {
+        const pr = params.period as Period;
+        const verb = pr.sense === 'created' ? 'created in' : pr.sense === 'closed' ? 'closed in' : 'active during';
+        bits.push(`${verb} ${pr.label}`);
+    }
     const scope = bits.length ? ` matching ${bits.join(', ')}` : '';
     return {
         tool: 'count_opportunities', success: true,
@@ -1877,9 +1996,24 @@ async function execListOpportunities(params: any, ctx: UserContext): Promise<Act
         value: Number(o.value), owner: o.owner?.name || '-', technology: o.technology || '-',
         region: o.region || '-', priority: o.priority || '-', probability: o.probability, updatedAt: o.updatedAt,
     }));
+    // Name the filters back. "Found 20 opportunities" gives the reader no way to
+    // tell whether their region, period or outcome was understood — and a filter
+    // that was quietly dropped looks exactly like one that matched everything.
+    const scopeBits = ['outcome', 'client', 'technology', 'region', 'practice', 'stage', 'salesRep', 'projectType', 'pricingModel']
+        .filter(k => params[k]).map(k => `${k}: ${params[k]}`);
+    if (params.period) {
+        const pr = params.period as Period;
+        const verb = pr.sense === 'created' ? 'created in' : pr.sense === 'closed' ? 'closed in' : 'active during';
+        scopeBits.push(`${verb} ${pr.label}`);
+    }
+    const scope = scopeBits.length ? ` matching ${scopeBits.join(', ')}` : '';
+    const capped = data.length >= Math.min(params.limit || 20, 50) ? ' (showing the first page)' : '';
+
     return {
         tool: 'list_opportunities', success: true,
-        summary: data.length > 0 ? `Found **${data.length}** opportunities.` : 'No opportunities found matching your criteria.',
+        summary: data.length > 0
+            ? `Found **${data.length}** opportunities${scope}${capped}.`
+            : `No opportunities found${scope || ' matching your criteria'}.`,
         data: { type: 'table', columns: ['Title', 'Client', 'Stage', 'Value', 'Owner', 'Technology', 'Region', 'Priority'], rows: data },
     };
 }
