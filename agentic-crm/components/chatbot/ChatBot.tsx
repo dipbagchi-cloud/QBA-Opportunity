@@ -394,8 +394,15 @@ export default function ChatBot() {
     const handleLauncherPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
         const rect = launcherRef.current?.getBoundingClientRect();
         if (!rect) return;
+        // Capture is taken only once a drag actually starts, in pointermove.
+        // Taking it here broke opening the chat entirely: while an element holds
+        // pointer capture the browser retargets the following click to it, so the
+        // button's onClick never ran and a plain click did nothing at all.
         dragRef.current = { dx: e.clientX - rect.left, dy: e.clientY - rect.top, moved: false };
-        e.currentTarget.setPointerCapture(e.pointerId);
+        // A fresh press is never a suppressed click. Without this, a drag whose
+        // click event the browser chose not to fire would leave the flag set and
+        // swallow the NEXT genuine click instead.
+        suppressClickRef.current = false;
     };
 
     const handleLauncherPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -406,7 +413,12 @@ export default function ChatBot() {
         // rather than being swallowed as a drag.
         if (!drag.moved) {
             const rect = launcherRef.current?.getBoundingClientRect();
-            if (rect && Math.abs(next.x - rect.left) + Math.abs(next.y - rect.top) > 4) drag.moved = true;
+            if (rect && Math.abs(next.x - rect.left) + Math.abs(next.y - rect.top) > 4) {
+                drag.moved = true;
+                // Now that this is a drag rather than a click, capture the
+                // pointer so it keeps tracking outside the button.
+                e.currentTarget.setPointerCapture(e.pointerId);
+            }
         }
         if (drag.moved) setLauncherPos(next);
     };
@@ -451,6 +463,12 @@ export default function ChatBot() {
                     onPointerMove={handleLauncherPointerMove}
                     onPointerUp={handleLauncherPointerUp}
                     onPointerCancel={handleLauncherPointerUp}
+                    // The click lives on the wrapper rather than the button, so
+                    // it fires wherever the browser decides to deliver it.
+                    onClick={() => {
+                        if (suppressClickRef.current) { suppressClickRef.current = false; return; }
+                        setIsOpen(true);
+                    }}
                     style={launcherPos
                         ? { left: launcherPos.x, top: launcherPos.y, touchAction: "none" }
                         : { touchAction: "none" }}
@@ -459,12 +477,8 @@ export default function ChatBot() {
                     }`}
                 >
                     <button
-                        // Click is suppressed after a drag, so releasing the
-                        // button at its new home does not also open the chat.
-                        onClick={() => {
-                            if (suppressClickRef.current) { suppressClickRef.current = false; return; }
-                            setIsOpen(true);
-                        }}
+                        type="button"
+                        aria-label="Open AI Assistant"
                         className="w-14 h-14 rounded-full bg-gradient-to-tr from-indigo-600 to-purple-600 text-white flex items-center justify-center shadow-lg hover:shadow-xl hover:scale-105 transition-all duration-200 cursor-grab active:cursor-grabbing"
                         title="AI Assistant — drag to move"
                     >
