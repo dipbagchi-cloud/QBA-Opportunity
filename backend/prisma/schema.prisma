@@ -186,6 +186,10 @@ model RateCard {
   code            String   @unique
   role            String
   skill           String   @default("")
+  // Grade from the cost card (L2..L8). It moves in lockstep with
+  // experienceBand, but the business reads and quotes the level, so it is
+  // stored rather than derived.
+  level           String   @default("")
   experienceBand  String   @default("")
   masterCtc          Float    @default(0)
   mercerCtc          Float    @default(0)

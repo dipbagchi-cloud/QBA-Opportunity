@@ -5,6 +5,7 @@ import { evaluateStageChangeRules, evaluateDataConditionRules, evaluateOpportuni
 import { calculateOpportunityProbability } from '../lib/opportunity-probability';
 import { buildOpportunityAccess } from '../lib/opportunity-access';
 import { recordStageEntry } from '../lib/stage-history';
+import { recostOpportunityResources } from '../lib/recost';
 import path from 'path';
 import fs from 'fs';
 
@@ -1472,6 +1473,26 @@ export async function updateOpportunity(req: Request, res: Response) {
                 } : {}),
             }
         });
+
+        // Re-estimation is the one moment a deal SHOULD be re-priced on today's
+        // card. Everywhere else the quote is a snapshot and must not move.
+        // Detected by the counter changing rather than hooked into each
+        // transition, for the same reason as the timeline below: several paths
+        // can trigger it and each would have to remember.
+        if (((updatedOpp as any).reEstimateCount ?? 0) > ((previous as any)?.reEstimateCount ?? 0)) {
+            try {
+                const recost = await recostOpportunityResources(updatedOpp.id);
+                if (recost?.changed.length) {
+                    console.log(`[Recost] ${updatedOpp.id}: ${recost.changed.length}/${recost.total} resources re-priced on the current rate card`);
+                }
+                if (recost?.unmatched.length) {
+                    console.warn(`[Recost] ${updatedOpp.id}: ${recost.unmatched.length} resource(s) had no match on the current card and keep their existing cost: ${recost.unmatched.map(u => `${u.skill} ${u.band}`).join('; ')}`);
+                }
+            } catch (error) {
+                // Re-pricing must never block the re-estimate itself.
+                console.error('[Recost] failed:', (error as Error).message);
+            }
+        }
 
         // Stage timeline. Comparing the stored stageId before/after catches every
         // path that can move the deal — the normal `stageUpdate`, the

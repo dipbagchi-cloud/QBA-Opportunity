@@ -48,6 +48,9 @@ export function getLocationParts(locationKey?: string, country?: string, city?: 
 
 export function getCtcForLocation(rateCard: any, locationKey: string): number {
     const field = LOCATION_CTC_FIELD[locationKey] ?? 'ctc';
+    // No rate for a location means no rate — zero, deliberately, with no
+    // fallback to the base CTC. A location the cost card does not price is not
+    // the same as one priced at the India rate.
     return Number((rateCard as any)[field]) || 0;
 }
 
