@@ -3,7 +3,7 @@ name: Deploy to Azure VM
 on:
   push:
     branches:
-      - Opportunity_MVC
+      - prod
       - uat
       - qa
 
@@ -19,7 +19,14 @@ jobs:
     # also exists on the mirror repo because branches are pushed to both remotes;
     # guarding by repository stops the mirror's runs from failing on missing
     # secrets and prevents two repos racing to deploy to the same VM.
-    if: github.ref == 'refs/heads/Opportunity_MVC' && github.repository == 'QuantumBusinessAdvisory/QCRM'
+    # Production deploys from `prod`, and only from `prod`.
+    #
+    # This used to fire on Opportunity_MVC, the day-to-day working branch, so
+    # every routine push deployed production and restarted its backend — which
+    # logs out every signed-in user. A `prod` branch already existed and,
+    # confusingly, was not what deployed production. Promotion is now a
+    # deliberate act: fast-forward prod when you mean it.
+    if: github.ref == 'refs/heads/prod' && github.repository == 'QuantumBusinessAdvisory/QCRM'
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
@@ -39,9 +46,9 @@ jobs:
             cd $APP_DIR
 
             echo "=== Pull latest code ==="
-            git fetch origin Opportunity_MVC
-            git checkout Opportunity_MVC
-            git reset --hard origin/Opportunity_MVC
+            git fetch origin prod
+            git checkout prod
+            git reset --hard origin/prod
 
             chmod +x scripts/pm2-safe-restart.sh scripts/verify-frontend-build.sh scripts/build-and-swap.sh
 
