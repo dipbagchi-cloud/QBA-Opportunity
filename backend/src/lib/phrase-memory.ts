@@ -135,7 +135,11 @@ export function recall(message: string): { slots: Record<string, any>; via: 'exa
 export function remember(message: string, slots: Record<string, any>): void {
     const tokens = tokenize(message);
     if (tokens.length < MIN_TOKENS) return;
-    if (!slots || (!slots.groupBy && !slots.__entityHint && !slots.outcome)) return;
+    // Worth remembering if it says something: either a named intent (the
+    // model-first path stores {intent, params}) or a usable slot (the older
+    // rescue path stores the slots directly).
+    const saysSomething = !!slots && (!!slots.intent || !!slots.groupBy || !!slots.__entityHint || !!slots.outcome);
+    if (!saysSomething) return;
 
     store.set(keyOf(tokens), {
         slots: { ...slots },

@@ -538,13 +538,28 @@ interface LLMParsedIntent {
 
 const SYSTEM_PROMPT = `You are an AI assistant for Q-CRM, a sales pipeline management system.
 Analyze the user message and determine their intent. Return a JSON object with:
-- "intent": one of [create_opportunity, update_opportunity, list_opportunities, get_details, pipeline_analytics, revenue_analytics, deal_health, forecast, create_lead, list_contacts, create_contact, get_contact, update_contact, delete_contact, add_comment, list_comments, approve_gom, review_gom, gom_status, list_users, list_audit_logs, my_profile, list_resources, convert_opportunity, move_to_presales, move_to_sales, proposal_sent, mark_lost, reestimate, general_chat, confirm_yes, confirm_no, provide_field_value, cancel]
+- "intent": one of [create_opportunity, update_opportunity, list_opportunities, count_opportunities, custom_chart, hot_cold, win_rate, get_details, pipeline_analytics, revenue_analytics, deal_health, forecast, create_lead, list_contacts, create_contact, get_contact, update_contact, delete_contact, add_comment, list_comments, approve_gom, review_gom, gom_status, list_users, list_audit_logs, my_profile, list_resources, convert_opportunity, move_to_presales, move_to_sales, proposal_sent, mark_lost, reestimate, greeting, thanks, farewell, about_bot, general_chat, confirm_yes, confirm_no, provide_field_value, cancel]
 - "params": extracted parameters as key-value pairs
 - "confidence": 0-1 confidence score
 
 For create_opportunity, extract any of: title, client, value, currency, technology, region, description, projectType, practice, salesRepName, managerName, pricingModel, tentativeStartDate, tentativeDuration, expectedDayRate, priority, expectedCloseDate, source, tags
 For update_opportunity, extract: nameOrId (deal name), plus any fields to change including stage
-For list_opportunities: stage, client, owner ("my" = self), technology, region, minValue, maxValue, search
+For list_opportunities: stage, client, owner ("my" = self), technology, region, practice, salesRep, projectType, pricingModel, outcome, minValue, maxValue, search, limit
+For count_opportunities ("how many …"): the same filters as list_opportunities
+For custom_chart (any "by X" / breakdown / chart / who-has-most question):
+   groupBy — one of client, technology, stage, practice, region, salesRep, month, projectType, pricingModel, status
+   measure — "value" for money, "count" for how many things
+   chartType — "bar" or "pie"
+   plus any filters above
+For hot_cold: temperature ("hot" = recently active, "cold" = no activity for weeks or on hold), limit
+For win_rate: any filters above
+
+outcome is one of open, closed, won, lost. Words for lost include rejected,
+declined, turned down, dropped. Words for won include secured and bagged.
+
+Questions naming a person or asking "who" are usually about salesRep. Informal
+words for a customer — outfits, firms, accounts, logos, orgs — mean client.
+A question asking for "the most rejects" or "the most wins" wants a COUNT.
 For get_details: nameOrId (deal name or ID)
 For create_lead: title, companyName, contactFirstName, contactLastName, contactEmail, contactTitle, value, source, description
 For list_contacts: search, client
@@ -1338,6 +1353,77 @@ async function resolveSlots(message: string): Promise<Record<string, any> | null
     const slots = await llmSlotRescue(message);
     if (slots) phraseMemory.remember(message, slots);
     return slots;
+}
+
+/**
+ * Ask a provider what the question means, before the rules get a look.
+ *
+ * The order used to be the other way round, for a good reason at the time: the
+ * only model available ran on this VM and took 23 seconds, so putting it first
+ * would have added that wait to every question the rules already answered
+ * correctly. With a hosted provider answering in about half a second that
+ * trade-off is gone, and the old order had a real cost — the rules would answer
+ * confidently from a vocabulary that happened not to contain the user's words,
+ * and the model never got asked. Every wrong answer of that kind needed a code
+ * change to fix a single missing synonym.
+ *
+ * The model still only INTERPRETS. Dates are computed locally, entity names are
+ * matched against master data, and every figure comes from the database, so a
+ * misreading can produce the wrong question but never an invented answer.
+ */
+const DISPATCHABLE_INTENTS = new Set([
+    'create_opportunity', 'update_opportunity', 'list_opportunities', 'count_opportunities',
+    'custom_chart', 'hot_cold', 'win_rate', 'get_details', 'pipeline_analytics', 'revenue_analytics',
+    'deal_health', 'forecast', 'create_lead', 'list_contacts', 'create_contact', 'get_contact',
+    'update_contact', 'delete_contact', 'add_comment', 'list_comments', 'approve_gom', 'review_gom',
+    'gom_status', 'list_users', 'list_audit_logs', 'my_profile', 'list_resources',
+    'convert_opportunity', 'move_to_presales', 'move_to_sales', 'proposal_sent', 'mark_lost',
+    'reestimate', 'greeting', 'thanks', 'farewell', 'about_bot', 'general_chat',
+    'confirm_yes', 'confirm_no', 'provide_field_value', 'cancel',
+]);
+
+async function llmParseIntentFirst(message: string, conversationContext: string): Promise<LLMParsedIntent | null> {
+    const providers = availableProviders();
+    if (!providers.length) return null;
+
+    const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+        { role: 'system', content: SYSTEM_PROMPT },
+        ...(conversationContext ? [{ role: 'system' as const, content: `Current conversation state: ${conversationContext}` }] : []),
+        { role: 'user', content: message },
+    ];
+
+    for (const provider of providers) {
+        try {
+            const res: any = await withTimeout(provider.client!.chat.completions.create({
+                model: provider.model,
+                messages,
+                response_format: { type: 'json_object' },
+                temperature: 0,
+                max_tokens: 400,
+            }) as any, `${provider.name} intent`);
+
+            const raw = res?.choices?.[0]?.message?.content;
+            if (!raw) throw new Error('empty response');
+            const parsed = JSON.parse(raw.replace(/^```json?\n?/, '').replace(/\n?```$/, '').trim());
+            noteSuccess(provider);
+
+            if (!parsed?.intent || !DISPATCHABLE_INTENTS.has(parsed.intent)) return null;
+            const params = (parsed.params && typeof parsed.params === 'object') ? parsed.params : {};
+
+            // Dates are computed here, not by the model. A model asked to work
+            // out what "last quarter" means will occasionally be wrong, and a
+            // wrong date range is invisible in the answer.
+            const period = extractPeriod(message.toLowerCase());
+            if (period) params.period = period;
+
+            if (provider.name !== 'primary') console.log(`[Chatbot] intent from ${provider.name} provider`);
+            return { intent: parsed.intent, params, confidence: Number(parsed.confidence) || 0.8 };
+        } catch (error) {
+            noteFailure(provider);
+            console.error(`[Chatbot] ${provider.name} intent parse failed: ${(error as Error).message}`);
+        }
+    }
+    return null;
 }
 
 async function llmSlotRescue(message: string): Promise<Record<string, any> | null> {
@@ -3020,27 +3106,48 @@ export async function processChat(message: string, ctx: UserContext): Promise<Ch
     //
     // So the model is the rescue path: it runs only when the rules did not
     // understand the sentence, which is precisely where it earns its latency.
-    let intent = nlpParseIntent(message, conv);
-
-    // The thirty-intent classification is no longer asked about questions. It
-    // cost ~23s here, and it guessed: "which of our accounts are we doing best
-    // with?" came back as list_contacts, answering "No contacts found" to a
-    // question about clients. Reading questions is now the slot rescue's job —
-    // smaller, faster, and constrained to fields that map onto real queries.
+    // Model first, rules second.
     //
-    // Writing is the one place the big prompt still earns its keep. "Spin up a
-    // deal for Acme on Azure worth 2 crore" has no dimension and no measure, so
-    // the slot rescue cannot represent it, and without this it would fall to the
-    // help text. Three conditions keep the cost where it belongs: the rules must
-    // have failed, the sentence must contain a write verb, and it must not look
-    // analytical — otherwise "add up revenue by client" would pay 20s for the
-    // word "add". Whatever it proposes still goes through the existing
-    // confirmation step, so a bad guess is shown to the user, not saved.
-    const WRITE_VERB = /\b(create|add|new|open|start|update|change|edit|set|move|mark|convert|log|record|delete|remove|assign|rename)\b/i;
-    const LOOKS_ANALYTICAL = /\b(chart|graph|plot|pie|bar|revenue|value|worth|count|how many|list|show|top|trend|wise|by|per|split)\b/i;
-    if (intent.intent === 'general_chat' && WRITE_VERB.test(message) && !LOOKS_ANALYTICAL.test(message)) {
-        const llmIntent = await callLLM(message, convContext);
-        if (llmIntent && llmIntent.intent !== 'general_chat') intent = llmIntent;
+    // The reverse order was right when the only model ran on this VM at 23s a
+    // question. It is wrong now that a provider answers in about half a second,
+    // because rules-first fails silently in a particular way: the rules match
+    // some word in the sentence, answer confidently from a vocabulary that
+    // happens not to contain what the user actually meant, and the model never
+    // gets asked. "Who is getting most rejects?" was answered across every deal
+    // in the system because "rejects" was not in a regex — and the only fix
+    // available was another code change for another missing synonym.
+    //
+    // The rules remain as the fallback, which is the right job for them: they
+    // are instant, they never fail, and they keep the assistant working when a
+    // provider is down, rate-limited or unfunded.
+    let intent: LLMParsedIntent | null = null;
+
+    // A conversation mid-flow — collecting fields for a new deal, awaiting a
+    // yes — is driven by state the model cannot see, so the rules own it.
+    const midFlow = conv.mode !== 'idle';
+
+    if (!midFlow) {
+        // A phrasing already interpreted is reused rather than re-asked, which
+        // keeps the common case at a millisecond and the provider bill near zero.
+        const remembered = phraseMemory.recall(message);
+        if (remembered?.slots?.intent) {
+            console.log(`[Chatbot] intent recalled (${remembered.via}) — no model call`);
+            intent = { intent: remembered.slots.intent, params: { ...remembered.slots.params }, confidence: 0.9 };
+            const freshPeriod = extractPeriod(message.toLowerCase());
+            if (freshPeriod) intent.params.period = freshPeriod;
+        } else {
+            intent = await llmParseIntentFirst(message, convContext);
+            if (intent && intent.confidence >= 0.6 && intent.intent !== 'general_chat') {
+                phraseMemory.remember(message, { intent: intent.intent, params: intent.params });
+            }
+        }
+    }
+
+    // Rules answer when the model was not asked, could not be reached, or read
+    // the question as small talk when it was not.
+    if (!intent || intent.intent === 'general_chat') {
+        const byRules = nlpParseIntent(message, conv);
+        if (!intent || byRules.intent !== 'general_chat') intent = byRules;
     }
 
     conv.history.push({ role: 'user', content: message });
