@@ -738,6 +738,20 @@ function nlpParseIntent(message: string, conv: ConversationState): LLMParsedInte
         return { intent: 'revenue_analytics', params: { groupBy: 'technology' }, confidence: 0.85 };
     }
 
+    // ANALYTICS: Hot / Cold (before health, which would otherwise swallow "cold")
+    //
+    // These are first-class ideas on the dashboard, so the bot has to know them
+    // too. Without this rule "which is the hottest opportunity right now?" fell
+    // through to the model, which had no executor to aim at and guessed a
+    // dimension — every such question came back as the same by-practice chart.
+    if (/\b(hot|hottest|cold|coldest|warm|warmest)\b/i.test(lower) && /\b(deal|deals|opportunit\w*|pipeline|lead|leads)\b/i.test(lower)) {
+        const wantsCold = /\b(cold|coldest)\b/i.test(lower);
+        // "which is the hottest opportunity" asks for one, not a list of five.
+        const singular = /\b(?:the\s+)?(?:hottest|coldest|warmest)\s+(?:deal|opportunity|lead)\b/i.test(lower);
+        const limit = extractTopN(lower) || (singular ? 1 : 0);
+        return { intent: 'hot_cold', params: { temperature: wantsCold ? 'cold' : 'hot', limit }, confidence: 0.9 };
+    }
+
     // ANALYTICS: Deal Health (before list)
     if (/\b(health|stalled|at.risk|risk|aging|stuck|inactive|dormant)\b/i.test(lower))
         return { intent: 'deal_health', params: {}, confidence: 0.85 };
@@ -1271,6 +1285,27 @@ function matchDimension(phrase: string): string | null {
  * and which shape to draw. Everything here is keyword matching over a closed
  * vocabulary — no model call.
  */
+/**
+ * "top 3", "top five", "5 biggest" — how many rows the question asked for.
+ *
+ * Returns 0 when the question named no number, so callers can apply their own
+ * default rather than being handed a fabricated one.
+ */
+const NUMBER_WORDS: Record<string, number> = {
+    one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+};
+function extractTopN(lower: string): number {
+    const digits = lower.match(/\b(?:top|first|bottom|last|worst|best)\s+(\d{1,2})\b/i)
+        || lower.match(/\b(\d{1,2})\s+(?:biggest|largest|highest|lowest|smallest|hottest|coldest|oldest|newest)\b/i);
+    if (digits) {
+        const n = Number(digits[1]);
+        if (n >= 1 && n <= 50) return n;
+    }
+    const words = lower.match(/\b(?:top|first|bottom|last)\s+(one|two|three|four|five|six|seven|eight|nine|ten)\b/i);
+    if (words) return NUMBER_WORDS[words[1].toLowerCase()] || 0;
+    return 0;
+}
+
 function extractChartParams(lower: string): Record<string, any> {
     const params: Record<string, any> = extractListParams(lower);
 
@@ -1893,6 +1928,89 @@ async function execRevenueAnalytics(params: any): Promise<ActionResult> {
                 { label: 'Count', data: sorted.map(e => e[1].count) },
             ],
         },
+    };
+}
+
+/**
+ * Hot and cold deals, using the DASHBOARD's definition rather than a new one.
+ *
+ * There, cold means an open deal that is stalled, and a deal is stalled when it
+ * has had no activity — no edit and no comment — for the configured window
+ * (Admin > Budget Assumptions, default 30 days), or when someone has put it On
+ * Hold by hand. Hot is the rest of the open pipeline. Closed deals are neither,
+ * since a finished deal carries no risk.
+ *
+ * Matching that definition matters more than picking a good one: a bot that
+ * answers "cold" differently from the tile the user just clicked is worse than
+ * one that cannot answer at all.
+ */
+async function execHotCold(params: any, ctx: UserContext): Promise<ActionResult> {
+    const wantsCold = params.temperature === 'cold';
+    const limit = params.limit && params.limit > 0 ? params.limit : 5;
+
+    const config = await prisma.systemConfig.findUnique({ where: { key: 'budget_assumptions' } });
+    const rawThreshold = Number((config?.value as any)?.stalledDaysThreshold);
+    const thresholdDays = Number.isFinite(rawThreshold) && rawThreshold > 0 ? rawThreshold : 30;
+
+    const opps = await prisma.opportunity.findMany({
+        where: { isArchived: false, stage: { isClosed: false }, ...buildOpportunityWhere(params, ctx) },
+        include: {
+            client: { select: { name: true } },
+            stage: { select: { name: true } },
+            owner: { select: { name: true } },
+            notes: { select: { createdAt: true }, orderBy: { createdAt: 'desc' }, take: 1 },
+        },
+    });
+
+    const now = Date.now();
+    const scored = opps.map(o => {
+        // Last activity is the later of an edit and a comment — the same pair the
+        // opportunities list uses, so the two agree on what "quiet" means.
+        const lastNote = o.notes[0]?.createdAt ? new Date(o.notes[0].createdAt).getTime() : 0;
+        const lastActivity = Math.max(new Date(o.updatedAt).getTime(), lastNote);
+        const idleDays = Math.max(0, Math.floor((now - lastActivity) / 86_400_000));
+        return {
+            id: o.id,
+            title: o.title,
+            client: o.client?.name || '-',
+            stage: o.stage?.name || '-',
+            owner: o.owner?.name || '-',
+            value: Number(o.value) || 0,
+            idleDays,
+            stalled: !!o.isStalled || idleDays > thresholdDays,
+        };
+    });
+
+    const picked = scored.filter(o => o.stalled === wantsCold);
+    // Cold: the most neglected first. Hot: the most recently touched first, with
+    // value breaking ties, since that is what "hottest" is asking about.
+    picked.sort((a, b) => wantsCold
+        ? (b.idleDays - a.idleDays) || (b.value - a.value)
+        : (a.idleDays - b.idleDays) || (b.value - a.value));
+
+    const shown = picked.slice(0, limit);
+    const label = wantsCold ? 'Cold' : 'Hot';
+    const total = picked.reduce((sum, o) => sum + o.value, 0);
+
+    if (!picked.length) {
+        return { tool: 'hot_cold', success: true, summary: `No ${label.toLowerCase()} opportunities right now.`, data: null };
+    }
+
+    const lines = shown.map((o, i) =>
+        `${i + 1}. **${o.title}** — ${o.client} · ${o.stage} · ${money(o.value)} · ${o.idleDays}d since last activity`);
+
+    const heading = picked.length > shown.length
+        ? `**${label} opportunities** — showing top ${shown.length} of ${picked.length}, ${money(total)} in total`
+        : `**${label} opportunities** — ${picked.length}, ${money(total)} in total`;
+    const rule = wantsCold
+        ? `_Cold = open deals with no edit or comment for over ${thresholdDays} days, or marked On Hold._`
+        : `_Hot = open deals with recent activity (within ${thresholdDays} days)._`;
+
+    return {
+        tool: 'hot_cold',
+        success: true,
+        summary: [heading, '', ...lines, '', rule].join('\n'),
+        data: { type: 'table', title: `${label} Opportunities`, rows: shown },
     };
 }
 
@@ -2864,6 +2982,14 @@ export async function processChat(message: string, ctx: UserContext): Promise<Ch
         if (m) extra = `\n\n**Pipeline Summary:**\n- Active: ${m.activeCount} | Won: ${m.wonCount} | Lost: ${m.lostCount}\n- Conversion: ${m.conversionRate}\n- Pipeline value: ${money(m.pipelineValue)}\n- Weighted: ${money(m.weightedPipeline)}\n- Avg deal: ${money(m.avgDealValue)}`;
         return reply(r.summary + extra, r.data, undefined, [r]);
     }
+    if (intent.intent === 'hot_cold') {
+        if (!canExecute('list_opportunities', ctx.permissions)) return reply('You don\'t have permission to view opportunities.');
+        const hcParams = inheritFilters(await enrichFiltersFromMasterData(message, { ...intent.params }), conv);
+        conv.lastFilters = { ...hcParams };
+        const result = await execHotCold(hcParams, ctx);
+        return reply(result.summary, result.data, undefined, [result]);
+    }
+
     if (intent.intent === 'revenue_analytics') {
         if (!canExecute('revenue_analytics', ctx.permissions)) return reply('No permission for analytics.');
         const r = await execRevenueAnalytics(intent.params);
