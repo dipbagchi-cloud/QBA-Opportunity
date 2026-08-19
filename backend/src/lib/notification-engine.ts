@@ -1394,7 +1394,11 @@ export async function evaluateStartDateApproachingReminders(): Promise<StartDate
  * Daily scan. For every active rule with triggerType=start_date_overdue, find
  * every opportunity whose tentativeStartDate has slipped past today AND is
  * still open (any stage other than Closed Won / Closed-Won / Closed Lost /
- * Delivered).
+ * Delivered) AND is not On Hold.
+ *
+ * On Hold deals are excluded entirely — no auto-revert and no notification —
+ * because a paused deal is expected to sail past its start date, and moving
+ * it to Qualification/Extended would silently take it off hold.
  *
  * Workflow actions when an overdue is detected and the opportunity is not
  * already in Qualification + Extended:
@@ -1420,6 +1424,7 @@ export interface StartDateOverdueResult {
   reverted: number;
   notified: number;
   skippedClosed: number;
+  skippedOnHold: number;
   skippedNoStartDate: number;
   skippedRecent: number;
   skippedNoRecipients: number;
@@ -1436,6 +1441,7 @@ export async function evaluateStartDateOverdueWorkflow(): Promise<StartDateOverd
     reverted: 0,
     notified: 0,
     skippedClosed: 0,
+    skippedOnHold: 0,
     skippedNoStartDate: 0,
     skippedRecent: 0,
     skippedNoRecipients: 0,
@@ -1469,6 +1475,7 @@ export async function evaluateStartDateOverdueWorkflow(): Promise<StartDateOverd
       where: { tentativeStartDate: { lt: today, not: null } },
       select: {
         id: true, title: true, currentStage: true, detailedStatus: true,
+        isStalled: true,
         gomApproved: true, reEstimateCount: true, ownerId: true, metadata: true,
         salesRepName: true, managerName: true, presalesAssigneeName: true,
         currency: true, value: true, tentativeStartDate: true, expectedCloseDate: true,
@@ -1488,6 +1495,17 @@ export async function evaluateStartDateOverdueWorkflow(): Promise<StartDateOverd
       }
       if (!opp.tentativeStartDate) {
         result.skippedNoStartDate += 1;
+        continue;
+      }
+
+      // On Hold deals are deliberately paused, so a start date sliding past
+      // today is expected rather than a slip: neither the auto-revert to
+      // Qualification/Extended nor the "start date passed" notification
+      // applies until someone takes the deal off hold. The On Hold toggle
+      // sets isStalled and detailedStatus='On Hold' together, but we check
+      // both defensively in case only one was set on legacy rows.
+      if (opp.isStalled || opp.detailedStatus === 'On Hold') {
+        result.skippedOnHold += 1;
         continue;
       }
 
@@ -1640,7 +1658,7 @@ export async function evaluateStartDateOverdueWorkflow(): Promise<StartDateOverd
     }
   }
 
-  console.log(`[StartDateOverdue] scan complete: rules=${result.rulesEvaluated} scanned=${result.scanned} reverted=${result.reverted} notified=${result.notified} skippedClosed=${result.skippedClosed} skippedNoStartDate=${result.skippedNoStartDate} skippedRecent=${result.skippedRecent} skippedNoRecipients=${result.skippedNoRecipients}`);
+  console.log(`[StartDateOverdue] scan complete: rules=${result.rulesEvaluated} scanned=${result.scanned} reverted=${result.reverted} notified=${result.notified} skippedClosed=${result.skippedClosed} skippedOnHold=${result.skippedOnHold} skippedNoStartDate=${result.skippedNoStartDate} skippedRecent=${result.skippedRecent} skippedNoRecipients=${result.skippedNoRecipients}`);
   return result;
 }
 

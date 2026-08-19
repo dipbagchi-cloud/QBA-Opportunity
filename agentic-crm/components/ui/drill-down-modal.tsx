@@ -24,6 +24,8 @@ export interface DrillDownConfig {
     title: string;
     columns: DrillColumn[];
     data: Record<string, any>[];
+    /** Optional one-line legend shown under the header, explaining what the rows are. */
+    note?: string;
     /** Optional: render a full-size chart inside the modal */
     chart?: ReactNode;
     /** Field used to bucket rows for the monthly distribution. Defaults to "expectedCloseDate". */
@@ -46,6 +48,16 @@ function formatCell(value: any, format?: string, currencyFormat?: (v: number, op
     if (format === "percent") return `${Number(value).toFixed(1)}%`;
     if (format === "number") return String(Number(value));
     return String(value);
+}
+
+/**
+ * A deal is On Hold when someone paused it explicitly. The API's `isStalled`
+ * flag is NOT a substitute: it is also true for deals that merely went quiet
+ * past the stale threshold, so keying off it would mark half the Cold list.
+ * Some drills stringify the flag ("Yes"/"No"), hence the string comparison.
+ */
+function isOnHold(row: Record<string, any>): boolean {
+    return String(row?.detailedStatus ?? "").trim().toLowerCase() === "on hold";
 }
 
 function downloadCSV(columns: DrillColumn[], data: Record<string, any>[], title: string, currencyFormat?: (v: number, opts?: any) => string) {
@@ -525,6 +537,10 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
         }
     };
 
+    // Counted over the rows the user can actually reach (post role/attribute
+    // filter), so the legend never claims paused deals that are filtered out.
+    const onHoldCount = useMemo(() => roleFiltered.filter(isOnHold).length, [roleFiltered]);
+
     const handleDownload = useCallback(() => {
         downloadCSV(columns, sortedData, config.title, currencyFormat);
     }, [config, columns, sortedData, currencyFormat]);
@@ -575,6 +591,20 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
                         </button>
                     </div>
                 </div>
+
+                {/* Legend strip — the caller's explanation of what these rows are,
+                    plus the On Hold key whenever any paused deal is in the list. */}
+                {(config.note || onHoldCount > 0) && (
+                    <div className="px-5 py-1.5 border-b border-slate-100 bg-white flex items-center gap-3 flex-wrap text-[10px] text-slate-500">
+                        {config.note && <span>{config.note}</span>}
+                        {onHoldCount > 0 && (
+                            <span className="inline-flex items-center gap-1">
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold border border-amber-300 bg-amber-100 text-amber-800">On Hold</span>
+                                <span>{onHoldCount} deliberately paused deal{onHoldCount === 1 ? "" : "s"} in this list</span>
+                            </span>
+                        )}
+                    </div>
+                )}
 
                 {/* Attribute filter bar — every filter is multi-select */}
                 {hasRoleFilters && (
@@ -805,10 +835,14 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
                                         // the deal. Keyboard-reachable, since a click target that
                                         // is not a link or button is invisible to tab navigation.
                                         const openable = !!row.id;
+                                        // Paused deals sit in these lists looking like live ones —
+                                        // an amber tint plus a badge on the first column keeps them
+                                        // readable as "parked, not neglected".
+                                        const onHold = isOnHold(row);
                                         return (
                                             <tr
                                                 key={row.id ?? idx}
-                                                className={`border-b border-slate-50 last:border-0 transition-colors ${openable ? "cursor-pointer hover:bg-indigo-50/60" : "hover:bg-slate-50/50"}`}
+                                                className={`border-b border-slate-50 last:border-0 transition-colors ${onHold ? "bg-amber-50/60 " : ""}${openable ? "cursor-pointer hover:bg-indigo-50/60" : "hover:bg-slate-50/50"}`}
                                                 onClick={openable ? () => openOpportunity(row) : undefined}
                                                 onKeyDown={openable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openOpportunity(row); } } : undefined}
                                                 tabIndex={openable ? 0 : undefined}
@@ -816,9 +850,17 @@ export function DrillDownModal({ config, onClose }: { config: DrillDownConfig; o
                                                 title={openable ? "Open this opportunity" : undefined}
                                             >
                                                 <td className="py-2 px-3 text-slate-400 font-mono">{(page - 1) * pageSize + idx + 1}</td>
-                                                {columns.map(col => (
+                                                {columns.map((col, colIdx) => (
                                                     <td key={col.key} className="py-2 px-3 text-slate-700 whitespace-nowrap">
                                                         {formatCell(row[col.key], col.format, currencyFormat)}
+                                                        {onHold && colIdx === 0 && (
+                                                            <span
+                                                                className="ml-1.5 px-1.5 py-0.5 rounded text-[9px] font-semibold border border-amber-300 bg-amber-100 text-amber-800 align-middle"
+                                                                title="This opportunity is On Hold — deliberately paused"
+                                                            >
+                                                                On Hold
+                                                            </span>
+                                                        )}
                                                     </td>
                                                 ))}
                                             </tr>
