@@ -85,6 +85,72 @@ async function resolveOpportunityAccess(
     });
 }
 
+/**
+ * Values offered inside the Stage column filter that are not stages. They are
+ * the badges the list paints beside the stage, and each clause below matches
+ * exactly the rows wearing that badge — so what you filter for is what you saw.
+ *
+ * Keep in sync with STAGE_STATUS_OPTIONS in the Opportunities list page, which
+ * groups these under a "Status" heading in the dropdown.
+ */
+export const STAGE_STATUS_VALUES = ['Extended', 'On Hold', 'Stalled'] as const;
+
+function isStageStatusValue(value: string): boolean {
+    return STAGE_STATUS_VALUES.some((s) => s.toLowerCase() === value.trim().toLowerCase());
+}
+
+/** Inactivity window (days) after which a deal is stalled. Admin > Budget Assumptions. */
+function resolveStalledThreshold(config: { value: unknown } | null): number {
+    const raw = (config?.value as any)?.stalledDaysThreshold;
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : 30;
+}
+
+/**
+ * Prisma WHERE fragment for one pseudo-status.
+ *
+ * "Stalled" mirrors the computed badge: open, not On Hold (the list shows only
+ * one badge and On Hold wins), and either manually paused or untouched past the
+ * threshold. "Untouched" spans updatedAt AND comments, because a Note does not
+ * bump the opportunity's updatedAt — the same rule the row mapper applies.
+ */
+function stageStatusClause(value: string, stalledDaysThreshold: number): any {
+    const normalized = value.trim().toLowerCase();
+    // detailedStatus is nullable, and `NOT (col = 'x')` drops NULL rows in SQL,
+    // so the negation below is spelled out rather than left to Prisma's NOT.
+    const notOnHold = {
+        OR: [
+            { detailedStatus: null },
+            { NOT: { detailedStatus: { equals: 'On Hold', mode: 'insensitive' as const } } },
+        ],
+    };
+
+    if (normalized === 'stalled') {
+        // daysSinceActivity is floored before the `> threshold` test, so a deal
+        // is only stalled once a full extra day has elapsed.
+        const cutoff = new Date(Date.now() - (stalledDaysThreshold + 1) * 86400000);
+        return {
+            AND: [
+                { stage: { name: { notIn: CLOSED_STAGE_NAMES } } },
+                notOnHold,
+                {
+                    OR: [
+                        { isStalled: true },
+                        {
+                            AND: [
+                                { updatedAt: { lte: cutoff } },
+                                { notes: { none: { createdAt: { gt: cutoff } } } },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        };
+    }
+    // Extended / On Hold are plain status values.
+    return { detailedStatus: { equals: value.trim(), mode: 'insensitive' as const } };
+}
+
 // GET /api/opportunities
 export async function listOpportunities(req: Request, res: Response) {
     try {
@@ -129,6 +195,12 @@ export async function listOpportunities(req: Request, res: Response) {
         const practiceFilters = readMulti(req.query.practice);
         const technologyFilters = readMulti(req.query.technology);
 
+        // Started here, awaited in two places: the Stalled pseudo-filter needs
+        // the threshold to build the WHERE clause, and the row mapper needs it
+        // to compute each deal's badge. Kicking it off before either keeps the
+        // common path (no Stalled filter) running in parallel with the query.
+        const stalledConfigPromise = prisma.systemConfig.findUnique({ where: { key: 'budget_assumptions' } });
+
         const andFilters: any[] = [];
 
         const where: any = {};
@@ -167,9 +239,27 @@ export async function listOpportunities(req: Request, res: Response) {
         } else if (stageNames.length > 1) {
             andFilters.push({ stage: { name: { in: stageNames } } });
         }
-        // Inline stage column filter — contains match.
+        // Inline stage column filter — contains match, except for the three
+        // pseudo-values (Extended / On Hold / Stalled), which are statuses the
+        // list paints as a badge next to the stage rather than stages a deal
+        // sits in. They live in the same dropdown because that is where users
+        // look for them. Picked values stay OR'd, matching every other column.
         if (stageFilters.length) {
-            andFilters.push(anyOf(stageFilters, (v) => ({ stage: { name: { contains: v, mode: 'insensitive' } } })));
+            const pseudo = stageFilters.filter(isStageStatusValue);
+            const realStages = stageFilters.filter((v) => !isStageStatusValue(v));
+            const clauses: any[] = realStages.map((v) => ({
+                stage: { name: { contains: v, mode: 'insensitive' as const } },
+            }));
+            if (pseudo.length) {
+                // Only the Stalled clause needs the configured inactivity
+                // window, and resolving it here costs a round-trip before the
+                // main query — so await the shared promise only when asked for.
+                const threshold = pseudo.some((v) => v.toLowerCase() === 'stalled')
+                    ? resolveStalledThreshold(await stalledConfigPromise)
+                    : 0;
+                for (const v of pseudo) clauses.push(stageStatusClause(v, threshold));
+            }
+            andFilters.push(clauses.length === 1 ? clauses[0] : { OR: clauses });
         }
 
         if (clientFilters.length) {
@@ -262,16 +352,12 @@ export async function listOpportunities(req: Request, res: Response) {
                 take: limit,
             }),
             prisma.opportunity.count({ where }),
-            prisma.systemConfig.findUnique({ where: { key: 'budget_assumptions' } }),
+            stalledConfigPromise,
         ]);
 
         // Inactivity threshold (in days) used to flag a deal as stalled —
         // configurable from Admin > Budget Assumptions (default 30).
-        const stalledDaysThreshold = (() => {
-            const raw = (stalledConfig?.value as any)?.stalledDaysThreshold;
-            const n = Number(raw);
-            return Number.isFinite(n) && n > 0 ? n : 30;
-        })();
+        const stalledDaysThreshold = resolveStalledThreshold(stalledConfig);
 
         // Transform for frontend with dynamic intelligence 
         const formatted = opportunities.map(opp => {
@@ -490,7 +576,13 @@ export async function getOpportunityFilterOptions(_req: Request, res: Response) 
 
         res.json({
             name: uniqSorted(opps.map((o) => o.title)),
-            stage: uniqSorted([...stages.map((s) => s.name), ...opps.map((o) => o.stage?.name)]),
+            // Real stages first (sorted), then the status pseudo-values, which
+            // the list page renders under their own heading at the bottom.
+            stage: [
+                ...uniqSorted([...stages.map((s) => s.name), ...opps.map((o) => o.stage?.name)])
+                    .filter((name) => !STAGE_STATUS_VALUES.some((s) => s.toLowerCase() === name.toLowerCase())),
+                ...STAGE_STATUS_VALUES,
+            ],
             salesRep: uniqSorted(opps.map((o) => o.salesRepName)),
             manager: uniqSorted(opps.map((o) => o.managerName)),
             practice: uniqSorted(opps.map((o) => (o as any).practice)),

@@ -23,6 +23,7 @@ export function MultiSelectFilter({
     placeholder = "filter…",
     triggerClassName,
     maxOptions = 300,
+    groupHeadings,
 }: {
     values: string[];
     onChange: (next: string[]) => void;
@@ -30,6 +31,12 @@ export function MultiSelectFilter({
     placeholder?: string;
     triggerClassName?: string;
     maxOptions?: number;
+    /**
+     * Optional heading rendered above a given option, keyed by that option's
+     * value. Lets a caller mixing two kinds of value in one list say where the
+     * second kind starts (e.g. stages, then statuses).
+     */
+    groupHeadings?: Record<string, string>;
 }) {
     const [open, setOpen] = useState(false);
     const [query, setQuery] = useState("");
@@ -138,9 +145,15 @@ export function MultiSelectFilter({
                         ) : (
                             visible.map((o) => {
                                 const isOn = selected.has(o);
+                                const heading = groupHeadings?.[o];
                                 return (
+                                    <div key={o}>
+                                    {heading && (
+                                        <p className="px-2 pt-1.5 pb-0.5 mt-0.5 border-t border-slate-100 text-[9px] uppercase tracking-wide text-slate-400 font-semibold">
+                                            {heading}
+                                        </p>
+                                    )}
                                     <button
-                                        key={o}
                                         type="button"
                                         onClick={() => toggle(o)}
                                         className={`flex items-center gap-1.5 w-full text-left px-2 py-1 text-[11px] ${isOn ? "bg-indigo-50 text-indigo-700" : "text-slate-700 hover:bg-slate-50"}`}
@@ -151,6 +164,7 @@ export function MultiSelectFilter({
                                         </span>
                                         <span className="truncate">{o}</span>
                                     </button>
+                                    </div>
                                 );
                             })
                         )}

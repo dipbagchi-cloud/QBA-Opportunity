@@ -70,6 +70,13 @@ const LIST_COLUMNS: ListColumn[] = [
     { key: 'lastActivity', label: 'Last Activity', sort: 'client' },
 ];
 
+// The Stage filter also offers the three status badges the list paints beside
+// the stage — that is where users look for "on hold". The backend appends them
+// to the stage option list and resolves them against detailedStatus/isStalled
+// (STAGE_STATUS_VALUES in opportunities.controller.ts); here we only mark where
+// the dropdown switches from stages to statuses.
+const STAGE_STATUS_HEADINGS: Record<string, string> = { Extended: 'Status' };
+
 // Columns whose sort is resolved in the DB (sent to the backend).
 const SERVER_SORT_KEYS = LIST_COLUMNS.filter(c => c.sort === 'server').map(c => c.key);
 // Columns with an inline server-side filter input.
@@ -436,6 +443,7 @@ export default function OpportunitiesPage() {
                                                         values={colFilters[col.key] || []}
                                                         onChange={(vals) => setColFilter(col.key, vals)}
                                                         options={filterOptions[col.key] || []}
+                                                        groupHeadings={col.key === 'stage' ? STAGE_STATUS_HEADINGS : undefined}
                                                         placeholder="filter…"
                                                         triggerClassName={`flex items-center justify-between gap-1 w-full min-w-[90px] px-2 py-1 text-[11px] font-normal border rounded bg-white text-left focus:outline-none focus:ring-1 focus:ring-indigo-400 ${colFilters[col.key]?.length ? 'border-indigo-300' : 'border-slate-200'}`}
                                                     />
