@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Check, ChevronDown, X } from "lucide-react";
 
 /**
@@ -23,6 +24,7 @@ export function MultiSelectFilter({
     placeholder = "filter…",
     triggerClassName,
     maxOptions = 300,
+    groupHeadings,
 }: {
     values: string[];
     onChange: (next: string[]) => void;
@@ -30,18 +32,75 @@ export function MultiSelectFilter({
     placeholder?: string;
     triggerClassName?: string;
     maxOptions?: number;
+    /**
+     * Optional heading rendered above a given option, keyed by that option's
+     * value. Lets a caller mixing two kinds of value in one list say where the
+     * second kind starts (e.g. stages, then statuses).
+     */
+    groupHeadings?: Record<string, string>;
 }) {
     const [open, setOpen] = useState(false);
     const [query, setQuery] = useState("");
     const rootRef = useRef<HTMLDivElement>(null);
+    const triggerRef = useRef<HTMLButtonElement>(null);
+    const panelRef = useRef<HTMLDivElement>(null);
     const searchRef = useRef<HTMLInputElement>(null);
+
+    /**
+     * The panel is portalled to <body> and positioned with `fixed` rather than
+     * being absolutely positioned next to the trigger. Callers put this control
+     * inside scrolling table headers, and an ancestor with `overflow` clips a
+     * descendant no matter its z-index — which silently truncated the bottom of
+     * the list. Fixed + portal escapes every overflow ancestor; the trade-off is
+     * that the position must be recomputed while the page scrolls.
+     */
+    const [pos, setPos] = useState<{ left: number; top: number; minWidth: number; maxHeight: number } | null>(null);
+
+    const updatePosition = useCallback(() => {
+        const el = triggerRef.current;
+        if (!el) return;
+        const r = el.getBoundingClientRect();
+        const GAP = 4;
+        const MARGIN = 8;      // keep clear of the viewport edge
+        const PANEL_WIDTH = 280;
+        const spaceBelow = window.innerHeight - r.bottom - GAP - MARGIN;
+        const spaceAbove = r.top - GAP - MARGIN;
+        // Drop upward only when below genuinely can't hold a usable list.
+        const openUp = spaceBelow < 180 && spaceAbove > spaceBelow;
+        const maxHeight = Math.max(140, Math.min(340, openUp ? spaceAbove : spaceBelow));
+        setPos({
+            left: Math.max(MARGIN, Math.min(r.left, window.innerWidth - PANEL_WIDTH - MARGIN)),
+            top: openUp ? Math.max(MARGIN, r.top - GAP - maxHeight) : r.bottom + GAP,
+            minWidth: r.width,
+            maxHeight,
+        });
+    }, []);
+
+    useLayoutEffect(() => {
+        if (open) updatePosition();
+    }, [open, updatePosition]);
+
+    useEffect(() => {
+        if (!open) return;
+        const onReflow = () => updatePosition();
+        // Capture phase so scrolling of the inner table container counts too,
+        // not just the window.
+        window.addEventListener("scroll", onReflow, true);
+        window.addEventListener("resize", onReflow);
+        return () => {
+            window.removeEventListener("scroll", onReflow, true);
+            window.removeEventListener("resize", onReflow);
+        };
+    }, [open, updatePosition]);
 
     useEffect(() => {
         const onDocMouseDown = (e: MouseEvent) => {
-            if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
-                setOpen(false);
-                setQuery("");
-            }
+            const target = e.target as Node;
+            // The panel lives outside rootRef in the portal, so it needs its
+            // own containment check or every click inside would dismiss it.
+            if (rootRef.current?.contains(target) || panelRef.current?.contains(target)) return;
+            setOpen(false);
+            setQuery("");
         };
         document.addEventListener("mousedown", onDocMouseDown);
         return () => document.removeEventListener("mousedown", onDocMouseDown);
@@ -71,6 +130,7 @@ export function MultiSelectFilter({
     return (
         <div ref={rootRef} className="relative" onClick={(e) => e.stopPropagation()}>
             <button
+                ref={triggerRef}
                 type="button"
                 onClick={() => setOpen((o) => !o)}
                 title={values.length > 1 ? values.join(", ") : undefined}
@@ -87,9 +147,14 @@ export function MultiSelectFilter({
                 )}
             </button>
 
-            {open && (
-                <div className="absolute left-0 top-full mt-0.5 z-50 w-max min-w-full max-w-[280px] bg-white border border-slate-200 rounded-md shadow-lg">
-                    <div className="p-1.5 border-b border-slate-100">
+            {open && pos && createPortal(
+                <div
+                    ref={panelRef}
+                    onClick={(e) => e.stopPropagation()}
+                    style={{ left: pos.left, top: pos.top, minWidth: pos.minWidth, maxHeight: pos.maxHeight }}
+                    className="fixed z-[200] w-max max-w-[280px] flex flex-col bg-white border border-slate-200 rounded-md shadow-lg"
+                >
+                    <div className="p-1.5 border-b border-slate-100 shrink-0">
                         <input
                             ref={searchRef}
                             value={query}
@@ -114,7 +179,7 @@ export function MultiSelectFilter({
                         />
                     </div>
 
-                    <div className="flex items-center justify-between px-2 py-1 border-b border-slate-100 text-[10px]">
+                    <div className="flex items-center justify-between px-2 py-1 border-b border-slate-100 text-[10px] shrink-0">
                         <button
                             type="button"
                             onClick={() => onChange(Array.from(new Set([...values, ...visible])))}
@@ -132,15 +197,24 @@ export function MultiSelectFilter({
                         </button>
                     </div>
 
-                    <div className="max-h-52 overflow-y-auto py-0.5">
+                    {/* flex-1 + min-h-0 so the list absorbs whatever height is
+                        left after the search box and the select-all row, and
+                        scrolls internally instead of overflowing the panel. */}
+                    <div className="flex-1 min-h-0 overflow-y-auto py-0.5">
                         {visible.length === 0 ? (
                             <p className="px-2 py-1.5 text-[11px] text-slate-400">No matching values</p>
                         ) : (
                             visible.map((o) => {
                                 const isOn = selected.has(o);
+                                const heading = groupHeadings?.[o];
                                 return (
+                                    <div key={o}>
+                                    {heading && (
+                                        <p className="px-2 pt-1.5 pb-0.5 mt-0.5 border-t border-slate-100 text-[9px] uppercase tracking-wide text-slate-400 font-semibold">
+                                            {heading}
+                                        </p>
+                                    )}
                                     <button
-                                        key={o}
                                         type="button"
                                         onClick={() => toggle(o)}
                                         className={`flex items-center gap-1.5 w-full text-left px-2 py-1 text-[11px] ${isOn ? "bg-indigo-50 text-indigo-700" : "text-slate-700 hover:bg-slate-50"}`}
@@ -151,11 +225,13 @@ export function MultiSelectFilter({
                                         </span>
                                         <span className="truncate">{o}</span>
                                     </button>
+                                    </div>
                                 );
                             })
                         )}
                     </div>
-                </div>
+                </div>,
+                document.body
             )}
         </div>
     );

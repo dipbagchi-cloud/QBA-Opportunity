@@ -70,6 +70,13 @@ const LIST_COLUMNS: ListColumn[] = [
     { key: 'lastActivity', label: 'Last Activity', sort: 'client' },
 ];
 
+// The Stage filter also offers the three status badges the list paints beside
+// the stage — that is where users look for "on hold". The backend appends them
+// to the stage option list and resolves them against detailedStatus/isStalled
+// (STAGE_STATUS_VALUES in opportunities.controller.ts); here we only mark where
+// the dropdown switches from stages to statuses.
+const STAGE_STATUS_HEADINGS: Record<string, string> = { Extended: 'Status' };
+
 // Columns whose sort is resolved in the DB (sent to the backend).
 const SERVER_SORT_KEYS = LIST_COLUMNS.filter(c => c.sort === 'server').map(c => c.key);
 // Columns with an inline server-side filter input.
@@ -436,6 +443,7 @@ export default function OpportunitiesPage() {
                                                         values={colFilters[col.key] || []}
                                                         onChange={(vals) => setColFilter(col.key, vals)}
                                                         options={filterOptions[col.key] || []}
+                                                        groupHeadings={col.key === 'stage' ? STAGE_STATUS_HEADINGS : undefined}
                                                         placeholder="filter…"
                                                         triggerClassName={`flex items-center justify-between gap-1 w-full min-w-[90px] px-2 py-1 text-[11px] font-normal border rounded bg-white text-left focus:outline-none focus:ring-1 focus:ring-indigo-400 ${colFilters[col.key]?.length ? 'border-indigo-300' : 'border-slate-200'}`}
                                                     />
@@ -545,19 +553,41 @@ export default function OpportunitiesPage() {
                                                     }`}>
                                                         {opp.stage}
                                                     </span>
-                                                    {opp.detailedStatus === 'On Hold' ? (
-                                                        <span className="text-[10px] text-amber-800 font-medium px-1.5 py-0.5 bg-amber-100 rounded-md border border-amber-300">
-                                                            On Hold
-                                                        </span>
-                                                    ) : opp.status === 'stalled' ? (
-                                                        <span className="text-[10px] text-orange-800 font-medium px-1.5 py-0.5 bg-orange-100 rounded-md border border-orange-300">
-                                                            Stalled
-                                                        </span>
-                                                    ) : opp.detailedStatus && !['Lost', 'Won', 'Open'].includes(opp.detailedStatus) ? (
-                                                        <span className="text-[10px] text-slate-500 font-medium px-1 bg-slate-100 rounded border border-slate-200">
-                                                            {opp.detailedStatus}
-                                                        </span>
-                                                    ) : null}
+                                                    {/* Where the deal sits in the workflow and how long since
+                                                        anyone touched it are separate facts — a deal can be
+                                                        Extended AND untouched for a month. These used to
+                                                        compete for one slot, so "Stalled" hid the workflow
+                                                        status and a Status filter looked like it returned the
+                                                        wrong rows. Both render now. */}
+                                                    {(() => {
+                                                        const onHold = opp.detailedStatus === 'On Hold';
+                                                        // The On Hold toggle sets the stalled flag too, so
+                                                        // showing both would state the same fact twice.
+                                                        const stalled = !onHold && opp.status === 'stalled';
+                                                        const workflow = opp.detailedStatus && !['Lost', 'Won', 'Open', 'On Hold'].includes(opp.detailedStatus)
+                                                            ? opp.detailedStatus
+                                                            : null;
+                                                        if (!workflow && !onHold && !stalled) return null;
+                                                        return (
+                                                            <div className="flex flex-wrap items-center gap-1">
+                                                                {workflow && (
+                                                                    <span className="text-[10px] text-slate-500 font-medium px-1 bg-slate-100 rounded border border-slate-200">
+                                                                        {workflow}
+                                                                    </span>
+                                                                )}
+                                                                {onHold && (
+                                                                    <span className="text-[10px] text-amber-800 font-medium px-1.5 py-0.5 bg-amber-100 rounded-md border border-amber-300" title="Deliberately paused">
+                                                                        On Hold
+                                                                    </span>
+                                                                )}
+                                                                {stalled && (
+                                                                    <span className="text-[10px] text-orange-800 font-medium px-1.5 py-0.5 bg-orange-100 rounded-md border border-orange-300" title="No edit or comment past the stale threshold">
+                                                                        Stalled
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })()}
                                                 </div>
                                             </td>
                                             <td className="py-2.5 px-4 text-[11px] whitespace-nowrap">

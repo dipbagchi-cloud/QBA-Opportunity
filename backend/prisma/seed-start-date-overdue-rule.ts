@@ -58,7 +58,7 @@ async function main() {
   const data = {
     name: RULE_NAME,
     description:
-      'Daily time-driven workflow: when the Tentative Start Date passes today, the opportunity is auto-reverted to Qualification with detailedStatus="Extended" and Sales is asked to update the revised start date. Project duration stays the same — end date recomputes when Sales saves. Disable to stop both the auto-revert and the notification.',
+      'Daily time-driven workflow: when the Tentative Start Date passes today, the opportunity is auto-reverted to Qualification with detailedStatus="Extended" and Sales is asked to update the revised start date. Project duration stays the same — end date recomputes when Sales saves. On Hold opportunities are skipped entirely (no status change, no notification) until they are taken off hold. Disable to stop both the auto-revert and the notification.',
     isActive: true,
     ruleType: 'time_driven',
     triggerType: 'start_date_overdue',

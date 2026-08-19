@@ -1173,6 +1173,11 @@ export default function DashboardPage() {
         ...stageProjectColumns,
         { key: 'lastActivity', label: 'Last Activity', format: 'text' as const },
     ];
+
+    // One wording for the Hot/Cold split, reused by the tile legend and by the
+    // note inside each popup, so the two can never drift apart.
+    const HOT_LEGEND = 'Hot — open deal edited or commented on within the stale threshold (Admin › Budget Assumptions, default 30 days).';
+    const COLD_LEGEND = 'Cold — open deal with no edit or comment past that threshold, or put On Hold.';
     // Row 3 — by workflow PHASE, which is a different question from row 2's
     // per-stage split: Sales covers the whole sales motion (Proposal through
     // Negotiation), so the two rows never simply repeat each other's numbers.
@@ -1223,7 +1228,7 @@ export default function DashboardPage() {
             badgeColor: 'bg-orange-50 text-orange-700 border-orange-200',
             count: hotOpps.length,
             totalValue: hotOpps.reduce((s, o) => s + (Number(o.value) || 0), 0),
-            drill: { title: 'Hot Opportunities — Edited or Commented Recently', columns: portfolioColumns, data: hotOpps },
+            drill: { title: 'Hot Opportunities — Edited or Commented Recently', note: HOT_LEGEND, columns: portfolioColumns, data: hotOpps },
         },
         {
             label: 'Cold',
@@ -1231,7 +1236,7 @@ export default function DashboardPage() {
             badgeColor: 'bg-cyan-50 text-cyan-700 border-cyan-200',
             count: coldOpps.length,
             totalValue: coldOpps.reduce((s, o) => s + (Number(o.value) || 0), 0),
-            drill: { title: 'Cold Opportunities — No Recent Edit or Comment', columns: portfolioColumns, data: coldOpps },
+            drill: { title: 'Cold Opportunities — No Recent Edit or Comment', note: COLD_LEGEND, columns: portfolioColumns, data: coldOpps },
         },
     ];
 
@@ -1461,6 +1466,20 @@ export default function DashboardPage() {
                         <p className="text-[10px] text-slate-400 truncate leading-tight">{tile.count} {tile.count === 1 ? 'opportunity' : 'opportunities'}</p>
                     </ExpandableCard>
                 ))}
+            </div>
+
+            {/* Legend for the Hot/Cold tiles above — "hot" and "cold" are not
+                self-explanatory, and both are activity signals rather than
+                anything about deal value or probability. */}
+            <div className="flex items-start gap-x-4 gap-y-1 flex-wrap text-[10px] text-slate-400 -mt-0.5 px-0.5">
+                <span className="inline-flex items-center gap-1">
+                    <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold border bg-orange-50 text-orange-700 border-orange-200">Hot</span>
+                    <span>{HOT_LEGEND.replace(/^Hot — /, '')}</span>
+                </span>
+                <span className="inline-flex items-center gap-1">
+                    <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold border bg-cyan-50 text-cyan-700 border-cyan-200">Cold</span>
+                    <span>{COLD_LEGEND.replace(/^Cold — /, '')}</span>
+                </span>
             </div>
 
             {/* Pending Actions — only the logged-in user's own open opportunities */}
