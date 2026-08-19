@@ -243,13 +243,21 @@ export async function listOpportunities(req: Request, res: Response) {
         // pseudo-values (Extended / On Hold / Stalled), which are statuses the
         // list paints as a badge next to the stage rather than stages a deal
         // sits in. They live in the same dropdown because that is where users
-        // look for them. Picked values stay OR'd, matching every other column.
+        // look for them.
+        //
+        // The two kinds narrow each other: stages OR among themselves, statuses
+        // OR among themselves, and the two groups AND. Picking "Discovery" and
+        // "Extended" means the Discovery deals that are Extended — not the union
+        // of every Discovery deal and every Extended one, which is a bigger set
+        // than either and answers no question anyone asked.
         if (stageFilters.length) {
             const pseudo = stageFilters.filter(isStageStatusValue);
             const realStages = stageFilters.filter((v) => !isStageStatusValue(v));
-            const clauses: any[] = realStages.map((v) => ({
-                stage: { name: { contains: v, mode: 'insensitive' as const } },
-            }));
+            if (realStages.length) {
+                andFilters.push(anyOf(realStages, (v) => ({
+                    stage: { name: { contains: v, mode: 'insensitive' } },
+                })));
+            }
             if (pseudo.length) {
                 // Only the Stalled clause needs the configured inactivity
                 // window, and resolving it here costs a round-trip before the
@@ -257,9 +265,8 @@ export async function listOpportunities(req: Request, res: Response) {
                 const threshold = pseudo.some((v) => v.toLowerCase() === 'stalled')
                     ? resolveStalledThreshold(await stalledConfigPromise)
                     : 0;
-                for (const v of pseudo) clauses.push(stageStatusClause(v, threshold));
+                andFilters.push(anyOf(pseudo, (v) => stageStatusClause(v, threshold)));
             }
-            andFilters.push(clauses.length === 1 ? clauses[0] : { OR: clauses });
         }
 
         if (clientFilters.length) {
