@@ -128,6 +128,8 @@ interface Opportunity {
     actualCloseDate?: string;
     createdAt?: string;
     status: string;
+    /** Workflow status the deal carries: Extended, On Hold, Sent for Re-estimate, … */
+    detailedStatus?: string | null;
     healthScore: number;
     daysInStage: number;
     daysToClose?: number | null;
@@ -153,6 +155,7 @@ interface PendingRow {
     dueRaw?: string;          // raw expectedCloseDate
     days: number;
     isStalled: boolean;
+    detailedStatus?: string;  // Extended, Sent for Re-estimate, … (never On Hold — filtered out)
     value: number;
 }
 
@@ -219,6 +222,11 @@ function PendingActionsPanel({
         return opportunities
             .filter(o => {
                 if (CLOSED.includes(o.currentStage)) return false;
+                // On Hold is a deliberate pause, so nothing is pending on it —
+                // listing it here asks the user to act on a deal someone
+                // decided to park. Same reasoning as the stale-deal and
+                // start-date reminders, which both skip On Hold.
+                if (o.detailedStatus === 'On Hold') return false;
                 // Only the logged-in user's pending actions — they own it, sell it,
                 // manage it, or are the assigned presales estimator.
                 return o.owner === userName
@@ -230,7 +238,11 @@ function PendingActionsPanel({
                 id: o.id,
                 opportunity: o.name,
                 client: o.client,
-                stage: STAGE_DISPLAY[o.currentStage] || o.currentStage,
+                // The real stage, not the workflow-phase label. "Presales" and
+                // "Sales" collapse three stages into two and don't match what
+                // the opportunity itself shows, so an action row could not be
+                // tied back to the stage it came from.
+                stage: o.currentStage,
                 rawStage: o.currentStage,
                 action: actionForStage(o.currentStage),
                 owner: ownerFor(o),
@@ -238,6 +250,7 @@ function PendingActionsPanel({
                 dueRaw: o.expectedCloseDate,
                 days: o.daysInStage ?? 0,
                 isStalled: o.isStalled,
+                detailedStatus: o.detailedStatus || undefined,
                 value: Number(o.value) || 0,
             }));
     }, [opportunities, userName]);
@@ -250,6 +263,7 @@ function PendingActionsPanel({
             r.opportunity.toLowerCase().includes(q) ||
             r.client.toLowerCase().includes(q) ||
             r.stage.toLowerCase().includes(q) ||
+            (r.detailedStatus || '').toLowerCase().includes(q) ||
             r.action.toLowerCase().includes(q) ||
             r.owner.toLowerCase().includes(q)
         );
@@ -264,7 +278,8 @@ function PendingActionsPanel({
                 const fv = val.trim().toLowerCase();
                 switch (key as PendingSortKey) {
                     case 'opportunity': return (r.opportunity + ' ' + r.client).toLowerCase().includes(fv);
-                    case 'stage': return r.stage.toLowerCase().includes(fv);
+                    // Stage column filter also matches the status badge shown in it.
+                    case 'stage': return (r.stage + ' ' + (r.detailedStatus || '')).toLowerCase().includes(fv);
                     case 'action': return r.action.toLowerCase().includes(fv);
                     case 'owner': return r.owner.toLowerCase().includes(fv);
                     case 'due': return fmtDate(r.dueRaw).toLowerCase().includes(fv);
@@ -411,9 +426,18 @@ function PendingActionsPanel({
                                         <div className="text-[9px] text-slate-400 truncate max-w-[180px] leading-tight" title={r.client}>{r.client}</div>
                                     </td>
                                     <td className="px-2 py-0.5">
-                                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-semibold border ${STAGE_COLORS[r.rawStage] || 'bg-slate-50 text-slate-600 border-slate-200'}`}>
-                                            {r.stage}
-                                        </span>
+                                        <div className="flex flex-wrap items-center gap-1">
+                                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-semibold border ${STAGE_COLORS[r.rawStage] || 'bg-slate-50 text-slate-600 border-slate-200'}`}>
+                                                {r.stage}
+                                            </span>
+                                            {/* Workflow status alongside the stage, as the opportunity
+                                                list shows it — "Extended" changes what the action means. */}
+                                            {r.detailedStatus && !['Lost', 'Won', 'Open'].includes(r.detailedStatus) && (
+                                                <span className="px-1 rounded text-[9px] font-medium text-slate-500 bg-slate-100 border border-slate-200" title={`Status: ${r.detailedStatus}`}>
+                                                    {r.detailedStatus}
+                                                </span>
+                                            )}
+                                        </div>
                                     </td>
                                     <td className="px-2 py-0.5 text-slate-700">{r.action}</td>
                                     <td className="px-2 py-0.5 text-slate-600 truncate max-w-[160px]" title={r.owner}>{r.owner}</td>
