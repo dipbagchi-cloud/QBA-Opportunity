@@ -361,6 +361,42 @@ export interface QPeopleTimesheetTotals {
   employees: number;
 }
 
+export interface QPeopleTimesheetEntry {
+  employeeId: string;
+  employeeName: string;
+  date: string;          // YYYY-MM-DD — sheets are one per employee per day
+  month: string;         // YYYY-MM
+  hours: number;
+}
+
+/**
+ * Per-day timesheet entries for one project.
+ *
+ * Only docstatus 1 (submitted) counts: 14,238 of the 100,866 sheets are still
+ * drafts, and unapproved time must not inflate actual cost. Note Frappe's
+ * separate workflow `status` field disagrees badly — it reads "Draft" on 81,267
+ * sheets — and is not used here.
+ */
+export async function fetchTimesheetEntries(projectId: string, force = false)
+  : Promise<QPeopleTimesheetEntry[]> {
+  return cached(`ts-entries:${projectId}`, async () => {
+    const rows = await list<any>('Timesheet', [
+      'name', 'employee', 'employee_name', 'start_date', 'end_date',
+      'total_hours', 'docstatus',
+    ], [['parent_project', '=', projectId], ['docstatus', '=', 1]]);
+
+    return rows
+      .filter((r) => r.start_date && Number(r.total_hours) > 0)
+      .map((r) => ({
+        employeeId: r.employee,
+        employeeName: r.employee_name || r.employee,
+        date: String(r.start_date).slice(0, 10),
+        month: String(r.start_date).slice(0, 7),
+        hours: Number(r.total_hours) || 0,
+      }));
+  }, force);
+}
+
 export async function fetchTimesheetTotalsForProject(projectId: string, force = false)
   : Promise<QPeopleTimesheetTotals> {
   return cached(`ts:${projectId}`, async () => {

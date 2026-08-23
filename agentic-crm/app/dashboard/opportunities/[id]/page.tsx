@@ -47,11 +47,13 @@ import { AssignPresalesModal } from "./components/AssignPresalesModal";
 import { SowStudio } from "./components/SowStudio";
 import { StageTimeline, StageHistoryEntry } from "./components/StageTimeline";
 import ProjectResourceMappingTab from "./components/ProjectResourceMappingTab";
+import ActualBookingCostTab from "./components/ActualBookingCostTab";
 
 // Static dropdowns (not master-data driven)
 // Sub-tabs inside the Actual GOM step. Project / Resource Mapping is the first
-// thing that must happen on a won deal, so it leads.
-const ACTUAL_GOM_SUBTABS = ["Project / Resource Mapping"];
+// thing that must happen on a won deal, so it leads; Actual Booking & Cost
+// depends on that mapping existing.
+const ACTUAL_GOM_SUBTABS = ["Project / Resource Mapping", "Actual Booking & Cost"];
 
 const DURATION_UNITS = ["days", "weeks", "months"];
 const ARCHITECTS = ["David Chen", "Sarah Jones", "Rahul Gupta", "Emily White"];
@@ -3791,6 +3793,10 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             opportunityId={id}
                             canEdit={canEditActualGom}
                         />
+                    )}
+
+                    {actualGomSubTab === 'Actual Booking & Cost' && (
+                        <ActualBookingCostTab opportunityId={id} />
                     )}
                 </div>
             )}

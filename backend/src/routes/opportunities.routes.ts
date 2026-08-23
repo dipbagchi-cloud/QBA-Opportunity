@@ -31,6 +31,7 @@ import {
     getProjectAllocation,
     listSkillsets,
 } from '../controllers/actual-gom.controller';
+import { getActualCost } from '../controllers/actual-cost.controller';
 import { authenticate, authorize, authorizeAny, authorizeAdmin } from '../middleware/auth';
 import { PERMISSIONS } from '../lib/permissions';
 
@@ -111,5 +112,6 @@ router.delete('/:id/qpeople/mapping', authorizeAdmin, deleteMapping);
 router.get('/:id/qpeople/resource-plan', authorizeAdmin, getResourcePlan);
 router.put('/:id/qpeople/resource-plan', authorizeAdmin, saveResourcePlan);
 router.get('/:id/qpeople/allocation', authorizeAdmin, getProjectAllocation);
+router.get('/:id/qpeople/actual-cost', authorizeAdmin, getActualCost);
 
 export default router;
