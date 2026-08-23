@@ -1336,6 +1336,31 @@ model QPeopleProjectMapping {
   @@map("qpeople_project_mappings")
 }
 
+// TEMPORARY bridge: employee skillset / experience while Q-People's own
+// custom_skillset_gom field is unpopulated (0 of 354 employees as of 2026-08-23).
+//
+// Sourced from the "Associate Mapping" sheet of the HR workbook. Q-People always
+// WINS when it has a value — see getEmployeesResolved() in lib/qpeople.ts — so
+// this table quietly stops being consulted as HR fills the real field, and can
+// then be dropped without touching the matching logic.
+model AssociateSkillOverride {
+  id             String   @id @default(cuid())
+  employeeId     String   @unique          // Q-People Employee.name, e.g. "QBA0460"
+  employeeName   String?
+  skillset       String?                    // maps to the Skillset GOM taxonomy
+  experienceBand String?                    // verbose form, e.g. "0 - 2 Years"
+  experienceYears Float?                    // parsed from "3 Years, 6 Months"
+  domain         String?
+  jobLevel       String?
+  status         String?
+  source         String   @default("excel")
+  importedAt     DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([skillset])
+  @@map("associate_skill_overrides")
+}
+
 // The delivery-side resource plan for a won deal, seeded from the presales
 // Resource Assignment and then edited against reality.
 //

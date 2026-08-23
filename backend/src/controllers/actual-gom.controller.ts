@@ -8,7 +8,7 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import {
-  fetchProjects, fetchEmployees, fetchCurrentCommitment, fetchAllocations,
+  fetchProjects, getEmployeesResolved, fetchCurrentCommitment, fetchAllocations,
   fetchTimesheetTotalsForProject, matchEmployees, skillsetCoverage,
   clearQPeopleCache, QPeopleError,
 } from '../lib/qpeople';
@@ -257,7 +257,7 @@ export async function getResourcePlan(req: Request, res: Response) {
     }
 
     const [employees, commitment, coverage] = await Promise.all([
-      fetchEmployees(force),
+      getEmployeesResolved(force),
       fetchCurrentCommitment(force).catch(() => new Map<string, number>()),
       skillsetCoverage(force),
     ]);

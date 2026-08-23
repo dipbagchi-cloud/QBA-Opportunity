@@ -14,7 +14,7 @@
  *  - Employee Project Allocation         2660 monthly docs, child `project_allocations`
  *                                        carries allocation_percent / allowed / booked hours
  */
-import { PrismaClient } from '@prisma/client';
+import { prisma } from './prisma';
 
 const BASE = process.env.QPEOPLE_BASE_URL || 'https://hr.qbadvisory.com';
 
@@ -63,6 +63,21 @@ async function list<T = any>(doctype: string, fields: string[], filters?: any[],
   params.set('limit_page_length', String(limit));
   if (filters?.length) params.set('filters', JSON.stringify(filters));
   const json = await qget<{ data: T[] }>(`/api/resource/${encodeURIComponent(doctype)}?${params}`);
+  return json.data || [];
+}
+
+/**
+ * Frappe serves a child doctype directly when `parent` names the doctype that
+ * owns it. That turns "expand every parent's child table" from N requests into
+ * one, which is the difference between a 2s response and a timeout.
+ */
+async function listChild<T = any>(childDoctype: string, parentDoctype: string, fields: string[]): Promise<T[]> {
+  const params = new URLSearchParams();
+  params.set('fields', JSON.stringify(fields));
+  params.set('limit_page_length', '0');
+  params.set('parent', parentDoctype);
+  const json = await qget<{ data: T[] }>(
+    `/api/resource/${encodeURIComponent(childDoctype)}?${params}`, 60000);
   return json.data || [];
 }
 
@@ -159,6 +174,8 @@ export interface QPeopleEmployee {
   experienceYears: number | null;   // custom_overall_experience, parsed from string
   dateOfJoining: string | null;
   timesheetApplicable: boolean;
+  /** Band straight from the HR workbook, used only when neither side has years. */
+  experienceBandFallback?: string | null;
 }
 
 export async function fetchEmployees(force = false): Promise<QPeopleEmployee[]> {
@@ -205,10 +222,13 @@ export interface QPeopleAllocationLine {
 }
 
 /**
- * Allocation docs are per employee per month, with a child table of projects.
- * The list API does not expand child tables, so each doc must be fetched — 2660
- * docs is far too many. We therefore fetch the parents (cheap) for the requested
- * period and only expand those, which keeps it to a few dozen requests.
+ * Allocation docs are per employee per month with a child table of projects.
+ *
+ * The obvious approach — fetch each parent doc to expand its children — needs
+ * ~333 sequential requests for 2660 docs and reliably times the endpoint out.
+ * Frappe will however serve a child doctype directly when `parent` names the
+ * owning doctype, which returns all 6881 lines in a single ~2s call. So: two
+ * list requests, joined in memory on the parent name.
  */
 export async function fetchAllocations(opts: { year?: number; months?: string[] } = {}, force = false)
   : Promise<QPeopleAllocationLine[]> {
@@ -218,64 +238,56 @@ export async function fetchAllocations(opts: { year?: number; months?: string[] 
     if (opts.year) filters.push(['year', '=', opts.year]);
     if (opts.months?.length) filters.push(['month', 'in', opts.months]);
 
-    const parents = await list<any>('Employee Project Allocation',
-      ['name', 'employee', 'employee_name', 'month', 'year', 'total_allocation'], filters);
+    const [parents, lines] = await Promise.all([
+      list<any>('Employee Project Allocation',
+        ['name', 'employee', 'employee_name', 'month', 'year', 'total_allocation'], filters),
+      listChild<any>('Project Allocation Item', 'Employee Project Allocation',
+        ['parent', 'project', 'project_name', 'project_manager',
+          'allocation_percent', 'allowed_hours', 'booked_hours']),
+    ]);
 
+    const byName = new Map(parents.map((p) => [p.name, p]));
     const out: QPeopleAllocationLine[] = [];
-    // Bounded concurrency — Frappe rate-limits aggressive parallel fetches.
-    const BATCH = 8;
-    for (let i = 0; i < parents.length; i += BATCH) {
-      const slice = parents.slice(i, i + BATCH);
-      const docs = await Promise.all(slice.map(async (p) => {
-        try {
-          const j = await qget<{ data: any }>(
-            `/api/resource/${encodeURIComponent('Employee Project Allocation')}/${encodeURIComponent(p.name)}`);
-          return { parent: p, doc: j.data };
-        } catch {
-          return null;   // one bad doc must not sink the whole view
-        }
-      }));
-      for (const entry of docs) {
-        if (!entry?.doc) continue;
-        const lines: any[] = entry.doc.project_allocations || [];
-        for (const l of lines) {
-          out.push({
-            employeeId: entry.parent.employee,
-            employeeName: entry.parent.employee_name,
-            month: entry.parent.month,
-            year: entry.parent.year,
-            projectId: l.project || null,
-            projectName: l.project_name || null,
-            projectManager: l.project_manager || null,
-            allocationPercent: Number(l.allocation_percent) || 0,
-            allowedHours: Number(l.allowed_hours) || 0,
-            bookedHours: Number(l.booked_hours) || 0,
-          });
-        }
-      }
+    for (const l of lines) {
+      const p = byName.get(l.parent);
+      if (!p) continue;                     // filtered out by year/month
+      out.push({
+        employeeId: p.employee,
+        employeeName: p.employee_name,
+        month: p.month,
+        year: p.year,
+        projectId: l.project || null,
+        projectName: l.project_name || null,
+        projectManager: l.project_manager || null,
+        allocationPercent: Number(l.allocation_percent) || 0,
+        allowedHours: Number(l.allowed_hours) || 0,
+        bookedHours: Number(l.booked_hours) || 0,
+      });
     }
     return out;
   }, force);
 }
 
-/** Current commitment per employee: summed allocation % over the latest period held. */
+/**
+ * Current commitment per employee. total_allocation already sits on the parent
+ * doc, so this needs the parent list only — no child expansion at all. Takes the
+ * busiest month of the most recent year as the representative figure.
+ */
 export async function fetchCurrentCommitment(force = false): Promise<Map<string, number>> {
-  const all = await fetchAllocations({}, force);
-  if (!all.length) return new Map();
-  const latestYear = Math.max(...all.map((a) => a.year || 0));
-  const inYear = all.filter((a) => a.year === latestYear);
-  const byEmployee = new Map<string, number>();
-  // Take the busiest month in the latest year as the representative commitment.
-  const byEmpMonth = new Map<string, number>();
-  for (const a of inYear) {
-    const k = `${a.employeeId}|${a.month}`;
-    byEmpMonth.set(k, (byEmpMonth.get(k) || 0) + a.allocationPercent);
-  }
-  for (const [k, pct] of byEmpMonth) {
-    const emp = k.split('|')[0];
-    byEmployee.set(emp, Math.max(byEmployee.get(emp) || 0, pct));
-  }
-  return byEmployee;
+  return cached('commitment', async () => {
+    const parents = await list<any>('Employee Project Allocation',
+      ['employee', 'month', 'year', 'total_allocation']);
+    const byEmployee = new Map<string, number>();
+    if (!parents.length) return byEmployee;
+
+    const latestYear = Math.max(...parents.map((p) => Number(p.year) || 0));
+    for (const p of parents) {
+      if (Number(p.year) !== latestYear) continue;
+      const pct = Number(p.total_allocation) || 0;
+      byEmployee.set(p.employee, Math.max(byEmployee.get(p.employee) || 0, pct));
+    }
+    return byEmployee;
+  }, force);
 }
 
 // ── Timesheets (actual hours / cost — feeds Actual GOM) ─────────────────────
@@ -372,22 +384,64 @@ export function matchEmployees(
     });
 }
 
+// ── Resolved employees (Q-People + temporary Excel overlay) ─────────────────
+
 /**
- * Why a match list is empty. Without this the UI cannot tell "nobody has that
- * skill" from "nobody has been tagged at all", and the second is the situation
- * today (0 of 354 employees carry a Skillset GOM).
+ * Q-People is the system of record, but its custom_skillset_gom is unpopulated
+ * today, so the HR "Associate Mapping" workbook fills the gap via
+ * associate_skill_overrides. Precedence is deliberate and one-way:
+ *
+ *   skillset / experience from Q-People  ->  used whenever present
+ *   otherwise                            ->  taken from the override table
+ *
+ * So each employee flips to the real source the moment HR tags them, with no
+ * code change and no re-import; once every employee is tagged the override
+ * table stops being read at all.
+ */
+export async function getEmployeesResolved(force = false): Promise<QPeopleEmployee[]> {
+  const [employees, overrides] = await Promise.all([
+    fetchEmployees(force),
+    prisma.associateSkillOverride.findMany().catch(() => []),
+  ]);
+  const byId = new Map(overrides.map((o) => [o.employeeId, o]));
+
+  return employees.map((e) => {
+    const o = byId.get(e.id);
+    if (!o) return e;
+    return {
+      ...e,
+      skillsetGom: e.skillsetGom || o.skillset || null,
+      experienceYears: e.experienceYears !== null ? e.experienceYears : (o.experienceYears ?? null),
+      // The workbook also carries a band directly; keep it for display when the
+      // numeric years are missing on both sides.
+      experienceBandFallback: o.experienceBand || null,
+    } as QPeopleEmployee;
+  });
+}
+
+/**
+ * Why a match list is empty — and which source is currently carrying it.
+ * Without this the UI cannot tell "nobody has that skill" from "nobody has been
+ * tagged at all", and the second was the situation before the workbook import.
  */
 export async function skillsetCoverage(force = false) {
-  const employees = await fetchEmployees(force);
-  const active = employees.filter((e) => e.status === 'Active');
+  const [raw, overrides] = await Promise.all([
+    fetchEmployees(force),
+    prisma.associateSkillOverride.findMany().catch(() => []),
+  ]);
+  const resolved = await getEmployeesResolved(force);
+
+  const active = resolved.filter((e) => e.status === 'Active');
   const tagged = active.filter((e) => !!e.skillsetGom);
-  const withExperience = active.filter((e) => e.experienceYears !== null);
+  const fromQPeople = raw.filter((e) => e.status === 'Active' && !!e.skillsetGom).length;
+
   return {
     activeEmployees: active.length,
     taggedWithSkillset: tagged.length,
-    withExperience: withExperience.length,
+    taggedInQPeople: fromQPeople,
+    taggedFromOverride: Math.max(0, tagged.length - fromQPeople),
+    overrideRows: overrides.length,
+    withExperience: active.filter((e) => e.experienceYears !== null).length,
     ready: tagged.length > 0,
   };
 }
-
-export type { PrismaClient };
