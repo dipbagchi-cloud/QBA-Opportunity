@@ -128,6 +128,9 @@ export default function ProjectResourceMappingTab({
     const [rows, setRows] = useState<PlanRow[]>([]);
     const [coverage, setCoverage] = useState<Coverage | null>(null);
     const [skillsets, setSkillsets] = useState<string[]>([]);
+    // Same admin-managed lookup the presales Resource Assignment uses, so the
+    // delivery plan speaks the same vocabulary as the estimate it came from.
+    const [projectRoles, setProjectRoles] = useState<string[]>([]);
     const [dirty, setDirty] = useState(false);
 
     const base = `${API_URL}/api/opportunities/${opportunityId}/qpeople`;
@@ -137,11 +140,12 @@ export default function ProjectResourceMappingTab({
         setError(null);
         try {
             const qs = refresh ? "?refresh=true" : "";
-            const [projRes, mapRes, planRes, skillRes] = await Promise.all([
+            const [projRes, mapRes, planRes, skillRes, roleRes] = await Promise.all([
                 fetch(`${base}/projects${qs}`, { headers: getAuthHeaders() }),
                 fetch(`${base}/mapping`, { headers: getAuthHeaders() }),
                 fetch(`${base}/resource-plan${qs}`, { headers: getAuthHeaders() }),
                 fetch(`${API_URL}/api/opportunities/qpeople/skillsets`, { headers: getAuthHeaders() }),
+                fetch(`${API_URL}/api/master/project-roles`, { headers: getAuthHeaders() }),
             ]);
 
             if (!projRes.ok) {
@@ -162,6 +166,14 @@ export default function ProjectResourceMappingTab({
                 setCoverage(planJson.coverage || null);
             }
             if (skillRes.ok) setSkillsets(await skillRes.json());
+            if (roleRes.ok) {
+                const roles = await roleRes.json();
+                setProjectRoles(
+                    (Array.isArray(roles) ? roles : [])
+                        .map((r: any) => (typeof r === "string" ? r : r?.name))
+                        .filter(Boolean),
+                );
+            }
             setDirty(false);
         } catch (e: any) {
             setError(e?.message || "Failed to load");
@@ -523,13 +535,26 @@ export default function ProjectResourceMappingTab({
                                                 </select>
                                             </td>
                                             <td className="p-2">
-                                                <input
+                                                {/* Admin-managed lookup, not free text — same list the presales
+                                                    Resource Assignment uses. A role seeded from the estimate that
+                                                    is no longer in the lookup is kept as an extra option so
+                                                    editing another column cannot silently blank it. */}
+                                                <select
                                                     value={r.projectRole || ""}
                                                     onChange={(e) => patchRow(r.id, { projectRole: e.target.value })}
                                                     disabled={!canEdit}
                                                     className="w-full px-2 py-1 text-xs border border-slate-300 rounded bg-white disabled:bg-slate-50"
-                                                    placeholder="Role"
-                                                />
+                                                >
+                                                    <option value="">— select role —</option>
+                                                    {projectRoles.map((role) => (
+                                                        <option key={role} value={role}>{role}</option>
+                                                    ))}
+                                                    {r.projectRole && !projectRoles.includes(r.projectRole) && (
+                                                        <option value={r.projectRole}>
+                                                            {r.projectRole} (not in lookup)
+                                                        </option>
+                                                    )}
+                                                </select>
                                             </td>
                                             <td className="p-2">
                                                 <input
