@@ -105,13 +105,19 @@ export async function getActualCost(req: Request, res: Response) {
       return dayCostCache.get(ctc)!;
     };
 
-    // ── Bucket hours by employee x month ──────────────────────────────────
+    // ── Bucket hours by employee x month, keeping submitted and draft apart ──
+    // Draft hours are included because submission lags heavily (63% of the
+    // current month is unsubmitted), but they are tracked separately so the UI
+    // can show a firm figure and a provisional one rather than blending them.
+    type Bucket = { submitted: number; draft: number };
     const months = new Set<string>();
-    const byEmp = new Map<string, { name: string; monthly: Map<string, number> }>();
+    const byEmp = new Map<string, { name: string; monthly: Map<string, Bucket> }>();
     for (const e of entries) {
       months.add(e.month);
-      const rec = byEmp.get(e.employeeId) || { name: e.employeeName, monthly: new Map<string, number>() };
-      rec.monthly.set(e.month, (rec.monthly.get(e.month) || 0) + e.hours);
+      const rec = byEmp.get(e.employeeId) || { name: e.employeeName, monthly: new Map<string, Bucket>() };
+      const b = rec.monthly.get(e.month) || { submitted: 0, draft: 0 };
+      if (e.submitted) b.submitted += e.hours; else b.draft += e.hours;
+      rec.monthly.set(e.month, b);
       byEmp.set(e.employeeId, rec);
     }
     const monthList = [...months].sort();
@@ -132,11 +138,15 @@ export async function getActualCost(req: Request, res: Response) {
 
       const monthly: Record<string, any> = {};
       let totalHours = 0;
+      let draftHours = 0;
       let totalCost = 0;
+      let draftCost = 0;
       let anyRate = false;
 
       for (const m of monthList) {
-        const hours = rec.monthly.get(m) || 0;
+        const b = rec.monthly.get(m);
+        if (!b) continue;
+        const hours = b.submitted + b.draft;
         if (!hours) continue;
         const days = hours / HOURS_PER_DAY;
         const { batch, extrapolated } = batchForMonth(batches, m);
@@ -148,12 +158,17 @@ export async function getActualCost(req: Request, res: Response) {
         }
         const dayCost = ctc !== null ? dayCostFor(ctc) : null;
         const cost = dayCost !== null ? days * dayCost : null;
-        if (cost !== null) { totalCost += cost; anyRate = true; }
+        const dCost = dayCost !== null ? (b.draft / HOURS_PER_DAY) * dayCost : null;
+        if (cost !== null) { totalCost += cost; draftCost += dCost || 0; anyRate = true; }
         totalHours += hours;
+        draftHours += b.draft;
         monthly[m] = {
           hours: Math.round(hours * 100) / 100,
+          submittedHours: Math.round(b.submitted * 100) / 100,
+          draftHours: Math.round(b.draft * 100) / 100,
           days: Math.round(days * 100) / 100,
           cost: cost === null ? null : Math.round(cost),
+          draftCost: dCost === null ? null : Math.round(dCost),
           rateBatch: batch?.label || null,
           rateExtrapolated: extrapolated,
           level,
@@ -161,6 +176,7 @@ export async function getActualCost(req: Request, res: Response) {
       }
 
       if (!anyRate && totalHours > 0) warnings.add('no-rate');
+      if (draftHours > 0) warnings.add('draft-time');
 
       return {
         employeeId: empId,
@@ -174,8 +190,11 @@ export async function getActualCost(req: Request, res: Response) {
         inPlan: plannedEmployeeIds.has(empId),
         monthly,
         totalHours: Math.round(totalHours * 100) / 100,
+        submittedHours: Math.round((totalHours - draftHours) * 100) / 100,
+        draftHours: Math.round(draftHours * 100) / 100,
         totalDays: Math.round((totalHours / HOURS_PER_DAY) * 100) / 100,
         totalCost: anyRate ? Math.round(totalCost) : null,
+        draftCost: anyRate ? Math.round(draftCost) : null,
         priced: anyRate,
         unpricedReason: anyRate ? null
           : noSkill ? 'No Skillset GOM recorded for this person'
@@ -185,20 +204,29 @@ export async function getActualCost(req: Request, res: Response) {
     }).sort((a, b) => b.totalHours - a.totalHours);
 
     // ── Column totals ─────────────────────────────────────────────────────
-    const monthTotals: Record<string, { hours: number; cost: number; priced: boolean }> = {};
+    const monthTotals: Record<string, { hours: number; draftHours: number; cost: number; draftCost: number; priced: boolean }> = {};
     for (const m of monthList) {
-      let h = 0; let c = 0; let priced = false;
+      let h = 0; let dh = 0; let c = 0; let dc = 0; let priced = false;
       for (const r of rows) {
         const cell = r.monthly[m];
         if (!cell) continue;
         h += cell.hours;
-        if (cell.cost !== null) { c += cell.cost; priced = true; }
+        dh += cell.draftHours;
+        if (cell.cost !== null) { c += cell.cost; dc += cell.draftCost || 0; priced = true; }
       }
-      monthTotals[m] = { hours: Math.round(h * 100) / 100, cost: Math.round(c), priced };
+      monthTotals[m] = {
+        hours: Math.round(h * 100) / 100,
+        draftHours: Math.round(dh * 100) / 100,
+        cost: Math.round(c),
+        draftCost: Math.round(dc),
+        priced,
+      };
     }
 
     const grandHours = rows.reduce((a, r) => a + r.totalHours, 0);
+    const grandDraftHours = rows.reduce((a, r) => a + r.draftHours, 0);
     const grandCost = rows.reduce((a, r) => a + (r.totalCost || 0), 0);
+    const grandDraftCost = rows.reduce((a, r) => a + (r.draftCost || 0), 0);
 
     res.json({
       project: {
@@ -212,15 +240,19 @@ export async function getActualCost(req: Request, res: Response) {
       totals: {
         people: rows.length,
         hours: Math.round(grandHours * 100) / 100,
+        submittedHours: Math.round((grandHours - grandDraftHours) * 100) / 100,
+        draftHours: Math.round(grandDraftHours * 100) / 100,
         days: Math.round((grandHours / HOURS_PER_DAY) * 100) / 100,
         cost: Math.round(grandCost),
+        submittedCost: Math.round(grandCost - grandDraftCost),
+        draftCost: Math.round(grandDraftCost),
         unpricedPeople: rows.filter((r) => !r.priced).length,
         unplannedPeople: rows.filter((r) => !r.inPlan).length,
       },
       basis: {
         hoursPerDay: HOURS_PER_DAY,
         workingDaysPerYear: assumptions.workingDaysPerYear,
-        timesheetFilter: 'submitted only (docstatus = 1)',
+        timesheetFilter: 'submitted and draft, reported separately (cancelled excluded)',
         rateBasis: "each person's own skill + experience band",
         rateCardVersioning: batches.map((b) => ({ label: b.label, from: b.uploadedAt })),
       },

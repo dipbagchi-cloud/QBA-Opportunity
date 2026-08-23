@@ -17,8 +17,11 @@ import {
 
 interface Cell {
     hours: number;
+    submittedHours: number;
+    draftHours: number;
     days: number;
     cost: number | null;
+    draftCost: number | null;
     rateBatch: string | null;
     rateExtrapolated: boolean;
     level: string | null;
@@ -35,8 +38,11 @@ interface Row {
     inPlan: boolean;
     monthly: Record<string, Cell>;
     totalHours: number;
+    submittedHours: number;
+    draftHours: number;
     totalDays: number;
     totalCost: number | null;
+    draftCost: number | null;
     priced: boolean;
     unpricedReason: string | null;
 }
@@ -45,9 +51,10 @@ interface Payload {
     project: { id: string; code: string; name: string };
     months: string[];
     rows: Row[];
-    monthTotals: Record<string, { hours: number; cost: number; priced: boolean }>;
+    monthTotals: Record<string, { hours: number; draftHours: number; cost: number; draftCost: number; priced: boolean }>;
     totals: {
-        people: number; hours: number; days: number; cost: number;
+        people: number; hours: number; submittedHours: number; draftHours: number;
+        days: number; cost: number; submittedCost: number; draftCost: number;
         unpricedPeople: number; unplannedPeople: number;
     };
     basis: {
@@ -61,6 +68,7 @@ interface Payload {
 }
 
 const WARNING_TEXT: Record<string, string> = {
+    "draft-time": "Some time is still in draft in Q-People and has not been submitted. It is included here and marked, because submission lags by weeks — but it is not yet approved effort.",
     "no-skillset": "Some people have no Skillset GOM recorded, so their time cannot be priced.",
     "no-experience": "Some people have no experience recorded, so their band — and therefore their rate — is unknown.",
     "no-rate": "Some people have no matching rate card entry for their skill and band.",
@@ -128,9 +136,10 @@ export default function ActualBookingCostTab({ opportunityId }: { opportunityId:
         return (
             <div className="bg-white rounded-lg border border-slate-200 p-8 text-center">
                 <Clock className="w-6 h-6 text-slate-400 mx-auto mb-2" />
-                <p className="text-sm font-semibold text-slate-700">No submitted timesheets for this project</p>
+                <p className="text-sm font-semibold text-slate-700">No timesheets booked against this project</p>
                 <p className="text-xs text-slate-500 mt-1">
-                    Only submitted timesheets count. Anything still in draft in Q-People is excluded.
+                    Nothing has been logged in Q-People for this project yet — draft or submitted.
+                    Only cancelled timesheets are ignored.
                 </p>
             </div>
         );
@@ -183,8 +192,30 @@ export default function ActualBookingCostTab({ opportunityId }: { opportunityId:
                     <div className="bg-indigo-50 rounded-lg p-3 border border-indigo-200">
                         <p className="text-xs text-indigo-600 mb-1">Actual cost</p>
                         <p className="font-semibold text-sm text-indigo-800">{fmtCurrency(grand?.cost || 0)}</p>
+                        {!!grand?.draftCost && (
+                            <p className="text-[10px] text-indigo-600/80 mt-0.5">
+                                incl. {fmtCurrency(grand.draftCost)} not yet submitted
+                            </p>
+                        )}
                     </div>
                 </div>
+
+                {/* Submission state — this is the difference between a firm number
+                    and a provisional one, so it is stated rather than implied. */}
+                {!!grand?.draftHours && (
+                    <div className="mt-3 flex flex-wrap items-center gap-3 text-[11px]">
+                        <span className="px-2 py-0.5 rounded-full border bg-emerald-100 text-emerald-700 border-emerald-300">
+                            {grand.submittedHours.toLocaleString()} h submitted · {fmtCurrency(grand.submittedCost)}
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full border bg-amber-100 text-amber-800 border-amber-300">
+                            {grand.draftHours.toLocaleString()} h still draft · {fmtCurrency(grand.draftCost)}
+                        </span>
+                        <span className="text-slate-500">
+                            {Math.round((grand.draftHours / (grand.hours || 1)) * 100)}% of this project&apos;s time
+                            is not yet submitted in Q-People
+                        </span>
+                    </div>
+                )}
 
                 {(grand?.unpricedPeople || grand?.unplannedPeople) ? (
                     <div className="flex flex-wrap gap-2 mt-3 text-[11px]">
@@ -268,10 +299,18 @@ export default function ActualBookingCostTab({ opportunityId }: { opportunityId:
                                                 const c = r.monthly[m];
                                                 return (
                                                     <td key={m} className="p-2 text-right whitespace-nowrap text-slate-700">
-                                                        {!c ? <span className="text-slate-300">–</span>
-                                                            : show === "hours" ? c.hours
-                                                                : c.cost === null ? <span className="text-amber-600" title={r.unpricedReason || ""}>n/a</span>
-                                                                    : fmtCurrency(c.cost)}
+                                                        {!c ? <span className="text-slate-300">–</span> : (
+                                                            <span
+                                                                className={c.draftHours > 0 ? "border-b border-dotted border-amber-500" : ""}
+                                                                title={c.draftHours > 0
+                                                                    ? `${c.submittedHours}h submitted, ${c.draftHours}h still draft`
+                                                                    : undefined}
+                                                            >
+                                                                {show === "hours" ? c.hours
+                                                                    : c.cost === null ? <span className="text-amber-600" title={r.unpricedReason || ""}>n/a</span>
+                                                                        : fmtCurrency(c.cost)}
+                                                            </span>
+                                                        )}
                                                     </td>
                                                 );
                                             })}
