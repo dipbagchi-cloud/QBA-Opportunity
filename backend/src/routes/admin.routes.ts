@@ -38,6 +38,8 @@ import {
   createRateCard,
   updateRateCard,
   deleteRateCard,
+  listRateCardBatches,
+  getRateCardHistory,
 } from '../controllers/rate-cards.controller';
 import {
   listAllClients,
@@ -168,6 +170,9 @@ router.delete('/roles/:id/users/:userId', authorize(PERMISSIONS.ROLES_MANAGE), r
 router.get('/teams', authorize(PERMISSIONS.USERS_MANAGE), listTeams);
 
 // Rate card management (requires costcard:manage)
+// Batch + history routes must precede /rate-cards/:id so they are not read as ids.
+router.get('/rate-cards/batches', authorize(PERMISSIONS.COSTCARD_MANAGE), listRateCardBatches);
+router.get('/rate-cards/history', authorize(PERMISSIONS.COSTCARD_MANAGE), getRateCardHistory);
 router.get('/rate-cards', authorize(PERMISSIONS.COSTCARD_MANAGE), listAllRateCards);
 router.post('/rate-cards', authorize(PERMISSIONS.COSTCARD_MANAGE), createRateCard);
 router.patch('/rate-cards/:id', authorize(PERMISSIONS.COSTCARD_MANAGE), updateRateCard);

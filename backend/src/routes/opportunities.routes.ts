@@ -21,7 +21,17 @@ import {
     getOpportunityFilterOptions,
     exportOpportunities,
 } from '../controllers/opportunities.controller';
-import { authenticate, authorize, authorizeAny } from '../middleware/auth';
+import {
+    listSelectableProjects,
+    getMapping,
+    saveMapping,
+    deleteMapping,
+    getResourcePlan,
+    saveResourcePlan,
+    getProjectAllocation,
+    listSkillsets,
+} from '../controllers/actual-gom.controller';
+import { authenticate, authorize, authorizeAny, authorizeAdmin } from '../middleware/auth';
 import { PERMISSIONS } from '../lib/permissions';
 
 const router = Router();
@@ -84,5 +94,22 @@ router.post('/:id/sow', authorizeAny(PERMISSIONS.PIPELINE_WRITE, PERMISSIONS.PRE
 router.post('/:id/attachments', authorizeAny(PERMISSIONS.PIPELINE_WRITE, PERMISSIONS.PRESALES_WRITE, PERMISSIONS.SALES_WRITE), handleUpload, uploadAttachment);
 router.get('/:id/attachments/:attachmentId/download', authorizeAny(PERMISSIONS.PIPELINE_VIEW, PERMISSIONS.PRESALES_VIEW, PERMISSIONS.SALES_VIEW), downloadAttachment);
 router.delete('/:id/attachments/:attachmentId', authorizeAny(PERMISSIONS.PIPELINE_WRITE, PERMISSIONS.PRESALES_WRITE, PERMISSIONS.SALES_WRITE), deleteAttachment);
+
+// ── Actual GOM: Q-People project / resource mapping ─────────────────────────
+// ADMIN ONLY, read and write alike. This deliberately overrides the earlier
+// rule that every role could view Actual GOM on a won deal: the tab exposes
+// cost, margin and individual employee data, so it is restricted to Admin.
+//
+// authorizeAdmin checks for the wildcard permission itself — no named
+// permission can express "Admin and nobody else", because a wildcard holder
+// satisfies every named permission a Manager would also pass.
+router.get('/qpeople/skillsets', authorizeAdmin, listSkillsets);
+router.get('/:id/qpeople/projects', authorizeAdmin, listSelectableProjects);
+router.get('/:id/qpeople/mapping', authorizeAdmin, getMapping);
+router.put('/:id/qpeople/mapping', authorizeAdmin, saveMapping);
+router.delete('/:id/qpeople/mapping', authorizeAdmin, deleteMapping);
+router.get('/:id/qpeople/resource-plan', authorizeAdmin, getResourcePlan);
+router.put('/:id/qpeople/resource-plan', authorizeAdmin, saveResourcePlan);
+router.get('/:id/qpeople/allocation', authorizeAdmin, getProjectAllocation);
 
 export default router;

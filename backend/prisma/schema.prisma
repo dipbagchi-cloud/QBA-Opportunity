@@ -203,11 +203,17 @@ model RateCard {
   ctcLuxembourg      Float    @default(0)
   category           String
   isActive        Boolean  @default(true)
+  // Which cost-card upload this rate came from. Nullable only so the column
+  // could be added to existing rows; the backfill assigns every row a batch.
+  batch           RateCardBatch? @relation(fields: [batchId], references: [id])
+  batchId         String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   @@index([category])
   @@index([skill])
+  @@index([batchId])
+  @@index([isActive])
   @@map("rate_cards")
 }
 
@@ -386,6 +392,8 @@ model Opportunity {
   vectorEmbedding   VectorEmbedding?
   project           Project?
   sowDocument       SowDocument?
+  qpeopleMapping    QPeopleProjectMapping?
+  actualResources   ActualResourceRow[]
 
   @@index([clientId])
   @@index([ownerId])
@@ -1299,9 +1307,126 @@ model SowNumberingConfig {
   // Version rules
   draftVersionPrefix String @default("0")
   approvedVersionStart String @default("1.0")
-  
+
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   @@map("sow_numbering_config")
+}
+
+// ============================================================================
+// ACTUAL GOM — Q-PEOPLE PROJECT & RESOURCE MAPPING
+// ============================================================================
+
+// Links a won opportunity to the Q-People project people book time against.
+//
+// Keyed on qpeopleProjectId (Project.name, "PROJ-0142") because that is unique
+// in Q-People. custom_project_code is NOT unique — two codes collide today —
+// so it is carried for display only. Both sides are @unique, which is what
+// enforces "a project already mapped must not appear in the selection list":
+// the exclusion is a DB guarantee, not just a UI filter.
+model QPeopleProjectMapping {
+  id                 String   @id @default(cuid())
+  opportunity        Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  opportunityId      String   @unique
+  qpeopleProjectId   String   @unique          // Project.name
+  qpeopleProjectCode String                     // custom_project_code (display)
+  qpeopleProjectName String
+  qpeopleCustomer    String?
+  mappedById         String?
+  mappedByName       String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([qpeopleProjectCode])
+  @@map("qpeople_project_mappings")
+}
+
+// One cost-card upload. Every rate belongs to exactly one batch, which is what
+// turns "716 rows" into a legible history: the current card plus the ones it
+// superseded, each identifiable rather than distinguishable only by a timestamp.
+//
+// Exactly one batch should be isCurrent at a time; its rows are the active
+// rates, and every other batch's rows are archived.
+model RateCardBatch {
+  id             String   @id @default(cuid())
+  label          String                  // "Cost Card — 13 Aug 2026"
+  sourceFile     String?                 // originating workbook, when known
+  uploadedAt     DateTime @default(now())
+  uploadedById   String?
+  uploadedByName String?
+  rowCount       Int      @default(0)
+  isCurrent      Boolean  @default(false)
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  rateCards      RateCard[]
+
+  @@index([isCurrent])
+  @@index([uploadedAt])
+  @@map("rate_card_batches")
+}
+
+// TEMPORARY bridge: employee skillset / experience while Q-People's own
+// custom_skillset_gom field is unpopulated (0 of 354 employees as of 2026-08-23).
+//
+// Sourced from the "Associate Mapping" sheet of the HR workbook. Q-People always
+// WINS when it has a value — see getEmployeesResolved() in lib/qpeople.ts — so
+// this table quietly stops being consulted as HR fills the real field, and can
+// then be dropped without touching the matching logic.
+model AssociateSkillOverride {
+  id             String   @id @default(cuid())
+  employeeId     String   @unique          // Q-People Employee.name, e.g. "QBA0460"
+  employeeName   String?
+  skillset       String?                    // maps to the Skillset GOM taxonomy
+  experienceBand String?                    // verbose form, e.g. "0 - 2 Years"
+  experienceYears Float?                    // parsed from "3 Years, 6 Months"
+  domain         String?
+  jobLevel       String?
+  status         String?
+  source         String   @default("excel")
+  importedAt     DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([skillset])
+  @@map("associate_skill_overrides")
+}
+
+// The delivery-side resource plan for a won deal, seeded from the presales
+// Resource Assignment and then edited against reality.
+//
+// `origin` drives the colour coding in the UI:
+//   MATCHED (green)  — unchanged from the presales estimate
+//   CHANGED (yellow) — derived from a presales row whose skill/band/role was edited
+//   NEW     (red)    — a resource type that was never in the estimate
+// sourceRowId is the presales resource row's id, or null for a NEW row.
+model ActualResourceRow {
+  id             String   @id @default(cuid())
+  opportunity    Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  opportunityId  String
+  sourceRowId    String?
+  origin         String   @default("MATCHED")   // MATCHED | CHANGED | NEW
+
+  // What the plan asks for
+  skill          String?
+  experienceBand String?
+  projectRole    String?
+  quantity       Int      @default(1)
+
+  // What the estimate originally asked for — kept so CHANGED rows can show the delta
+  originalSkill          String?
+  originalExperienceBand String?
+  originalProjectRole    String?
+
+  // Who was picked from Q-People to fill it
+  employeeId     String?
+  employeeName   String?
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([opportunityId])
+  @@index([origin])
+  @@map("actual_resource_rows")
 }

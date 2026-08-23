@@ -46,8 +46,13 @@ import { AssignmentPane } from "./components/AssignmentPane";
 import { AssignPresalesModal } from "./components/AssignPresalesModal";
 import { SowStudio } from "./components/SowStudio";
 import { StageTimeline, StageHistoryEntry } from "./components/StageTimeline";
+import ProjectResourceMappingTab from "./components/ProjectResourceMappingTab";
 
 // Static dropdowns (not master-data driven)
+// Sub-tabs inside the Actual GOM step. Project / Resource Mapping is the first
+// thing that must happen on a won deal, so it leads.
+const ACTUAL_GOM_SUBTABS = ["Project / Resource Mapping"];
+
 const DURATION_UNITS = ["days", "weeks", "months"];
 const ARCHITECTS = ["David Chen", "Sarah Jones", "Rahul Gupta", "Emily White"];
 
@@ -495,19 +500,42 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
     // Presales View State (The detailed view after transition)
     const [activeTab, setActiveTab] = useState("Project Details");
+    const [actualGomSubTab, setActualGomSubTab] = useState<string>(ACTUAL_GOM_SUBTABS[0]);
     const [activeStep, setActiveStep] = useState(0); // 0: Pipeline, 1: Presales
     const [opportunityStage, setOpportunityStage] = useState(0); // actual DB stage (0-3), stays fixed when navigating steps
     const [currentStageName, setCurrentStageName] = useState(''); // actual Kanban stage name (Discovery, Qualification, Proposal, Negotiation, Closed Won, Closed Lost)
     // Stage timeline source data — which stages the deal has been through, and when.
     const [stageHistory, setStageHistory] = useState<StageHistoryEntry[]>([]);
     const [opportunityCreatedAt, setOpportunityCreatedAt] = useState<string>('');
-    const steps = ["Pipeline", "Presales", "Sales", "SOW", "Project"];
+    const steps = ["Pipeline", "Presales", "Sales", "SOW", "Project", "Actual GOM"];
+    // Declared here rather than further down because the Actual GOM gate below
+    // needs it, and a `const` referenced before its declaration throws.
+    const activeRoleName = (user?.role?.name || "").trim().toLowerCase();
+    const isActiveAdmin = !!user?.role?.permissions?.includes("*") || activeRoleName === "admin";
     const isManagerOrAdmin = !!opportunityAccess?.permissions?.approvals?.manage;
     const canApproveGom = !!opportunityAccess?.permissions?.approvals?.manage;
     const canViewPipeline = !!(opportunityAccess?.permissions?.pipeline?.view || opportunityAccess?.workflow?.pipelineEditable);
     const canViewPresales = !!(opportunityAccess?.permissions?.presales?.view || opportunityAccess?.permissions?.estimation?.manage || opportunityAccess?.permissions?.gom?.view || opportunityAccess?.permissions?.approvals?.manage);
     const canViewSales = !!opportunityAccess?.permissions?.sales?.view;
     const canViewProject = !!(opportunityAccess?.permissions?.sales?.view || opportunityAccess?.permissions?.sow?.view);
+    // "Actual GOM" exists only once the deal is won — there is no delivered margin
+    // before that — so the tab is not rendered at all on any other opportunity.
+    // Matches the same won-stage name family used by the stage mapping in the
+    // fetch effect below ('Delivered' is not a configured stage today, but is kept
+    // in step with that mapping).
+    //
+    // Two gates, both required: the deal must be WON, and the viewer must be an
+    // Admin. Actual GOM exposes cost, margin and individual employee data, so it
+    // is Admin-only — this supersedes the earlier rule that every role could see
+    // it on a won deal.
+    //
+    // Admin is tested as the wildcard permission, not the role name, and mirrors
+    // authorizeAdmin on the backend routes so the UI never shows a tab whose API
+    // calls would 403.
+    const isClosedWonStage = currentStageName === 'Closed Won' || currentStageName === 'Closed-Won' || currentStageName === 'Delivered';
+    const canViewActualGom = isClosedWonStage && isActiveAdmin;
+    // Admins can both read and write it; there is no read-only Actual GOM viewer.
+    const canEditActualGom = canViewActualGom;
     const canEditPipeline = !!opportunityAccess?.workflow?.pipelineEditable;
     const canEditPresales = !!opportunityAccess?.workflow?.presalesEditable;
     const canManageEstimation = !!opportunityAccess?.workflow?.estimationEditable;
@@ -545,9 +573,12 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             canViewSales,
             false,
             canViewProject,
+            canViewActualGom,
         ];
         if (stepAccess[activeStep]) return;
 
+        // Actual GOM (5) is intentionally absent from the fallback list — it is a
+        // destination the user picks, never one they get dropped onto.
         const reachableSteps =
             opportunityStage === 3 ? [4, 2, 1, 0] :
             opportunityStage === 2 ? [2, 1, 0] :
@@ -557,7 +588,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         if (fallback !== undefined && fallback !== activeStep) {
             setActiveStep(fallback);
         }
-    }, [activeStep, opportunityStage, canViewPipeline, canViewPresales, canViewSales, canViewProject]);
+    }, [activeStep, opportunityStage, canViewPipeline, canViewPresales, canViewSales, canViewProject, canViewActualGom]);
 
     useEffect(() => {
         const visibleTabs = [
@@ -582,8 +613,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const [isStalled, setIsStalled] = useState(false);
     const [lostModalType, setLostModalType] = useState<string>('Closed Lost');
 
-    const activeRoleName = (user?.role?.name || "").trim().toLowerCase();
-    const isActiveAdmin = !!user?.role?.permissions?.includes("*") || activeRoleName === "admin";
+    // (activeRoleName / isActiveAdmin are declared near the top of the component
+    // because the Actual GOM gate needs them before this point.)
     // Stage-specific assignment rules (tab-driven, per product spec):
     // - Sales Rep: editable in Pipeline (step 0) and Sales (step 2)
     // - Manager:   editable in Pipeline (step 0), Presales (step 1) and Sales (step 2)
@@ -2058,16 +2089,27 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             {/* Stepper Navigation */}
             <div className="bg-white p-3 rounded-lg shadow-sm border border-slate-200">
                 <div className="flex w-full mt-1 h-8 bg-slate-50 rounded-full overflow-hidden border border-slate-200">
-                    {steps.filter(step => step !== "SOW").map((step) => {
+                    {/* SOW is never a bar segment (it opens from the Sales step). "Actual GOM"
+                        shows only on a Closed Won deal, and there it shows for every role.
+                        Every segment is flex-1, so the bar spans the same width either way:
+                        four wider segments before the deal is won, five narrower ones after. */}
+                    {steps
+                        .filter(step => step !== "SOW" && (step !== "Actual GOM" || canViewActualGom))
+                        .map((step, visibleIdx, visibleSteps) => {
                         const idx = steps.indexOf(step);
-                        // Map step idx to DB stage: 0=Pipeline, 1=Presales, 2=Sales, 3=SOW (accessible at stage 2+), 4=Project (stage 3)
+                        // Map step idx to DB stage: 0=Pipeline, 1=Presales, 2=Sales, 3=SOW (accessible at stage 2+), 4=Project (stage 3), 5=Actual GOM (stage 3)
                         const stageForIdx = idx <= 2 ? idx : idx === 3 ? 2 : 3;
-                        const isCompleted = idx <= 2 ? idx < opportunityStage : idx === 3 ? opportunityStage >= 3 : opportunityStage === 3;
+                        const isActualGom = idx === 5;
+                        // Actual GOM never renders as "completed" — the delivered margin is
+                        // not a milestone the deal passes through, so it stays a plain
+                        // destination once the project exists.
+                        const isCompleted = isActualGom ? false : idx <= 2 ? idx < opportunityStage : idx === 3 ? opportunityStage >= 3 : opportunityStage === 3;
                         const isActive = idx === activeStep;
                         const hasStepAccess =
                             idx === 0 ? canViewPipeline :
                             idx === 1 ? canViewPresales :
                             idx === 2 ? canViewSales :
+                            isActualGom ? canViewActualGom :
                             canViewProject;
                         const isAccessible = opportunityStage >= stageForIdx && hasStepAccess;
 
@@ -2088,9 +2130,11 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             >
                                 {isCompleted && <Check className="w-4 h-4" />}
                                 {step}
-                                {/* Chevron Separator */}
-                                {idx !== steps.length - 1 && (
-                                    <div className={`absolute right-0 top-0 bottom-0 w-[1px] transform skew-x-12 translate-x-3 z-10 
+                                {/* Chevron Separator — keyed off position in the VISIBLE list so
+                                    the last segment never draws a trailing divider, whichever
+                                    role is looking. */}
+                                {visibleIdx !== visibleSteps.length - 1 && (
+                                    <div className={`absolute right-0 top-0 bottom-0 w-[1px] transform skew-x-12 translate-x-3 z-10
                                         ${isCompleted && idx + 1 <= opportunityStage ? 'bg-emerald-500 border-r border-emerald-400' : 'bg-white border-r border-slate-300'}`}
                                     ></div>
                                 )}
@@ -3687,6 +3731,67 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             Back to Opportunities
                         </button>
                     </div>
+                </div>
+            )}
+
+            {/* ACTUAL GOM VIEW (Step 5) — delivered margin against the approved estimate.
+                Rendered for every role, but only on a won deal; see canViewActualGom above. */}
+            {activeStep === 5 && canViewActualGom && (
+                <div className="space-y-4 animate-in fade-in duration-300">
+                    {/* Deal header — the baseline every Actual GOM sub-tab measures against */}
+                    <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-5">
+                        <div className="flex items-center gap-2 mb-1">
+                            <TrendingUp className="w-5 h-5 text-indigo-600" />
+                            <h2 className="text-base font-bold text-slate-900">Actual GOM</h2>
+                        </div>
+                        <p className="text-xs text-slate-500 mb-5">
+                            Delivered gross operating margin for this engagement, measured against the approved estimate.
+                        </p>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
+                                <p className="text-xs text-slate-500 mb-1">Client</p>
+                                <p className="font-semibold text-sm text-slate-800">{formData.clientName || '-'}</p>
+                            </div>
+                            <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
+                                <p className="text-xs text-slate-500 mb-1">Project</p>
+                                <p className="font-semibold text-sm text-slate-800">{formData.projectName || '-'}</p>
+                            </div>
+                            <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
+                                <p className="text-xs text-slate-500 mb-1">Contracted Value</p>
+                                <p className="font-semibold text-sm text-slate-800">
+                                    {cSym}{getFinalQuoteValue().toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Sub-tabs. Only one exists today; the bar is here so adding the
+                        margin sub-tabs later does not restructure the view. */}
+                    <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-2">
+                        <div className="flex gap-1">
+                            {ACTUAL_GOM_SUBTABS.map((t) => (
+                                <button
+                                    key={t}
+                                    onClick={() => setActualGomSubTab(t)}
+                                    className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                                        actualGomSubTab === t
+                                            ? 'bg-indigo-600 text-white'
+                                            : 'text-slate-600 hover:bg-slate-100'
+                                    }`}
+                                >
+                                    {t}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {actualGomSubTab === 'Project / Resource Mapping' && (
+                        <ProjectResourceMappingTab
+                            opportunityId={id}
+                            canEdit={canEditActualGom}
+                        />
+                    )}
                 </div>
             )}
 
