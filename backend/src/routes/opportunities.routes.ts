@@ -31,7 +31,7 @@ import {
     getProjectAllocation,
     listSkillsets,
 } from '../controllers/actual-gom.controller';
-import { authenticate, authorize, authorizeAny } from '../middleware/auth';
+import { authenticate, authorize, authorizeAny, authorizeAdmin } from '../middleware/auth';
 import { PERMISSIONS } from '../lib/permissions';
 
 const router = Router();
@@ -96,19 +96,20 @@ router.get('/:id/attachments/:attachmentId/download', authorizeAny(PERMISSIONS.P
 router.delete('/:id/attachments/:attachmentId', authorizeAny(PERMISSIONS.PIPELINE_WRITE, PERMISSIONS.PRESALES_WRITE, PERMISSIONS.SALES_WRITE), deleteAttachment);
 
 // ── Actual GOM: Q-People project / resource mapping ─────────────────────────
-// Reading is open to anyone who can view the deal (the Actual GOM tab itself is
-// visible to every role on a won deal, Read-Only included). Writing the mapping
-// and the resource plan is a delivery action, so it needs a write permission.
-const CAN_VIEW = authorizeAny(PERMISSIONS.PIPELINE_VIEW, PERMISSIONS.PRESALES_VIEW, PERMISSIONS.SALES_VIEW);
-const CAN_EDIT = authorizeAny(PERMISSIONS.PRESALES_WRITE, PERMISSIONS.SALES_WRITE, PERMISSIONS.PIPELINE_WRITE);
-
-router.get('/qpeople/skillsets', CAN_VIEW, listSkillsets);
-router.get('/:id/qpeople/projects', CAN_VIEW, listSelectableProjects);
-router.get('/:id/qpeople/mapping', CAN_VIEW, getMapping);
-router.put('/:id/qpeople/mapping', CAN_EDIT, saveMapping);
-router.delete('/:id/qpeople/mapping', CAN_EDIT, deleteMapping);
-router.get('/:id/qpeople/resource-plan', CAN_VIEW, getResourcePlan);
-router.put('/:id/qpeople/resource-plan', CAN_EDIT, saveResourcePlan);
-router.get('/:id/qpeople/allocation', CAN_VIEW, getProjectAllocation);
+// ADMIN ONLY, read and write alike. This deliberately overrides the earlier
+// rule that every role could view Actual GOM on a won deal: the tab exposes
+// cost, margin and individual employee data, so it is restricted to Admin.
+//
+// authorizeAdmin checks for the wildcard permission itself — no named
+// permission can express "Admin and nobody else", because a wildcard holder
+// satisfies every named permission a Manager would also pass.
+router.get('/qpeople/skillsets', authorizeAdmin, listSkillsets);
+router.get('/:id/qpeople/projects', authorizeAdmin, listSelectableProjects);
+router.get('/:id/qpeople/mapping', authorizeAdmin, getMapping);
+router.put('/:id/qpeople/mapping', authorizeAdmin, saveMapping);
+router.delete('/:id/qpeople/mapping', authorizeAdmin, deleteMapping);
+router.get('/:id/qpeople/resource-plan', authorizeAdmin, getResourcePlan);
+router.put('/:id/qpeople/resource-plan', authorizeAdmin, saveResourcePlan);
+router.get('/:id/qpeople/allocation', authorizeAdmin, getProjectAllocation);
 
 export default router;

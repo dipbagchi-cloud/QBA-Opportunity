@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { verifyToken, TokenPayload } from '../services/auth.service';
-import { hasPermission, hasAnyPermission } from '../lib/permissions';
+import { hasPermission, hasAnyPermission, WILDCARD } from '../lib/permissions';
 
 // Extend Express Request to include user
 declare global {
@@ -83,4 +83,30 @@ export function authorizeAny(...requiredPermissions: string[]) {
 
     next();
   };
+}
+
+/**
+ * Middleware: Admin only — the caller must hold the wildcard permission itself.
+ *
+ * authorize()/authorizeAny() cannot express this: they pass for anyone holding
+ * the named permission, and a wildcard holder satisfies every named permission,
+ * so there is no permission string that means "Admin and nobody else". Checking
+ * for the wildcard directly is the only way to exclude Manager, Management,
+ * Sales and Presales while still admitting Admin.
+ *
+ * Must be used after authenticate().
+ */
+export function authorizeAdmin(req: Request, res: Response, next: NextFunction) {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+
+  if (!req.user.permissions?.includes(WILDCARD)) {
+    return res.status(403).json({
+      error: 'Administrator access required',
+      role: req.user.roleName,
+    });
+  }
+
+  next();
 }

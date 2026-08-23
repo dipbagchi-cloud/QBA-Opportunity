@@ -508,6 +508,10 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const [stageHistory, setStageHistory] = useState<StageHistoryEntry[]>([]);
     const [opportunityCreatedAt, setOpportunityCreatedAt] = useState<string>('');
     const steps = ["Pipeline", "Presales", "Sales", "SOW", "Project", "Actual GOM"];
+    // Declared here rather than further down because the Actual GOM gate below
+    // needs it, and a `const` referenced before its declaration throws.
+    const activeRoleName = (user?.role?.name || "").trim().toLowerCase();
+    const isActiveAdmin = !!user?.role?.permissions?.includes("*") || activeRoleName === "admin";
     const isManagerOrAdmin = !!opportunityAccess?.permissions?.approvals?.manage;
     const canApproveGom = !!opportunityAccess?.permissions?.approvals?.manage;
     const canViewPipeline = !!(opportunityAccess?.permissions?.pipeline?.view || opportunityAccess?.workflow?.pipelineEditable);
@@ -520,19 +524,18 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     // fetch effect below ('Delivered' is not a configured stage today, but is kept
     // in step with that mapping).
     //
-    // Stage is the ONLY gate: every role sees the tab on a won deal, Read-Only
-    // included. There is no role or assignment condition here — the panel is
-    // informational, so a view-only role reading it is the intended behaviour.
+    // Two gates, both required: the deal must be WON, and the viewer must be an
+    // Admin. Actual GOM exposes cost, margin and individual employee data, so it
+    // is Admin-only — this supersedes the earlier rule that every role could see
+    // it on a won deal.
+    //
+    // Admin is tested as the wildcard permission, not the role name, and mirrors
+    // authorizeAdmin on the backend routes so the UI never shows a tab whose API
+    // calls would 403.
     const isClosedWonStage = currentStageName === 'Closed Won' || currentStageName === 'Closed-Won' || currentStageName === 'Delivered';
-    const canViewActualGom = isClosedWonStage;
-    // Everyone can READ Actual GOM; writing the Q-People mapping and the resource
-    // plan is a delivery action. Mirrors the authorizeAny() on the backend routes
-    // exactly, so the UI never offers a save the API will reject.
-    const canEditActualGom = !!(
-        opportunityAccess?.permissions?.presales?.edit ||
-        opportunityAccess?.permissions?.sales?.edit ||
-        opportunityAccess?.permissions?.pipeline?.edit
-    );
+    const canViewActualGom = isClosedWonStage && isActiveAdmin;
+    // Admins can both read and write it; there is no read-only Actual GOM viewer.
+    const canEditActualGom = canViewActualGom;
     const canEditPipeline = !!opportunityAccess?.workflow?.pipelineEditable;
     const canEditPresales = !!opportunityAccess?.workflow?.presalesEditable;
     const canManageEstimation = !!opportunityAccess?.workflow?.estimationEditable;
@@ -610,8 +613,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const [isStalled, setIsStalled] = useState(false);
     const [lostModalType, setLostModalType] = useState<string>('Closed Lost');
 
-    const activeRoleName = (user?.role?.name || "").trim().toLowerCase();
-    const isActiveAdmin = !!user?.role?.permissions?.includes("*") || activeRoleName === "admin";
+    // (activeRoleName / isActiveAdmin are declared near the top of the component
+    // because the Actual GOM gate needs them before this point.)
     // Stage-specific assignment rules (tab-driven, per product spec):
     // - Sales Rep: editable in Pipeline (step 0) and Sales (step 2)
     // - Manager:   editable in Pipeline (step 0), Presales (step 1) and Sales (step 2)

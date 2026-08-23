@@ -21,7 +21,7 @@ import { API_URL, getAuthHeaders } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import {
     Link2, Unlink, RefreshCw, Plus, Trash2, AlertTriangle,
-    Check, Users, Search, Info,
+    Check, Users, Search, Info, UserCheck,
 } from "lucide-react";
 
 // QCRM rate cards carry two spellings of the same bands; the compact form is what
@@ -88,6 +88,61 @@ interface Coverage {
     ready: boolean;
 }
 
+type FindingStatus = "MATCHED" | "SKILL_MISMATCH" | "UNPLANNED" | "NOT_ALLOCATED";
+
+interface Finding {
+    employeeId: string;
+    employeeName: string;
+    qpeopleSkill: string | null;
+    designation: string | null;
+    allocationPercent: number;
+    bookedHours: number;
+    allowedHours: number;
+    months: string[];
+    plannedSkill: string | null;
+    plannedBand: string | null;
+    status: FindingStatus;
+    detail: string | null;
+}
+
+interface Reconciliation {
+    projectId: string;
+    period: number | null;
+    findings: Finding[];
+    unfilledPlanLines: { rowId: string; skill: string | null; experienceBand: string | null; projectRole: string | null; quantity: number }[];
+    totals: {
+        allocatedInQPeople: number;
+        matched: number;
+        skillMismatch: number;
+        unplanned: number;
+        notAllocated: number;
+        unfilledPlanLines: number;
+    };
+}
+
+const FINDING_STYLE: Record<FindingStatus, { row: string; badge: string; label: string }> = {
+    MATCHED: {
+        row: "border-l-4 border-emerald-500 bg-emerald-50/40",
+        badge: "bg-emerald-100 text-emerald-700 border-emerald-300",
+        label: "Matched",
+    },
+    SKILL_MISMATCH: {
+        row: "border-l-4 border-amber-400 bg-amber-50/50",
+        badge: "bg-amber-100 text-amber-800 border-amber-300",
+        label: "Skill mismatch",
+    },
+    UNPLANNED: {
+        row: "border-l-4 border-red-500 bg-red-50/40",
+        badge: "bg-red-100 text-red-700 border-red-300",
+        label: "Not in plan",
+    },
+    NOT_ALLOCATED: {
+        row: "border-l-4 border-orange-400 bg-orange-50/40",
+        badge: "bg-orange-100 text-orange-800 border-orange-300",
+        label: "Not allocated",
+    },
+};
+
 const ORIGIN_STYLE: Record<string, { row: string; badge: string; label: string }> = {
     MATCHED: {
         row: "border-l-4 border-emerald-500 bg-emerald-50/40",
@@ -127,6 +182,9 @@ export default function ProjectResourceMappingTab({
 
     const [rows, setRows] = useState<PlanRow[]>([]);
     const [coverage, setCoverage] = useState<Coverage | null>(null);
+    // Null until a Q-People project is mapped — there is nothing to reconcile against.
+    const [recon, setRecon] = useState<Reconciliation | null>(null);
+    const [showMatched, setShowMatched] = useState(false);
     const [skillsets, setSkillsets] = useState<string[]>([]);
     // Same admin-managed lookup the presales Resource Assignment uses, so the
     // delivery plan speaks the same vocabulary as the estimate it came from.
@@ -164,6 +222,7 @@ export default function ProjectResourceMappingTab({
                 const planJson = await planRes.json();
                 setRows(planJson.rows || []);
                 setCoverage(planJson.coverage || null);
+                setRecon(planJson.reconciliation || null);
             }
             if (skillRes.ok) setSkillsets(await skillRes.json());
             if (roleRes.ok) {
@@ -672,6 +731,113 @@ export default function ProjectResourceMappingTab({
                     </div>
                 )}
             </div>
+
+            {/* ── Reconciliation against Q-People's actual allocation ─────── */}
+            {recon && (
+                <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-5">
+                    <div className="flex items-start justify-between mb-1 gap-4">
+                        <div className="flex items-center gap-2">
+                            <UserCheck className="w-5 h-5 text-indigo-600" />
+                            <h3 className="text-base font-bold text-slate-900">Allocated in Q-People</h3>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 text-[11px] justify-end">
+                            <span className="px-2 py-0.5 rounded-full border bg-emerald-100 text-emerald-700 border-emerald-300">
+                                {recon.totals.matched} matched
+                            </span>
+                            <span className="px-2 py-0.5 rounded-full border bg-amber-100 text-amber-800 border-amber-300">
+                                {recon.totals.skillMismatch} skill mismatch
+                            </span>
+                            <span className="px-2 py-0.5 rounded-full border bg-red-100 text-red-700 border-red-300">
+                                {recon.totals.unplanned} not in plan
+                            </span>
+                            <span className="px-2 py-0.5 rounded-full border bg-orange-100 text-orange-800 border-orange-300">
+                                {recon.totals.notAllocated} not allocated
+                            </span>
+                        </div>
+                    </div>
+                    <p className="text-xs text-slate-500 mb-4">
+                        Who Q-People actually has booked on this project{recon.period ? ` (${recon.period})` : ""},
+                        checked against the plan above. {recon.totals.allocatedInQPeople} allocated in Q-People.
+                    </p>
+
+                    {recon.findings.length === 0 ? (
+                        <div className="border border-dashed border-slate-300 rounded-lg p-6 text-center text-sm text-slate-500">
+                            Q-People has nobody allocated to this project yet.
+                        </div>
+                    ) : (
+                        <>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm min-w-[860px]">
+                                    <thead>
+                                        <tr className="text-left text-xs text-slate-500 border-b border-slate-200">
+                                            <th className="p-2 font-semibold">Status</th>
+                                            <th className="p-2 font-semibold">Person</th>
+                                            <th className="p-2 font-semibold">Q-People skill</th>
+                                            <th className="p-2 font-semibold">Planned as</th>
+                                            <th className="p-2 font-semibold text-right">Alloc %</th>
+                                            <th className="p-2 font-semibold text-right">Booked / allowed hrs</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {recon.findings
+                                            .filter((f) => showMatched || f.status !== "MATCHED")
+                                            .map((f) => {
+                                                const st = FINDING_STYLE[f.status];
+                                                return (
+                                                    <tr key={`${f.employeeId}-${f.status}`} className={`${st.row} border-b border-slate-100 align-top`}>
+                                                        <td className="p-2">
+                                                            <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold border ${st.badge}`}>
+                                                                {st.label}
+                                                            </span>
+                                                        </td>
+                                                        <td className="p-2">
+                                                            <div className="text-slate-800">{f.employeeName}</div>
+                                                            {f.designation && <div className="text-[10px] text-slate-500">{f.designation}</div>}
+                                                            {f.detail && <div className="text-[10px] text-slate-600 mt-0.5 max-w-md">{f.detail}</div>}
+                                                        </td>
+                                                        <td className="p-2 text-xs text-slate-700">{f.qpeopleSkill || <span className="text-slate-400 italic">not set</span>}</td>
+                                                        <td className="p-2 text-xs text-slate-700">
+                                                            {f.plannedSkill || <span className="text-slate-400 italic">—</span>}
+                                                            {f.plannedBand && <span className="text-slate-400"> · {f.plannedBand}</span>}
+                                                        </td>
+                                                        <td className="p-2 text-xs text-right text-slate-700">{f.allocationPercent || 0}%</td>
+                                                        <td className="p-2 text-xs text-right text-slate-700">
+                                                            {Math.round(f.bookedHours)} / {Math.round(f.allowedHours)}
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            {recon.totals.matched > 0 && (
+                                <button
+                                    onClick={() => setShowMatched((v) => !v)}
+                                    className="mt-3 text-xs font-semibold text-indigo-600 hover:underline"
+                                >
+                                    {showMatched ? "Hide" : "Show"} {recon.totals.matched} matched
+                                </button>
+                            )}
+                        </>
+                    )}
+
+                    {recon.unfilledPlanLines.length > 0 && (
+                        <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+                            <p className="text-xs font-semibold text-slate-700 mb-1.5">
+                                {recon.unfilledPlanLines.length} plan line{recon.unfilledPlanLines.length === 1 ? "" : "s"} with nobody named
+                            </p>
+                            <div className="flex flex-wrap gap-1.5">
+                                {recon.unfilledPlanLines.map((u) => (
+                                    <span key={u.rowId} className="px-2 py-0.5 rounded border border-slate-300 bg-white text-[11px] text-slate-600">
+                                        {u.skill || "—"}{u.experienceBand ? ` · ${u.experienceBand}` : ""}{u.quantity > 1 ? ` ×${u.quantity}` : ""}
+                                    </span>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
         </div>
     );
 }

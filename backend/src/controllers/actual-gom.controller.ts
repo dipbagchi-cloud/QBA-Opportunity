@@ -9,7 +9,7 @@ import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import {
   fetchProjects, getEmployeesResolved, fetchCommitmentDetail, fetchAllocations,
-  fetchTimesheetTotalsForProject, matchEmployees, skillsetCoverage, EmployeeCommitment,
+  fetchTimesheetTotalsForProject, matchEmployees, skillsetCoverage, EmployeeCommitment, skillKey,
   clearQPeopleCache, QPeopleError,
 } from '../lib/qpeople';
 import { recordAudit } from '../lib/audit';
@@ -294,14 +294,156 @@ export async function getResourcePlan(req: Request, res: Response) {
         })),
     }));
 
+    // Reconciliation against who Q-People actually has booked on the mapped
+    // project. Additive: `rows` keeps exactly the shape it had, and this block
+    // is null when no project is mapped, so the existing UI is unaffected.
+    let reconciliation: Awaited<ReturnType<typeof buildReconciliation>> | null = null;
+    const mapping = await prisma.qPeopleProjectMapping.findUnique({ where: { opportunityId: id } });
+    if (mapping) {
+      reconciliation = await buildReconciliation(mapping.qpeopleProjectId, rows, employees, force)
+        .catch(() => null);
+    }
+
     res.json({
       rows: withCandidates,
       coverage,
       presalesRowCount: presalesResources(opp).length,
+      reconciliation,
     });
   } catch (err) {
     return handleQPeopleError(res, err);
   }
+}
+
+/**
+ * Compare the QCRM resource plan against Q-People's actual allocation for the
+ * mapped project, and classify every person on either side:
+ *
+ *   MATCHED       planned in QCRM and allocated in Q-People, skill agrees
+ *   SKILL_MISMATCH allocated to the project, but their skillset is not one the
+ *                  plan asks for — the commonest real finding
+ *   NOT_ALLOCATED  named on a QCRM plan line but not booked on the project
+ *   UNPLANNED      booked on the project but not on any plan line
+ *
+ * Planned lines with no named person are reported separately as unfilled demand
+ * rather than being forced into one of the above.
+ */
+async function buildReconciliation(
+  projectId: string,
+  planRows: { id: string; skill: string | null; experienceBand: string | null; projectRole: string | null; employeeId: string | null; employeeName: string | null; quantity: number }[],
+  employees: Awaited<ReturnType<typeof getEmployeesResolved>>,
+  force: boolean,
+) {
+  const allocations = await fetchAllocations({}, force);
+  const forProject = allocations.filter((a) => a.projectId === projectId);
+
+  // Latest period held for this project — earlier months describe a staffing
+  // shape that has since moved on.
+  const latestYear = forProject.length ? Math.max(...forProject.map((a) => a.year || 0)) : null;
+  const inScope = forProject.filter((a) => a.year === latestYear);
+
+  const byEmployee = new Map<string, { employeeId: string; employeeName: string; percent: number; bookedHours: number; allowedHours: number; months: Set<string> }>();
+  for (const a of inScope) {
+    const e = byEmployee.get(a.employeeId) || {
+      employeeId: a.employeeId, employeeName: a.employeeName,
+      percent: 0, bookedHours: 0, allowedHours: 0, months: new Set<string>(),
+    };
+    e.percent = Math.max(e.percent, a.allocationPercent);
+    e.bookedHours += a.bookedHours;
+    e.allowedHours += a.allowedHours;
+    e.months.add(a.month);
+    byEmployee.set(a.employeeId, e);
+  }
+
+  const empById = new Map(employees.map((e) => [e.id, e]));
+  const plannedByEmployee = new Map(planRows.filter((r) => r.employeeId).map((r) => [r.employeeId!, r]));
+  const wantedSkills = new Set(planRows.map((r) => skillKey(r.skill)).filter(Boolean));
+
+  const findings: any[] = [];
+
+  // Everyone Q-People has on the project
+  for (const [empId, alloc] of byEmployee) {
+    const emp = empById.get(empId);
+    const planned = plannedByEmployee.get(empId);
+    const empSkillKey = skillKey(emp?.skillsetGom);
+    const base = {
+      employeeId: empId,
+      employeeName: alloc.employeeName || emp?.name || empId,
+      qpeopleSkill: emp?.skillsetGom || null,
+      designation: emp?.designation || null,
+      allocationPercent: alloc.percent,
+      bookedHours: alloc.bookedHours,
+      allowedHours: alloc.allowedHours,
+      months: [...alloc.months],
+      plannedRowId: planned?.id || null,
+      plannedSkill: planned?.skill || null,
+      plannedBand: planned?.experienceBand || null,
+    };
+
+    if (planned) {
+      const agrees = !!empSkillKey && empSkillKey === skillKey(planned.skill);
+      findings.push({
+        ...base,
+        status: agrees ? 'MATCHED' : 'SKILL_MISMATCH',
+        detail: agrees
+          ? null
+          : `Planned as "${planned.skill || '—'}" but Q-People has them as "${emp?.skillsetGom || 'no skillset set'}"`,
+      });
+    } else {
+      const skillIsWanted = !!empSkillKey && wantedSkills.has(empSkillKey);
+      findings.push({
+        ...base,
+        status: 'UNPLANNED',
+        detail: skillIsWanted
+          ? 'Booked on the project and their skill is in the plan, but they are not named on any line'
+          : 'Booked on the project but their skill is not in the plan at all',
+      });
+    }
+  }
+
+  // Named on the plan but absent from Q-People's allocation
+  for (const r of planRows) {
+    if (!r.employeeId || byEmployee.has(r.employeeId)) continue;
+    const emp = empById.get(r.employeeId);
+    findings.push({
+      employeeId: r.employeeId,
+      employeeName: r.employeeName || emp?.name || r.employeeId,
+      qpeopleSkill: emp?.skillsetGom || null,
+      designation: emp?.designation || null,
+      allocationPercent: 0,
+      bookedHours: 0,
+      allowedHours: 0,
+      months: [],
+      plannedRowId: r.id,
+      plannedSkill: r.skill,
+      plannedBand: r.experienceBand,
+      status: 'NOT_ALLOCATED',
+      detail: 'On the QCRM plan but not allocated to this project in Q-People',
+    });
+  }
+
+  const unfilled = planRows
+    .filter((r) => !r.employeeId)
+    .map((r) => ({ rowId: r.id, skill: r.skill, experienceBand: r.experienceBand, projectRole: r.projectRole, quantity: r.quantity }));
+
+  const count = (s: string) => findings.filter((f) => f.status === s).length;
+  return {
+    projectId,
+    period: latestYear,
+    findings: findings.sort((a, b) => {
+      const order: Record<string, number> = { SKILL_MISMATCH: 0, UNPLANNED: 1, NOT_ALLOCATED: 2, MATCHED: 3 };
+      return (order[a.status] ?? 9) - (order[b.status] ?? 9) || a.employeeName.localeCompare(b.employeeName);
+    }),
+    unfilledPlanLines: unfilled,
+    totals: {
+      allocatedInQPeople: byEmployee.size,
+      matched: count('MATCHED'),
+      skillMismatch: count('SKILL_MISMATCH'),
+      unplanned: count('UNPLANNED'),
+      notAllocated: count('NOT_ALLOCATED'),
+      unfilledPlanLines: unfilled.length,
+    },
+  };
 }
 
 /**
