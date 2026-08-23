@@ -203,11 +203,17 @@ model RateCard {
   ctcLuxembourg      Float    @default(0)
   category           String
   isActive        Boolean  @default(true)
+  // Which cost-card upload this rate came from. Nullable only so the column
+  // could be added to existing rows; the backfill assigns every row a batch.
+  batch           RateCardBatch? @relation(fields: [batchId], references: [id])
+  batchId         String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   @@index([category])
   @@index([skill])
+  @@index([batchId])
+  @@index([isActive])
   @@map("rate_cards")
 }
 
@@ -1334,6 +1340,32 @@ model QPeopleProjectMapping {
 
   @@index([qpeopleProjectCode])
   @@map("qpeople_project_mappings")
+}
+
+// One cost-card upload. Every rate belongs to exactly one batch, which is what
+// turns "716 rows" into a legible history: the current card plus the ones it
+// superseded, each identifiable rather than distinguishable only by a timestamp.
+//
+// Exactly one batch should be isCurrent at a time; its rows are the active
+// rates, and every other batch's rows are archived.
+model RateCardBatch {
+  id             String   @id @default(cuid())
+  label          String                  // "Cost Card — 13 Aug 2026"
+  sourceFile     String?                 // originating workbook, when known
+  uploadedAt     DateTime @default(now())
+  uploadedById   String?
+  uploadedByName String?
+  rowCount       Int      @default(0)
+  isCurrent      Boolean  @default(false)
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  rateCards      RateCard[]
+
+  @@index([isCurrent])
+  @@index([uploadedAt])
+  @@map("rate_card_batches")
 }
 
 // TEMPORARY bridge: employee skillset / experience while Q-People's own

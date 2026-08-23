@@ -7,6 +7,7 @@ import { useAuthStore } from "@/lib/auth-store";
 import { apiClient, API_URL, getAuthHeaders } from "@/lib/api";
 import { useCurrency } from "@/components/providers/currency-provider";
 import { canAccessSettingsTab, hasAnyGrantedPermission, type SettingsTabKey } from "@/lib/access-control";
+import RateCardArchive from "./components/RateCardArchive";
 import { SowAdminTab } from "./components/SowAdminTab";
 import EmailTemplateBuilder, { CustomCalcField } from "@/components/email-templates/EmailTemplateBuilder";
 
@@ -1635,6 +1636,11 @@ interface RateCardItem {
 
 function RateCardsTab() {
     const { format: fmtCurrency } = useCurrency();
+    // Active vs Archive. The tab used to list all 716 rows with nothing marking
+    // the ~393 retired ones, which read as a data problem; they now live behind
+    // the Archive sub-tab with their upload history.
+    const [subTab, setSubTab] = useState<"active" | "archive">("active");
+    const [archivedCount, setArchivedCount] = useState<number | null>(null);
     const [rateCards, setRateCards] = useState<RateCardItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [showCreate, setShowCreate] = useState(false);
@@ -1666,12 +1672,15 @@ function RateCardsTab() {
         try {
             const qp = new URLSearchParams({ page: String(pg), limit: String(rcLimit) });
             if (search) qp.set("search", search);
+            // Only the live card belongs here; retired rates are in Archive.
+            qp.set("status", "active");
             const res = await apiClient<any>(`/api/admin/rate-cards?${qp.toString()}`);
             if (res.data && Array.isArray(res.data)) {
                 setRateCards(res.data);
                 setRcTotal(res.total ?? res.data.length);
                 setRcPage(res.page ?? pg);
                 setRcTotalPages(res.totalPages ?? 1);
+                if (res.counts) setArchivedCount(res.counts.archived);
             } else if (Array.isArray(res)) {
                 setRateCards(res);
                 setRcTotal(res.length);
@@ -1787,6 +1796,26 @@ function RateCardsTab() {
 
     return (
         <div className="space-y-4">
+            {/* Sub-tabs */}
+            <div className="flex gap-1 bg-slate-100 rounded-lg p-1 w-fit">
+                <button
+                    onClick={() => setSubTab("active")}
+                    className={`px-4 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                        subTab === "active" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-600 hover:text-slate-800"}`}
+                >
+                    Current Rate Card{rcTotal > 0 && subTab === "active" ? ` (${rcTotal})` : ""}
+                </button>
+                <button
+                    onClick={() => setSubTab("archive")}
+                    className={`px-4 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                        subTab === "archive" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-600 hover:text-slate-800"}`}
+                >
+                    Archive{archivedCount !== null ? ` (${archivedCount})` : ""}
+                </button>
+            </div>
+
+            {subTab === "archive" ? <RateCardArchive /> : (
+            <>
             {/* Header */}
             <div className="flex items-center justify-between">
                 <div>
@@ -1981,6 +2010,8 @@ function RateCardsTab() {
                         </div>
                     )}
                 </div>
+            )}
+            </>
             )}
         </div>
     );
