@@ -55,6 +55,9 @@ interface Candidate {
     experienceYears: number | null;
     experienceKnown: boolean;
     experienceMatches: boolean;
+    // Fractional years placed on the shared band ladder: 4.17 -> "4 - 6 Years"
+    experienceBandKey: string | null;
+    experienceBandLabel: string | null;
     // Q-People's total_allocation is 100 for anyone allocated at all, so it is
     // NOT spare capacity. What is meaningful is how thinly someone is spread.
     projectCount: number;
@@ -374,14 +377,25 @@ export default function ProjectResourceMappingTab({
                                 disabled={!canEdit}
                             />
                         </div>
+                        {/* The placeholder option is load-bearing. Without an option
+                            whose value is "", a controlled select holding "" matches
+                            nothing, so the browser silently selects the FIRST option
+                            instead. The row then looks picked while React state is
+                            still empty — leaving Map project disabled — and clicking
+                            that already-highlighted row fires no change event, so it
+                            can never recover. */}
                         <select
                             value={chosenProject}
                             onChange={(e) => setChosenProject(e.target.value)}
                             disabled={!canEdit}
-                            size={Math.min(8, Math.max(3, visibleProjects.length))}
+                            size={Math.min(8, Math.max(3, visibleProjects.length + 1))}
                             className="w-full text-sm border border-slate-300 rounded-md p-1 focus:ring-1 focus:ring-indigo-500"
                         >
-                            {visibleProjects.length === 0 && <option disabled>No matching projects</option>}
+                            <option value="">
+                                {visibleProjects.length === 0
+                                    ? "No matching projects"
+                                    : `— select a project (${visibleProjects.length}) —`}
+                            </option>
                             {visibleProjects.map((p) => (
                                 <option key={p.id} value={p.id}>
                                     {p.code} — {p.name}{p.customer ? ` · ${p.customer}` : ""}
@@ -551,7 +565,11 @@ export default function ProjectResourceMappingTab({
                                                         {cands.map((c) => (
                                                             <option key={c.employeeId} value={c.employeeId}>
                                                                 {c.employeeName}
-                                                                {c.experienceKnown ? ` · ${c.experienceYears}y` : " · exp n/a"}
+                                                                {/* Show the band the person falls in, not just raw years —
+                                                                    4.17y on its own does not read as "4 - 6 Years". */}
+                                                                {c.experienceBandLabel
+                                                                    ? ` · ${c.experienceBandLabel}${c.experienceKnown && c.experienceYears !== null ? ` (${c.experienceYears}y)` : ""}`
+                                                                    : " · exp n/a"}
                                                                 {c.projectCount > 0
                                                                     ? ` · on ${c.projectCount} project${c.projectCount === 1 ? "" : "s"}`
                                                                     : " · unallocated"}

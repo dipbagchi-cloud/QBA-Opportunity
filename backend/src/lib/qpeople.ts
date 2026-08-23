@@ -376,16 +376,67 @@ export async function fetchTimesheetTotalsForProject(projectId: string, force = 
 
 // ── Matching ────────────────────────────────────────────────────────────────
 
-/** QCRM experience bands come in two spellings; both map to the same year range. */
-export function parseExperienceBand(band?: string | null): { min: number; max: number } | null {
+/**
+ * The one experience-band ladder, shared by QCRM rate cards, the HR workbook and
+ * this matcher. Lower bound inclusive, upper bound exclusive — so 4.17 years is
+ * "4 - 6 Years", and a boundary value like exactly 4.0 lands in 4-6 rather than
+ * ambiguously in both 2-4 and 4-6.
+ */
+export const EXPERIENCE_BANDS = [
+  { key: '0-2', label: '0 - 2 Years', min: 0, max: 2 },
+  { key: '2-4', label: '2 - 4 Years', min: 2, max: 4 },
+  { key: '4-6', label: '4 - 6 Years', min: 4, max: 6 },
+  { key: '6-8', label: '6 - 8 Years', min: 6, max: 8 },
+  { key: '8-12', label: '8 - 12 Years', min: 8, max: 12 },
+  { key: '12-15', label: '12 - 15 Years', min: 12, max: 15 },
+  { key: '15+', label: '15+ Years', min: 15, max: Infinity },
+] as const;
+
+export type ExperienceBandKey = (typeof EXPERIENCE_BANDS)[number]['key'];
+
+/**
+ * Reduce any spelling of a band to its canonical key. The same band appears as
+ * "00-02" (resource rows), "0 - 2 Years" (rate cards and the HR workbook),
+ * ">15" and "15+ Years" — all of which must compare equal.
+ */
+export function canonicalBandKey(band?: string | null): ExperienceBandKey | null {
   if (!band) return null;
   const b = band.trim().toLowerCase();
-  if (/^(>|15\+)/.test(b) || b.startsWith('15+')) return { min: 15, max: 99 };
-  const m = b.match(/(\d+)\s*[-–]\s*(\d+)/);
-  if (m) return { min: Number(m[1]), max: Number(m[2]) };
+  if (b.startsWith('>') || b.startsWith('15+') || /^\s*15\s*\+/.test(b)) return '15+';
+  const m = b.match(/(\d+)\s*[-–—]\s*(\d+)/);
+  if (m) {
+    const lo = Number(m[1]);
+    const hi = Number(m[2]);
+    const hit = EXPERIENCE_BANDS.find((x) => x.min === lo && x.max === hi);
+    if (hit) return hit.key;
+    // Tolerate a band that is written slightly off the ladder by matching on
+    // its lower bound, which is what actually distinguishes the bands.
+    const byLow = EXPERIENCE_BANDS.find((x) => x.min === lo);
+    return byLow ? byLow.key : null;
+  }
   const single = b.match(/^(\d+)/);
-  if (single) return { min: Number(single[1]), max: 99 };
+  if (single) {
+    const byLow = EXPERIENCE_BANDS.find((x) => x.min === Number(single[1]));
+    return byLow ? byLow.key : null;
+  }
   return null;
+}
+
+/**
+ * Place a fractional year count on the ladder: 4.17 -> "4-6", 9.67 -> "8-12",
+ * 22.42 -> "15+". This is what makes a decimal experience figure comparable to
+ * the banded requirement on a resource row.
+ */
+export function bandForYears(years?: number | null): ExperienceBandKey | null {
+  if (years === null || years === undefined || !Number.isFinite(years)) return null;
+  const hit = EXPERIENCE_BANDS.find((b) => years >= b.min && years < b.max);
+  return hit ? hit.key : '15+';
+}
+
+/** Human label for a canonical key, for display next to a candidate. */
+export function bandLabel(key?: ExperienceBandKey | null): string | null {
+  if (!key) return null;
+  return EXPERIENCE_BANDS.find((b) => b.key === key)?.label ?? null;
 }
 
 export interface EmployeeMatch {
@@ -395,6 +446,9 @@ export interface EmployeeMatch {
   projectCount: number;
   experienceMatches: boolean;    // false when the band is missed OR experience is unknown
   experienceKnown: boolean;
+  /** The candidate's own band, derived from their fractional years. */
+  experienceBandKey: ExperienceBandKey | null;
+  experienceBandLabel: string | null;
 }
 
 /**
@@ -412,22 +466,28 @@ export function matchEmployees(
 ): EmployeeMatch[] {
   const want = skillKey(skill);
   if (!want) return [];
-  const range = parseExperienceBand(experienceBand);
+  const wantBand = canonicalBandKey(experienceBand);
 
   return employees
     .filter((e) => e.status === 'Active' && skillKey(e.skillsetGom) === want)
     .map((e) => {
       const c = commitment.get(e.id) || null;
-      const known = e.experienceYears !== null;
-      const fits = known && range
-        ? e.experienceYears! >= range.min && e.experienceYears! <= range.max
-        : !range;
+      // Prefer the numeric years — 4.17 places precisely on the ladder. Fall
+      // back to the band the HR workbook recorded when years are missing.
+      const ownBand = bandForYears(e.experienceYears)
+        ?? canonicalBandKey(e.experienceBandFallback);
+      const known = ownBand !== null;
+      // Band-to-band comparison, not a range test: it makes a boundary value
+      // land in exactly one band instead of satisfying two adjacent ones.
+      const fits = wantBand ? ownBand === wantBand : true;
       return {
         employee: e,
         commitment: c,
         projectCount: c ? c.projects.length : 0,
         experienceMatches: fits,
         experienceKnown: known,
+        experienceBandKey: ownBand,
+        experienceBandLabel: bandLabel(ownBand),
       };
     })
     .sort((a, b) => {

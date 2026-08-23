@@ -275,6 +275,9 @@ export async function getResourcePlan(req: Request, res: Response) {
           experienceYears: m.employee.experienceYears,
           experienceKnown: m.experienceKnown,
           experienceMatches: m.experienceMatches,
+          // Fractional years placed on the shared band ladder (4.17 -> "4 - 6 Years")
+          experienceBandKey: m.experienceBandKey,
+          experienceBandLabel: m.experienceBandLabel,
           // Commitment is the split across projects, not spare capacity —
           // Q-People's total_allocation is 100 for anyone allocated at all.
           projectCount: m.projectCount,

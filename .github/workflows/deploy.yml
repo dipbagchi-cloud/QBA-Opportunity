@@ -58,6 +58,21 @@ jobs:
             npm ci 2>&1 | tail -5
             # Postinstall already runs prisma generate; this is belt + braces.
             npx prisma generate 2>&1 | tail -3
+
+            # Apply pending schema migrations BEFORE the backend restarts, so new
+            # code never meets an old schema. set -eo pipefail + script_stop mean
+            # a failed migration aborts the deploy instead of restarting into a
+            # broken state.
+            #
+            # These databases were originally built with `prisma db push`, so they
+            # had no _prisma_migrations history and every existing migration looked
+            # pending. They have been baselined with `prisma migrate resolve
+            # --applied <name>`; if you add an environment, baseline it the same way
+            # before its first deploy or migrate deploy will try to replay
+            # already-applied migrations and fail on "already exists".
+            echo "--- prisma migrate deploy ---"
+            npx prisma migrate deploy
+
             # Compile TS — show full output so errors are visible in CI logs.
             npx tsc
 
@@ -118,6 +133,12 @@ jobs:
             cd $APP_DIR/backend
             npm ci 2>&1 | tail -5
             npx prisma generate 2>&1 | tail -3
+
+            # Apply pending migrations before the restart — see the production
+            # job for why, and for the baselining requirement.
+            echo "--- prisma migrate deploy ---"
+            npx prisma migrate deploy
+
             npx tsc
 
             echo "=== Restart UAT backend safely ==="
@@ -177,6 +198,12 @@ jobs:
             cd $APP_DIR/backend
             npm ci 2>&1 | tail -5
             npx prisma generate 2>&1 | tail -3
+
+            # Apply pending migrations before the restart — see the production
+            # job for why, and for the baselining requirement.
+            echo "--- prisma migrate deploy ---"
+            npx prisma migrate deploy
+
             npx tsc
 
             echo "=== Restart QA backend safely ==="
