@@ -8,8 +8,8 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import {
-  fetchProjects, getEmployeesResolved, fetchCurrentCommitment, fetchAllocations,
-  fetchTimesheetTotalsForProject, matchEmployees, skillsetCoverage,
+  fetchProjects, getEmployeesResolved, fetchCommitmentDetail, fetchAllocations,
+  fetchTimesheetTotalsForProject, matchEmployees, skillsetCoverage, EmployeeCommitment,
   clearQPeopleCache, QPeopleError,
 } from '../lib/qpeople';
 import { recordAudit } from '../lib/audit';
@@ -258,7 +258,7 @@ export async function getResourcePlan(req: Request, res: Response) {
 
     const [employees, commitment, coverage] = await Promise.all([
       getEmployeesResolved(force),
-      fetchCurrentCommitment(force).catch(() => new Map<string, number>()),
+      fetchCommitmentDetail(force).catch(() => new Map<string, EmployeeCommitment>()),
       skillsetCoverage(force),
     ]);
 
@@ -275,8 +275,19 @@ export async function getResourcePlan(req: Request, res: Response) {
           experienceYears: m.employee.experienceYears,
           experienceKnown: m.experienceKnown,
           experienceMatches: m.experienceMatches,
-          allocationPercent: m.allocationPercent,
-          remainingPercent: m.remainingPercent,
+          // Commitment is the split across projects, not spare capacity —
+          // Q-People's total_allocation is 100 for anyone allocated at all.
+          projectCount: m.projectCount,
+          commitmentMonth: m.commitment ? `${m.commitment.month} ${m.commitment.year}` : null,
+          commitmentProjects: m.commitment
+            ? m.commitment.projects.map((p) => ({
+                projectId: p.projectId,
+                projectName: p.projectName,
+                percent: p.percent,
+                bookedHours: p.bookedHours,
+                allowedHours: p.allowedHours,
+              }))
+            : [],
         })),
     }));
 

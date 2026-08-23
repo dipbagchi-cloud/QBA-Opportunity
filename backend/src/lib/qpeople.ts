@@ -268,25 +268,76 @@ export async function fetchAllocations(opts: { year?: number; months?: string[] 
   }, force);
 }
 
+const MONTH_ORDER = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+export interface EmployeeCommitment {
+  month: string;
+  year: number;
+  totalPercent: number;
+  projects: { projectId: string | null; projectName: string | null; percent: number; bookedHours: number; allowedHours: number }[];
+}
+
 /**
- * Current commitment per employee. total_allocation already sits on the parent
- * doc, so this needs the parent list only — no child expansion at all. Takes the
- * busiest month of the most recent year as the representative figure.
+ * What each employee is committed to in the most recent *complete* month.
+ *
+ * Important: `total_allocation` is NOT spare capacity. It is the person's whole
+ * 100% split across their projects, so it reads 100 for anyone allocated to
+ * anything at all — every one of the 222 employees with a record sits at 100%.
+ * Deriving "remaining capacity = 100 - total_allocation" therefore always yields
+ * zero and tells the reader nothing. What is genuinely useful is the split: how
+ * many projects the person is spread over, at what percentage, and their booked
+ * vs allowed hours. That is what this returns.
+ *
+ * The reference month skips partial months — the in-progress month has a
+ * fraction of the usual record count and would make everyone look idle.
  */
-export async function fetchCurrentCommitment(force = false): Promise<Map<string, number>> {
-  return cached('commitment', async () => {
-    const parents = await list<any>('Employee Project Allocation',
-      ['employee', 'month', 'year', 'total_allocation']);
-    const byEmployee = new Map<string, number>();
-    if (!parents.length) return byEmployee;
+export async function fetchCommitmentDetail(force = false): Promise<Map<string, EmployeeCommitment>> {
+  return cached('commitment-detail', async () => {
+    const [parents, lines] = await Promise.all([
+      list<any>('Employee Project Allocation', ['name', 'employee', 'month', 'year', 'total_allocation']),
+      listChild<any>('Project Allocation Item', 'Employee Project Allocation',
+        ['parent', 'project', 'project_name', 'allocation_percent', 'allowed_hours', 'booked_hours']),
+    ]);
+    const out = new Map<string, EmployeeCommitment>();
+    if (!parents.length) return out;
 
     const latestYear = Math.max(...parents.map((p) => Number(p.year) || 0));
-    for (const p of parents) {
-      if (Number(p.year) !== latestYear) continue;
-      const pct = Number(p.total_allocation) || 0;
-      byEmployee.set(p.employee, Math.max(byEmployee.get(p.employee) || 0, pct));
+    const inYear = parents.filter((p) => Number(p.year) === latestYear);
+
+    // Pick the newest month that looks complete (>=60% of the fullest month).
+    const counts = new Map<string, number>();
+    inYear.forEach((p) => counts.set(p.month, (counts.get(p.month) || 0) + 1));
+    const fullest = Math.max(...counts.values());
+    const complete = MONTH_ORDER.filter((m) => (counts.get(m) || 0) >= fullest * 0.6);
+    const refMonth = complete.length ? complete[complete.length - 1] : undefined;
+    if (!refMonth) return out;
+
+    const refDocs = inYear.filter((p) => p.month === refMonth);
+    const docByName = new Map(refDocs.map((p) => [p.name, p]));
+    const linesByParent = new Map<string, any[]>();
+    for (const l of lines) {
+      if (!docByName.has(l.parent)) continue;
+      const arr = linesByParent.get(l.parent) || [];
+      arr.push(l);
+      linesByParent.set(l.parent, arr);
     }
-    return byEmployee;
+
+    for (const doc of refDocs) {
+      const ls = linesByParent.get(doc.name) || [];
+      out.set(doc.employee, {
+        month: refMonth,
+        year: latestYear,
+        totalPercent: Number(doc.total_allocation) || 0,
+        projects: ls.map((l) => ({
+          projectId: l.project || null,
+          projectName: l.project_name || null,
+          percent: Number(l.allocation_percent) || 0,
+          bookedHours: Number(l.booked_hours) || 0,
+          allowedHours: Number(l.allowed_hours) || 0,
+        })).sort((a, b) => b.percent - a.percent),
+      });
+    }
+    return out;
   }, force);
 }
 
@@ -339,8 +390,9 @@ export function parseExperienceBand(band?: string | null): { min: number; max: n
 
 export interface EmployeeMatch {
   employee: QPeopleEmployee;
-  allocationPercent: number;     // current commitment, 0 when unknown
-  remainingPercent: number;
+  /** Committed split for the reference month; null when Q-People has no record. */
+  commitment: EmployeeCommitment | null;
+  projectCount: number;
   experienceMatches: boolean;    // false when the band is missed OR experience is unknown
   experienceKnown: boolean;
 }
@@ -356,7 +408,7 @@ export function matchEmployees(
   employees: QPeopleEmployee[],
   skill: string | null | undefined,
   experienceBand: string | null | undefined,
-  commitment: Map<string, number>,
+  commitment: Map<string, EmployeeCommitment>,
 ): EmployeeMatch[] {
   const want = skillKey(skill);
   if (!want) return [];
@@ -365,22 +417,23 @@ export function matchEmployees(
   return employees
     .filter((e) => e.status === 'Active' && skillKey(e.skillsetGom) === want)
     .map((e) => {
-      const pct = commitment.get(e.id) || 0;
+      const c = commitment.get(e.id) || null;
       const known = e.experienceYears !== null;
       const fits = known && range
         ? e.experienceYears! >= range.min && e.experienceYears! <= range.max
         : !range;
       return {
         employee: e,
-        allocationPercent: pct,
-        remainingPercent: Math.max(0, 100 - pct),
+        commitment: c,
+        projectCount: c ? c.projects.length : 0,
         experienceMatches: fits,
         experienceKnown: known,
       };
     })
     .sort((a, b) => {
+      // Band matches first, then the least thinly-spread people.
       if (a.experienceMatches !== b.experienceMatches) return a.experienceMatches ? -1 : 1;
-      return b.remainingPercent - a.remainingPercent;
+      return a.projectCount - b.projectCount;
     });
 }
 

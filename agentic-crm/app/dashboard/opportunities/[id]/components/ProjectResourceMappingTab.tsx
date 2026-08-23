@@ -38,6 +38,14 @@ interface QProject {
     isActive: boolean;
 }
 
+interface CommitmentProject {
+    projectId: string | null;
+    projectName: string | null;
+    percent: number;
+    bookedHours: number;
+    allowedHours: number;
+}
+
 interface Candidate {
     employeeId: string;
     employeeName: string;
@@ -47,8 +55,11 @@ interface Candidate {
     experienceYears: number | null;
     experienceKnown: boolean;
     experienceMatches: boolean;
-    allocationPercent: number;
-    remainingPercent: number;
+    // Q-People's total_allocation is 100 for anyone allocated at all, so it is
+    // NOT spare capacity. What is meaningful is how thinly someone is spread.
+    projectCount: number;
+    commitmentMonth: string | null;
+    commitmentProjects: CommitmentProject[];
 }
 
 interface PlanRow {
@@ -541,12 +552,42 @@ export default function ProjectResourceMappingTab({
                                                             <option key={c.employeeId} value={c.employeeId}>
                                                                 {c.employeeName}
                                                                 {c.experienceKnown ? ` · ${c.experienceYears}y` : " · exp n/a"}
-                                                                {` · ${c.remainingPercent}% free`}
+                                                                {c.projectCount > 0
+                                                                    ? ` · on ${c.projectCount} project${c.projectCount === 1 ? "" : "s"}`
+                                                                    : " · unallocated"}
                                                                 {c.experienceMatches ? "" : " · band mismatch"}
                                                             </option>
                                                         ))}
                                                     </select>
                                                 )}
+                                                {/* Current commitment for the person picked — the split
+                                                    across projects, which is what Q-People actually knows. */}
+                                                {(() => {
+                                                    const picked = cands.find((c) => c.employeeId === r.employeeId);
+                                                    if (!picked) return null;
+                                                    if (!picked.commitmentProjects.length) {
+                                                        return (
+                                                            <p className="text-[10px] text-slate-500 mt-1">
+                                                                No allocation recorded in Q-People
+                                                            </p>
+                                                        );
+                                                    }
+                                                    return (
+                                                        <div className="text-[10px] text-slate-600 mt-1 leading-snug">
+                                                            <span className="text-slate-400">
+                                                                Committed ({picked.commitmentMonth}):
+                                                            </span>{" "}
+                                                            {picked.commitmentProjects.slice(0, 3).map((p, i) => (
+                                                                <span key={`${p.projectId}-${i}`}>
+                                                                    {i > 0 && ", "}
+                                                                    {p.percent}% {p.projectName || p.projectId}
+                                                                </span>
+                                                            ))}
+                                                            {picked.commitmentProjects.length > 3 &&
+                                                                ` +${picked.commitmentProjects.length - 3} more`}
+                                                        </div>
+                                                    );
+                                                })()}
                                             </td>
                                             {canEdit && (
                                                 <td className="p-2">
