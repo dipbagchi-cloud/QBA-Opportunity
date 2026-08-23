@@ -367,15 +367,25 @@ export interface QPeopleTimesheetEntry {
   date: string;          // YYYY-MM-DD — sheets are one per employee per day
   month: string;         // YYYY-MM
   hours: number;
+  submitted: boolean;    // docstatus 1 = submitted, 0 = still a draft
 }
 
 /**
- * Per-day timesheet entries for one project.
+ * Per-day timesheet entries for one project, BOTH submitted and draft.
  *
- * Only docstatus 1 (submitted) counts: 14,238 of the 100,866 sheets are still
- * drafts, and unapproved time must not inflate actual cost. Note Frappe's
- * separate workflow `status` field disagrees badly — it reads "Draft" on 81,267
- * sheets — and is not used here.
+ * Draft time is returned rather than filtered out, because submission lags
+ * badly and the lag lands on exactly the projects people care about: 63% of
+ * August 2026 hours were still draft, and 20 of the 147 projects with any
+ * effort had nothing submitted at all — including every recently started one.
+ * Excluding drafts made the feature look empty on new projects while real hours
+ * sat in Q-People.
+ *
+ * The caller keeps the two apart so draft time is never passed off as firm:
+ * cost is reported as a submitted figure plus a clearly-labelled provisional
+ * one. Cancelled sheets (docstatus 2) are dropped outright.
+ *
+ * Note Frappe's separate workflow `status` field is NOT used — it disagrees
+ * badly with docstatus, reading "Draft" on 81,267 sheets.
  */
 export async function fetchTimesheetEntries(projectId: string, force = false)
   : Promise<QPeopleTimesheetEntry[]> {
@@ -383,7 +393,7 @@ export async function fetchTimesheetEntries(projectId: string, force = false)
     const rows = await list<any>('Timesheet', [
       'name', 'employee', 'employee_name', 'start_date', 'end_date',
       'total_hours', 'docstatus',
-    ], [['parent_project', '=', projectId], ['docstatus', '=', 1]]);
+    ], [['parent_project', '=', projectId], ['docstatus', '!=', 2]]);
 
     return rows
       .filter((r) => r.start_date && Number(r.total_hours) > 0)
@@ -393,6 +403,7 @@ export async function fetchTimesheetEntries(projectId: string, force = false)
         date: String(r.start_date).slice(0, 10),
         month: String(r.start_date).slice(0, 7),
         hours: Number(r.total_hours) || 0,
+        submitted: r.docstatus === 1,
       }));
   }, force);
 }
