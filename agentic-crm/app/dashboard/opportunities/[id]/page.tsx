@@ -46,8 +46,13 @@ import { AssignmentPane } from "./components/AssignmentPane";
 import { AssignPresalesModal } from "./components/AssignPresalesModal";
 import { SowStudio } from "./components/SowStudio";
 import { StageTimeline, StageHistoryEntry } from "./components/StageTimeline";
+import ProjectResourceMappingTab from "./components/ProjectResourceMappingTab";
 
 // Static dropdowns (not master-data driven)
+// Sub-tabs inside the Actual GOM step. Project / Resource Mapping is the first
+// thing that must happen on a won deal, so it leads.
+const ACTUAL_GOM_SUBTABS = ["Project / Resource Mapping"];
+
 const DURATION_UNITS = ["days", "weeks", "months"];
 const ARCHITECTS = ["David Chen", "Sarah Jones", "Rahul Gupta", "Emily White"];
 
@@ -495,6 +500,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
     // Presales View State (The detailed view after transition)
     const [activeTab, setActiveTab] = useState("Project Details");
+    const [actualGomSubTab, setActualGomSubTab] = useState<string>(ACTUAL_GOM_SUBTABS[0]);
     const [activeStep, setActiveStep] = useState(0); // 0: Pipeline, 1: Presales
     const [opportunityStage, setOpportunityStage] = useState(0); // actual DB stage (0-3), stays fixed when navigating steps
     const [currentStageName, setCurrentStageName] = useState(''); // actual Kanban stage name (Discovery, Qualification, Proposal, Negotiation, Closed Won, Closed Lost)
@@ -519,6 +525,14 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     // informational, so a view-only role reading it is the intended behaviour.
     const isClosedWonStage = currentStageName === 'Closed Won' || currentStageName === 'Closed-Won' || currentStageName === 'Delivered';
     const canViewActualGom = isClosedWonStage;
+    // Everyone can READ Actual GOM; writing the Q-People mapping and the resource
+    // plan is a delivery action. Mirrors the authorizeAny() on the backend routes
+    // exactly, so the UI never offers a save the API will reject.
+    const canEditActualGom = !!(
+        opportunityAccess?.permissions?.presales?.edit ||
+        opportunityAccess?.permissions?.sales?.edit ||
+        opportunityAccess?.permissions?.pipeline?.edit
+    );
     const canEditPipeline = !!opportunityAccess?.workflow?.pipelineEditable;
     const canEditPresales = !!opportunityAccess?.workflow?.presalesEditable;
     const canManageEstimation = !!opportunityAccess?.workflow?.estimationEditable;
@@ -3721,6 +3735,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 Rendered for every role, but only on a won deal; see canViewActualGom above. */}
             {activeStep === 5 && canViewActualGom && (
                 <div className="space-y-4 animate-in fade-in duration-300">
+                    {/* Deal header — the baseline every Actual GOM sub-tab measures against */}
                     <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-5">
                         <div className="flex items-center gap-2 mb-1">
                             <TrendingUp className="w-5 h-5 text-indigo-600" />
@@ -3730,7 +3745,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             Delivered gross operating margin for this engagement, measured against the approved estimate.
                         </p>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                             <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
                                 <p className="text-xs text-slate-500 mb-1">Client</p>
                                 <p className="font-semibold text-sm text-slate-800">{formData.clientName || '-'}</p>
@@ -3746,19 +3761,34 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 </p>
                             </div>
                         </div>
+                    </div>
 
-                        <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50/60 p-6 text-center">
-                            <div className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-slate-200 mb-3">
-                                <Info className="w-5 h-5 text-slate-500" />
-                            </div>
-                            <p className="text-sm font-semibold text-slate-700 mb-1">Actuals not available yet</p>
-                            <p className="text-xs text-slate-500 max-w-md mx-auto">
-                                Delivered cost and revenue have not been recorded for this engagement.
-                                Once the actuals feed is connected, realised margin will be compared
-                                here against the GOM approved during presales.
-                            </p>
+                    {/* Sub-tabs. Only one exists today; the bar is here so adding the
+                        margin sub-tabs later does not restructure the view. */}
+                    <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-2">
+                        <div className="flex gap-1">
+                            {ACTUAL_GOM_SUBTABS.map((t) => (
+                                <button
+                                    key={t}
+                                    onClick={() => setActualGomSubTab(t)}
+                                    className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                                        actualGomSubTab === t
+                                            ? 'bg-indigo-600 text-white'
+                                            : 'text-slate-600 hover:bg-slate-100'
+                                    }`}
+                                >
+                                    {t}
+                                </button>
+                            ))}
                         </div>
                     </div>
+
+                    {actualGomSubTab === 'Project / Resource Mapping' && (
+                        <ProjectResourceMappingTab
+                            opportunityId={id}
+                            canEdit={canEditActualGom}
+                        />
+                    )}
                 </div>
             )}
 

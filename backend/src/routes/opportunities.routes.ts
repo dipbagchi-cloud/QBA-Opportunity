@@ -21,6 +21,16 @@ import {
     getOpportunityFilterOptions,
     exportOpportunities,
 } from '../controllers/opportunities.controller';
+import {
+    listSelectableProjects,
+    getMapping,
+    saveMapping,
+    deleteMapping,
+    getResourcePlan,
+    saveResourcePlan,
+    getProjectAllocation,
+    listSkillsets,
+} from '../controllers/actual-gom.controller';
 import { authenticate, authorize, authorizeAny } from '../middleware/auth';
 import { PERMISSIONS } from '../lib/permissions';
 
@@ -84,5 +94,21 @@ router.post('/:id/sow', authorizeAny(PERMISSIONS.PIPELINE_WRITE, PERMISSIONS.PRE
 router.post('/:id/attachments', authorizeAny(PERMISSIONS.PIPELINE_WRITE, PERMISSIONS.PRESALES_WRITE, PERMISSIONS.SALES_WRITE), handleUpload, uploadAttachment);
 router.get('/:id/attachments/:attachmentId/download', authorizeAny(PERMISSIONS.PIPELINE_VIEW, PERMISSIONS.PRESALES_VIEW, PERMISSIONS.SALES_VIEW), downloadAttachment);
 router.delete('/:id/attachments/:attachmentId', authorizeAny(PERMISSIONS.PIPELINE_WRITE, PERMISSIONS.PRESALES_WRITE, PERMISSIONS.SALES_WRITE), deleteAttachment);
+
+// ── Actual GOM: Q-People project / resource mapping ─────────────────────────
+// Reading is open to anyone who can view the deal (the Actual GOM tab itself is
+// visible to every role on a won deal, Read-Only included). Writing the mapping
+// and the resource plan is a delivery action, so it needs a write permission.
+const CAN_VIEW = authorizeAny(PERMISSIONS.PIPELINE_VIEW, PERMISSIONS.PRESALES_VIEW, PERMISSIONS.SALES_VIEW);
+const CAN_EDIT = authorizeAny(PERMISSIONS.PRESALES_WRITE, PERMISSIONS.SALES_WRITE, PERMISSIONS.PIPELINE_WRITE);
+
+router.get('/qpeople/skillsets', CAN_VIEW, listSkillsets);
+router.get('/:id/qpeople/projects', CAN_VIEW, listSelectableProjects);
+router.get('/:id/qpeople/mapping', CAN_VIEW, getMapping);
+router.put('/:id/qpeople/mapping', CAN_EDIT, saveMapping);
+router.delete('/:id/qpeople/mapping', CAN_EDIT, deleteMapping);
+router.get('/:id/qpeople/resource-plan', CAN_VIEW, getResourcePlan);
+router.put('/:id/qpeople/resource-plan', CAN_EDIT, saveResourcePlan);
+router.get('/:id/qpeople/allocation', CAN_VIEW, getProjectAllocation);
 
 export default router;

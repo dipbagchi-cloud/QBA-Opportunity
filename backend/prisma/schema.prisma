@@ -386,6 +386,8 @@ model Opportunity {
   vectorEmbedding   VectorEmbedding?
   project           Project?
   sowDocument       SowDocument?
+  qpeopleMapping    QPeopleProjectMapping?
+  actualResources   ActualResourceRow[]
 
   @@index([clientId])
   @@index([ownerId])
@@ -1299,9 +1301,75 @@ model SowNumberingConfig {
   // Version rules
   draftVersionPrefix String @default("0")
   approvedVersionStart String @default("1.0")
-  
+
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   @@map("sow_numbering_config")
+}
+
+// ============================================================================
+// ACTUAL GOM — Q-PEOPLE PROJECT & RESOURCE MAPPING
+// ============================================================================
+
+// Links a won opportunity to the Q-People project people book time against.
+//
+// Keyed on qpeopleProjectId (Project.name, "PROJ-0142") because that is unique
+// in Q-People. custom_project_code is NOT unique — two codes collide today —
+// so it is carried for display only. Both sides are @unique, which is what
+// enforces "a project already mapped must not appear in the selection list":
+// the exclusion is a DB guarantee, not just a UI filter.
+model QPeopleProjectMapping {
+  id                 String   @id @default(cuid())
+  opportunity        Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  opportunityId      String   @unique
+  qpeopleProjectId   String   @unique          // Project.name
+  qpeopleProjectCode String                     // custom_project_code (display)
+  qpeopleProjectName String
+  qpeopleCustomer    String?
+  mappedById         String?
+  mappedByName       String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([qpeopleProjectCode])
+  @@map("qpeople_project_mappings")
+}
+
+// The delivery-side resource plan for a won deal, seeded from the presales
+// Resource Assignment and then edited against reality.
+//
+// `origin` drives the colour coding in the UI:
+//   MATCHED (green)  — unchanged from the presales estimate
+//   CHANGED (yellow) — derived from a presales row whose skill/band/role was edited
+//   NEW     (red)    — a resource type that was never in the estimate
+// sourceRowId is the presales resource row's id, or null for a NEW row.
+model ActualResourceRow {
+  id             String   @id @default(cuid())
+  opportunity    Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  opportunityId  String
+  sourceRowId    String?
+  origin         String   @default("MATCHED")   // MATCHED | CHANGED | NEW
+
+  // What the plan asks for
+  skill          String?
+  experienceBand String?
+  projectRole    String?
+  quantity       Int      @default(1)
+
+  // What the estimate originally asked for — kept so CHANGED rows can show the delta
+  originalSkill          String?
+  originalExperienceBand String?
+  originalProjectRole    String?
+
+  // Who was picked from Q-People to fill it
+  employeeId     String?
+  employeeName   String?
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([opportunityId])
+  @@index([origin])
+  @@map("actual_resource_rows")
 }
