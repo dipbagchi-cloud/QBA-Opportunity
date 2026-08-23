@@ -24,6 +24,8 @@ interface Cell {
     draftCost: number | null;
     rateBatch: string | null;
     rateExtrapolated: boolean;
+    rateFallback: boolean;
+    rateBandUsed: string | null;
     level: string | null;
 }
 
@@ -44,6 +46,9 @@ interface Row {
     totalCost: number | null;
     draftCost: number | null;
     priced: boolean;
+    // Priced, but at a band the card covers rather than the person's own.
+    rateFallback: boolean;
+    rateFallbackNote: string | null;
     unpricedReason: string | null;
 }
 
@@ -55,7 +60,7 @@ interface Payload {
     totals: {
         people: number; hours: number; submittedHours: number; draftHours: number;
         days: number; cost: number; submittedCost: number; draftCost: number;
-        unpricedPeople: number; unplannedPeople: number;
+        unpricedPeople: number; fallbackPricedPeople: number; unplannedPeople: number;
     };
     basis: {
         hoursPerDay: number;
@@ -72,6 +77,7 @@ const WARNING_TEXT: Record<string, string> = {
     "no-skillset": "Some people have no Skillset GOM recorded, so their time cannot be priced.",
     "no-experience": "Some people have no experience recorded, so their band — and therefore their rate — is unknown.",
     "no-rate": "Some people have no matching rate card entry for their skill and band.",
+    "rate-fallback": "The rate card has no row at some people's experience band, so they are priced at the highest band it does cover. Those figures understate senior cost — add the missing bands to the cost card to fix it.",
     "location": "Some people are based where the rate card has no location column (Uzbekistan, Georgia, Indonesia); the India/Kolkata base CTC is used.",
 };
 
@@ -224,6 +230,11 @@ export default function ActualBookingCostTab({ opportunityId }: { opportunityId:
                                 {grand.unpricedPeople} unpriced — cost understated
                             </span>
                         )}
+                        {!!grand?.fallbackPricedPeople && (
+                            <span className="px-2 py-0.5 rounded-full border bg-amber-100 text-amber-800 border-amber-300">
+                                {grand.fallbackPricedPeople} priced at a lower band — approximate
+                            </span>
+                        )}
                         {!!grand?.unplannedPeople && (
                             <span className="px-2 py-0.5 rounded-full border bg-red-100 text-red-700 border-red-300">
                                 {grand.unplannedPeople} not on the plan
@@ -286,6 +297,14 @@ export default function ActualBookingCostTab({ opportunityId }: { opportunityId:
                                                                     not in plan
                                                                 </span>
                                                             )}
+                                                            {r.rateFallback && (
+                                                                <span
+                                                                    className="px-1.5 py-0 rounded-full text-[9px] font-semibold border bg-amber-100 text-amber-800 border-amber-300"
+                                                                    title={r.rateFallbackNote || ""}
+                                                                >
+                                                                    approx. rate
+                                                                </span>
+                                                            )}
                                                         </div>
                                                         <div className="text-[10px] text-slate-500">
                                                             {r.skill || <span className="italic">no skillset</span>}
@@ -326,6 +345,7 @@ export default function ActualBookingCostTab({ opportunityId }: { opportunityId:
                                                     {r.experienceYears !== null && <>Experience: <strong>{r.experienceYears}y</strong> · </>}
                                                     Days booked: <strong>{r.totalDays}</strong>
                                                     {!r.priced && <> · <span className="text-amber-700 font-semibold">Not priced — {r.unpricedReason}</span></>}
+                                                    {r.rateFallback && <> · <span className="text-amber-700 font-semibold">Approximate — {r.rateFallbackNote}</span></>}
                                                     {r.priced && (() => {
                                                         const used = [...new Set(Object.values(r.monthly).map((c) => c.rateBatch).filter(Boolean))];
                                                         const extra = Object.values(r.monthly).some((c) => c.rateExtrapolated);
