@@ -30,6 +30,7 @@ import {
   bandForYears, canonicalBandKey, bandLabel, QPeopleError,
 } from '../lib/qpeople';
 import { calculateRateCard, BudgetAssumptions } from '../lib/gom-calculator';
+import { bandOrder, type ExperienceBandKey } from '../lib/experience-bands';
 
 const HOURS_PER_DAY = 8;
 
@@ -91,9 +92,45 @@ export async function getActualCost(req: Request, res: Response) {
       select: { batchId: true, skill: true, experienceBand: true, ctc: true, level: true },
     });
     const rateIndex = new Map<string, { ctc: number; level: string }>();
+    // Also keep every band priced for a skill, ordered by seniority, so a band
+    // the card does not cover can fall back to the nearest one it does.
+    const bandsBySkill = new Map<string, { band: string; order: number; ctc: number; level: string }[]>();
     for (const r of allRates) {
-      const k = `${r.batchId}|${skillKey(r.skill)}|${canonicalBandKey(r.experienceBand)}`;
+      const band = canonicalBandKey(r.experienceBand);
+      if (!band) continue;
+      const k = `${r.batchId}|${skillKey(r.skill)}|${band}`;
       if (!rateIndex.has(k)) rateIndex.set(k, { ctc: r.ctc, level: r.level });
+      const sk = `${r.batchId}|${skillKey(r.skill)}`;
+      const arr = bandsBySkill.get(sk) || [];
+      if (!arr.some((x) => x.band === band)) {
+        arr.push({ band, order: bandOrder(band), ctc: r.ctc, level: r.level });
+        bandsBySkill.set(sk, arr);
+      }
+    }
+    for (const arr of bandsBySkill.values()) arr.sort((a, b) => a.order - b.order);
+
+    /**
+     * Rate for a skill at a band, falling back when the card does not price
+     * that seniority.
+     *
+     * 14 skills in the current card have no 15+ row — including several
+     * inherently senior ones (Delivery Lead/Head and both Project Manager
+     * skills stop at 3 bands) — so a strict lookup leaves real, expensive
+     * people costing nothing, which understates the project far more than an
+     * approximate rate does. We take the highest band priced at or below the
+     * person's, and flag the row so the approximation is never invisible.
+     */
+    function lookupRate(batchId: string, skill: string, wantBand: ExperienceBandKey) {
+      const exact = rateIndex.get(`${batchId}|${skillKey(skill)}|${wantBand}`);
+      if (exact) return { ...exact, bandUsed: wantBand, fallback: false };
+      const list = bandsBySkill.get(`${batchId}|${skillKey(skill)}`);
+      if (!list?.length) return null;
+      const want = bandOrder(wantBand);
+      const atOrBelow = list.filter((x) => x.order <= want);
+      // Prefer the most senior band the card actually prices; if the person is
+      // more junior than anything priced, use the lowest available instead.
+      const pick = atOrBelow.length ? atOrBelow[atOrBelow.length - 1] : list[0];
+      return { ctc: pick.ctc, level: pick.level, bandUsed: pick.band, fallback: true };
     }
 
     // Day cost is expensive-ish to derive and repeats heavily; memoise per CTC.
@@ -142,6 +179,7 @@ export async function getActualCost(req: Request, res: Response) {
       let totalCost = 0;
       let draftCost = 0;
       let anyRate = false;
+      let fellBack = false;
 
       for (const m of monthList) {
         const b = rec.monthly.get(m);
@@ -152,9 +190,14 @@ export async function getActualCost(req: Request, res: Response) {
         const { batch, extrapolated } = batchForMonth(batches, m);
         let ctc: number | null = null;
         let level: string | null = null;
+        let bandUsed: string | null = null;
+        let rateFallback = false;
         if (batch && skill && bandKey) {
-          const hit = rateIndex.get(`${batch.id}|${skillKey(skill)}|${bandKey}`);
-          if (hit) { ctc = hit.ctc; level = hit.level; }
+          const hit = lookupRate(batch.id, skill, bandKey);
+          if (hit) {
+            ctc = hit.ctc; level = hit.level; bandUsed = hit.bandUsed; rateFallback = hit.fallback;
+            if (hit.fallback) fellBack = true;
+          }
         }
         const dayCost = ctc !== null ? dayCostFor(ctc) : null;
         const cost = dayCost !== null ? days * dayCost : null;
@@ -171,12 +214,15 @@ export async function getActualCost(req: Request, res: Response) {
           draftCost: dCost === null ? null : Math.round(dCost),
           rateBatch: batch?.label || null,
           rateExtrapolated: extrapolated,
+          rateFallback,
+          rateBandUsed: bandUsed,
           level,
         };
       }
 
       if (!anyRate && totalHours > 0) warnings.add('no-rate');
       if (draftHours > 0) warnings.add('draft-time');
+      if (fellBack) warnings.add('rate-fallback');
 
       return {
         employeeId: empId,
@@ -196,6 +242,12 @@ export async function getActualCost(req: Request, res: Response) {
         totalCost: anyRate ? Math.round(totalCost) : null,
         draftCost: anyRate ? Math.round(draftCost) : null,
         priced: anyRate,
+        // True when the card had no row at this person's band and a lower one
+        // was used — the figure is approximate and understates seniority.
+        rateFallback: fellBack,
+        rateFallbackNote: fellBack
+          ? `Rate card has no "${bandLabel(bandKey) || bandKey}" row for ${skill}; priced at the highest band it does cover`
+          : null,
         unpricedReason: anyRate ? null
           : noSkill ? 'No Skillset GOM recorded for this person'
           : noBand ? 'No experience recorded for this person'
@@ -247,6 +299,7 @@ export async function getActualCost(req: Request, res: Response) {
         submittedCost: Math.round(grandCost - grandDraftCost),
         draftCost: Math.round(grandDraftCost),
         unpricedPeople: rows.filter((r) => !r.priced).length,
+        fallbackPricedPeople: rows.filter((r) => r.rateFallback).length,
         unplannedPeople: rows.filter((r) => !r.inPlan).length,
       },
       basis: {
