@@ -501,13 +501,24 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     // Stage timeline source data — which stages the deal has been through, and when.
     const [stageHistory, setStageHistory] = useState<StageHistoryEntry[]>([]);
     const [opportunityCreatedAt, setOpportunityCreatedAt] = useState<string>('');
-    const steps = ["Pipeline", "Presales", "Sales", "SOW", "Project"];
+    const steps = ["Pipeline", "Presales", "Sales", "SOW", "Project", "Actual GOM"];
     const isManagerOrAdmin = !!opportunityAccess?.permissions?.approvals?.manage;
     const canApproveGom = !!opportunityAccess?.permissions?.approvals?.manage;
     const canViewPipeline = !!(opportunityAccess?.permissions?.pipeline?.view || opportunityAccess?.workflow?.pipelineEditable);
     const canViewPresales = !!(opportunityAccess?.permissions?.presales?.view || opportunityAccess?.permissions?.estimation?.manage || opportunityAccess?.permissions?.gom?.view || opportunityAccess?.permissions?.approvals?.manage);
     const canViewSales = !!opportunityAccess?.permissions?.sales?.view;
     const canViewProject = !!(opportunityAccess?.permissions?.sales?.view || opportunityAccess?.permissions?.sow?.view);
+    // "Actual GOM" exists only once the deal is won — there is no delivered margin
+    // before that — so the tab is not rendered at all on any other opportunity.
+    // Matches the same won-stage name family used by the stage mapping in the
+    // fetch effect below ('Delivered' is not a configured stage today, but is kept
+    // in step with that mapping).
+    //
+    // Stage is the ONLY gate: every role sees the tab on a won deal, Read-Only
+    // included. There is no role or assignment condition here — the panel is
+    // informational, so a view-only role reading it is the intended behaviour.
+    const isClosedWonStage = currentStageName === 'Closed Won' || currentStageName === 'Closed-Won' || currentStageName === 'Delivered';
+    const canViewActualGom = isClosedWonStage;
     const canEditPipeline = !!opportunityAccess?.workflow?.pipelineEditable;
     const canEditPresales = !!opportunityAccess?.workflow?.presalesEditable;
     const canManageEstimation = !!opportunityAccess?.workflow?.estimationEditable;
@@ -545,9 +556,12 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             canViewSales,
             false,
             canViewProject,
+            canViewActualGom,
         ];
         if (stepAccess[activeStep]) return;
 
+        // Actual GOM (5) is intentionally absent from the fallback list — it is a
+        // destination the user picks, never one they get dropped onto.
         const reachableSteps =
             opportunityStage === 3 ? [4, 2, 1, 0] :
             opportunityStage === 2 ? [2, 1, 0] :
@@ -557,7 +571,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         if (fallback !== undefined && fallback !== activeStep) {
             setActiveStep(fallback);
         }
-    }, [activeStep, opportunityStage, canViewPipeline, canViewPresales, canViewSales, canViewProject]);
+    }, [activeStep, opportunityStage, canViewPipeline, canViewPresales, canViewSales, canViewProject, canViewActualGom]);
 
     useEffect(() => {
         const visibleTabs = [
@@ -2058,16 +2072,27 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             {/* Stepper Navigation */}
             <div className="bg-white p-3 rounded-lg shadow-sm border border-slate-200">
                 <div className="flex w-full mt-1 h-8 bg-slate-50 rounded-full overflow-hidden border border-slate-200">
-                    {steps.filter(step => step !== "SOW").map((step) => {
+                    {/* SOW is never a bar segment (it opens from the Sales step). "Actual GOM"
+                        shows only on a Closed Won deal, and there it shows for every role.
+                        Every segment is flex-1, so the bar spans the same width either way:
+                        four wider segments before the deal is won, five narrower ones after. */}
+                    {steps
+                        .filter(step => step !== "SOW" && (step !== "Actual GOM" || canViewActualGom))
+                        .map((step, visibleIdx, visibleSteps) => {
                         const idx = steps.indexOf(step);
-                        // Map step idx to DB stage: 0=Pipeline, 1=Presales, 2=Sales, 3=SOW (accessible at stage 2+), 4=Project (stage 3)
+                        // Map step idx to DB stage: 0=Pipeline, 1=Presales, 2=Sales, 3=SOW (accessible at stage 2+), 4=Project (stage 3), 5=Actual GOM (stage 3)
                         const stageForIdx = idx <= 2 ? idx : idx === 3 ? 2 : 3;
-                        const isCompleted = idx <= 2 ? idx < opportunityStage : idx === 3 ? opportunityStage >= 3 : opportunityStage === 3;
+                        const isActualGom = idx === 5;
+                        // Actual GOM never renders as "completed" — the delivered margin is
+                        // not a milestone the deal passes through, so it stays a plain
+                        // destination once the project exists.
+                        const isCompleted = isActualGom ? false : idx <= 2 ? idx < opportunityStage : idx === 3 ? opportunityStage >= 3 : opportunityStage === 3;
                         const isActive = idx === activeStep;
                         const hasStepAccess =
                             idx === 0 ? canViewPipeline :
                             idx === 1 ? canViewPresales :
                             idx === 2 ? canViewSales :
+                            isActualGom ? canViewActualGom :
                             canViewProject;
                         const isAccessible = opportunityStage >= stageForIdx && hasStepAccess;
 
@@ -2088,9 +2113,11 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             >
                                 {isCompleted && <Check className="w-4 h-4" />}
                                 {step}
-                                {/* Chevron Separator */}
-                                {idx !== steps.length - 1 && (
-                                    <div className={`absolute right-0 top-0 bottom-0 w-[1px] transform skew-x-12 translate-x-3 z-10 
+                                {/* Chevron Separator — keyed off position in the VISIBLE list so
+                                    the last segment never draws a trailing divider, whichever
+                                    role is looking. */}
+                                {visibleIdx !== visibleSteps.length - 1 && (
+                                    <div className={`absolute right-0 top-0 bottom-0 w-[1px] transform skew-x-12 translate-x-3 z-10
                                         ${isCompleted && idx + 1 <= opportunityStage ? 'bg-emerald-500 border-r border-emerald-400' : 'bg-white border-r border-slate-300'}`}
                                     ></div>
                                 )}
@@ -3686,6 +3713,51 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                         >
                             Back to Opportunities
                         </button>
+                    </div>
+                </div>
+            )}
+
+            {/* ACTUAL GOM VIEW (Step 5) — delivered margin against the approved estimate.
+                Rendered for every role, but only on a won deal; see canViewActualGom above. */}
+            {activeStep === 5 && canViewActualGom && (
+                <div className="space-y-4 animate-in fade-in duration-300">
+                    <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-5">
+                        <div className="flex items-center gap-2 mb-1">
+                            <TrendingUp className="w-5 h-5 text-indigo-600" />
+                            <h2 className="text-base font-bold text-slate-900">Actual GOM</h2>
+                        </div>
+                        <p className="text-xs text-slate-500 mb-5">
+                            Delivered gross operating margin for this engagement, measured against the approved estimate.
+                        </p>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
+                            <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
+                                <p className="text-xs text-slate-500 mb-1">Client</p>
+                                <p className="font-semibold text-sm text-slate-800">{formData.clientName || '-'}</p>
+                            </div>
+                            <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
+                                <p className="text-xs text-slate-500 mb-1">Project</p>
+                                <p className="font-semibold text-sm text-slate-800">{formData.projectName || '-'}</p>
+                            </div>
+                            <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
+                                <p className="text-xs text-slate-500 mb-1">Contracted Value</p>
+                                <p className="font-semibold text-sm text-slate-800">
+                                    {cSym}{getFinalQuoteValue().toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50/60 p-6 text-center">
+                            <div className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-slate-200 mb-3">
+                                <Info className="w-5 h-5 text-slate-500" />
+                            </div>
+                            <p className="text-sm font-semibold text-slate-700 mb-1">Actuals not available yet</p>
+                            <p className="text-xs text-slate-500 max-w-md mx-auto">
+                                Delivered cost and revenue have not been recorded for this engagement.
+                                Once the actuals feed is connected, realised margin will be compared
+                                here against the GOM approved during presales.
+                            </p>
+                        </div>
                     </div>
                 </div>
             )}
