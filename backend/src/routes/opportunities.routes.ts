@@ -32,6 +32,8 @@ import {
     listSkillsets,
 } from '../controllers/actual-gom.controller';
 import { getActualCost } from '../controllers/actual-cost.controller';
+import { getMargin } from '../controllers/actual-margin.controller';
+import { getDeliveryQueue, getMarginPortfolio } from '../controllers/delivery.controller';
 import { authenticate, authorize, authorizeAny, authorizeAdmin } from '../middleware/auth';
 import { PERMISSIONS } from '../lib/permissions';
 
@@ -105,6 +107,10 @@ router.delete('/:id/attachments/:attachmentId', authorizeAny(PERMISSIONS.PIPELIN
 // permission can express "Admin and nobody else", because a wildcard holder
 // satisfies every named permission a Manager would also pass.
 router.get('/qpeople/skillsets', authorizeAdmin, listSkillsets);
+// Collection-level views of won business. Two path segments, so they cannot be
+// swallowed by the single-segment '/:id' route registered further up.
+router.get('/qpeople/delivery-queue', authorizeAdmin, getDeliveryQueue);
+router.get('/qpeople/margin-portfolio', authorizeAdmin, getMarginPortfolio);
 router.get('/:id/qpeople/projects', authorizeAdmin, listSelectableProjects);
 router.get('/:id/qpeople/mapping', authorizeAdmin, getMapping);
 router.put('/:id/qpeople/mapping', authorizeAdmin, saveMapping);
@@ -113,5 +119,6 @@ router.get('/:id/qpeople/resource-plan', authorizeAdmin, getResourcePlan);
 router.put('/:id/qpeople/resource-plan', authorizeAdmin, saveResourcePlan);
 router.get('/:id/qpeople/allocation', authorizeAdmin, getProjectAllocation);
 router.get('/:id/qpeople/actual-cost', authorizeAdmin, getActualCost);
+router.get('/:id/qpeople/margin', authorizeAdmin, getMargin);
 
 export default router;
