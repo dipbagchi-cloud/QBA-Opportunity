@@ -86,12 +86,25 @@ function monthLabel(m: string) {
     return `${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(mo) - 1]} ${y.slice(2)}`;
 }
 
+type ShowMode = "both" | "cost" | "hours";
+
+const SHOW_OPTIONS: [ShowMode, string][] = [
+    ["both", "Cost + Hours"],
+    ["cost", "Cost"],
+    ["hours", "Hours"],
+];
+
+/** Hours as they read inside a grid cell — the unit matters next to a currency figure. */
+function hoursLabel(h: number) {
+    return `${h.toLocaleString()} h`;
+}
+
 export default function ActualBookingCostTab({ opportunityId }: { opportunityId: string }) {
     const { format: fmtCurrency } = useCurrency();
     const [data, setData] = useState<Payload | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    const [show, setShow] = useState<"cost" | "hours">("cost");
+    const [show, setShow] = useState<ShowMode>("both");
     const [openRow, setOpenRow] = useState<string | null>(null);
 
     const load = useCallback(async (refresh = false) => {
@@ -167,14 +180,13 @@ export default function ActualBookingCostTab({ opportunityId }: { opportunityId:
                     </div>
                     <div className="flex items-center gap-2">
                         <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
-                            <button
-                                onClick={() => setShow("cost")}
-                                className={`px-3 py-1 rounded-md text-xs font-medium ${show === "cost" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-600"}`}
-                            >Cost</button>
-                            <button
-                                onClick={() => setShow("hours")}
-                                className={`px-3 py-1 rounded-md text-xs font-medium ${show === "hours" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-600"}`}
-                            >Hours</button>
+                            {SHOW_OPTIONS.map(([opt, label]) => (
+                                <button
+                                    key={opt}
+                                    onClick={() => setShow(opt)}
+                                    className={`px-3 py-1 rounded-md text-xs font-medium whitespace-nowrap ${show === opt ? "bg-white text-indigo-700 shadow-sm" : "text-slate-600"}`}
+                                >{label}</button>
+                            ))}
                         </div>
                         <button onClick={() => load(true)} className="text-xs text-slate-500 hover:text-slate-700 flex items-center gap-1">
                             <RefreshCw className="w-3.5 h-3.5" /> Refresh
@@ -259,7 +271,7 @@ export default function ActualBookingCostTab({ opportunityId }: { opportunityId:
                 <div className="flex items-center gap-2 mb-3">
                     <Users className="w-4 h-4 text-slate-500" />
                     <h4 className="text-sm font-bold text-slate-800">
-                        Monthly {show === "cost" ? "cost" : "hours"} by person
+                        Monthly {show === "both" ? "cost and hours" : show === "cost" ? "cost" : "hours"} by person
                     </h4>
                     <span className="text-[11px] text-slate-400">
                         {data.months.length} month{data.months.length === 1 ? "" : "s"} with bookings
@@ -320,22 +332,35 @@ export default function ActualBookingCostTab({ opportunityId }: { opportunityId:
                                                     <td key={m} className="p-2 text-right whitespace-nowrap text-slate-700">
                                                         {!c ? <span className="text-slate-300">–</span> : (
                                                             <span
-                                                                className={c.draftHours > 0 ? "border-b border-dotted border-amber-500" : ""}
+                                                                className={`inline-block ${c.draftHours > 0 ? "border-b border-dotted border-amber-500" : ""}`}
                                                                 title={c.draftHours > 0
                                                                     ? `${c.submittedHours}h submitted, ${c.draftHours}h still draft`
                                                                     : undefined}
                                                             >
-                                                                {show === "hours" ? c.hours
-                                                                    : c.cost === null ? <span className="text-amber-600" title={r.unpricedReason || ""}>n/a</span>
-                                                                        : fmtCurrency(c.cost)}
+                                                                {show === "hours" ? hoursLabel(c.hours) : (
+                                                                    <>
+                                                                        {c.cost === null
+                                                                            ? <span className="text-amber-600" title={r.unpricedReason || ""}>n/a</span>
+                                                                            : fmtCurrency(c.cost)}
+                                                                        {show === "both" && (
+                                                                            <span className="block text-[10px] font-normal text-slate-500">{hoursLabel(c.hours)}</span>
+                                                                        )}
+                                                                    </>
+                                                                )}
                                                             </span>
                                                         )}
                                                     </td>
                                                 );
                                             })}
                                             <td className="p-2 text-right font-semibold whitespace-nowrap border-l border-slate-200 text-slate-900">
-                                                {show === "hours" ? r.totalHours
-                                                    : r.totalCost === null ? <span className="text-amber-600">n/a</span> : fmtCurrency(r.totalCost)}
+                                                {show === "hours" ? hoursLabel(r.totalHours) : (
+                                                    <>
+                                                        {r.totalCost === null ? <span className="text-amber-600">n/a</span> : fmtCurrency(r.totalCost)}
+                                                        {show === "both" && (
+                                                            <span className="block text-[10px] font-normal text-slate-500">{hoursLabel(r.totalHours)}</span>
+                                                        )}
+                                                    </>
+                                                )}
                                             </td>
                                         </tr>
                                         {open && (
@@ -364,12 +389,26 @@ export default function ActualBookingCostTab({ opportunityId }: { opportunityId:
                                     const t = data.monthTotals[m];
                                     return (
                                         <td key={m} className="p-2 text-right whitespace-nowrap text-slate-900">
-                                            {show === "hours" ? t.hours : fmtCurrency(t.cost)}
+                                            {show === "hours" ? hoursLabel(t.hours) : (
+                                                <>
+                                                    {fmtCurrency(t.cost)}
+                                                    {show === "both" && (
+                                                        <span className="block text-[10px] font-normal text-slate-600">{hoursLabel(t.hours)}</span>
+                                                    )}
+                                                </>
+                                            )}
                                         </td>
                                     );
                                 })}
                                 <td className="p-2 text-right whitespace-nowrap border-l border-slate-200 text-slate-900">
-                                    {show === "hours" ? grand?.hours : fmtCurrency(grand?.cost || 0)}
+                                    {show === "hours" ? hoursLabel(grand?.hours || 0) : (
+                                        <>
+                                            {fmtCurrency(grand?.cost || 0)}
+                                            {show === "both" && (
+                                                <span className="block text-[10px] font-normal text-slate-600">{hoursLabel(grand?.hours || 0)}</span>
+                                            )}
+                                        </>
+                                    )}
                                 </td>
                             </tr>
                         </tbody>
