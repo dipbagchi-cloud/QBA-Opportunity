@@ -65,16 +65,27 @@ function batchForMonth(batches: { id: string; label: string; uploadedAt: Date }[
   return batches.length ? { batch: batches[0], extrapolated: true } : { batch: null, extrapolated: true };
 }
 
-/**
- * GET /api/opportunities/:id/qpeople/actual-cost
- */
-export async function getActualCost(req: Request, res: Response) {
-  try {
-    const { id } = req.params;
-    const force = req.query.refresh === 'true';
+/** Thrown when an opportunity has no Q-People project mapped yet. */
+export class NotMappedError extends Error {
+  constructor() {
+    super('Map a Q-People project first');
+    this.name = 'NotMappedError';
+  }
+}
 
+export type ActualCostPayload = Awaited<ReturnType<typeof computeActualCost>>;
+
+/**
+ * The costing engine, shared by three callers: the Actual Booking & Cost tab,
+ * the Margin & Variance sub-tab, and the portfolio listing.
+ *
+ * It throws (NotMappedError / QPeopleError) rather than writing a response, so
+ * the portfolio loop can catch a single failing project and carry on instead of
+ * losing the whole page to one Q-People timeout.
+ */
+export async function computeActualCost(id: string, force = false) {
     const mapping = await prisma.qPeopleProjectMapping.findUnique({ where: { opportunityId: id } });
-    if (!mapping) return res.status(409).json({ error: 'Map a Q-People project first' });
+    if (!mapping) throw new NotMappedError();
 
     const [entries, employees, assumptions, batches, planRows] = await Promise.all([
       fetchTimesheetEntries(mapping.qpeopleProjectId, force),
@@ -280,7 +291,7 @@ export async function getActualCost(req: Request, res: Response) {
     const grandCost = rows.reduce((a, r) => a + (r.totalCost || 0), 0);
     const grandDraftCost = rows.reduce((a, r) => a + (r.draftCost || 0), 0);
 
-    res.json({
+    return {
       project: {
         id: mapping.qpeopleProjectId,
         code: mapping.qpeopleProjectCode,
@@ -310,8 +321,18 @@ export async function getActualCost(req: Request, res: Response) {
         rateCardVersioning: batches.map((b) => ({ label: b.label, from: b.uploadedAt })),
       },
       warnings: [...warnings],
-    });
+    };
+}
+
+/**
+ * GET /api/opportunities/:id/qpeople/actual-cost
+ */
+export async function getActualCost(req: Request, res: Response) {
+  try {
+    const data = await computeActualCost(req.params.id, req.query.refresh === 'true');
+    return res.json(data);
   } catch (err) {
+    if (err instanceof NotMappedError) return res.status(409).json({ error: err.message });
     if (err instanceof QPeopleError) {
       console.error('Q-People error:', err.message);
       return res.status(502).json({ error: 'Could not reach Q-People', detail: err.message });

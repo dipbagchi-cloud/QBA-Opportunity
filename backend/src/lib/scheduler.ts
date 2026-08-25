@@ -3,6 +3,7 @@ import {
   evaluateStartDateApproachingReminders,
   evaluateStartDateOverdueWorkflow,
 } from './notification-engine';
+import { refreshMarginSnapshots } from './margin-snapshots';
 
 // Process-wide guard so we never start the scheduler twice if this module is
 // imported more than once (e.g. ts-node-dev hot reload).
@@ -83,7 +84,44 @@ export function startScheduledJobs(): void {
   if (started) return;
   started = true;
 
-  // Master switch — disables the entire time-driven scheduler.
+  // ── Delivery-margin snapshots ────────────────────────────────────────────
+  //
+  // OFF by default, and opt-in per environment via MARGIN_SNAPSHOT_ENABLED.
+  //
+  // Margin history is worth having, but nobody asked for another unattended
+  // timer: snapshots are normally written on demand, when someone hits
+  // "Recompute now" on the Delivery Margin page (and once automatically to
+  // bootstrap an environment that has none). That covers the history need
+  // without a job running against Q-People every night unwatched. Set the flag
+  // to 'true' if the portfolio grows enough that on-demand stops being enough.
+  //
+  // It is armed BEFORE the master switch below, and on its own flag, so that
+  // enabling it never depends on TIME_DRIVEN_JOBS_ENABLED — that one is forced
+  // 'false' on QA and UAT to stop reminder emails reaching real cloned-prod
+  // contacts, and hanging this off it would mean it could only ever run in
+  // production. This job sends nothing; it reads Q-People and writes its own
+  // table, which is safe in every environment.
+  const snapshotsEnabled =
+    (process.env.MARGIN_SNAPSHOT_ENABLED || 'false').toLowerCase() === 'true';
+  if (snapshotsEnabled) {
+    const snap = parseTimeOfDay(process.env.MARGIN_SNAPSHOT_DAILY_AT || '02:30');
+    scheduleDailyAt('margin-snapshots', snap.hours, snap.minutes, async () => {
+      const r = await refreshMarginSnapshots();
+      console.log(
+        `[Scheduler] margin snapshots asOf=${r.asOf.toISOString().slice(0, 10)}: `
+        + `${r.written}/${r.attempted} written`
+        + (r.failed.length ? `, ${r.failed.length} failed: ${r.failed.map(f => f.opportunityId).join(', ')}` : ''),
+      );
+    });
+    console.log(
+      `[Scheduler] margin snapshots armed: daily-at=`
+      + `${String(snap.hours).padStart(2, '0')}:${String(snap.minutes).padStart(2, '0')} (server local)`,
+    );
+  } else {
+    console.log('[Scheduler] margin snapshots on-demand only (set MARGIN_SNAPSHOT_ENABLED=true to run them nightly)');
+  }
+
+  // Master switch — disables the entire EMAIL-SENDING time-driven scheduler.
   const enabled = (process.env.TIME_DRIVEN_JOBS_ENABLED || process.env.STALE_REMINDER_ENABLED || 'true').toLowerCase() !== 'false';
   if (!enabled) {
     console.log('[Scheduler] time-driven jobs disabled via env');

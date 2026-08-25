@@ -20,7 +20,8 @@ import {
     RefreshCw,
     Check,
     CheckCheck,
-    ExternalLink
+    ExternalLink,
+    TrendingUp
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { AuthProvider } from "@/components/providers/auth-provider";
@@ -45,6 +46,9 @@ const allSidebarItems: NavItem[] = [
     { icon: Briefcase, label: "Opportunities", href: "/dashboard/opportunities", permissionsAny: ["pipeline:view", "presales:view", "sales:view"] },
     { icon: Users, label: "Contacts", href: "/dashboard/contacts", permissionsAny: ["contacts:view", "contacts:write"] },
     { icon: BarChart3, label: "Analytics", href: "/dashboard/analytics", permissionsAny: ["analytics:view", "analytics:export"] },
+    // Portfolio margin across won deals. Admin-only, matching the Actual GOM
+    // tab it aggregates.
+    { icon: TrendingUp, label: "Delivery Margin", href: "/dashboard/delivery-margin", adminOnly: true },
     { icon: Bot, label: "Agentic AI", href: "/dashboard/agents", adminOnly: true },
     { icon: Settings, label: "Settings", href: "/dashboard/settings", permissionsAny: ["settings:view", "settings:manage", "users:manage", "roles:manage", "metadata:manage", "costcard:manage", "auditlogs:view"] },
 ];

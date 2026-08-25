@@ -394,6 +394,7 @@ model Opportunity {
   sowDocument       SowDocument?
   qpeopleMapping    QPeopleProjectMapping?
   actualResources   ActualResourceRow[]
+  gomSnapshots      ActualGomSnapshot[]
 
   @@index([clientId])
   @@index([ownerId])
@@ -1429,4 +1430,65 @@ model ActualResourceRow {
   @@index([opportunityId])
   @@index([origin])
   @@map("actual_resource_rows")
+}
+
+// One day's reading of a won deal's delivery margin.
+//
+// The portfolio view used to recompute every mapped project from Q-People on
+// each page load. That is fine at five projects and becomes a timeout at fifty,
+// and it can only ever answer "what is true now" — margin EROSION, the thing
+// anyone actually wants to see, needs history nobody was keeping.
+//
+// A nightly job writes one row per mapped won deal. The portfolio reads these
+// and is therefore instant and immune to Q-People being down; the per-deal tab
+// still recomputes live on demand.
+model ActualGomSnapshot {
+  id                    String   @id @default(cuid())
+  opportunity           Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  opportunityId         String
+  // Date-only (UTC midnight). One row per deal per day — a re-run on the same
+  // day overwrites rather than accumulating.
+  asOf                  DateTime
+
+  // Estimate side, copied in so a snapshot stays meaningful even if the
+  // presales estimate is later edited.
+  contractedRevenue     Float    @default(0)
+  estimatedCost         Float    @default(0)
+  estimatedGomPercent   Float?
+
+  // Actuals
+  actualCost            Float    @default(0)
+  budgetConsumedPercent Float?
+  hours                 Float    @default(0)
+  submittedHours        Float    @default(0)
+  draftHours            Float    @default(0)
+
+  // Like-for-like comparison
+  overlapMonths         Int      @default(0)
+  overlapPlannedCost    Float    @default(0)
+  overlapActualCost     Float    @default(0)
+  burnRatio             Float?
+  unplannedSpend        Float    @default(0)
+
+  // Projection, and whether it was trustworthy enough to publish
+  projectedTotalCost    Float?
+  projectedGomPercent   Float?
+  gomDeltaPoints        Float?
+  projectionReliable    Boolean  @default(false)
+
+  // Confidence
+  submittedSharePercent Float    @default(0)
+  firm                  Boolean  @default(false)
+  unpricedPeople        Int      @default(0)
+  fallbackPricedPeople  Int      @default(0)
+  unplannedPeople       Int      @default(0)
+
+  caveats               String   @default("")
+
+  computedAt            DateTime @default(now())
+
+  @@unique([opportunityId, asOf])
+  @@index([opportunityId])
+  @@index([asOf])
+  @@map("actual_gom_snapshots")
 }

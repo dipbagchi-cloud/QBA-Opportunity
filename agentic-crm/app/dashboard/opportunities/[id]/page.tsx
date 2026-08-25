@@ -48,12 +48,13 @@ import { SowStudio } from "./components/SowStudio";
 import { StageTimeline, StageHistoryEntry } from "./components/StageTimeline";
 import ProjectResourceMappingTab from "./components/ProjectResourceMappingTab";
 import ActualBookingCostTab from "./components/ActualBookingCostTab";
+import MarginVarianceTab from "./components/MarginVarianceTab";
 
 // Static dropdowns (not master-data driven)
 // Sub-tabs inside the Actual GOM step. Project / Resource Mapping is the first
 // thing that must happen on a won deal, so it leads; Actual Booking & Cost
 // depends on that mapping existing.
-const ACTUAL_GOM_SUBTABS = ["Project / Resource Mapping", "Actual Booking & Cost"];
+const ACTUAL_GOM_SUBTABS = ["Project / Resource Mapping", "Actual Booking & Cost", "Margin & Variance"];
 
 const DURATION_UNITS = ["days", "weeks", "months"];
 const ARCHITECTS = ["David Chen", "Sarah Jones", "Rahul Gupta", "Emily White"];
@@ -1073,7 +1074,15 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 } else if (stageName === 'Presales' || stageName === 'Qualification') {
                     stageIdx = 1;
                 }
-                setActiveStep(stageIdx === 3 ? 4 : stageIdx);
+                // Deep link from the delivery queue: ?tab=actual-gom lands
+                // straight on Actual GOM instead of dropping the user on the
+                // default step to hunt for it. Read off location rather than
+                // useSearchParams so the page is not forced into a Suspense
+                // boundary for one optional query string.
+                const deepTab = typeof window !== 'undefined'
+                    ? new URLSearchParams(window.location.search).get('tab')
+                    : null;
+                setActiveStep(deepTab === 'actual-gom' ? 5 : stageIdx === 3 ? 4 : stageIdx);
                 setOpportunityStage(stageIdx);
 
                 // Load presales data from saved record (Project Details tab fields)
@@ -3797,6 +3806,10 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
                     {actualGomSubTab === 'Actual Booking & Cost' && (
                         <ActualBookingCostTab opportunityId={id} />
+                    )}
+
+                    {actualGomSubTab === 'Margin & Variance' && (
+                        <MarginVarianceTab opportunityId={id} />
                     )}
                 </div>
             )}

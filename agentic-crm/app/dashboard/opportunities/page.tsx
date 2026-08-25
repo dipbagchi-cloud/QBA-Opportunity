@@ -32,6 +32,7 @@ import {
 import Link from "next/link";
 import { useOpportunityStore } from "@/lib/store";
 import { useAuthStore } from "@/lib/auth-store";
+import DeliveryQueueView from "./components/DeliveryQueueView";
 import { API_URL, getAuthHeaders } from "@/lib/api";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import KanbanBoard from "@/components/opportunities/KanbanBoard";
@@ -125,7 +126,7 @@ export default function OpportunitiesPage() {
         }
     };
 
-    const [viewMode, setViewMode] = useState<'list' | 'kanban' | 'by_owner'>('list');
+    const [viewMode, setViewMode] = useState<'list' | 'kanban' | 'by_owner' | 'delivery'>('list');
     const { currency: globalCurrency, getSymbol, getRate } = useCurrency();
 
     // Download every opportunity as CSV. The export is deliberately independent
@@ -375,9 +376,23 @@ export default function OpportunitiesPage() {
                 >
                     By Owner
                 </button>
+                {/* Delivery handover queue. Admin-only, matching the Actual GOM
+                    tab it feeds — a non-admin cannot act on anything in it. */}
+                {isAdmin && (
+                    <button
+                        onClick={() => setViewMode('delivery')}
+                        className={`px-3 py-1.5 text-sm font-medium border-b-2 transition-colors ${viewMode === 'delivery'
+                            ? 'text-indigo-600 border-indigo-600'
+                            : 'text-slate-500 border-transparent hover:text-indigo-600'}`}
+                    >
+                        Won / To Map
+                    </button>
+                )}
             </div>
 
-            {/* Search Bar */}
+            {/* Search Bar. Hidden for the delivery queue, which has its own
+                fixed shape and its own status filter. */}
+            {viewMode !== 'delivery' && (<>
             <div className="relative">
                 <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
                 <input
@@ -414,10 +429,13 @@ export default function OpportunitiesPage() {
                     </button>
                 </div>
             )}
+            </>)}
             </div>
 
             {/* Opportunities View */}
-            {viewMode === 'list' ? (
+            {viewMode === 'delivery' ? (
+                <DeliveryQueueView />
+            ) : viewMode === 'list' ? (
                 <div className="flex-1 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col min-h-0">
                     <div className="flex-1 overflow-auto">
                         <table className="w-full relative">
