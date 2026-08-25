@@ -7,10 +7,16 @@
  * Nothing answered "which engagements are in trouble", which is the question
  * that actually gets asked, and answering it meant opening deals one at a time.
  *
- * Unlike the Won / To Map queue, this DOES fan out to Q-People — one costing per
- * mapped deal — so it is slower and can partially fail. The backend caps
- * concurrency and isolates failures per row; this page renders a failed row as
- * a failed row rather than pretending the portfolio is healthy.
+ * Served from the snapshot table, so it is a single indexed query rather than a
+ * fan-out to Q-People. That makes it fast, immune to Q-People being down, and —
+ * because snapshots accumulate — able to answer "since when" rather than only
+ * "right now".
+ *
+ * Snapshots are written on demand: "Recompute now" forces a live costing and
+ * records one, and an environment with none bootstraps itself on first load.
+ * There is deliberately no unattended nightly job unless someone opts in via
+ * MARGIN_SNAPSHOT_ENABLED. A deal with no snapshot renders as an errored row
+ * rather than being quietly dropped from the totals.
  */
 
 import React, { useState, useEffect, useCallback } from "react";
@@ -35,11 +41,14 @@ interface Row {
     } | null;
     confidence: { submittedSharePercent: number; firm: boolean } | null;
     caveats: string[];
+    asOf: string | null;
     error: string | null;
 }
 
 interface Payload {
     rows: Row[];
+    source: "snapshot" | "live";
+    asOf: string | null;
     totals: {
         wonDeals: number; mappedDeals: number; unmappedDeals: number;
         computed: number; failed: number;
@@ -82,20 +91,33 @@ export default function DeliveryMarginPage() {
                     <p className="text-xs text-slate-500 mt-0.5">
                         Estimated versus actual margin across every won deal mapped to a Q-People project.
                     </p>
+                    {/* Provenance matters here: this page normally serves last
+                        night's snapshot, and a reader must never mistake it for
+                        a live reading. */}
+                    {data && (
+                        <p className="text-[11px] text-slate-400 mt-1">
+                            {data.source === "live"
+                                ? "Recomputed live from Q-People just now."
+                                : data.asOf
+                                    ? `From the snapshot recorded on ${new Date(data.asOf).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}.`
+                                    : "From the last recorded snapshot."}
+                            {" "}Recompute now re-costs every deal from Q-People — slower, and it records a new snapshot, which is what builds the margin trend.
+                        </p>
+                    )}
                 </div>
                 <button
                     onClick={() => load(true)}
                     disabled={loading}
                     className="text-xs text-slate-500 hover:text-slate-700 flex items-center gap-1 disabled:opacity-50"
                 >
-                    <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} /> Refresh
+                    <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} /> Recompute now
                 </button>
             </div>
 
             {loading && (
                 <div className="bg-white rounded-lg border border-slate-200 p-8 text-center text-sm text-slate-500">
                     <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-indigo-500" />
-                    Costing every mapped project from Q-People — this one is genuinely slow.
+                    Loading delivery margin…
                 </div>
             )}
 

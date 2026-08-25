@@ -64,6 +64,16 @@ interface Payload {
     };
     monthly: MonthRow[];
     caveats: string[];
+    history: {
+        asOf: string;
+        actualCost: number;
+        budgetConsumedPercent: number | null;
+        projectedGomPercent: number | null;
+        gomDeltaPoints: number | null;
+        projectionReliable: boolean;
+        estimatedGomPercent: number | null;
+        hours: number;
+    }[];
 }
 
 const CAVEAT_TEXT: Record<string, string> = {
@@ -140,6 +150,7 @@ export default function MarginVarianceTab({ opportunityId }: { opportunityId: st
 
     const { estimate, toDate, overlap, unplanned, notStarted, projection, confidence } = data;
     const delta = projection.gomDeltaPoints;
+    const trend = data.history || [];
 
     return (
         <div className="space-y-4">
@@ -298,6 +309,68 @@ export default function MarginVarianceTab({ opportunityId }: { opportunityId: st
                     </ul>
                 </div>
             )}
+
+            {/* ── Erosion trend ────────────────────────────────────────────
+                The reason snapshots exist. A single reading tells you where a
+                deal is; only a series tells you which way it is moving. */}
+            <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-5">
+                <h4 className="text-sm font-bold text-slate-800 mb-1">Margin over time</h4>
+                {trend.length < 2 ? (
+                    <p className="text-xs text-slate-500">
+                        {trend.length === 0
+                            ? "No snapshots recorded yet. One is written each time someone recomputes the Delivery Margin page, and the trend appears here once there are at least two."
+                            : `One snapshot so far (${new Date(trend[0].asOf).toLocaleDateString()}). The trend appears once a second has been recorded.`}
+                    </p>
+                ) : (
+                    <>
+                        <p className="text-xs text-slate-500 mb-3">
+                            Projected GOM at each recorded snapshot, against the {estimate.estimatedGomPercent ?? "—"}% this
+                            deal was approved at.
+                        </p>
+                        <div className="overflow-x-auto">
+                            <div className="flex items-end gap-1 min-w-max h-24">
+                                {trend.map((h) => {
+                                    const v = h.projectedGomPercent;
+                                    const approved = h.estimatedGomPercent ?? 0;
+                                    // Bars are drawn on a 0..100 scale clamped at
+                                    // both ends; a negative projected margin is
+                                    // real and is drawn as a zero-height red stub
+                                    // rather than being dropped.
+                                    const height = v === null ? 0 : Math.max(2, Math.min(100, v));
+                                    const below = v !== null && v < approved;
+                                    return (
+                                        <div key={h.asOf} className="flex flex-col items-center gap-1" title={
+                                            v === null
+                                                ? `${new Date(h.asOf).toLocaleDateString()} — not projectable`
+                                                : `${new Date(h.asOf).toLocaleDateString()} — ${v}% projected vs ${approved}% approved`
+                                        }>
+                                            <div
+                                                className={`w-4 rounded-t ${v === null ? "bg-slate-200" : below ? "bg-red-400" : "bg-emerald-400"}`}
+                                                style={{ height: `${height}%` }}
+                                            />
+                                            <span className="text-[8px] text-slate-400 whitespace-nowrap">
+                                                {new Date(h.asOf).toLocaleDateString(undefined, { day: "numeric", month: "short" })}
+                                            </span>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                        {(() => {
+                            const first = trend.find((h) => h.projectedGomPercent !== null);
+                            const last = [...trend].reverse().find((h) => h.projectedGomPercent !== null);
+                            if (!first || !last || first === last) return null;
+                            const move = (last.projectedGomPercent as number) - (first.projectedGomPercent as number);
+                            return (
+                                <p className={`text-xs mt-3 font-semibold ${move < 0 ? "text-red-700" : "text-emerald-700"}`}>
+                                    {move < 0 ? "Slid" : "Improved"} {Math.abs(Math.round(move * 10) / 10)} points since{" "}
+                                    {new Date(first.asOf).toLocaleDateString(undefined, { day: "numeric", month: "short" })}.
+                                </p>
+                            );
+                        })()}
+                    </>
+                )}
+            </div>
 
             {/* ── Month by month ───────────────────────────────────────────── */}
             <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-5">

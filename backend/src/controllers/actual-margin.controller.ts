@@ -36,6 +36,7 @@ import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { QPeopleError } from '../lib/qpeople';
 import { computeActualCost, NotMappedError } from './actual-cost.controller';
+import { snapshotHistory } from '../lib/margin-snapshots';
 
 /** How much of a month's hours must be submitted before the variance is firm. */
 const SUBMITTED_CONFIDENCE_FLOOR = 0.5;
@@ -262,8 +263,15 @@ export async function computeMargin(opportunityId: string, force = false) {
  */
 export async function getMargin(req: Request, res: Response) {
   try {
-    const data = await computeMargin(req.params.id, req.query.refresh === 'true');
-    return res.json(data);
+    const id = req.params.id;
+    // The live figure and the erosion curve behind it. History comes from the
+    // nightly snapshots, so it is empty until the job has run at least once —
+    // an empty array, never an error.
+    const [data, history] = await Promise.all([
+      computeMargin(id, req.query.refresh === 'true'),
+      snapshotHistory(id).catch(() => []),
+    ]);
+    return res.json({ ...data, history });
   } catch (err) {
     if (err instanceof NotMappedError) return res.status(409).json({ error: err.message });
     if (err instanceof QPeopleError) {

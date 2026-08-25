@@ -8,9 +8,11 @@
  *                      all, so it loads instantly and still works when Q-People
  *                      is down. This is the operational work queue.
  *
- *   margin-portfolio — fans out to Q-People, one costing per mapped deal. Real
- *                      money, real latency. Answers "which engagements are
- *                      losing margin?"
+ *   margin-portfolio — reads the nightly snapshot table. Answers "which
+ *                      engagements are losing margin?" and, because the
+ *                      snapshots accumulate, "since when?". Only recomputes
+ *                      live when explicitly asked, or to bootstrap an
+ *                      environment that has no snapshots yet.
  *
  * Keeping them apart matters: the queue is the screen someone opens twenty
  * times a day, and it would be absurd for it to wait on an external HR system
@@ -18,37 +20,9 @@
  */
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
-import { QPeopleError } from '../lib/qpeople';
-import { NotMappedError } from './actual-cost.controller';
-import { computeMargin } from './actual-margin.controller';
+import { refreshMarginSnapshots, latestSnapshots } from '../lib/margin-snapshots';
 
 const WON_STAGE = 'Closed Won';
-
-/**
- * Q-People is a shared external system and the VM has already shown it will
- * OOM-kill chatty processes, so the portfolio never opens more than this many
- * costings at once. Sequential would be safer still but turns a 6-deal page
- * into six round trips of latency.
- */
-const PORTFOLIO_CONCURRENCY = 3;
-
-async function mapWithConcurrency<T, R>(
-  items: T[],
-  limit: number,
-  fn: (item: T) => Promise<R>,
-): Promise<R[]> {
-  const out = new Array<R>(items.length);
-  let next = 0;
-  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (true) {
-      const i = next++;
-      if (i >= items.length) return;
-      out[i] = await fn(items[i]);
-    }
-  });
-  await Promise.all(workers);
-  return out;
-}
 
 /** Won deals, with how far each one has got through delivery handover. */
 async function loadWonDeals() {
@@ -160,66 +134,104 @@ export async function getDeliveryQueue(_req: Request, res: Response) {
 /**
  * GET /api/opportunities/qpeople/margin-portfolio
  *
- * Estimated vs actual margin across every mapped won deal.
+ * Reads the nightly snapshots by default, so the page is a single indexed query
+ * rather than a fan-out to Q-People. Two escape hatches:
  *
- * One deal failing must not take the page with it, so each costing is caught
- * individually and reported as an errored row. That is the difference between
- * "Q-People is slow today" and "the margin page is broken".
+ *   ?refresh=true  recompute every deal live and persist today's snapshot.
+ *                  Slow and externally dependent — the explicit "I want it
+ *                  current" button, not the default.
+ *   bootstrap      if no snapshots exist at all (fresh environment, or before
+ *                  the first nightly run) it computes once rather than showing
+ *                  an empty page and looking broken.
  */
 export async function getMarginPortfolio(req: Request, res: Response) {
   try {
-    const force = req.query.refresh === 'true';
+    const wantLive = req.query.refresh === 'true';
     const deals = await loadWonDeals();
     const mapped = deals.filter((d) => d.qpeopleMapping);
 
-    const results = await mapWithConcurrency(mapped, PORTFOLIO_CONCURRENCY, async (d) => {
-      try {
-        const m = await computeMargin(d.id, force);
+    let snaps = await latestSnapshots();
+    let ranLive = false;
+    let runFailures: { opportunityId: string; error: string }[] = [];
+
+    // Bootstrap covers the gap between deploying this and the first 02:30 run.
+    if (wantLive || snaps.size === 0) {
+      const run = await refreshMarginSnapshots();
+      runFailures = run.failed;
+      ranLive = true;
+      snaps = await latestSnapshots();
+    }
+
+    const rows = mapped.map((d) => {
+      const s = snaps.get(d.id);
+      const project = d.qpeopleMapping
+        ? {
+          id: d.qpeopleMapping.qpeopleProjectId,
+          code: d.qpeopleMapping.qpeopleProjectCode,
+          name: d.qpeopleMapping.qpeopleProjectName,
+        }
+        : null;
+
+      if (!s) {
+        const why = runFailures.find((f) => f.opportunityId === d.id);
         return {
-          opportunityId: d.id,
-          title: d.title,
-          client: d.client?.name || null,
-          owner: d.owner?.name || null,
-          project: m.project,
-          estimate: m.estimate,
-          toDate: m.toDate,
-          projection: m.projection,
-          confidence: m.confidence,
-          caveats: m.caveats,
-          error: null as string | null,
-        };
-      } catch (e: any) {
-        return {
-          opportunityId: d.id,
-          title: d.title,
-          client: d.client?.name || null,
-          owner: d.owner?.name || null,
-          project: d.qpeopleMapping
-            ? {
-              id: d.qpeopleMapping.qpeopleProjectId,
-              code: d.qpeopleMapping.qpeopleProjectCode,
-              name: d.qpeopleMapping.qpeopleProjectName,
-            }
-            : null,
-          estimate: null, toDate: null, projection: null, confidence: null, caveats: [],
-          error: e instanceof QPeopleError ? `Q-People: ${e.message}`
-            : e instanceof NotMappedError ? e.message
-              : 'Could not compute margin',
+          opportunityId: d.id, title: d.title, client: d.client?.name || null,
+          owner: d.owner?.name || null, project,
+          estimate: null, toDate: null, projection: null, confidence: null,
+          caveats: [], asOf: null,
+          error: why ? why.error : 'No snapshot yet for this deal',
         };
       }
+
+      return {
+        opportunityId: d.id,
+        title: d.title,
+        client: d.client?.name || null,
+        owner: d.owner?.name || null,
+        project,
+        estimate: {
+          contractedRevenue: s.contractedRevenue,
+          estimatedCost: s.estimatedCost,
+          estimatedGomPercent: s.estimatedGomPercent,
+        },
+        toDate: {
+          actualCost: s.actualCost,
+          budgetConsumedPercent: s.budgetConsumedPercent,
+          hours: s.hours,
+        },
+        projection: {
+          projectedGomPercent: s.projectedGomPercent,
+          gomDeltaPoints: s.gomDeltaPoints,
+          reliable: s.projectionReliable,
+          suppressedReason: s.projectionReliable
+            ? null
+            : 'too little comparable time booked to project a landing margin',
+        },
+        confidence: {
+          submittedSharePercent: s.submittedSharePercent,
+          firm: s.firm,
+        },
+        caveats: s.caveats ? s.caveats.split(',').filter(Boolean) : [],
+        asOf: s.asOf,
+        error: null as string | null,
+      };
     });
 
     // Biggest margin erosion first — the reason anyone opens this page. Rows
-    // that failed to compute sort last rather than masquerading as healthy.
-    const ok = results.filter((r) => !r.error);
-    const failed = results.filter((r) => r.error);
+    // with no snapshot sort last rather than masquerading as healthy.
+    const ok = rows.filter((r) => !r.error);
+    const failed = rows.filter((r) => r.error);
     ok.sort((a, b) =>
       (a.projection?.gomDeltaPoints ?? Infinity) - (b.projection?.gomDeltaPoints ?? Infinity));
 
     const withDelta = ok.filter((r) => r.projection?.gomDeltaPoints != null);
+    const newest = ok.reduce<Date | null>(
+      (a, r) => (r.asOf && (!a || r.asOf > a) ? r.asOf : a), null);
 
     return res.json({
       rows: [...ok, ...failed],
+      source: ranLive ? 'live' : 'snapshot',
+      asOf: newest,
       totals: {
         wonDeals: deals.length,
         mappedDeals: mapped.length,
@@ -229,10 +241,7 @@ export async function getMarginPortfolio(req: Request, res: Response) {
         contractedRevenue: ok.reduce((a, r) => a + (r.estimate?.contractedRevenue || 0), 0),
         estimatedCost: ok.reduce((a, r) => a + (r.estimate?.estimatedCost || 0), 0),
         actualCostToDate: ok.reduce((a, r) => a + (r.toDate?.actualCost || 0), 0),
-        // Deals projected to land below the margin they were sold at.
         atRisk: withDelta.filter((r) => (r.projection!.gomDeltaPoints as number) < 0).length,
-        // Deals whose numbers are mostly draft time, and so should not be
-        // quoted as fact regardless of what the delta says.
         provisional: ok.filter((r) => r.confidence && !r.confidence.firm).length,
       },
     });
