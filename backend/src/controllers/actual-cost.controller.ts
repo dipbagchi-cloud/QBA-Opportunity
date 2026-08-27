@@ -422,6 +422,9 @@ export async function computeActualCost(id: string, force = false) {
       batchFrom: Date;
       cost: number;
       monthTotals: Record<string, { hours: number; draftHours: number; cost: number; draftCost: number; priced: boolean }>;
+      // Per person, so the grid can put both cards side by side on one row
+      // instead of making the reader hold two tables in their head.
+      byEmployee: Record<string, { totalCost: number | null; monthly: Record<string, number | null> }>;
       delta: number;
       deltaPercent: number | null;
     } | null = null;
@@ -435,6 +438,12 @@ export async function computeActualCost(id: string, force = false) {
         batchFrom: latestBatch.uploadedAt,
         cost: altCost,
         monthTotals: monthTotalsFor(altRows),
+        byEmployee: Object.fromEntries(altRows.map((r) => [r.employeeId, {
+          totalCost: r.totalCost,
+          monthly: Object.fromEntries(
+            Object.entries(r.monthly).map(([m, c]) => [m, (c as any).cost as number | null]),
+          ),
+        }])),
         delta: altCost - baseCost,
         deltaPercent: baseCost ? Math.round(((altCost - baseCost) / baseCost) * 10000) / 100 : null,
       };
