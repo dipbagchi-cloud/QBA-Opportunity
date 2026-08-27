@@ -1492,3 +1492,40 @@ model ActualGomSnapshot {
   @@index([asOf])
   @@map("actual_gom_snapshots")
 }
+
+// Two names for one skill.
+//
+// The cost card and Q-People are separate vocabularies that are supposed to be
+// the same taxonomy and are not. The card carries 126 distinct skills; Q-People
+// uses 27; 103 card skills have nobody tagged with them. Where those are simply
+// different names for the same discipline — "UI/ UX/ WP" on the card versus
+// "UI/UX development" in Q-People — candidate matching finds nobody and the
+// person doing the work simultaneously shows as "not in plan". One naming
+// split, two wrong answers.
+//
+// Deliberately NOT derived automatically. A similarity pass over the two
+// vocabularies produced roughly 50% false positives — "Power Builder" against
+// "Power Automate", "Project System" (the SAP PS module) against "Project
+// Manager" — and a wrong alias is worse than no match, because it silently
+// prices someone at another skill's rate and attributes their hours to the
+// wrong plan line. Every row here is a human judgement.
+model SkillAlias {
+  id             String   @id @default(cuid())
+  // Matching compares normalised keys (see skillKey); the labels are what a
+  // human reads in Settings. Both are stored so the table stays legible.
+  aliasKey       String
+  canonicalKey   String
+  aliasLabel     String
+  canonicalLabel String
+  note           String?
+  isActive       Boolean  @default(true)
+  createdById    String?
+  createdByName  String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([aliasKey, canonicalKey])
+  @@index([aliasKey])
+  @@index([isActive])
+  @@map("skill_aliases")
+}

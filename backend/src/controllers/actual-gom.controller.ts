@@ -12,6 +12,7 @@ import {
   fetchTimesheetTotalsForProject, matchEmployees, skillsetCoverage, EmployeeCommitment, skillKey,
   clearQPeopleCache, QPeopleError,
 } from '../lib/qpeople';
+import { getSkillAliasMap } from '../lib/skill-aliases';
 import { recordAudit } from '../lib/audit';
 
 /** Actual GOM only exists for won deals — mirrors the frontend tab gate. */
@@ -256,15 +257,16 @@ export async function getResourcePlan(req: Request, res: Response) {
       }
     }
 
-    const [employees, commitment, coverage] = await Promise.all([
+    const [employees, commitment, coverage, aliases] = await Promise.all([
       getEmployeesResolved(force),
       fetchCommitmentDetail(force).catch(() => new Map<string, EmployeeCommitment>()),
       skillsetCoverage(force),
+      getSkillAliasMap(force),
     ]);
 
     const withCandidates = rows.map((row) => ({
       ...row,
-      candidates: matchEmployees(employees, row.skill, row.experienceBand, commitment)
+      candidates: matchEmployees(employees, row.skill, row.experienceBand, commitment, aliases)
         .map((m) => ({
           employeeId: m.employee.id,
           employeeName: m.employee.name,

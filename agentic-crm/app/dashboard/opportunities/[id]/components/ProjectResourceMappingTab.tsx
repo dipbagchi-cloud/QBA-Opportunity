@@ -627,10 +627,22 @@ export default function ProjectResourceMappingTab({
                                             </td>
                                             <td className="p-2">
                                                 {cands.length === 0 ? (
-                                                    <span className="text-[11px] text-slate-400 italic">
+                                                    /* Naming the failing side matters. The old wording —
+                                                       "no match for this skill / band" — sent people
+                                                       hunting through experience bands, but the band
+                                                       NEVER excludes anyone: it only flags and sorts,
+                                                       which is why other rows read "band mismatch" and
+                                                       still offer a person. An empty list is always a
+                                                       skill-level miss. */
+                                                    <span
+                                                        className="text-[11px] text-amber-700 italic"
+                                                        title={coverage && !coverage.ready
+                                                            ? "Nobody in Q-People has a Skillset GOM tag yet, so no row can be matched."
+                                                            : `No active Q-People employee is tagged with "${r.skill || "this skill"}". The experience band is not the problem — a band mismatch would still list the person, flagged. If Q-People uses a different name for this same skill, add the pair under Settings → Rate Cards → Skill Aliases.`}
+                                                    >
                                                         {coverage && !coverage.ready
-                                                            ? "no tagged employees"
-                                                            : "no match for this skill / band"}
+                                                            ? "no tagged employees in Q-People"
+                                                            : "no one in Q-People is tagged with this skill"}
                                                     </span>
                                                 ) : (
                                                     <select

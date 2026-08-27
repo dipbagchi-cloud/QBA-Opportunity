@@ -30,6 +30,7 @@ import {
   bandForYears, canonicalBandKey, bandLabel, QPeopleError,
 } from '../lib/qpeople';
 import { calculateRateCard, BudgetAssumptions } from '../lib/gom-calculator';
+import { getSkillAliasMap } from '../lib/skill-aliases';
 import { bandOrder, type ExperienceBandKey } from '../lib/experience-bands';
 
 const HOURS_PER_DAY = 8;
@@ -103,13 +104,14 @@ export async function computeActualCost(id: string, force = false) {
     const mapping = await prisma.qPeopleProjectMapping.findUnique({ where: { opportunityId: id } });
     if (!mapping) throw new NotMappedError();
 
-    const [entries, employees, assumptions, batches, planRows, opp] = await Promise.all([
+    const [entries, employees, assumptions, batches, planRows, opp, aliases] = await Promise.all([
       fetchTimesheetEntries(mapping.qpeopleProjectId, force),
       getEmployeesResolved(force),
       loadAssumptions(),
       prisma.rateCardBatch.findMany({ orderBy: { uploadedAt: 'asc' } }),
       prisma.actualResourceRow.findMany({ where: { opportunityId: id } }),
       prisma.opportunity.findUnique({ where: { id }, select: { createdAt: true } }),
+      getSkillAliasMap(force),
     ]);
 
     // One card for the whole engagement — the one it was sold against.
@@ -123,6 +125,12 @@ export async function computeActualCost(id: string, force = false) {
     const allRates = await prisma.rateCard.findMany({
       select: { batchId: true, skill: true, experienceBand: true, ctc: true, level: true },
     });
+    // Skills are collapsed onto their alias group on BOTH sides, so someone
+    // tagged "UI/UX development" still prices against the card's "UI/ UX/ WP".
+    const canonSkill = (v: string | null | undefined) => {
+      const k = skillKey(v);
+      return k ? (aliases.get(k) || k) : '';
+    };
     const rateIndex = new Map<string, { ctc: number; level: string }>();
     // Also keep every band priced for a skill, ordered by seniority, so a band
     // the card does not cover can fall back to the nearest one it does.
@@ -130,9 +138,9 @@ export async function computeActualCost(id: string, force = false) {
     for (const r of allRates) {
       const band = canonicalBandKey(r.experienceBand);
       if (!band) continue;
-      const k = `${r.batchId}|${skillKey(r.skill)}|${band}`;
+      const k = `${r.batchId}|${canonSkill(r.skill)}|${band}`;
       if (!rateIndex.has(k)) rateIndex.set(k, { ctc: r.ctc, level: r.level });
-      const sk = `${r.batchId}|${skillKey(r.skill)}`;
+      const sk = `${r.batchId}|${canonSkill(r.skill)}`;
       const arr = bandsBySkill.get(sk) || [];
       if (!arr.some((x) => x.band === band)) {
         arr.push({ band, order: bandOrder(band), ctc: r.ctc, level: r.level });
@@ -153,9 +161,9 @@ export async function computeActualCost(id: string, force = false) {
      * person's, and flag the row so the approximation is never invisible.
      */
     function lookupRate(batchId: string, skill: string, wantBand: ExperienceBandKey) {
-      const exact = rateIndex.get(`${batchId}|${skillKey(skill)}|${wantBand}`);
+      const exact = rateIndex.get(`${batchId}|${canonSkill(skill)}|${wantBand}`);
       if (exact) return { ...exact, bandUsed: wantBand, fallback: false };
-      const list = bandsBySkill.get(`${batchId}|${skillKey(skill)}`);
+      const list = bandsBySkill.get(`${batchId}|${canonSkill(skill)}`);
       if (!list?.length) return null;
       const want = bandOrder(wantBand);
       const atOrBelow = list.filter((x) => x.order <= want);

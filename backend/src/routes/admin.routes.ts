@@ -42,6 +42,10 @@ import {
   getRateCardHistory,
 } from '../controllers/rate-cards.controller';
 import {
+  listSkillAliases, getSkillAliasSuggestions, createSkillAlias,
+  updateSkillAlias, deleteSkillAlias,
+} from '../controllers/skill-aliases.controller';
+import {
   listAllClients,
   createClient,
   updateClient,
@@ -170,6 +174,15 @@ router.delete('/roles/:id/users/:userId', authorize(PERMISSIONS.ROLES_MANAGE), r
 router.get('/teams', authorize(PERMISSIONS.USERS_MANAGE), listTeams);
 
 // Rate card management (requires costcard:manage)
+// Skill aliases reconcile the cost-card vocabulary with Q-People's. Same
+// permission as the cost card, since that is the taxonomy they belong to.
+// /suggestions precedes /:id so it is not read as an id.
+router.get('/skill-aliases/suggestions', authorize(PERMISSIONS.COSTCARD_MANAGE), getSkillAliasSuggestions);
+router.get('/skill-aliases', authorize(PERMISSIONS.COSTCARD_MANAGE), listSkillAliases);
+router.post('/skill-aliases', authorize(PERMISSIONS.COSTCARD_MANAGE), createSkillAlias);
+router.patch('/skill-aliases/:id', authorize(PERMISSIONS.COSTCARD_MANAGE), updateSkillAlias);
+router.delete('/skill-aliases/:id', authorize(PERMISSIONS.COSTCARD_MANAGE), deleteSkillAlias);
+
 // Batch + history routes must precede /rate-cards/:id so they are not read as ids.
 router.get('/rate-cards/batches', authorize(PERMISSIONS.COSTCARD_MANAGE), listRateCardBatches);
 router.get('/rate-cards/history', authorize(PERMISSIONS.COSTCARD_MANAGE), getRateCardHistory);
