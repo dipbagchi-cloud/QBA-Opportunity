@@ -30,6 +30,7 @@ import {
     saveResourcePlan,
     getProjectAllocation,
     listSkillsets,
+  getResetPreview, resetActualGom,
 } from '../controllers/actual-gom.controller';
 import { getActualCost } from '../controllers/actual-cost.controller';
 import { getMargin } from '../controllers/actual-margin.controller';
@@ -120,5 +121,9 @@ router.put('/:id/qpeople/resource-plan', authorizeAdmin, saveResourcePlan);
 router.get('/:id/qpeople/allocation', authorizeAdmin, getProjectAllocation);
 router.get('/:id/qpeople/actual-cost', authorizeAdmin, getActualCost);
 router.get('/:id/qpeople/margin', authorizeAdmin, getMargin);
+// Destructive: drops this deal's snapshots, resource plan and project mapping.
+// The preview exists so the confirmation can state what is about to be lost.
+router.get('/:id/qpeople/actual-gom/reset-preview', authorizeAdmin, getResetPreview);
+router.delete('/:id/qpeople/actual-gom', authorizeAdmin, resetActualGom);
 
 export default router;
