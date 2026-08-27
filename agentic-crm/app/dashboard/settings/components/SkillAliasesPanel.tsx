@@ -18,7 +18,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { API_URL, getAuthHeaders } from "@/lib/api";
 import {
-    Link2, Plus, Trash2, RefreshCw, AlertTriangle, Check, X, Lightbulb, Users,
+    Link2, Plus, Trash2, RefreshCw, AlertTriangle, Check, X, Lightbulb, Users, Pencil, Save,
 } from "lucide-react";
 
 interface Alias {
@@ -51,6 +51,10 @@ export default function SkillAliasesPanel() {
     const [error, setError] = useState<string | null>(null);
     const [adding, setAdding] = useState(false);
     const [form, setForm] = useState({ aliasLabel: "", canonicalLabel: "", note: "" });
+    // Editing an existing pair in place. Re-pairing has to be possible without
+    // delete-and-recreate, which would lose who approved it and why.
+    const [editId, setEditId] = useState<string | null>(null);
+    const [editForm, setEditForm] = useState({ aliasLabel: "", canonicalLabel: "", note: "" });
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -85,6 +89,36 @@ export default function SkillAliasesPanel() {
             if (!res.ok) throw new Error(body.error || `Failed (${res.status})`);
             setAdding(false);
             setForm({ aliasLabel: "", canonicalLabel: "", note: "" });
+            await load();
+        } catch (e: any) {
+            setError(e?.message || "Could not save");
+        } finally {
+            setBusy(null);
+        }
+    }
+
+    function beginEdit(row: Alias) {
+        setEditId(row.id);
+        setError(null);
+        setEditForm({
+            aliasLabel: row.aliasLabel,
+            canonicalLabel: row.canonicalLabel,
+            note: row.note || "",
+        });
+    }
+
+    async function saveEdit(row: Alias) {
+        setBusy(row.id);
+        setError(null);
+        try {
+            const res = await fetch(API_URL + "/api/admin/skill-aliases/" + row.id, {
+                method: "PATCH",
+                headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+                body: JSON.stringify(editForm),
+            });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(body.error || "Failed (" + res.status + ")");
+            setEditId(null);
             await load();
         } catch (e: any) {
             setError(e?.message || "Could not save");
@@ -270,37 +304,97 @@ export default function SkillAliasesPanel() {
                         </tr>
                     </thead>
                     <tbody>
-                        {rows.map((r) => (
-                            <tr key={r.id} className={`border-b border-slate-100 ${r.isActive ? "" : "opacity-50"}`}>
-                                <td className="p-3 font-medium text-slate-800">{r.aliasLabel}</td>
-                                <td className="p-3 text-slate-700">{r.canonicalLabel}</td>
-                                <td className="p-3 text-slate-500">
-                                    {r.note || <span className="italic text-slate-300">—</span>}
-                                    {r.createdByName && <div className="text-[10px] text-slate-400 mt-0.5">by {r.createdByName}</div>}
-                                </td>
-                                <td className="p-3">
-                                    <button
-                                        onClick={() => toggle(r)}
-                                        disabled={busy === r.id}
-                                        className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${r.isActive
-                                            ? "bg-emerald-100 text-emerald-700 border-emerald-300"
-                                            : "bg-slate-100 text-slate-500 border-slate-300"}`}
-                                    >
-                                        {r.isActive ? "Active" : "Off"}
-                                    </button>
-                                </td>
-                                <td className="p-3 text-right">
-                                    <button
-                                        onClick={() => remove(r)}
-                                        disabled={busy === r.id}
-                                        className="text-slate-400 hover:text-red-600"
-                                        title="Delete alias"
-                                    >
-                                        <Trash2 className="w-3.5 h-3.5" />
-                                    </button>
-                                </td>
-                            </tr>
-                        ))}
+                        {rows.map((r) => {
+                            const editing = editId === r.id;
+                            const cell = "w-full px-2 py-1 text-xs rounded-md border border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-500/40";
+                            return (
+                                <tr key={r.id} className={`border-b border-slate-100 ${r.isActive || editing ? "" : "opacity-50"} ${editing ? "bg-indigo-50/40" : ""}`}>
+                                    <td className="p-3 font-medium text-slate-800 align-top">
+                                        {editing ? (
+                                            <input
+                                                value={editForm.aliasLabel}
+                                                onChange={(e) => setEditForm({ ...editForm, aliasLabel: e.target.value })}
+                                                className={cell}
+                                            />
+                                        ) : r.aliasLabel}
+                                    </td>
+                                    <td className="p-3 text-slate-700 align-top">
+                                        {editing ? (
+                                            <input
+                                                value={editForm.canonicalLabel}
+                                                onChange={(e) => setEditForm({ ...editForm, canonicalLabel: e.target.value })}
+                                                className={cell}
+                                            />
+                                        ) : r.canonicalLabel}
+                                    </td>
+                                    <td className="p-3 text-slate-500 align-top">
+                                        {editing ? (
+                                            <input
+                                                value={editForm.note}
+                                                onChange={(e) => setEditForm({ ...editForm, note: e.target.value })}
+                                                placeholder="why this pair is the same skill"
+                                                className={cell}
+                                            />
+                                        ) : (
+                                            <>
+                                                {r.note || <span className="italic text-slate-300">—</span>}
+                                                {r.createdByName && <div className="text-[10px] text-slate-400 mt-0.5">by {r.createdByName}</div>}
+                                            </>
+                                        )}
+                                    </td>
+                                    <td className="p-3 align-top">
+                                        <button
+                                            onClick={() => toggle(r)}
+                                            disabled={busy === r.id || editing}
+                                            className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border disabled:opacity-60 ${r.isActive
+                                                ? "bg-emerald-100 text-emerald-700 border-emerald-300"
+                                                : "bg-slate-100 text-slate-500 border-slate-300"}`}
+                                        >
+                                            {r.isActive ? "Active" : "Off"}
+                                        </button>
+                                    </td>
+                                    <td className="p-3 text-right whitespace-nowrap align-top">
+                                        {editing ? (
+                                            <span className="inline-flex items-center gap-2">
+                                                <button
+                                                    onClick={() => saveEdit(r)}
+                                                    disabled={busy === r.id || !editForm.aliasLabel || !editForm.canonicalLabel}
+                                                    className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-indigo-600 text-white text-[11px] font-medium disabled:opacity-50"
+                                                >
+                                                    <Save className="w-3 h-3" /> Save
+                                                </button>
+                                                <button
+                                                    onClick={() => { setEditId(null); setError(null); }}
+                                                    className="text-slate-400 hover:text-slate-700"
+                                                    title="Cancel"
+                                                >
+                                                    <X className="w-3.5 h-3.5" />
+                                                </button>
+                                            </span>
+                                        ) : (
+                                            <span className="inline-flex items-center gap-2">
+                                                <button
+                                                    onClick={() => beginEdit(r)}
+                                                    disabled={!!busy}
+                                                    className="text-slate-400 hover:text-indigo-600"
+                                                    title="Edit this pair"
+                                                >
+                                                    <Pencil className="w-3.5 h-3.5" />
+                                                </button>
+                                                <button
+                                                    onClick={() => remove(r)}
+                                                    disabled={busy === r.id}
+                                                    className="text-slate-400 hover:text-red-600"
+                                                    title="Delete alias"
+                                                >
+                                                    <Trash2 className="w-3.5 h-3.5" />
+                                                </button>
+                                            </span>
+                                        )}
+                                    </td>
+                                </tr>
+                            );
+                        })}
                         {rows.length === 0 && (
                             <tr><td colSpan={5} className="p-8 text-center text-slate-500">
                                 No aliases yet. Accept a suggestion above, or add one manually.
@@ -312,9 +406,10 @@ export default function SkillAliasesPanel() {
 
             <p className="text-[10px] text-slate-400 leading-relaxed">
                 Aliases apply in both directions and everywhere skills are compared — candidate matching on the
-                Actual GOM resource plan, and the rate lookup that prices booked hours. Turning one off reverts
-                to exact-name matching for that pair. Changes take effect within five minutes, or immediately on
-                the next Refresh.
+                Actual GOM resource plan, and the rate lookup that prices booked hours. Edit a pair in place if it
+                turns out to be wrong; turning one off reverts to exact-name matching for that pair without losing
+                the record of who set it. Every create, edit and delete is written to the audit log with the before
+                and after. Changes take effect within five minutes, or immediately on the next Refresh.
             </p>
         </div>
     );

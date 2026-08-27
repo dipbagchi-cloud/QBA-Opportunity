@@ -179,20 +179,70 @@ export async function createSkillAlias(req: Request, res: Response) {
   }
 }
 
-/** PATCH /api/admin/skill-aliases/:id — enable/disable or re-note. */
+/**
+ * PATCH /api/admin/skill-aliases/:id
+ *
+ * Edits either side of the pair, the note, or the active flag. Correcting a
+ * mis-paired alias has to be possible in place: delete-and-recreate loses who
+ * approved it and why, which is most of the value of keeping the table at all.
+ */
 export async function updateSkillAlias(req: Request, res: Response) {
   try {
-    const { isActive, note } = req.body || {};
+    const { isActive, note, aliasLabel, canonicalLabel } = req.body || {};
+    const before = await prisma.skillAlias.findUnique({ where: { id: req.params.id } });
+    if (!before) return res.status(404).json({ error: 'Alias not found' });
+
     const data: any = {};
     if (typeof isActive === 'boolean') data.isActive = isActive;
     if (note !== undefined) data.note = note ? String(note).trim() : null;
+
+    // Re-pairing: the keys are derived, never supplied, so an edit can never
+    // leave label and key describing different skills.
+    const nextAliasLabel = aliasLabel !== undefined ? String(aliasLabel).trim() : before.aliasLabel;
+    const nextCanonLabel = canonicalLabel !== undefined ? String(canonicalLabel).trim() : before.canonicalLabel;
+    const repairing = aliasLabel !== undefined || canonicalLabel !== undefined;
+
+    if (repairing) {
+      if (!nextAliasLabel || !nextCanonLabel) {
+        return res.status(400).json({ error: 'Both skills are required' });
+      }
+      const aliasKey = skillKey(nextAliasLabel);
+      const canonicalKey = skillKey(nextCanonLabel);
+      if (!aliasKey || !canonicalKey) {
+        return res.status(400).json({ error: 'Those skill names normalise to nothing' });
+      }
+      if (aliasKey === canonicalKey) {
+        return res.status(400).json({ error: 'Those two names are already identical once normalised' });
+      }
+      data.aliasLabel = nextAliasLabel;
+      data.canonicalLabel = nextCanonLabel;
+      data.aliasKey = aliasKey;
+      data.canonicalKey = canonicalKey;
+    }
+
     if (!Object.keys(data).length) return res.status(400).json({ error: 'Nothing to update' });
 
-    const row = await prisma.skillAlias.update({ where: { id: req.params.id }, data });
+    let row;
+    try {
+      row = await prisma.skillAlias.update({ where: { id: req.params.id }, data });
+    } catch (e: any) {
+      // Unique constraint on (aliasKey, canonicalKey): the edit collides with
+      // an alias that already exists. Say which, rather than "unexpected error".
+      if (e?.code === 'P2002') {
+        return res.status(409).json({
+          error: 'That pair already exists as another alias — edit or delete that one instead',
+        });
+      }
+      throw e;
+    }
+
     invalidateSkillAliasCache();
     await recordAudit({
       req, entity: 'SkillAlias', entityId: row.id, action: 'SKILL_ALIAS_UPDATE',
-      changes: { alias: row.aliasLabel, canonical: row.canonicalLabel, isActive: row.isActive },
+      changes: {
+        before: { alias: before.aliasLabel, canonical: before.canonicalLabel, isActive: before.isActive, note: before.note },
+        after: { alias: row.aliasLabel, canonical: row.canonicalLabel, isActive: row.isActive, note: row.note },
+      },
     }).catch(() => { /* ignore */ });
     return res.json(row);
   } catch (err) {
