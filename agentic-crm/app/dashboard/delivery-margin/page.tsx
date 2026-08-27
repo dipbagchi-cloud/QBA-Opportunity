@@ -23,6 +23,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { API_URL, getAuthHeaders } from "@/lib/api";
 import { useCurrency } from "@/components/providers/currency-provider";
+import DeliveryQueueView from "../opportunities/components/DeliveryQueueView";
 import {
     TrendingDown, TrendingUp, RefreshCw, AlertTriangle, ArrowRight, Minus, ShieldAlert,
 } from "lucide-react";
@@ -62,6 +63,10 @@ export default function DeliveryMarginPage() {
     const [data, setData] = useState<Payload | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    // Margin only covers deals that HAVE a project mapped. The deals missing
+    // from it are the ones most worth chasing, so they get a tab here rather
+    // than only a link to another screen.
+    const [tab, setTab] = useState<"margin" | "unmapped">("margin");
 
     const load = useCallback(async (refresh = false) => {
         setLoading(true);
@@ -105,23 +110,59 @@ export default function DeliveryMarginPage() {
                         </p>
                     )}
                 </div>
+                {tab === "margin" && (
+                    <button
+                        onClick={() => load(true)}
+                        disabled={loading}
+                        className="text-xs text-slate-500 hover:text-slate-700 flex items-center gap-1 disabled:opacity-50"
+                    >
+                        <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} /> Recompute now
+                    </button>
+                )}
+            </div>
+
+            {/* Sub-tabs */}
+            <div className="flex gap-1 bg-slate-100 rounded-lg p-1 w-fit">
                 <button
-                    onClick={() => load(true)}
-                    disabled={loading}
-                    className="text-xs text-slate-500 hover:text-slate-700 flex items-center gap-1 disabled:opacity-50"
+                    onClick={() => setTab("margin")}
+                    className={`px-4 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                        tab === "margin" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-600 hover:text-slate-800"}`}
                 >
-                    <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} /> Recompute now
+                    Margin{data ? ` (${data.totals.mappedDeals})` : ""}
+                </button>
+                <button
+                    onClick={() => setTab("unmapped")}
+                    className={`px-4 py-1.5 rounded-md text-xs font-medium transition-colors flex items-center gap-1.5 ${
+                        tab === "unmapped" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-600 hover:text-slate-800"}`}
+                >
+                    Unmapped won deals
+                    {data && data.totals.unmappedDeals > 0 && (
+                        <span className="px-1.5 py-0 rounded-full text-[10px] font-bold bg-red-100 text-red-700 border border-red-300">
+                            {data.totals.unmappedDeals}
+                        </span>
+                    )}
                 </button>
             </div>
 
-            {loading && (
+            {tab === "unmapped" && (
+                <>
+                    <p className="text-xs text-slate-500">
+                        Won deals with no Q-People project mapped. They produce no actual cost and no margin, so
+                        they are absent from the Margin tab entirely — which is exactly why they are easy to lose.
+                        Mapping one brings it into the margin view.
+                    </p>
+                    <DeliveryQueueView initialFilter="unmapped" />
+                </>
+            )}
+
+            {tab === "margin" && loading && (
                 <div className="bg-white rounded-lg border border-slate-200 p-8 text-center text-sm text-slate-500">
                     <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-indigo-500" />
                     Loading delivery margin…
                 </div>
             )}
 
-            {error && !loading && (
+            {tab === "margin" && error && !loading && (
                 <div className="flex items-start gap-3 bg-amber-50 border border-amber-300 rounded-lg p-4 text-amber-900">
                     <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5 text-amber-600" />
                     <div className="text-sm">
@@ -132,7 +173,7 @@ export default function DeliveryMarginPage() {
                 </div>
             )}
 
-            {data && !loading && (
+            {tab === "margin" && data && !loading && (
                 <>
                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                         <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
@@ -180,11 +221,14 @@ export default function DeliveryMarginPage() {
                             <span>
                                 <strong>{data.totals.unmappedDeals}</strong> won{" "}
                                 {data.totals.unmappedDeals === 1 ? "deal is" : "deals are"} not mapped to a Q-People project
-                                and so appear nowhere on this page.{" "}
-                                <Link href="/dashboard/opportunities" className="font-semibold text-indigo-600 hover:underline">
-                                    Open the Won / To Map queue
-                                </Link>{" "}
-                                to fix that.
+                                and so {data.totals.unmappedDeals === 1 ? "does" : "do"} not appear in the figures above.{" "}
+                                <button
+                                    onClick={() => setTab("unmapped")}
+                                    className="font-semibold text-indigo-600 hover:underline"
+                                >
+                                    See which
+                                </button>{" "}
+                                — mapping one brings it into this view.
                             </span>
                         </div>
                     )}

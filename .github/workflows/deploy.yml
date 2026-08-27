@@ -50,7 +50,7 @@ jobs:
             git checkout prod
             git reset --hard origin/prod
 
-            chmod +x scripts/pm2-safe-restart.sh scripts/verify-frontend-build.sh scripts/build-and-swap.sh
+            chmod +x scripts/pm2-safe-restart.sh scripts/verify-frontend-build.sh scripts/build-and-swap.sh scripts/verify-backend-deploy.sh
 
             echo "=== Backend: install + generate + compile ==="
             cd $APP_DIR/backend
@@ -78,6 +78,9 @@ jobs:
 
             echo "=== Restart backend safely ==="
             bash $APP_DIR/scripts/pm2-safe-restart.sh qcrm-backend 3001 $ECO
+            # A restart exiting 0 does not prove the process loaded the code that
+            # was just compiled — Node reads dist/ once, at startup. Assert it.
+            bash $APP_DIR/scripts/verify-backend-deploy.sh $APP_DIR 3001 qcrm-backend $ECO
 
             echo "=== Frontend: install + build ==="
             cd $APP_DIR/agentic-crm
@@ -127,7 +130,7 @@ jobs:
             git checkout uat
             git reset --hard origin/uat
 
-            chmod +x scripts/pm2-safe-restart.sh scripts/verify-frontend-build.sh scripts/build-and-swap.sh
+            chmod +x scripts/pm2-safe-restart.sh scripts/verify-frontend-build.sh scripts/build-and-swap.sh scripts/verify-backend-deploy.sh
 
             echo "=== Backend: install + generate + compile ==="
             cd $APP_DIR/backend
@@ -146,6 +149,9 @@ jobs:
             # here makes pm2-safe-restart fuser-kill the OTHER env's backend and
             # then fail the bind-wait. Keep in sync with backend/.env PORT.
             bash $APP_DIR/scripts/pm2-safe-restart.sh qcrm-uat-backend 3005 $ECO
+            # A restart exiting 0 does not prove the process loaded the code that
+            # was just compiled — Node reads dist/ once, at startup. Assert it.
+            bash $APP_DIR/scripts/verify-backend-deploy.sh $APP_DIR 3005 qcrm-uat-backend $ECO
 
             echo "=== Frontend: install + build ==="
             cd $APP_DIR/agentic-crm
@@ -192,7 +198,7 @@ jobs:
             git checkout qa
             git reset --hard origin/qa
 
-            chmod +x scripts/pm2-safe-restart.sh scripts/verify-frontend-build.sh scripts/build-and-swap.sh
+            chmod +x scripts/pm2-safe-restart.sh scripts/verify-frontend-build.sh scripts/build-and-swap.sh scripts/verify-backend-deploy.sh
 
             echo "=== Backend: install + generate + compile ==="
             cd $APP_DIR/backend
@@ -211,6 +217,9 @@ jobs:
             # here makes pm2-safe-restart fuser-kill the OTHER env's backend and
             # then fail the bind-wait. Keep in sync with backend/.env PORT.
             bash $APP_DIR/scripts/pm2-safe-restart.sh qcrm-qa-backend 3003 $ECO
+            # A restart exiting 0 does not prove the process loaded the code that
+            # was just compiled — Node reads dist/ once, at startup. Assert it.
+            bash $APP_DIR/scripts/verify-backend-deploy.sh $APP_DIR 3003 qcrm-qa-backend $ECO
 
             echo "=== Frontend: install + build ==="
             cd $APP_DIR/agentic-crm

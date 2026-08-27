@@ -1449,6 +1449,37 @@ export async function updateOpportunity(req: Request, res: Response) {
                     }
                     const reEstCount = (previous as any)?.reEstimateCount || 0;
                     stageUpdate.detailedStatus = reEstCount > 0 ? 'Re-estimation Submitted' : 'Estimation Submitted';
+
+                    // Stamp the cost card this estimate was submitted against.
+                    //
+                    // Actual GOM must price delivery on the card the deal was SOLD
+                    // on, otherwise a card issued mid-delivery re-prices work that
+                    // was quoted at the old rates and the "overrun" is partly just
+                    // the rate change. Which card that was can only be known at
+                    // submission, so it is recorded here rather than inferred later.
+                    //
+                    // First submission only, and never overwritten: a re-estimate
+                    // does not re-open the commercial baseline. Everything is
+                    // best-effort — failing to stamp must never block a submission.
+                    try {
+                        const pdNow = (previous?.presalesData as any) || {};
+                        if (reEstCount === 0 && !pdNow.rateCardBatchId) {
+                            const liveBatch = await prisma.rateCardBatch.findFirst({
+                                orderBy: { uploadedAt: 'desc' },
+                                select: { id: true, label: true },
+                            });
+                            if (liveBatch) {
+                                stageUpdate.presalesData = {
+                                    ...pdNow,
+                                    initialSubmissionAt: new Date().toISOString(),
+                                    rateCardBatchId: liveBatch.id,
+                                    rateCardBatchLabel: liveBatch.label,
+                                };
+                            }
+                        }
+                    } catch (e) {
+                        console.error('Could not stamp rate card batch at submission:', e);
+                    }
                 }
             }
         }
