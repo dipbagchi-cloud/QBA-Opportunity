@@ -455,13 +455,23 @@ export function matchEmployees(
   skill: string | null | undefined,
   experienceBand: string | null | undefined,
   commitment: Map<string, EmployeeCommitment>,
+  // key -> canonical key, from the reviewed skill_aliases table. Passed in
+  // rather than imported so this file stays free of a database dependency (and
+  // of a circular import with skill-aliases.ts, which needs skillKey from here).
+  aliases: Map<string, string> = new Map(),
 ): EmployeeMatch[] {
-  const want = skillKey(skill);
+  // Both sides must be collapsed onto the same alias group, or the comparison
+  // is only as good as the raw strings — which is exactly the bug aliases fix.
+  const canon = (v: string | null | undefined) => {
+    const k = skillKey(v);
+    return k ? (aliases.get(k) || k) : '';
+  };
+  const want = canon(skill);
   if (!want) return [];
   const wantBand = canonicalBandKey(experienceBand);
 
   return employees
-    .filter((e) => e.status === 'Active' && skillKey(e.skillsetGom) === want)
+    .filter((e) => e.status === 'Active' && canon(e.skillsetGom) === want)
     .map((e) => {
       const c = commitment.get(e.id) || null;
       // Prefer the numeric years — 4.17 places precisely on the ladder. Fall

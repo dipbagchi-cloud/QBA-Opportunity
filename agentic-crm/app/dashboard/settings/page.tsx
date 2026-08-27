@@ -8,6 +8,7 @@ import { apiClient, API_URL, getAuthHeaders } from "@/lib/api";
 import { useCurrency } from "@/components/providers/currency-provider";
 import { canAccessSettingsTab, hasAnyGrantedPermission, type SettingsTabKey } from "@/lib/access-control";
 import RateCardArchive from "./components/RateCardArchive";
+import SkillAliasesPanel from "./components/SkillAliasesPanel";
 import { SowAdminTab } from "./components/SowAdminTab";
 import EmailTemplateBuilder, { CustomCalcField } from "@/components/email-templates/EmailTemplateBuilder";
 
@@ -1639,7 +1640,7 @@ function RateCardsTab() {
     // Active vs Archive. The tab used to list all 716 rows with nothing marking
     // the ~393 retired ones, which read as a data problem; they now live behind
     // the Archive sub-tab with their upload history.
-    const [subTab, setSubTab] = useState<"active" | "archive">("active");
+    const [subTab, setSubTab] = useState<"active" | "archive" | "aliases">("active");
     const [archivedCount, setArchivedCount] = useState<number | null>(null);
     const [rateCards, setRateCards] = useState<RateCardItem[]>([]);
     const [loading, setLoading] = useState(true);
@@ -1812,9 +1813,16 @@ function RateCardsTab() {
                 >
                     Archive{archivedCount !== null ? ` (${archivedCount})` : ""}
                 </button>
+                <button
+                    onClick={() => setSubTab("aliases")}
+                    className={`px-4 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                        subTab === "aliases" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-600 hover:text-slate-800"}`}
+                >
+                    Skill Aliases
+                </button>
             </div>
 
-            {subTab === "archive" ? <RateCardArchive /> : (
+            {subTab === "aliases" ? <SkillAliasesPanel /> : subTab === "archive" ? <RateCardArchive /> : (
             <>
             {/* Header */}
             <div className="flex items-center justify-between">
