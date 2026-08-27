@@ -54,15 +54,31 @@ async function loadAssumptions(): Promise<BudgetAssumptions> {
   return { ...DEFAULT_ASSUMPTIONS, ...v };
 }
 
-/** Which rate-card batch was live in a given YYYY-MM. */
-function batchForMonth(batches: { id: string; label: string; uploadedAt: Date }[], month: string) {
-  // End of that month — a card uploaded mid-month governs the rest of it.
-  const cutoff = new Date(`${month}-01T00:00:00Z`);
-  cutoff.setUTCMonth(cutoff.getUTCMonth() + 1);
-  const live = batches.filter((b) => b.uploadedAt < cutoff);
+/**
+ * Which rate-card batch prices this opportunity.
+ *
+ * The card the deal was ESTIMATED on, i.e. the one live when the opportunity was
+ * created — not the one live when the time happened to be booked.
+ *
+ * This used to be chosen per booking month, which quietly broke the comparison
+ * the Actual GOM tab exists for. A deal sold in June against the April card, but
+ * delivered in August after a new card landed on the 13th, had its August hours
+ * priced on rates nobody had quoted it at: the estimate said one thing, the
+ * actuals were measured with a different ruler, and the resulting "overrun" was
+ * partly just the rate change. Pricing the whole engagement on the card it was
+ * sold against makes the variance mean what it claims to mean.
+ *
+ * A deal created before any card exists falls back to the earliest, flagged.
+ */
+function batchForOpportunity(
+  batches: { id: string; label: string; uploadedAt: Date }[],
+  createdAt: Date | null,
+) {
+  if (!batches.length) return { batch: null, extrapolated: true };
+  if (!createdAt) return { batch: batches[batches.length - 1], extrapolated: true };
+  const live = batches.filter((b) => b.uploadedAt <= createdAt);
   if (live.length) return { batch: live[live.length - 1], extrapolated: false };
-  // Months before any rate card exists fall back to the earliest one, flagged.
-  return batches.length ? { batch: batches[0], extrapolated: true } : { batch: null, extrapolated: true };
+  return { batch: batches[0], extrapolated: true };
 }
 
 /** Thrown when an opportunity has no Q-People project mapped yet. */
@@ -87,13 +103,18 @@ export async function computeActualCost(id: string, force = false) {
     const mapping = await prisma.qPeopleProjectMapping.findUnique({ where: { opportunityId: id } });
     if (!mapping) throw new NotMappedError();
 
-    const [entries, employees, assumptions, batches, planRows] = await Promise.all([
+    const [entries, employees, assumptions, batches, planRows, opp] = await Promise.all([
       fetchTimesheetEntries(mapping.qpeopleProjectId, force),
       getEmployeesResolved(force),
       loadAssumptions(),
       prisma.rateCardBatch.findMany({ orderBy: { uploadedAt: 'asc' } }),
       prisma.actualResourceRow.findMany({ where: { opportunityId: id } }),
+      prisma.opportunity.findUnique({ where: { id }, select: { createdAt: true } }),
     ]);
+
+    // One card for the whole engagement — the one it was sold against.
+    const { batch: oppBatch, extrapolated: oppExtrapolated } =
+      batchForOpportunity(batches, opp?.createdAt ?? null);
 
     const empById = new Map(employees.map((e) => [e.id, e]));
     const plannedEmployeeIds = new Set(planRows.map((r) => r.employeeId).filter(Boolean) as string[]);
@@ -198,7 +219,8 @@ export async function computeActualCost(id: string, force = false) {
         const hours = b.submitted + b.draft;
         if (!hours) continue;
         const days = hours / HOURS_PER_DAY;
-        const { batch, extrapolated } = batchForMonth(batches, m);
+        const batch = oppBatch;
+        const extrapolated = oppExtrapolated;
         let ctc: number | null = null;
         let level: string | null = null;
         let bandUsed: string | null = null;
@@ -318,6 +340,11 @@ export async function computeActualCost(id: string, force = false) {
         workingDaysPerYear: assumptions.workingDaysPerYear,
         timesheetFilter: 'submitted and draft, reported separately (cancelled excluded)',
         rateBasis: "each person's own skill + experience band",
+        // The card this engagement is priced on, and why that one.
+        rateCardUsed: oppBatch?.label || null,
+        rateCardRule: 'the rate card live when this opportunity was created — the one it was estimated against',
+        rateCardExtrapolated: oppExtrapolated,
+        opportunityCreatedAt: opp?.createdAt ?? null,
         rateCardVersioning: batches.map((b) => ({ label: b.label, from: b.uploadedAt })),
       },
       warnings: [...warnings],
