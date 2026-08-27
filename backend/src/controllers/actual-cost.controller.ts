@@ -279,8 +279,16 @@ export async function computeActualCost(id: string, force = false) {
     const monthList = [...months].sort();
 
     // ── Price each person-month ───────────────────────────────────────────
+    //
+    // Parameterised by batch so the same booked hours can be priced twice: once
+    // on the card the deal was sold against (the baseline every variance is
+    // measured from) and once on the card live today. When a new card lands
+    // mid-delivery those are different numbers, and both are worth knowing —
+    // the first says whether the deal is performing against what was quoted,
+    // the second says what the remaining work actually costs now.
     const warnings = new Set<string>();
-    const rows = [...byEmp.entries()].map(([empId, rec]) => {
+    const buildRows = (useBatch: typeof oppBatch, useExtrapolated: boolean) =>
+      [...byEmp.entries()].map(([empId, rec]) => {
       const emp = empById.get(empId);
       const bandKey = emp
         ? (bandForYears(emp.experienceYears) ?? canonicalBandKey(emp.experienceBandFallback))
@@ -306,8 +314,8 @@ export async function computeActualCost(id: string, force = false) {
         const hours = b.submitted + b.draft;
         if (!hours) continue;
         const days = hours / HOURS_PER_DAY;
-        const batch = oppBatch;
-        const extrapolated = oppExtrapolated;
+        const batch = useBatch;
+        const extrapolated = useExtrapolated;
         let ctc: number | null = null;
         let level: string | null = null;
         let bandUsed: string | null = null;
@@ -373,25 +381,62 @@ export async function computeActualCost(id: string, force = false) {
           : noBand ? 'No experience recorded for this person'
           : 'No rate card entry for this skill and band',
       };
-    }).sort((a, b) => b.totalHours - a.totalHours);
+      }).sort((a, b) => b.totalHours - a.totalHours);
+
+    const rows = buildRows(oppBatch, oppExtrapolated);
 
     // ── Column totals ─────────────────────────────────────────────────────
-    const monthTotals: Record<string, { hours: number; draftHours: number; cost: number; draftCost: number; priced: boolean }> = {};
-    for (const m of monthList) {
-      let h = 0; let dh = 0; let c = 0; let dc = 0; let priced = false;
-      for (const r of rows) {
-        const cell = r.monthly[m];
-        if (!cell) continue;
-        h += cell.hours;
-        dh += cell.draftHours;
-        if (cell.cost !== null) { c += cell.cost; dc += cell.draftCost || 0; priced = true; }
+    const monthTotalsFor = (src: typeof rows) => {
+      const out: Record<string, { hours: number; draftHours: number; cost: number; draftCost: number; priced: boolean }> = {};
+      for (const m of monthList) {
+        let h = 0; let dh = 0; let c = 0; let dc = 0; let priced = false;
+        for (const r of src) {
+          const cell = r.monthly[m];
+          if (!cell) continue;
+          h += cell.hours;
+          dh += cell.draftHours;
+          if (cell.cost !== null) { c += cell.cost; dc += cell.draftCost || 0; priced = true; }
+        }
+        out[m] = {
+          hours: Math.round(h * 100) / 100,
+          draftHours: Math.round(dh * 100) / 100,
+          cost: Math.round(c),
+          draftCost: Math.round(dc),
+          priced,
+        };
       }
-      monthTotals[m] = {
-        hours: Math.round(h * 100) / 100,
-        draftHours: Math.round(dh * 100) / 100,
-        cost: Math.round(c),
-        draftCost: Math.round(dc),
-        priced,
+      return out;
+    };
+    const monthTotals = monthTotalsFor(rows);
+
+    // ── The other card, when one landed mid-delivery ───────────────────────
+    //
+    // Only produced when the newest card is not the one this deal was sold on.
+    // A deal whose card is still current has nothing to compare against, and
+    // showing it a second identical column would be noise.
+    const latestBatch = batches.length ? batches[batches.length - 1] : null;
+    const cardSwitched = !!(latestBatch && oppBatch && latestBatch.id !== oppBatch.id);
+
+    let atLatestCard: {
+      batchLabel: string;
+      batchFrom: Date;
+      cost: number;
+      monthTotals: Record<string, { hours: number; draftHours: number; cost: number; draftCost: number; priced: boolean }>;
+      delta: number;
+      deltaPercent: number | null;
+    } | null = null;
+
+    if (cardSwitched && latestBatch) {
+      const altRows = buildRows(latestBatch, false);
+      const altCost = Math.round(altRows.reduce((a, r) => a + (r.totalCost || 0), 0));
+      const baseCost = Math.round(rows.reduce((a, r) => a + (r.totalCost || 0), 0));
+      atLatestCard = {
+        batchLabel: latestBatch.label,
+        batchFrom: latestBatch.uploadedAt,
+        cost: altCost,
+        monthTotals: monthTotalsFor(altRows),
+        delta: altCost - baseCost,
+        deltaPercent: baseCost ? Math.round(((altCost - baseCost) / baseCost) * 10000) / 100 : null,
       };
     }
 
@@ -409,6 +454,9 @@ export async function computeActualCost(id: string, force = false) {
       months: monthList,
       rows,
       monthTotals,
+      // Same hours, priced on the current card. Null when no card has landed
+      // since this deal was sold, i.e. there is no switchover to show.
+      atLatestCard,
       totals: {
         people: rows.length,
         hours: Math.round(grandHours * 100) / 100,
@@ -435,6 +483,8 @@ export async function computeActualCost(id: string, force = false) {
         // must be able to tell them apart.
         rateCardInferred: cardSource === 'created-date' || cardSource === 'none',
         rateCardExtrapolated: oppExtrapolated,
+        cardSwitchedSinceEstimate: cardSwitched,
+        latestRateCard: latestBatch ? latestBatch.label : null,
         opportunityCreatedAt: opp?.createdAt ?? null,
         initialSubmissionAt: firstSubmission?.enteredAt
           ?? ((opp?.presalesData as any) || {}).initialSubmissionAt

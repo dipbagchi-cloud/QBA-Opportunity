@@ -12,7 +12,7 @@ import React, { useMemo, useState, useEffect, useCallback } from "react";
 import { API_URL, getAuthHeaders } from "@/lib/api";
 import { useCurrency } from "@/components/providers/currency-provider";
 import {
-    Clock, RefreshCw, AlertTriangle, Info, Users, ChevronDown, ChevronRight,
+    Clock, RefreshCw, AlertTriangle, Info, Users, ChevronDown, ChevronRight, Layers,
 } from "lucide-react";
 
 interface Cell {
@@ -72,10 +72,20 @@ interface Payload {
         rateCardSource: string;
         rateCardInferred: boolean;
         rateCardExtrapolated: boolean;
+        cardSwitchedSinceEstimate: boolean;
+        latestRateCard: string | null;
         opportunityCreatedAt: string | null;
         initialSubmissionAt: string | null;
         rateCardVersioning: { label: string; from: string }[];
     };
+    atLatestCard: {
+        batchLabel: string;
+        batchFrom: string;
+        cost: number;
+        monthTotals: Record<string, { hours: number; draftHours: number; cost: number; draftCost: number; priced: boolean }>;
+        delta: number;
+        deltaPercent: number | null;
+    } | null;
     warnings: string[];
 }
 
@@ -262,6 +272,97 @@ export default function ActualBookingCostTab({ opportunityId }: { opportunityId:
                     </div>
                 ) : null}
             </div>
+
+            {/* ── Two cards, one set of hours ───────────────────────────────
+                Only shown when a cost card landed after this deal was sold.
+                The two answer different questions and are labelled as such:
+                the left is the baseline every variance is measured against,
+                the right is what the same work costs at today's rates. */}
+            {data.atLatestCard && (
+                <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-5">
+                    <div className="flex items-center gap-2 mb-1">
+                        <Layers className="w-4 h-4 text-indigo-600" />
+                        <h4 className="text-sm font-bold text-slate-800">A new cost card landed mid-delivery</h4>
+                    </div>
+                    <p className="text-[11px] text-slate-500 mb-4 max-w-3xl">
+                        The same {data.totals.hours.toLocaleString()} booked hours, priced both ways.
+                        These are not a before and after — they are two different questions.
+                    </p>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div className="bg-indigo-50 rounded-lg p-3 border border-indigo-200">
+                            <p className="text-xs text-indigo-700 mb-1 font-semibold">As sold</p>
+                            <p className="font-bold text-lg text-indigo-900">{fmtCurrency(data.totals.cost)}</p>
+                            <p className="text-[10px] text-indigo-700/80 mt-1">{data.basis.rateCardUsed}</p>
+                            <p className="text-[10px] text-slate-500 mt-1 leading-snug">
+                                The baseline. Every margin and variance figure on this deal is measured
+                                against this, because it is the rate the work was quoted at.
+                            </p>
+                        </div>
+
+                        <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
+                            <p className="text-xs text-slate-600 mb-1 font-semibold">At today&apos;s card</p>
+                            <p className="font-bold text-lg text-slate-800">{fmtCurrency(data.atLatestCard.cost)}</p>
+                            <p className="text-[10px] text-slate-500 mt-1">{data.atLatestCard.batchLabel}</p>
+                            <p className="text-[10px] text-slate-500 mt-1 leading-snug">
+                                What this same effort would cost at current rates. Relevant to what the
+                                remaining work will cost, and to any re-pricing conversation.
+                            </p>
+                        </div>
+
+                        <div className={`rounded-lg p-3 border ${data.atLatestCard.delta > 0
+                            ? "bg-red-50 border-red-200" : "bg-emerald-50 border-emerald-200"}`}>
+                            <p className={`text-xs mb-1 font-semibold ${data.atLatestCard.delta > 0 ? "text-red-700" : "text-emerald-700"}`}>
+                                Difference
+                            </p>
+                            <p className={`font-bold text-lg ${data.atLatestCard.delta > 0 ? "text-red-800" : "text-emerald-800"}`}>
+                                {data.atLatestCard.delta > 0 ? "+" : ""}{fmtCurrency(data.atLatestCard.delta)}
+                            </p>
+                            {data.atLatestCard.deltaPercent !== null && (
+                                <p className={`text-[10px] mt-1 font-semibold ${data.atLatestCard.delta > 0 ? "text-red-700" : "text-emerald-700"}`}>
+                                    {data.atLatestCard.deltaPercent > 0 ? "+" : ""}{data.atLatestCard.deltaPercent}% on the new card
+                                </p>
+                            )}
+                            <p className="text-[10px] text-slate-500 mt-1 leading-snug">
+                                Rate movement alone. None of this is delivery performance \u2014 the hours are identical.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="overflow-x-auto mt-4">
+                        <table className="text-xs w-full min-w-[420px]">
+                            <thead>
+                                <tr className="text-slate-500 border-b border-slate-200">
+                                    <th className="p-2 text-left font-semibold">Month</th>
+                                    <th className="p-2 text-right font-semibold">Hours</th>
+                                    <th className="p-2 text-right font-semibold">As sold</th>
+                                    <th className="p-2 text-right font-semibold">At today&apos;s card</th>
+                                    <th className="p-2 text-right font-semibold">Difference</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {data.months.map((m) => {
+                                    const base = data.monthTotals[m];
+                                    const alt = data.atLatestCard!.monthTotals[m];
+                                    if (!base) return null;
+                                    const d = (alt?.cost ?? 0) - base.cost;
+                                    return (
+                                        <tr key={m} className="border-b border-slate-100">
+                                            <td className="p-2 font-medium text-slate-800">{monthLabel(m)}</td>
+                                            <td className="p-2 text-right text-slate-600">{base.hours.toLocaleString()}</td>
+                                            <td className="p-2 text-right text-slate-700">{fmtCurrency(base.cost)}</td>
+                                            <td className="p-2 text-right text-slate-700">{fmtCurrency(alt?.cost ?? 0)}</td>
+                                            <td className={`p-2 text-right font-semibold ${d > 0 ? "text-red-600" : d < 0 ? "text-emerald-600" : "text-slate-400"}`}>
+                                                {d === 0 ? "\u2013" : <>{d > 0 ? "+" : ""}{fmtCurrency(d)}</>}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
 
             {/* Warnings */}
             {data.warnings.length > 0 && (
