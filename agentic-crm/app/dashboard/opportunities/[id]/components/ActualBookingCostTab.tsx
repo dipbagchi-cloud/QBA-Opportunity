@@ -36,6 +36,7 @@ interface Row {
     branch: string | null;
     skill: string | null;
     experienceYears: number | null;
+    experienceBandKey: string | null;
     experienceBandLabel: string | null;
     inPlan: boolean;
     monthly: Record<string, Cell>;
@@ -109,7 +110,9 @@ export default function ActualBookingCostTab({ opportunityId }: { opportunityId:
     const [data, setData] = useState<Payload | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    const [openRow, setOpenRow] = useState<string | null>(null);
+    // Months start expanded — the per-person split is the point of the table,
+    // not something to go hunting for.
+    const [closedMonths, setClosedMonths] = useState<Set<string>>(new Set());
 
     const load = useCallback(async (refresh = false) => {
         setLoading(true);
@@ -323,24 +326,22 @@ export default function ActualBookingCostTab({ opportunityId }: { opportunityId:
                 </div>
             )}
 
-            {/* ── One table, per resource ───────────────────────────────────
-                Previously this was a month x person matrix of cost, with a
-                separate month-level table above comparing the two cost cards.
-                Two tables, two orientations, and the reader had to join them
-                mentally to answer "who is driving the difference".
-
-                Now: one row per person carrying hours and both cards, expanding
-                to that person's months. The month totals live in the footer row,
-                so nothing that was visible before has been lost. */}
+            {/* ── Month, then the people inside it ──────────────────────────
+                Grouped this way round on purpose. The question the two cost
+                cards raise is "where is the difference coming from", and the
+                answer is a month first (when the new card started applying)
+                and a person second (who inside that month is expensive). A
+                person-first table forced the reader to hold three monthly
+                figures per person in their head to see it. */}
             <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-5">
                 <div className="flex items-center gap-2 mb-3">
                     <Users className="w-4 h-4 text-slate-500" />
                     <h4 className="text-sm font-bold text-slate-800">
-                        Cost by person{dual ? " — on both cost cards" : ""}
+                        Cost by month and person{dual ? " — on both cost cards" : ""}
                     </h4>
                     <span className="text-[11px] text-slate-400">
-                        {data.rows.length} {data.rows.length === 1 ? "person" : "people"} ·{" "}
-                        {data.months.length} month{data.months.length === 1 ? "" : "s"} · click a row for the monthly split
+                        {data.months.length} month{data.months.length === 1 ? "" : "s"} ·{" "}
+                        {data.rows.length} {data.rows.length === 1 ? "person" : "people"} · click a month to collapse it
                     </span>
                 </div>
 
@@ -348,7 +349,7 @@ export default function ActualBookingCostTab({ opportunityId }: { opportunityId:
                     <table className="text-xs w-full min-w-[720px]">
                         <thead>
                             <tr className="text-slate-500 border-b border-slate-200">
-                                <th className="p-2 text-left font-semibold min-w-[230px]">Person</th>
+                                <th className="p-2 text-left font-semibold min-w-[260px]">Month / person</th>
                                 <th className="p-2 text-right font-semibold">Hours</th>
                                 <th className="p-2 text-right font-semibold">{dual ? "As sold" : "Cost"}</th>
                                 {dual && <th className="p-2 text-right font-semibold">At today&apos;s card</th>}
@@ -356,22 +357,51 @@ export default function ActualBookingCostTab({ opportunityId }: { opportunityId:
                             </tr>
                         </thead>
                         <tbody>
-                            {data.rows.map((r) => {
-                                const open = openRow === r.employeeId;
-                                const alt = data.atLatestCard?.byEmployee?.[r.employeeId];
-                                const altTotal = alt?.totalCost ?? null;
-                                const d = (r.totalCost !== null && altTotal !== null) ? altTotal - r.totalCost : null;
+                            {data.months.map((m) => {
+                                const t = data.monthTotals[m];
+                                const at = data.atLatestCard?.monthTotals?.[m];
+                                const md = at ? at.cost - t.cost : null;
+                                const collapsed = closedMonths.has(m);
+                                // Only the people who actually booked in this month.
+                                const people = data.rows.filter((r) => r.monthly[m]);
+
                                 return (
-                                    <React.Fragment key={r.employeeId}>
+                                    <React.Fragment key={m}>
                                         <tr
-                                            className={`border-b border-slate-100 hover:bg-slate-50 cursor-pointer ${!r.priced ? "bg-amber-50/40" : ""}`}
-                                            onClick={() => setOpenRow(open ? null : r.employeeId)}
+                                            className="border-b border-slate-200 bg-slate-50 cursor-pointer hover:bg-slate-100"
+                                            onClick={() => setClosedMonths((prev) => {
+                                                const next = new Set(prev);
+                                                if (next.has(m)) next.delete(m); else next.add(m);
+                                                return next;
+                                            })}
                                         >
-                                            <td className="p-2">
-                                                <div className="flex items-start gap-1.5">
-                                                    {open ? <ChevronDown className="w-3 h-3 mt-0.5 text-slate-400" /> : <ChevronRight className="w-3 h-3 mt-0.5 text-slate-400" />}
-                                                    <div>
-                                                        <div className="text-slate-800 font-medium flex items-center gap-1.5 flex-wrap">
+                                            <td className="p-2 font-bold text-slate-800">
+                                                <span className="inline-flex items-center gap-1.5">
+                                                    {collapsed ? <ChevronRight className="w-3 h-3 text-slate-400" /> : <ChevronDown className="w-3 h-3 text-slate-400" />}
+                                                    {monthLabel(m)}
+                                                    <span className="font-normal text-[10px] text-slate-400">
+                                                        {people.length} {people.length === 1 ? "person" : "people"}
+                                                    </span>
+                                                </span>
+                                            </td>
+                                            <td className="p-2 text-right font-bold text-slate-800">{t.hours.toLocaleString()}</td>
+                                            <td className="p-2 text-right font-bold text-slate-900">{fmtCurrency(t.cost)}</td>
+                                            {dual && <td className="p-2 text-right font-bold text-slate-800">{fmtCurrency(at?.cost ?? 0)}</td>}
+                                            {dual && (
+                                                <td className={`p-2 text-right font-bold ${md === null ? "text-slate-300" : md > 0 ? "text-red-600" : md < 0 ? "text-emerald-600" : "text-slate-400"}`}>
+                                                    {md === null ? "–" : <>{md > 0 ? "+" : ""}{fmtCurrency(md)}</>}
+                                                </td>
+                                            )}
+                                        </tr>
+
+                                        {!collapsed && people.map((r) => {
+                                            const c = r.monthly[m];
+                                            const am = data.atLatestCard?.byEmployee?.[r.employeeId]?.monthly?.[m] ?? null;
+                                            const pd = (c.cost !== null && am !== null) ? am - c.cost : null;
+                                            return (
+                                                <tr key={m + r.employeeId} className={`border-b border-slate-100 hover:bg-slate-50 ${!r.priced ? "bg-amber-50/40" : ""}`}>
+                                                    <td className="p-2 pl-8">
+                                                        <div className="text-slate-800 flex items-center gap-1.5 flex-wrap">
                                                             {r.employeeName}
                                                             {!r.inPlan && (
                                                                 <span className="px-1.5 py-0 rounded-full text-[9px] font-semibold border bg-red-100 text-red-700 border-red-300">
@@ -390,131 +420,48 @@ export default function ActualBookingCostTab({ opportunityId }: { opportunityId:
                                                         <div className="text-[10px] text-slate-500">
                                                             {r.skill || <span className="italic">no skillset</span>}
                                                             {r.experienceBandLabel ? ` · ${r.experienceBandLabel}` : ""}
-                                                            {r.branch ? ` · ${r.branch}` : ""}
+                                                            {c.rateBandUsed && c.rateBandUsed !== r.experienceBandKey
+                                                                ? ` · priced at ${c.rateBandUsed}`
+                                                                : ""}
                                                         </div>
-                                                    </div>
-                                                </div>
-                                            </td>
-                                            <td className="p-2 text-right whitespace-nowrap text-slate-700">
-                                                <span
-                                                    className={r.draftHours > 0 ? "border-b border-dotted border-amber-500" : ""}
-                                                    title={r.draftHours > 0 ? `${r.submittedHours}h submitted, ${r.draftHours}h still draft` : undefined}
-                                                >
-                                                    {r.totalHours.toLocaleString()}
-                                                </span>
-                                            </td>
-                                            <td className="p-2 text-right whitespace-nowrap font-semibold text-slate-900">
-                                                {r.totalCost === null
-                                                    ? <span className="text-amber-600" title={r.unpricedReason || ""}>n/a</span>
-                                                    : fmtCurrency(r.totalCost)}
-                                            </td>
-                                            {dual && (
-                                                <td className="p-2 text-right whitespace-nowrap text-slate-700">
-                                                    {altTotal === null ? <span className="text-slate-300">–</span> : fmtCurrency(altTotal)}
-                                                </td>
-                                            )}
-                                            {dual && (
-                                                <td className={`p-2 text-right whitespace-nowrap font-semibold ${d === null ? "text-slate-300" : d > 0 ? "text-red-600" : d < 0 ? "text-emerald-600" : "text-slate-400"}`}>
-                                                    {d === null ? "–" : <>{d > 0 ? "+" : ""}{fmtCurrency(d)}</>}
-                                                </td>
-                                            )}
-                                        </tr>
-
-                                        {open && (
-                                            <tr className="bg-slate-50/70">
-                                                <td colSpan={dual ? 5 : 3} className="px-6 py-3">
-                                                    <div className="text-[11px] text-slate-600 mb-2">
-                                                        {r.designation && <>Designation: <strong>{r.designation}</strong> · </>}
-                                                        {r.experienceYears !== null && <>Experience: <strong>{r.experienceYears}y</strong> · </>}
-                                                        Days booked: <strong>{r.totalDays}</strong>
-                                                        {!r.priced && <> · <span className="text-amber-700 font-semibold">Not priced — {r.unpricedReason}</span></>}
-                                                        {r.rateFallback && <> · <span className="text-amber-700 font-semibold">Approximate — {r.rateFallbackNote}</span></>}
-                                                    </div>
-                                                    <table className="text-[11px] w-full max-w-2xl">
-                                                        <thead>
-                                                            <tr className="text-slate-400 border-b border-slate-200">
-                                                                <th className="py-1 text-left font-semibold">Month</th>
-                                                                <th className="py-1 text-right font-semibold">Hours</th>
-                                                                <th className="py-1 text-right font-semibold">{dual ? "As sold" : "Cost"}</th>
-                                                                {dual && <th className="py-1 text-right font-semibold">At today&apos;s card</th>}
-                                                                {dual && <th className="py-1 text-right font-semibold">Difference</th>}
-                                                            </tr>
-                                                        </thead>
-                                                        <tbody>
-                                                            {data.months.map((m) => {
-                                                                const c = r.monthly[m];
-                                                                if (!c) return null;
-                                                                const am = alt?.monthly?.[m] ?? null;
-                                                                const md = (c.cost !== null && am !== null) ? am - c.cost : null;
-                                                                return (
-                                                                    <tr key={m} className="border-b border-slate-100 last:border-0">
-                                                                        <td className="py-1 text-slate-700">{monthLabel(m)}</td>
-                                                                        <td className="py-1 text-right text-slate-600">
-                                                                            <span
-                                                                                className={c.draftHours > 0 ? "border-b border-dotted border-amber-500" : ""}
-                                                                                title={c.draftHours > 0 ? `${c.submittedHours}h submitted, ${c.draftHours}h still draft` : undefined}
-                                                                            >
-                                                                                {c.hours.toLocaleString()}
-                                                                            </span>
-                                                                        </td>
-                                                                        <td className="py-1 text-right text-slate-700">
-                                                                            {c.cost === null ? <span className="text-amber-600">n/a</span> : fmtCurrency(c.cost)}
-                                                                        </td>
-                                                                        {dual && (
-                                                                            <td className="py-1 text-right text-slate-700">
-                                                                                {am === null ? <span className="text-slate-300">–</span> : fmtCurrency(am)}
-                                                                            </td>
-                                                                        )}
-                                                                        {dual && (
-                                                                            <td className={`py-1 text-right font-semibold ${md === null ? "text-slate-300" : md > 0 ? "text-red-600" : md < 0 ? "text-emerald-600" : "text-slate-400"}`}>
-                                                                                {md === null ? "–" : <>{md > 0 ? "+" : ""}{fmtCurrency(md)}</>}
-                                                                            </td>
-                                                                        )}
-                                                                    </tr>
-                                                                );
-                                                            })}
-                                                        </tbody>
-                                                    </table>
-                                                    {r.priced && (() => {
-                                                        const used = [...new Set(Object.values(r.monthly).map((c) => c.rateBatch).filter(Boolean))];
-                                                        const extra = Object.values(r.monthly).some((c) => c.rateExtrapolated);
-                                                        return <p className="text-[10px] text-slate-500 mt-2">Priced on <strong>{used.join(", ")}</strong>
-                                                            {extra && <span className="text-amber-700"> (predates any rate card — earliest used)</span>}</p>;
-                                                    })()}
-                                                </td>
-                                            </tr>
-                                        )}
+                                                    </td>
+                                                    <td className="p-2 text-right whitespace-nowrap text-slate-700">
+                                                        <span
+                                                            className={c.draftHours > 0 ? "border-b border-dotted border-amber-500" : ""}
+                                                            title={c.draftHours > 0 ? `${c.submittedHours}h submitted, ${c.draftHours}h still draft` : undefined}
+                                                        >
+                                                            {c.hours.toLocaleString()}
+                                                        </span>
+                                                    </td>
+                                                    <td className="p-2 text-right whitespace-nowrap text-slate-700">
+                                                        {c.cost === null
+                                                            ? <span className="text-amber-600" title={r.unpricedReason || ""}>n/a</span>
+                                                            : fmtCurrency(c.cost)}
+                                                    </td>
+                                                    {dual && (
+                                                        <td className="p-2 text-right whitespace-nowrap text-slate-700">
+                                                            {am === null ? <span className="text-slate-300">–</span> : fmtCurrency(am)}
+                                                        </td>
+                                                    )}
+                                                    {dual && (
+                                                        <td className={`p-2 text-right whitespace-nowrap font-semibold ${pd === null ? "text-slate-300" : pd > 0 ? "text-red-600" : pd < 0 ? "text-emerald-600" : "text-slate-400"}`}>
+                                                            {pd === null ? "–" : <>{pd > 0 ? "+" : ""}{fmtCurrency(pd)}</>}
+                                                        </td>
+                                                    )}
+                                                </tr>
+                                            );
+                                        })}
                                     </React.Fragment>
                                 );
                             })}
 
-                            {/* Month totals, so collapsing the matrix loses nothing. */}
-                            <tr className="border-t-2 border-slate-300 bg-slate-50/60 text-slate-500">
-                                <td className="p-2 text-[10px] font-semibold uppercase tracking-wide" colSpan={dual ? 5 : 3}>
-                                    By month
-                                </td>
-                            </tr>
-                            {data.months.map((m) => {
-                                const t = data.monthTotals[m];
-                                const at = data.atLatestCard?.monthTotals?.[m];
-                                const md = at ? at.cost - t.cost : null;
-                                return (
-                                    <tr key={`tot-${m}`} className="border-b border-slate-100 bg-slate-50/60">
-                                        <td className="p-2 pl-8 text-slate-600">{monthLabel(m)}</td>
-                                        <td className="p-2 text-right text-slate-600">{t.hours.toLocaleString()}</td>
-                                        <td className="p-2 text-right text-slate-700">{fmtCurrency(t.cost)}</td>
-                                        {dual && <td className="p-2 text-right text-slate-700">{fmtCurrency(at?.cost ?? 0)}</td>}
-                                        {dual && (
-                                            <td className={`p-2 text-right font-semibold ${md === null ? "text-slate-300" : md > 0 ? "text-red-600" : "text-emerald-600"}`}>
-                                                {md === null ? "–" : <>{md > 0 ? "+" : ""}{fmtCurrency(md)}</>}
-                                            </td>
-                                        )}
-                                    </tr>
-                                );
-                            })}
-
                             <tr className="border-t-2 border-slate-300 bg-slate-50 font-semibold">
-                                <td className="p-2 text-slate-800">Total</td>
+                                <td className="p-2 text-slate-800">
+                                    Total
+                                    <span className="ml-2 font-normal text-[10px] text-slate-500">
+                                        {data.totals.people} {data.totals.people === 1 ? "person" : "people"} across {data.months.length} month{data.months.length === 1 ? "" : "s"}
+                                    </span>
+                                </td>
                                 <td className="p-2 text-right text-slate-900">{data.totals.hours.toLocaleString()}</td>
                                 <td className="p-2 text-right text-slate-900">{fmtCurrency(data.totals.cost)}</td>
                                 {dual && <td className="p-2 text-right text-slate-900">{fmtCurrency(data.atLatestCard!.cost)}</td>}
