@@ -194,6 +194,103 @@ export async function deleteMapping(req: Request, res: Response) {
   }
 }
 
+/**
+ * GET /api/opportunities/:id/qpeople/actual-gom/reset-preview
+ *
+ * What a reset would destroy, counted before anything is touched. Shown in the
+ * confirmation so nobody agrees to "delete everything" without knowing that
+ * "everything" is four hand-picked resources and a project code.
+ */
+export async function getResetPreview(req: Request, res: Response) {
+  try {
+    const { id } = req.params;
+    const [mapping, planRows, planFilled, snapshots] = await Promise.all([
+      prisma.qPeopleProjectMapping.findUnique({ where: { opportunityId: id } }),
+      prisma.actualResourceRow.count({ where: { opportunityId: id } }),
+      prisma.actualResourceRow.count({ where: { opportunityId: id, NOT: { employeeId: null } } }),
+      prisma.actualGomSnapshot.count({ where: { opportunityId: id } }),
+    ]);
+
+    return res.json({
+      mapping: mapping
+        ? { code: mapping.qpeopleProjectCode, name: mapping.qpeopleProjectName, id: mapping.qpeopleProjectId }
+        : null,
+      planRows,
+      planFilled,
+      snapshots,
+      anythingToReset: !!mapping || planRows > 0 || snapshots > 0,
+    });
+  } catch (err) {
+    return handleQPeopleError(res, err);
+  }
+}
+
+/**
+ * DELETE /api/opportunities/:id/qpeople/actual-gom
+ *
+ * Start this deal's Actual GOM over: drops the stored snapshots, the resource
+ * plan, and the Q-People project mapping. The deal falls back to "Unmapped" in
+ * the Won / To Map queue and produces no actuals until someone re-maps it.
+ *
+ * Nothing here is recoverable from within the app. Snapshots can be recomputed,
+ * but the resource plan and the mapping were hand-picked and have to be picked
+ * again — which is why the UI states the counts and demands a second click, and
+ * why the audit entry records exactly what was destroyed rather than just
+ * "reset". Timesheets are untouched: they live in Q-People and this only ever
+ * deletes QCRM's own interpretation of them.
+ *
+ * One transaction, so a partial reset cannot leave a mapping pointing at a plan
+ * that no longer exists.
+ */
+export async function resetActualGom(req: Request, res: Response) {
+  try {
+    const { id } = req.params;
+
+    const mapping = await prisma.qPeopleProjectMapping.findUnique({ where: { opportunityId: id } });
+    const planRows = await prisma.actualResourceRow.count({ where: { opportunityId: id } });
+    const snapshots = await prisma.actualGomSnapshot.count({ where: { opportunityId: id } });
+
+    if (!mapping && planRows === 0 && snapshots === 0) {
+      return res.status(409).json({ error: 'Nothing to reset — this deal has no Actual GOM data' });
+    }
+
+    await prisma.$transaction([
+      prisma.actualGomSnapshot.deleteMany({ where: { opportunityId: id } }),
+      prisma.actualResourceRow.deleteMany({ where: { opportunityId: id } }),
+      ...(mapping ? [prisma.qPeopleProjectMapping.delete({ where: { opportunityId: id } })] : []),
+    ]);
+
+    // Q-People responses are cached per project; a re-map should not be served
+    // a stale timesheet list from before the reset.
+    try { clearQPeopleCache(); } catch { /* cache is best-effort */ }
+
+    await recordAudit({
+      req,
+      entity: 'ActualGom',
+      entityId: id,
+      action: 'RESET',
+      changes: {
+        removedMapping: mapping
+          ? { project: mapping.qpeopleProjectId, code: mapping.qpeopleProjectCode }
+          : null,
+        removedPlanRows: planRows,
+        removedSnapshots: snapshots,
+      },
+    });
+
+    return res.json({
+      message: 'Actual GOM reset',
+      removed: {
+        mapping: mapping ? mapping.qpeopleProjectCode : null,
+        planRows,
+        snapshots,
+      },
+    });
+  } catch (err) {
+    return handleQPeopleError(res, err);
+  }
+}
+
 // ── Resource plan ───────────────────────────────────────────────────────────
 
 interface PresalesResource {

@@ -49,6 +49,7 @@ import { StageTimeline, StageHistoryEntry } from "./components/StageTimeline";
 import ProjectResourceMappingTab from "./components/ProjectResourceMappingTab";
 import ActualBookingCostTab from "./components/ActualBookingCostTab";
 import MarginVarianceTab from "./components/MarginVarianceTab";
+import ResetActualGom from "./components/ResetActualGom";
 
 // Static dropdowns (not master-data driven)
 // Sub-tabs inside the Actual GOM step. Project / Resource Mapping is the first
@@ -3751,9 +3752,20 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 <div className="space-y-4 animate-in fade-in duration-300">
                     {/* Deal header — the baseline every Actual GOM sub-tab measures against */}
                     <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-5">
-                        <div className="flex items-center gap-2 mb-1">
-                            <TrendingUp className="w-5 h-5 text-indigo-600" />
-                            <h2 className="text-base font-bold text-slate-900">Actual GOM</h2>
+                        <div className="flex items-start justify-between gap-4 mb-1">
+                            <div className="flex items-center gap-2">
+                                <TrendingUp className="w-5 h-5 text-indigo-600" />
+                                <h2 className="text-base font-bold text-slate-900">Actual GOM</h2>
+                            </div>
+                            {/* Sits on the deal header so it is reachable from any
+                                sub-tab, and deliberately understated: this is a
+                                destructive action nobody should reach for casually. */}
+                            {canEditActualGom && (
+                                <ResetActualGom
+                                    opportunityId={id}
+                                    onReset={() => setActualGomSubTab(ACTUAL_GOM_SUBTABS[0])}
+                                />
+                            )}
                         </div>
                         <p className="text-xs text-slate-500 mb-5">
                             Delivered gross operating margin for this engagement, measured against the approved estimate.

@@ -275,7 +275,7 @@ export default function ActualBookingCostTab({ opportunityId }: { opportunityId:
 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                         <div className="bg-indigo-50 rounded-lg p-3 border border-indigo-200">
-                            <p className="text-xs text-indigo-700 mb-1 font-semibold">As sold</p>
+                            <p className="text-xs text-indigo-700 mb-1 font-semibold">Cost When Sold</p>
                             <p className="font-bold text-lg text-indigo-900">{fmtCurrency(data.totals.cost)}</p>
                             <p className="text-[10px] text-indigo-700/80 mt-1">{data.basis.rateCardUsed}</p>
                             <p className="text-[10px] text-slate-500 mt-1 leading-snug">
@@ -351,7 +351,7 @@ export default function ActualBookingCostTab({ opportunityId }: { opportunityId:
                             <tr className="text-slate-500 border-b border-slate-200">
                                 <th className="p-2 text-left font-semibold min-w-[260px]">Month / person</th>
                                 <th className="p-2 text-right font-semibold">Hours</th>
-                                <th className="p-2 text-right font-semibold">{dual ? "As sold" : "Cost"}</th>
+                                <th className="p-2 text-right font-semibold">{dual ? "Cost When Sold" : "Cost"}</th>
                                 {dual && <th className="p-2 text-right font-semibold">At today&apos;s card</th>}
                                 {dual && <th className="p-2 text-right font-semibold">Difference</th>}
                             </tr>
