@@ -35,6 +35,14 @@ import { bandOrder, type ExperienceBandKey } from '../lib/experience-bands';
 
 const HOURS_PER_DAY = 8;
 
+/** How the pricing card was chosen, in words the tab can print verbatim. */
+const CARD_SOURCE_TEXT: Record<CardSource, string> = {
+  'stamped-at-submission': 'the rate card recorded against this estimate when it was first submitted to Sales',
+  'submission-date': 'the rate card live when this estimate was first submitted to Sales',
+  'created-date': 'the rate card live when this opportunity was created \u2014 no submission was recorded for it, so this is inferred',
+  'none': 'no rate card could be determined',
+};
+
 const DEFAULT_ASSUMPTIONS: BudgetAssumptions = {
   marginPercent: 35,
   deliveryMgmtPercent: 10,
@@ -58,28 +66,55 @@ async function loadAssumptions(): Promise<BudgetAssumptions> {
 /**
  * Which rate-card batch prices this opportunity.
  *
- * The card the deal was ESTIMATED on, i.e. the one live when the opportunity was
- * created — not the one live when the time happened to be booked.
+ * The card the deal was SOLD on — not the one live when the time happened to be
+ * booked. Cost used to be priced per booking month, which quietly broke the
+ * comparison the Actual GOM tab exists for: a deal sold in June against the
+ * April card but delivered through August, after a new card landed on the 13th,
+ * had its August hours priced at rates nobody had ever quoted it, so the
+ * resulting "overrun" was partly just the rate change.
  *
- * This used to be chosen per booking month, which quietly broke the comparison
- * the Actual GOM tab exists for. A deal sold in June against the April card, but
- * delivered in August after a new card landed on the 13th, had its August hours
- * priced on rates nobody had quoted it at: the estimate said one thing, the
- * actuals were measured with a different ruler, and the resulting "overrun" was
- * partly just the rate change. Pricing the whole engagement on the card it was
- * sold against makes the variance mean what it claims to mean.
+ * "Sold on" means the card live at INITIAL SUBMISSION — when presales first sent
+ * the estimate to sales. A re-estimate does not re-open that baseline.
  *
- * A deal created before any card exists falls back to the earliest, flagged.
+ * Three sources, in descending authority, because the earlier ones did not exist
+ * for historic deals:
+ *
+ *   1. presalesData.rateCardBatchId — stamped at first submission. Exact, and
+ *      immune to the card list changing afterwards. Every deal submitted from
+ *      now on has this.
+ *   2. The earliest StageHistory entry for the Proposal stage — the real
+ *      submission date. Only usable where stage history was recorded; on this
+ *      database it starts 2026-08-13, so most existing deals have none.
+ *   3. opportunity.createdAt — an inference, and flagged as one. A deal created
+ *      in June and submitted in September is priced on June's card, which may be
+ *      wrong; nothing recorded at the time can settle it.
  */
+type CardSource = 'stamped-at-submission' | 'submission-date' | 'created-date' | 'none';
+
 function batchForOpportunity(
   batches: { id: string; label: string; uploadedAt: Date }[],
-  createdAt: Date | null,
-) {
-  if (!batches.length) return { batch: null, extrapolated: true };
-  if (!createdAt) return { batch: batches[batches.length - 1], extrapolated: true };
-  const live = batches.filter((b) => b.uploadedAt <= createdAt);
-  if (live.length) return { batch: live[live.length - 1], extrapolated: false };
-  return { batch: batches[0], extrapolated: true };
+  opts: { stampedBatchId?: string | null; submittedAt?: Date | null; createdAt?: Date | null },
+): { batch: { id: string; label: string; uploadedAt: Date } | null; extrapolated: boolean; source: CardSource } {
+  if (!batches.length) return { batch: null, extrapolated: true, source: 'none' };
+
+  // 1. Exact, recorded at the moment it mattered.
+  if (opts.stampedBatchId) {
+    const hit = batches.find((b) => b.id === opts.stampedBatchId);
+    if (hit) return { batch: hit, extrapolated: false, source: 'stamped-at-submission' };
+    // Stamped against a batch that has since been deleted — fall through rather
+    // than pricing on a card that no longer exists.
+  }
+
+  // 2/3. Whichever date we have; the source is reported so the UI can say how
+  // confident this is rather than presenting an inference as a fact.
+  const anchor = opts.submittedAt || opts.createdAt || null;
+  const source: CardSource = opts.submittedAt ? 'submission-date' : 'created-date';
+  if (!anchor) return { batch: batches[batches.length - 1], extrapolated: true, source: 'none' };
+
+  const live = batches.filter((b) => b.uploadedAt <= anchor);
+  if (live.length) return { batch: live[live.length - 1], extrapolated: false, source };
+  // Submitted before any card existed: use the earliest, flagged.
+  return { batch: batches[0], extrapolated: true, source };
 }
 
 /** Thrown when an opportunity has no Q-People project mapped yet. */
@@ -104,19 +139,34 @@ export async function computeActualCost(id: string, force = false) {
     const mapping = await prisma.qPeopleProjectMapping.findUnique({ where: { opportunityId: id } });
     if (!mapping) throw new NotMappedError();
 
-    const [entries, employees, assumptions, batches, planRows, opp, aliases] = await Promise.all([
+    const [entries, employees, assumptions, batches, planRows, opp, firstSubmission, aliases] = await Promise.all([
       fetchTimesheetEntries(mapping.qpeopleProjectId, force),
       getEmployeesResolved(force),
       loadAssumptions(),
       prisma.rateCardBatch.findMany({ orderBy: { uploadedAt: 'asc' } }),
       prisma.actualResourceRow.findMany({ where: { opportunityId: id } }),
-      prisma.opportunity.findUnique({ where: { id }, select: { createdAt: true } }),
+      prisma.opportunity.findUnique({
+        where: { id },
+        select: { createdAt: true, presalesData: true },
+      }),
+      // Earliest move into Proposal = initial submission. Empty for deals that
+      // predate stage-history recording, which is why the fallback chain exists.
+      prisma.stageHistory.findFirst({
+        where: { opportunityId: id, stage: { is: { name: 'Proposal' } } },
+        orderBy: { enteredAt: 'asc' },
+        select: { enteredAt: true },
+      }).catch(() => null),
       getSkillAliasMap(force),
     ]);
 
     // One card for the whole engagement — the one it was sold against.
-    const { batch: oppBatch, extrapolated: oppExtrapolated } =
-      batchForOpportunity(batches, opp?.createdAt ?? null);
+    const stampedBatchId = ((opp?.presalesData as any) || {}).rateCardBatchId ?? null;
+    const { batch: oppBatch, extrapolated: oppExtrapolated, source: cardSource } =
+      batchForOpportunity(batches, {
+        stampedBatchId,
+        submittedAt: firstSubmission?.enteredAt ?? null,
+        createdAt: opp?.createdAt ?? null,
+      });
 
     const empById = new Map(employees.map((e) => [e.id, e]));
     const plannedEmployeeIds = new Set(planRows.map((r) => r.employeeId).filter(Boolean) as string[]);
@@ -134,17 +184,46 @@ export async function computeActualCost(id: string, force = false) {
     const rateIndex = new Map<string, { ctc: number; level: string }>();
     // Also keep every band priced for a skill, ordered by seniority, so a band
     // the card does not cover can fall back to the nearest one it does.
-    const bandsBySkill = new Map<string, { band: string; order: number; ctc: number; level: string }[]>();
+    const bandsBySkill = new Map<string, { band: string; order: number; ctc: number; level: string; canonical: boolean }[]>();
+
+    // When several card skills alias onto one key, the row belonging to the
+    // CANONICAL skill wins.
+    //
+    // Without this the index simply kept whichever row it happened to read
+    // first, so an alias could silently re-price people. Aliasing "Cloud
+    // Security" and "Cloud (Azure" onto "Cloud Architect (AWS, Azure, GCP)"
+    // collapsed three skills onto one key, and a Cloud Architect at band 4-6
+    // was priced from the 9,16,812 "Cloud (Azure" row instead of the
+    // 40,00,000 one — a 4x understatement produced by a Settings change, with
+    // nothing on screen to show it had happened.
+    //
+    // An alias should let a person be FOUND under another name, never quietly
+    // change what that name costs.
+    const fromCanonicalSkill = new Set<string>();
     for (const r of allRates) {
       const band = canonicalBandKey(r.experienceBand);
       if (!band) continue;
-      const k = `${r.batchId}|${canonSkill(r.skill)}|${band}`;
-      if (!rateIndex.has(k)) rateIndex.set(k, { ctc: r.ctc, level: r.level });
-      const sk = `${r.batchId}|${canonSkill(r.skill)}`;
+      const own = skillKey(r.skill);
+      const canon = canonSkill(r.skill);
+      const isCanonical = own === canon;
+
+      const k = `${r.batchId}|${canon}|${band}`;
+      if (!rateIndex.has(k) || (isCanonical && !fromCanonicalSkill.has(k))) {
+        rateIndex.set(k, { ctc: r.ctc, level: r.level });
+        if (isCanonical) fromCanonicalSkill.add(k);
+      }
+
+      const sk = `${r.batchId}|${canon}`;
       const arr = bandsBySkill.get(sk) || [];
-      if (!arr.some((x) => x.band === band)) {
-        arr.push({ band, order: bandOrder(band), ctc: r.ctc, level: r.level });
+      const existing = arr.find((x) => x.band === band);
+      if (!existing) {
+        arr.push({ band, order: bandOrder(band), ctc: r.ctc, level: r.level, canonical: isCanonical });
         bandsBySkill.set(sk, arr);
+      } else if (isCanonical && !existing.canonical) {
+        // Same reasoning as above, applied to the fallback ladder.
+        existing.ctc = r.ctc;
+        existing.level = r.level;
+        existing.canonical = true;
       }
     }
     for (const arr of bandsBySkill.values()) arr.sort((a, b) => a.order - b.order);
@@ -350,9 +429,16 @@ export async function computeActualCost(id: string, force = false) {
         rateBasis: "each person's own skill + experience band",
         // The card this engagement is priced on, and why that one.
         rateCardUsed: oppBatch?.label || null,
-        rateCardRule: 'the rate card live when this opportunity was created — the one it was estimated against',
+        rateCardRule: CARD_SOURCE_TEXT[cardSource],
+        rateCardSource: cardSource,
+        // An inferred card is not the same claim as a recorded one, and the UI
+        // must be able to tell them apart.
+        rateCardInferred: cardSource === 'created-date' || cardSource === 'none',
         rateCardExtrapolated: oppExtrapolated,
         opportunityCreatedAt: opp?.createdAt ?? null,
+        initialSubmissionAt: firstSubmission?.enteredAt
+          ?? ((opp?.presalesData as any) || {}).initialSubmissionAt
+          ?? null,
         rateCardVersioning: batches.map((b) => ({ label: b.label, from: b.uploadedAt })),
       },
       warnings: [...warnings],

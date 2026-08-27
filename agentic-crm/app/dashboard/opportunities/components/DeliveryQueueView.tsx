@@ -71,12 +71,18 @@ function fmtDate(d: string | null) {
     return new Date(d).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "2-digit" });
 }
 
-export default function DeliveryQueueView() {
+/**
+ * `initialFilter` lets the Delivery Margin page embed this as its "Unmapped
+ * won deals" sub-tab without duplicating the table — one queue, two doors.
+ */
+export default function DeliveryQueueView({
+    initialFilter = "all",
+}: { initialFilter?: Status | "all" } = {}) {
     const { format: fmtCurrency } = useCurrency();
     const [data, setData] = useState<Payload | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    const [filter, setFilter] = useState<Status | "all">("all");
+    const [filter, setFilter] = useState<Status | "all">(initialFilter);
 
     const load = useCallback(async () => {
         setLoading(true);
