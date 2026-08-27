@@ -67,6 +67,10 @@ interface Payload {
         workingDaysPerYear: number;
         timesheetFilter: string;
         rateBasis: string;
+        rateCardUsed: string | null;
+        rateCardRule: string;
+        rateCardExtrapolated: boolean;
+        opportunityCreatedAt: string | null;
         rateCardVersioning: { label: string; from: string }[];
     };
     warnings: string[];
@@ -417,10 +421,12 @@ export default function ActualBookingCostTab({ opportunityId }: { opportunityId:
 
                 <p className="text-[10px] text-slate-400 mt-3 leading-relaxed">
                     Q-People records no cost data, so every figure here is computed by QCRM:
-                    hours ÷ {data.basis.hoursPerDay} = days, priced at the rate card live in that month
-                    ({data.basis.rateCardVersioning.map((b) => b.label).join(" → ")}), on
-                    each person&apos;s own skill and experience band, using
+                    hours ÷ {data.basis.hoursPerDay} = days, priced on{" "}
+                    <strong>{data.basis.rateCardUsed || "no rate card"}</strong> — {data.basis.rateCardRule} —
+                    on each person&apos;s own skill and experience band, using
                     the {data.basis.workingDaysPerYear}-productive-day basis the estimate used.
+                    Every month is priced on that same card, so a card issued mid-delivery does not
+                    silently re-price work that was quoted against the old one.
                     Timesheets: {data.basis.timesheetFilter}.
                 </p>
             </div>

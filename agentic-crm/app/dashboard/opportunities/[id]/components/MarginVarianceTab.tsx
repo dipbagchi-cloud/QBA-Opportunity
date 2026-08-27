@@ -424,7 +424,9 @@ export default function MarginVarianceTab({ opportunityId }: { opportunityId: st
 
                 <p className="text-[10px] text-slate-400 mt-3 leading-relaxed">
                     Planned figures come from the approved presales estimate&apos;s monthly GOM breakdown; actuals are
-                    Q-People hours priced on the rate card live in that month. Only months appearing on both sides feed
+                    Q-People hours priced on the rate card this deal was estimated against — the one live when the
+                    opportunity was created, applied to every month, so a later card cannot re-price work that was
+                    quoted on the old one. Only months appearing on both sides feed
                     the variance above. The projection, when shown, carries {projection.basis}.
                 </p>
             </div>
