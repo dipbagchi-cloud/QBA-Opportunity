@@ -27,6 +27,13 @@ model User {
   phone         String?
   isActive      Boolean   @default(true)
   muteNotification Boolean @default(true)
+  // Set whenever an admin edits this user's roles by hand. The QPeople sync and
+  // the designation->role mapping auto-apply both REPLACE a user's whole role
+  // list, so without this flag a hand-granted role (typically Admin) is silently
+  // discarded the next time anyone presses "Sync from QPeople". Users with the
+  // flag keep the roles they were given and are skipped by every mapping-driven
+  // role write. Clear it to hand the user back to designation-based management.
+  rolesManuallyAssigned Boolean @default(false)
   externalId    String?   @unique
   qpeopleId     String?   @unique
   createdAt     DateTime  @default(now())

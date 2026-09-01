@@ -82,6 +82,7 @@ export async function listUsers(req: Request, res: Response) {
         qpeopleId: u.qpeopleId,
         isActive: u.isActive,
         muteNotification: (u as any).muteNotification ?? true,
+        rolesManuallyAssigned: (u as any).rolesManuallyAssigned ?? false,
         lastLoginAt: u.lastLoginAt,
         createdAt: u.createdAt,
         roles: u.roles.map((r: any) => ({ id: r.id, name: r.name })),
@@ -191,7 +192,7 @@ export async function createUser(req: Request, res: Response) {
 export async function updateUser(req: Request, res: Response) {
   try {
     const { id } = req.params;
-    const { roleId, roleIds, isActive, name, title, department, teamId } = req.body;
+    const { roleId, roleIds, isActive, name, title, department, teamId, rolesManuallyAssigned } = req.body;
 
     const user = await prisma.user.findUnique({ where: { id }, include: { roles: true } });
     if (!user) {
@@ -220,6 +221,17 @@ export async function updateUser(req: Request, res: Response) {
       if (!resolvedRoleIds.includes(user.activeRoleId || '')) {
         updateData.activeRoleId = resolvedRoleIds[0];
       }
+      // An admin picked these roles by hand, so the QPeople designation mapping
+      // must stop managing this user. Without this the next "Sync from QPeople"
+      // replaces the whole list with the designation's mapped roles and silently
+      // drops anything the mapping lacks — which is Admin for 97 of 98 mappings.
+      updateData.rolesManuallyAssigned = true;
+    }
+
+    // Explicit opt-out, set after the block above so `false` wins: hands the
+    // user back to designation-based management on the next sync.
+    if (rolesManuallyAssigned !== undefined) {
+      updateData.rolesManuallyAssigned = !!rolesManuallyAssigned;
     }
 
     if (isActive !== undefined) updateData.isActive = isActive;
@@ -677,6 +689,10 @@ export async function syncQPeopleUsers(req: Request, res: Response) {
     let updated = 0;
     let skipped = 0;
     let roleMapped = 0;
+    // Users whose roles an admin set by hand: their profile fields still sync
+    // from QPeople, but their roles are left exactly as they are.
+    let rolesPreserved = 0;
+    const rolesPreservedFor: string[] = [];
 
     for (const emp of employees) {
       const empName = emp.employee_name || emp.name || '';
@@ -717,8 +733,11 @@ export async function syncQPeopleUsers(req: Request, res: Response) {
             ...( mappedJobBand ? { jobBand: mappedJobBand } : {}),
           } as any,
         });
-        // Auto-assign mapped roles if designation has mappings (set replaces old roles)
-        if (mappedRoleIds.length > 0) {
+        // Auto-assign mapped roles if designation has mappings (set replaces old
+        // roles). Skipped for users whose roles were assigned by hand — `set`
+        // would discard the hand-granted role, which is how every manually
+        // granted Admin kept disappearing on the next sync.
+        if (mappedRoleIds.length > 0 && !(existing as any).rolesManuallyAssigned) {
           await prisma.user.update({
             where: { id: existing.id },
             data: {
@@ -727,6 +746,9 @@ export async function syncQPeopleUsers(req: Request, res: Response) {
             },
           });
           roleMapped++;
+        } else if (mappedRoleIds.length > 0) {
+          rolesPreserved++;
+          if (rolesPreservedFor.length < 100) rolesPreservedFor.push(existing.email);
         }
         updated++;
       } else {
@@ -760,16 +782,29 @@ export async function syncQPeopleUsers(req: Request, res: Response) {
         entityId: 'bulk-sync',
         action: 'SYNC_QPEOPLE',
         userId: req.user!.userId,
-        changes: { totalFetched: employees.length, created, updated, skipped, roleMapped },
+        // Name the users whose roles were left alone, so the audit trail shows
+        // who the mapping did NOT touch — the previous silence here is why the
+        // stripped Admins took weeks to trace back to a sync run.
+        changes: {
+          totalFetched: employees.length,
+          created,
+          updated,
+          skipped,
+          roleMapped,
+          rolesPreserved,
+          rolesPreservedFor,
+        },
       },
     });
 
     res.json({
-      message: `QPeople sync complete. Created: ${created}, Updated: ${updated}, Skipped: ${skipped}, Role-mapped: ${roleMapped}`,
+      message: `QPeople sync complete. Created: ${created}, Updated: ${updated}, Skipped: ${skipped}, Role-mapped: ${roleMapped}`
+        + (rolesPreserved > 0 ? `, Roles preserved (manually assigned): ${rolesPreserved}` : ''),
       created,
       updated,
       skipped,
       roleMapped,
+      rolesPreserved,
       total: employees.length,
     });
   } catch (error) {
@@ -1115,18 +1150,30 @@ export async function upsertQPeopleMapping(req: Request, res: Response) {
       },
     });
 
-    // Auto-apply: update all users with this designation
+    // Auto-apply: update all users with this designation. Users whose roles an
+    // admin set by hand keep their roles — a mapping edit must not silently
+    // rewrite roles someone deliberately chose — but still take the jobBand,
+    // which is a pay-band attribute the mapping legitimately owns.
     const usersWithDesignation = await prisma.user.findMany({
       where: { designation: qpeopleDesignation },
       include: { roles: { select: { id: true } } },
     });
     let applied = 0;
+    let rolesPreserved = 0;
     for (const user of usersWithDesignation) {
+      const keepRoles = (user as any).rolesManuallyAssigned === true;
+      if (keepRoles) {
+        rolesPreserved++;
+        // Nothing left to write for this user once roles are off the table.
+        if (!jobBand) continue;
+      }
       await prisma.user.update({
         where: { id: user.id },
         data: {
-          roles: { set: crmRoleIds.map((rid: string) => ({ id: rid })) },
-          activeRoleId: crmRoleIds[0],
+          ...(keepRoles ? {} : {
+            roles: { set: crmRoleIds.map((rid: string) => ({ id: rid })) },
+            activeRoleId: crmRoleIds[0],
+          }),
           ...(jobBand ? { jobBand } : {}),
           // Do NOT write department here. Department is each employee's own
           // attribute, synced per-user from QPeople. The mappings UI shows an
@@ -1138,7 +1185,7 @@ export async function upsertQPeopleMapping(req: Request, res: Response) {
       applied++;
     }
 
-    res.json({ ...mapping, applied });
+    res.json({ ...mapping, applied, rolesPreserved });
   } catch (error) {
     console.error('Upsert QPeople mapping error:', error);
     res.status(500).json({ error: 'Failed to save mapping' });
@@ -1157,8 +1204,10 @@ export async function deleteQPeopleMapping(req: Request, res: Response) {
     const readOnlyRole = await prisma.role.findFirst({ where: { name: 'Read-Only' } });
     const demoted: string[] = [];
     if (readOnlyRole) {
+      // Hand-assigned users are excluded: deleting a mapping must not demote
+      // someone an admin deliberately granted a role to.
       const affectedUsers = await prisma.user.findMany({
-        where: { designation: mapping.qpeopleDesignation },
+        where: { designation: mapping.qpeopleDesignation, rolesManuallyAssigned: false },
       });
       for (const user of affectedUsers) {
         await prisma.user.update({
@@ -1206,7 +1255,11 @@ export async function resetAllQPeopleMappings(req: Request, res: Response) {
     const readOnlyRole = await prisma.role.findFirst({ where: { name: 'Read-Only' } });
     let usersReset = 0;
     if (readOnlyRole) {
-      const qpUsers = await prisma.user.findMany({ where: { qpeopleId: { not: null } } });
+      // Same exclusion as the single-mapping delete: a bulk reset clears roles
+      // the mapping granted, not roles an admin granted by hand.
+      const qpUsers = await prisma.user.findMany({
+        where: { qpeopleId: { not: null }, rolesManuallyAssigned: false },
+      });
       for (const user of qpUsers) {
         await prisma.user.update({
           where: { id: user.id },
@@ -1254,11 +1307,29 @@ export async function applyQPeopleMappings(req: Request, res: Response) {
 
     let applied = 0;
     let cleaned = 0;
+    let rolesPreserved = 0;
     // Track who was actually touched, so the audit entry can name them.
     const changedUsers: { email: string; roles: string[]; jobBand?: string | null }[] = [];
+    const rolesPreservedFor: string[] = [];
     for (const user of users) {
       const mappedRoleIds = designationToRoleIds.get(user.designation || '') || [];
       const mappedJobBand = designationToJobBand.get(user.designation || '') || null;
+      // Roles an admin set by hand are never rewritten from the designation;
+      // jobBand still applies, since the mapping legitimately owns that.
+      const keepRoles = (user as any).rolesManuallyAssigned === true;
+      if (keepRoles) {
+        rolesPreserved++;
+        if (rolesPreservedFor.length < 100) rolesPreservedFor.push(user.email);
+        if (mappedJobBand) {
+          await prisma.user.update({
+            where: { id: user.id },
+            data: { jobBand: mappedJobBand } as any,
+          });
+          applied++;
+          changedUsers.push({ email: user.email, roles: [], jobBand: mappedJobBand });
+        }
+        continue;
+      }
 
       if (mappedRoleIds.length > 0) {
         // Has mapping: set exactly the mapped roles (removes stale Read-Only etc.).
@@ -1312,10 +1383,18 @@ export async function applyQPeopleMappings(req: Request, res: Response) {
         usersConsidered: users.length,
         mappingsInEffect: mappings.length,
         updatedUsers: changedUsers.slice(0, 200),
+        rolesPreserved,
+        rolesPreservedFor,
       },
     });
 
-    res.json({ message: `Applied role/job-band mappings to ${applied} users`, applied, total: users.length });
+    res.json({
+      message: `Applied role/job-band mappings to ${applied} users`
+        + (rolesPreserved > 0 ? ` (${rolesPreserved} kept manually assigned roles)` : ''),
+      applied,
+      rolesPreserved,
+      total: users.length,
+    });
   } catch (error) {
     console.error('Apply QPeople mappings error:', error);
     res.status(500).json({ error: 'Failed to apply mappings' });
