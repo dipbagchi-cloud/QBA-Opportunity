@@ -110,7 +110,6 @@ interface AdminUser {
     qpeopleId?: string;
     isActive: boolean;
     muteNotification: boolean;
-    rolesManuallyAssigned?: boolean;
     roles: { id: string; name: string }[];
     team?: { id: string; name: string } | null;
     createdAt: string;
@@ -669,26 +668,7 @@ function UsersTab() {
                 body: JSON.stringify({ roleIds }),
             });
             fetchUsers(userPage, userSearch);
-            // Editing roles by hand pins them: the QPeople sync will no longer
-            // overwrite this user from their designation mapping.
-            setStatus({ type: "success", message: "Roles updated and pinned — QPeople sync will no longer change this user's roles." });
-        } catch (err: any) {
-            setStatus({ type: "error", message: err.message });
-        }
-    };
-
-    // Hand the user back to designation-based role management.
-    const handleUnpinRoles = async (u: AdminUser) => {
-        if (!confirm(`Let QPeople sync manage ${u.name}'s roles again?
-
-Their roles will be replaced by whatever their designation ("${u.designation || 'none'}") maps to on the next sync.`)) return;
-        try {
-            await apiClient(`/api/admin/users/${u.id}`, {
-                method: "PATCH",
-                body: JSON.stringify({ rolesManuallyAssigned: false }),
-            });
-            fetchUsers(userPage, userSearch);
-            setStatus({ type: "success", message: `${u.name}'s roles are managed by QPeople sync again.` });
+            setStatus({ type: "success", message: "Roles updated." });
         } catch (err: any) {
             setStatus({ type: "error", message: err.message });
         }
@@ -1012,16 +992,6 @@ Their roles will be replaced by whatever their designation ("${u.designation || 
                                             selectedRoles={u.roles}
                                             onChange={(newRoleIds) => handleRoleChange(u.id, newRoleIds)}
                                         />
-                                        {u.rolesManuallyAssigned && (
-                                            <button
-                                                type="button"
-                                                onClick={() => handleUnpinRoles(u)}
-                                                title="These roles were set by hand, so QPeople sync leaves them alone. Click to let the sync manage them again."
-                                                className="mt-1 inline-flex items-center gap-1 text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full hover:bg-amber-100"
-                                            >
-                                                <Lock className="w-2.5 h-2.5" /> Pinned
-                                            </button>
-                                        )}
                                     </td>
                                     <td className="px-3 py-2">
                                         <button onClick={() => handleToggleActive(u)} title={u.isActive ? "Deactivate" : "Activate"}>
