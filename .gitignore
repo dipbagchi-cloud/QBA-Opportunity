@@ -29,3 +29,9 @@ backend/uploads/sow-templates/
 # Chatbot phrase memory — runtime state, and it holds example question text
 # typed by users (which can name clients). Belongs on the server, not in git.
 backend/data/
+
+# Session recordings and decks: large binaries that do not belong in git.
+# QCRM_Walkthrough_Narrated.mp4 is 108MB, over GitHub's hard 100MB file limit,
+# so committing it would make every push to this repo fail.
+QCRM_Walkthrough_Narrated.mp4
+QCRM_Walkthrough_Narrated.pptx
