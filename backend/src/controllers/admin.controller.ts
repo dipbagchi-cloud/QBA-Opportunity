@@ -676,7 +676,11 @@ export async function syncQPeopleUsers(req: Request, res: Response) {
     let created = 0;
     let updated = 0;
     let skipped = 0;
+    // Mapped roles are only ever handed to users this sync creates.
     let roleMapped = 0;
+    // Existing users whose designation has a mapping that the sync deliberately
+    // did not apply, because their roles are theirs to keep.
+    let rolesUntouched = 0;
 
     for (const emp of employees) {
       const empName = emp.employee_name || emp.name || '';
@@ -706,7 +710,13 @@ export async function syncQPeopleUsers(req: Request, res: Response) {
       });
 
       if (existing) {
-        // Update department, designation, reporting manager, jobBand
+        // Refresh only the attributes QPeople owns. Roles are deliberately left
+        // alone: a refresh must never cost someone access they already have.
+        // These writes used to be `roles: { set: mapped }`, which replaces the
+        // whole list, so any role the designation mapping lacked — Admin for 97
+        // of 98 mappings — was silently dropped on every sync. Designation
+        // mappings now reach existing users only through an explicit admin
+        // action: the "Apply mappings" button, or the Users edit dialog.
         await prisma.user.update({
           where: { id: existing.id },
           data: {
@@ -717,17 +727,7 @@ export async function syncQPeopleUsers(req: Request, res: Response) {
             ...( mappedJobBand ? { jobBand: mappedJobBand } : {}),
           } as any,
         });
-        // Auto-assign mapped roles if designation has mappings (set replaces old roles)
-        if (mappedRoleIds.length > 0) {
-          await prisma.user.update({
-            where: { id: existing.id },
-            data: {
-              roles: { set: mappedRoleIds.map((rid: string) => ({ id: rid })) },
-              activeRoleId: mappedRoleIds[0],
-            },
-          });
-          roleMapped++;
-        }
+        if (mappedRoleIds.length > 0) rolesUntouched++;
         updated++;
       } else {
         // Determine roles: use mapped roles if available, otherwise default Read-Only
@@ -760,16 +760,28 @@ export async function syncQPeopleUsers(req: Request, res: Response) {
         entityId: 'bulk-sync',
         action: 'SYNC_QPEOPLE',
         userId: req.user!.userId,
-        changes: { totalFetched: employees.length, created, updated, skipped, roleMapped },
+        // Record that this run changed no existing user's roles — the previous
+        // silence here is why the stripped Admins took weeks to trace back to a
+        // sync run.
+        changes: {
+          totalFetched: employees.length,
+          created,
+          updated,
+          skipped,
+          roleMapped,
+          rolesUntouched,
+          existingUserRolesModified: 0,
+        },
       },
     });
 
     res.json({
-      message: `QPeople sync complete. Created: ${created}, Updated: ${updated}, Skipped: ${skipped}, Role-mapped: ${roleMapped}`,
+      message: `QPeople sync complete. Created: ${created}, Updated: ${updated}, Skipped: ${skipped}, Roles assigned to new users: ${roleMapped}. Existing users kept their roles.`,
       created,
       updated,
       skipped,
       roleMapped,
+      rolesUntouched,
       total: employees.length,
     });
   } catch (error) {
@@ -1115,7 +1127,9 @@ export async function upsertQPeopleMapping(req: Request, res: Response) {
       },
     });
 
-    // Auto-apply: update all users with this designation
+    // Auto-apply: update all users with this designation. This is an explicit
+    // admin action — saving a mapping is a request to push it out — so unlike
+    // the QPeople sync it does rewrite roles.
     const usersWithDesignation = await prisma.user.findMany({
       where: { designation: qpeopleDesignation },
       include: { roles: { select: { id: true } } },
@@ -1206,7 +1220,9 @@ export async function resetAllQPeopleMappings(req: Request, res: Response) {
     const readOnlyRole = await prisma.role.findFirst({ where: { name: 'Read-Only' } });
     let usersReset = 0;
     if (readOnlyRole) {
-      const qpUsers = await prisma.user.findMany({ where: { qpeopleId: { not: null } } });
+      const qpUsers = await prisma.user.findMany({
+        where: { qpeopleId: { not: null } },
+      });
       for (const user of qpUsers) {
         await prisma.user.update({
           where: { id: user.id },
@@ -1259,7 +1275,6 @@ export async function applyQPeopleMappings(req: Request, res: Response) {
     for (const user of users) {
       const mappedRoleIds = designationToRoleIds.get(user.designation || '') || [];
       const mappedJobBand = designationToJobBand.get(user.designation || '') || null;
-
       if (mappedRoleIds.length > 0) {
         // Has mapping: set exactly the mapped roles (removes stale Read-Only etc.).
         // jobBand may be applied; department is intentionally left untouched so we
@@ -1315,7 +1330,11 @@ export async function applyQPeopleMappings(req: Request, res: Response) {
       },
     });
 
-    res.json({ message: `Applied role/job-band mappings to ${applied} users`, applied, total: users.length });
+    res.json({
+      message: `Applied role/job-band mappings to ${applied} users`,
+      applied,
+      total: users.length,
+    });
   } catch (error) {
     console.error('Apply QPeople mappings error:', error);
     res.status(500).json({ error: 'Failed to apply mappings' });

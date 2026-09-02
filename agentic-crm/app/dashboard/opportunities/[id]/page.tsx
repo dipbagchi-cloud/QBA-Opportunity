@@ -381,11 +381,10 @@ function RevenueSync({ onRevenueChange }: { onRevenueChange: (rev: number) => vo
 
 export default function OpportunityDetailsPage({ params }: { params: Promise<{ id: string }> }) {
     const router = useRouter();
-    const { currency: globalCurrency, getSymbol, getRate, setCurrency } = useCurrency();
+    const { currency: globalCurrency, getSymbol, getRate } = useCurrency();
     const [opportunityCurrency, setOpportunityCurrency] = useState<string>('INR');
     const [opportunityMetadata, setOpportunityMetadata] = useState<any>(null);
-    const [originalData, setOriginalData] = useState<{value: number, currency: string} | null>(null);
-    const prevCurrencyRef = useRef(globalCurrency);
+    const prevCurrencyRef = useRef(opportunityCurrency);
 
 
 
@@ -444,11 +443,15 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         eligibleForEscalation: false
     });
 
+    // Re-denominate the form when the OPPORTUNITY's currency changes (picking a
+    // country switches it). The viewer's global picker deliberately does not
+    // trigger this: it only drives the secondary "(~ ...)" hints, so switching it
+    // can never rewrite the figure this deal was submitted with.
     useEffect(() => {
         if (skipDerivedEffects.current) return;
-        if (prevCurrencyRef.current && prevCurrencyRef.current !== globalCurrency) {
+        if (prevCurrencyRef.current && prevCurrencyRef.current !== opportunityCurrency) {
             const oldRate = getRate(prevCurrencyRef.current);
-            const newRate = getRate(globalCurrency);
+            const newRate = getRate(opportunityCurrency);
             if (oldRate && newRate) {
                 setFormData(prev => ({
                     ...prev,
@@ -460,10 +463,9 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     return n > 0 ? String(Math.round(n * newRate / oldRate * 100) / 100) : prev;
                 });
             }
-            prevCurrencyRef.current = globalCurrency;
-            setOpportunityCurrency(globalCurrency);
+            prevCurrencyRef.current = opportunityCurrency;
         }
-    }, [globalCurrency]);
+    }, [opportunityCurrency]);
 
 
     // Country → Region + Currency mapping (fetched from API)
@@ -988,25 +990,18 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     expectedDayRate: data.expectedDayRate || "",
                     description: data.description || "",
                     presalesAssignee: data.presalesAssigneeName || "",
-                    value: (() => {
-                        let loadedValue = data.value || 0;
-                        const dataCurr = data.currency || 'USD';
-                        if (dataCurr !== globalCurrency) {
-                            const rates = data.metadata?.exchangeRatesSnapshot;
-                            if (rates && rates[dataCurr] && rates[globalCurrency]) {
-                                loadedValue = (loadedValue * rates[globalCurrency]) / rates[dataCurr];
-                            } else {
-                                loadedValue = (loadedValue * getRate(globalCurrency)) / getRate(dataCurr);
-                            }
-                            loadedValue = Math.round(loadedValue * 100) / 100;
-                        }
-                        return loadedValue;
-                    })(),
+                    // Held in the opportunity's own currency, exactly as submitted.
+                    // Converting it into the viewer's global picker here is what made
+                    // an existing deal render in someone else's currency (and, when
+                    // the rates had not loaded yet, at a 1:1 rate under the wrong
+                    // symbol). The global picker now only feeds the "(~ ...)" hints.
+                    value: data.value || 0,
                     eligibleForEscalation: data.eligibleForEscalation === true
                 });
 
-                setOriginalData({ value: data.value || 0, currency: data.currency || 'USD' });
-                setOpportunityCurrency(globalCurrency);
+                const loadedCurrency = data.currency || 'USD';
+                setOpportunityCurrency(loadedCurrency);
+                prevCurrencyRef.current = loadedCurrency;
                 setOpportunityMetadata(data.metadata || null);
                 setOpportunityOwnerId(data.ownerId || data.owner?.id || '');
                 setOpportunityAccess(data.access || null);
@@ -1150,10 +1145,12 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             const countryInfo = countryRegionMap[value];
             const autoRegion = countryInfo?.region || '';
             setFormData(prev => ({ ...prev, country: value, region: autoRegion }));
-            // Auto-switch global currency to the selected country's currency (supported only)
+            // Switch THIS opportunity's currency to the country's (supported only).
+            // This used to call the global setCurrency(), which writes localStorage
+            // and so changed the display currency on every other screen too.
             if (countryInfo?.currency) {
                 const SUPPORTED_CURRENCIES = new Set(['INR', 'USD', 'EUR', 'GBP', 'AED', 'SGD']);
-                setCurrency(SUPPORTED_CURRENCIES.has(countryInfo.currency) ? countryInfo.currency : 'USD');
+                setOpportunityCurrency(SUPPORTED_CURRENCIES.has(countryInfo.currency) ? countryInfo.currency : 'USD');
             }
         } else {
             setFormData(prev => ({ ...prev, [name]: value }));
@@ -1337,7 +1334,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     salesRepName: formData.salesRep,
                     managerName: opportunityManagerName,
                     presalesAssigneeName: formData.presalesAssignee,
-                    currency: globalCurrency
+                    currency: opportunityCurrency
                 })
             });
 
@@ -1346,7 +1343,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 const optimisticUpdates: any = { name: formData.projectName };
                 const rawValue: any = formData.value;
                 if (rawValue !== '' && rawValue !== undefined) optimisticUpdates.value = Number(rawValue);
-                optimisticUpdates.currency = globalCurrency;
+                optimisticUpdates.currency = opportunityCurrency;
                 optimisticUpdates.salesRepName = formData.salesRep;
                 optimisticUpdates.managerName = opportunityManagerName;
                 optimisticUpdates.presalesAssigneeName = formData.presalesAssignee;
@@ -1355,7 +1352,6 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                         opp.id === id ? { ...opp, ...optimisticUpdates } : opp
                     ),
                 }));
-                setOpportunityCurrency(globalCurrency);
                 toast({ title: "Success", description: "Opportunity updated successfully!" });
             } else {
                 const errorData = await res.json().catch(() => ({}));
@@ -1800,6 +1796,23 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
     
     const cSym = getSymbol(opportunityCurrency);
+
+    // Convert an amount held in the opportunity's own currency into the viewer's
+    // globally-selected currency, for the secondary "(~ ...)" hints only. Prefers
+    // the rates captured on the opportunity so the hint reflects what was quoted,
+    // and falls back to live rates for deals saved before snapshots existed.
+    const toGlobalCurrency = (val: number): number => {
+        const amount = Number(val) || 0;
+        if (!amount || opportunityCurrency === globalCurrency) return amount;
+        const snap = opportunityMetadata?.exchangeRatesSnapshot as Record<string, number> | undefined;
+        const from = snap?.[opportunityCurrency] || getRate(opportunityCurrency);
+        const to = snap?.[globalCurrency] || getRate(globalCurrency);
+        if (!from || !to) return amount;
+        return (amount * to) / from;
+    };
+
+    // True when the viewer is looking at a currency other than the deal's own.
+    const showsConvertedHint = !!opportunityCurrency && !!globalCurrency && opportunityCurrency !== globalCurrency;
     
     // Convert presales data saved in potentially different currency to current opportunity currency
     const getPresalesConverted = (val: number) => {
@@ -1817,7 +1830,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
     const getPipelineProjectedRevenueBase = () => {
         const projectedRevenue = Number(formData.value) || 0;
-        const selectedRate = getRate(globalCurrency);
+        const selectedRate = getRate(opportunityCurrency);
         return selectedRate > 0 ? projectedRevenue / selectedRate : projectedRevenue;
     };
 
@@ -2456,7 +2469,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                         {/* Day Rate (only for Staffing) */}
                         {formData.projectType === 'Staffing' && (
                         <div className="space-y-1.5">
-                            <label className="block text-sm font-bold text-slate-700">Expected Day Rate ({getSymbol(globalCurrency)}) *</label>
+                            <label className="block text-sm font-bold text-slate-700">Expected Day Rate ({cSym}) *</label>
                             <input
                                 type="number"
                                 name="expectedDayRate"
@@ -2474,7 +2487,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
 
                         {/* Value */}
                         <div className="space-y-1.5">
-                            <label className="block text-sm font-bold text-slate-700">Estimated Value ({getSymbol(globalCurrency)})</label>
+                            <label className="block text-sm font-bold text-slate-700">Estimated Value ({cSym})</label>
                             {formData.projectType === 'Staffing' ? (
                             <>
                                 <input
@@ -2498,10 +2511,10 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     onChange={(e) => setFormData(prev => ({ ...prev, value: e.target.value === '' ? ('' as any) : Number(e.target.value) }))}
                                 />
                             )}
-                            {originalData && originalData.currency !== globalCurrency && originalData.value > 0 && (
+                            {showsConvertedHint && Number(formData.value) > 0 && (
                                 <div className="text-xs text-slate-500 font-medium mt-1">
-                                    <span className="text-slate-400 mr-1 font-normal">Original:</span>
-                                    {getSymbol(originalData.currency)}{originalData.value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                    <span className="text-slate-400 mr-1 font-normal">&asymp;</span>
+                                    {getSymbol(globalCurrency)}{toGlobalCurrency(Number(formData.value)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
                                 </div>
                             )}
                         </div>
@@ -2720,9 +2733,9 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             : durationToWorkingDays(Number(formData.duration) || 0, formData.durationUnit)
                     }
                     salesTargetRevenue={getPipelineProjectedRevenueBase()}
-                    reEstimateSuggestedRevenue={Number(reEstimateSuggestedRevenue) > 0 ? Number(reEstimateSuggestedRevenue) / (getRate(globalCurrency) || 1) : 0}
+                    reEstimateSuggestedRevenue={Number(reEstimateSuggestedRevenue) > 0 ? Number(reEstimateSuggestedRevenue) / (getRate(opportunityCurrency) || 1) : 0}
                     isReEstimation={detailedStatus === 'Re-estimation' || detailedStatus === 'Sent for Re-estimate'}
-                    initialCurrency={globalCurrency}
+                    initialCurrency={opportunityCurrency}
                     currentUserName={user?.name || ''}
                     canEditOthersRows={adminEditUnlocked}
                     holidays={holidays}
@@ -2829,18 +2842,18 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     {formData.expectedDayRate && (
                                     <div>
                                         <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Expected Day Rate</label>
-                                        <div className="font-semibold text-slate-800">{formData.expectedDayRate}</div>
+                                        <div className="font-semibold text-slate-800">{cSym}{formData.expectedDayRate}</div>
                                     </div>
                                     )}
                                     {Number(formData.value) > 0 && (
                                     <div>
                                         <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Estimated Value</label>
                                         <div className="font-semibold text-slate-800">
-                                            {getSymbol(globalCurrency)}{Number(formData.value).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
-                                            {originalData && originalData.currency !== globalCurrency && originalData.value > 0 && (
+                                            {cSym}{Number(formData.value).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                            {showsConvertedHint && (
                                                 <div className="text-xs text-slate-500 font-medium mt-0.5">
-                                                    <span className="text-slate-400 font-normal">Original: </span>
-                                                    {getSymbol(originalData.currency)}{originalData.value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                                    <span className="text-slate-400 font-normal">&asymp; </span>
+                                                    {getSymbol(globalCurrency)}{toGlobalCurrency(Number(formData.value)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
                                                 </div>
                                             )}
                                         </div>
@@ -2851,9 +2864,9 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                         <label className="block text-xs font-semibold text-amber-600 uppercase mb-1">Adjusted Quote Value (Sales Suggested)</label>
                                         <div className="font-bold text-amber-700">
                                             {cSym}{Number(adjustedEstimatedValue).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
-                                            {opportunityCurrency && globalCurrency && opportunityCurrency !== globalCurrency && (
+                                            {showsConvertedHint && (
                                                 <span className="text-xs text-slate-500 ml-1">
-                                                    ({getSymbol(globalCurrency)}{(Number(adjustedEstimatedValue) * getRate(globalCurrency) / getRate(opportunityCurrency)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
+                                                    (&asymp; {getSymbol(globalCurrency)}{toGlobalCurrency(Number(adjustedEstimatedValue)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
                                                 </span>
                                             )}
                                         </div>
@@ -3660,9 +3673,9 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                         return (
                                             <>
                                                 {cSym}{finalQuote.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
-                                                {opportunityCurrency && globalCurrency && opportunityCurrency !== globalCurrency && (
+                                                {showsConvertedHint && (
                                                     <span className="text-xs text-slate-500 ml-1">
-                                                        ({getSymbol(globalCurrency)}{(finalQuote * getRate(globalCurrency) / getRate(opportunityCurrency)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
+                                                        (&asymp; {getSymbol(globalCurrency)}{toGlobalCurrency(finalQuote).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
                                                     </span>
                                                 )}
                                             </>
@@ -3675,9 +3688,9 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 <p className="text-xs text-amber-600 mb-1">Adjusted Quote Value (Sales Suggested)</p>
                                 <p className="font-bold text-amber-700">
                                     {cSym}{Number(adjustedEstimatedValue).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
-                                    {opportunityCurrency && globalCurrency && opportunityCurrency !== globalCurrency && (
+                                    {showsConvertedHint && (
                                         <span className="text-xs text-slate-500 ml-1">
-                                            ({getSymbol(globalCurrency)}{(Number(adjustedEstimatedValue) * getRate(globalCurrency) / getRate(opportunityCurrency)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
+                                            (&asymp; {getSymbol(globalCurrency)}{toGlobalCurrency(Number(adjustedEstimatedValue)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
                                         </span>
                                     )}
                                 </p>
@@ -3720,9 +3733,9 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                         return (
                                             <>
                                                 {cSym}{finalQuote.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
-                                                {opportunityCurrency && globalCurrency && opportunityCurrency !== globalCurrency && (
+                                                {showsConvertedHint && (
                                                     <span className="text-xs text-slate-500 ml-1">
-                                                        ({getSymbol(globalCurrency)}{(finalQuote * getRate(globalCurrency) / getRate(opportunityCurrency)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
+                                                        (&asymp; {getSymbol(globalCurrency)}{toGlobalCurrency(finalQuote).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
                                                     </span>
                                                 )}
                                             </>
