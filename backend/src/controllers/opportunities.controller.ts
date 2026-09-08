@@ -1185,6 +1185,8 @@ export async function getOpportunity(req: Request, res: Response) {
                 client: true,
                 stage: true,
                 owner: true,
+                // CR-11: the linked parent RFP, for bidirectional navigation.
+                rfp: { select: { id: true, reference: true, customer: true, status: true, submissionDueDate: true } },
                 attachments: {
                     select: { id: true, fileName: true, fileType: true, fileSize: true, uploadedAt: true, category: true },
                     orderBy: { uploadedAt: 'desc' },
@@ -1790,6 +1792,8 @@ export async function updateOpportunity(req: Request, res: Response) {
                 // CR-07: governance override (On Hold / Future/Deferred); normalized
                 // so derived facts (Won/Lost/Archived) can never be stored here.
                 ...(body.lifecycleStatus !== undefined ? { lifecycleStatus: normalizeLifecycleOverride(body.lifecycleStatus) } : {}),
+                // CR-11: link/unlink the parent RFP.
+                ...(body.rfpId !== undefined ? { rfpId: body.rfpId || null } : {}),
                 ...(body.isStalled !== undefined ? { isStalled: body.isStalled } : {}),
                 // Only whoever owns the escalation flag at the current stage may
                 // move it (Sales in Pipeline, offshore manager in Presales,

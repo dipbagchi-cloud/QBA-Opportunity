@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 
 import opportunitiesRoutes from './routes/opportunities.routes';
+import rfpRoutes from './routes/rfp.routes';
 import leadsRoutes from './routes/leads.routes';
 import analyticsRoutes from './routes/analytics.routes';
 import approvalsRoutes from './routes/approvals.routes';
@@ -57,6 +58,7 @@ app.use('/api/admin', adminRoutes);
 
 // Protected API routes
 app.use('/api/opportunities', opportunitiesRoutes);
+app.use('/api/rfps', rfpRoutes);
 app.use('/api/leads', leadsRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/approvals', approvalsRoutes);

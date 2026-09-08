@@ -388,6 +388,9 @@ model Opportunity {
   // Relations
   client            Client          @relation(fields: [clientId], references: [id])
   clientId          String
+  // CR-11: optional parent RFP (a deal belongs to at most one RFP).
+  rfp               Rfp?            @relation(fields: [rfpId], references: [id])
+  rfpId             String?
   owner             User            @relation("OpportunityOwner", fields: [ownerId], references: [id])
   ownerId           String
   team              Team?           @relation(fields: [teamId], references: [id])
@@ -425,6 +428,7 @@ model Opportunity {
   @@index([isQualified])
   @@index([lifecycleStatus])
   @@index([revenueType])
+  @@index([rfpId])
   @@map("opportunities")
 }
 
@@ -536,6 +540,33 @@ model Task {
   @@index([dueDate])
   @@index([status])
   @@map("tasks")
+}
+
+// CR-10 — dedicated RFP tracking. RFPs have hard submission dates and can't be
+// safely managed as ordinary leads. CR-11 links each RFP to its opportunities
+// (parent → children) for bidirectional navigation.
+model Rfp {
+  id                 String    @id @default(cuid())
+  reference          String                     // RFP name / reference
+  customer           String                     // customer / client name
+  owner              String?                    // owner (name)
+  status             String    @default("Identified") // readiness / bid status
+  receivedDate       DateTime?
+  submissionDueDate  DateTime?
+  internalTargetDate DateTime?
+  clarificationDate  DateTime?                  // pre-bid / clarification milestone
+  preBidDate         DateTime?
+  notes              String?
+  isArchived         Boolean   @default(false)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  createdById        String
+
+  opportunities      Opportunity[]              // CR-11 parent → child opportunities
+
+  @@index([submissionDueDate])
+  @@index([status])
+  @@map("rfps")
 }
 
 // CR-08 — structured next action / decision tracking. Each row is one action;

@@ -715,6 +715,25 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         } catch (e) { console.error(e); }
     };
 
+    // CR-11: link this opportunity to a parent RFP.
+    const [rfpList, setRfpList] = useState<any[]>([]);
+    const [linkedRfpId, setLinkedRfpId] = useState<string>('');
+    useEffect(() => {
+        fetch(`${API_URL}/api/rfps`, { headers: getAuthHeaders() })
+            .then(r => r.ok ? r.json() : [])
+            .then(d => setRfpList(Array.isArray(d) ? d : []))
+            .catch(() => {});
+    }, []);
+    const linkRfp = async (rfpId: string) => {
+        setLinkedRfpId(rfpId);
+        try {
+            await fetch(`${API_URL}/api/opportunities/${id}`, {
+                method: 'PATCH', headers: getAuthHeaders(), body: JSON.stringify({ rfpId: rfpId || null }),
+            });
+            toast({ title: rfpId ? 'Linked to RFP' : 'RFP link removed' });
+        } catch (e) { console.error(e); }
+    };
+
     // GOM percent and revenue from estimation context
     const [contextGomPercent, setContextGomPercent] = useState(0);
     const [contextRevenue, setContextRevenue] = useState(0);
@@ -1078,6 +1097,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 setQualAnswers((data.qualificationData?.answers && typeof data.qualificationData.answers === 'object') ? data.qualificationData.answers : {});
                 setQualStatus(data.qualificationStatus || null);
                 setQualScore(data.qualificationScore ?? null);
+                setLinkedRfpId(data.rfpId || ''); // CR-11
                 setGomApproved(data.gomApproved === true);
                 setApprovedGomPercent(data.gomApproved === true && data.presalesData?.finalGomPercent != null
                     ? Number(data.presalesData.finalGomPercent)
@@ -3004,6 +3024,20 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     <div>
                                         <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Revenue Type</label>
                                         <div className="font-semibold text-slate-800">{formData.revenueType || <span className="text-slate-400">-</span>}</div>
+                                    </div>
+                                    <div className="col-span-2">
+                                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Linked RFP</label>
+                                        <select
+                                            value={linkedRfpId}
+                                            onChange={(e) => linkRfp(e.target.value)}
+                                            disabled={!canEditProjectDetails}
+                                            className="w-full md:w-96 px-3 py-2 border border-slate-300 rounded-md text-sm bg-white disabled:bg-slate-50 disabled:cursor-not-allowed"
+                                        >
+                                            <option value="">— Not linked —</option>
+                                            {rfpList.map((r: any) => (
+                                                <option key={r.id} value={r.id}>{r.reference} · {r.customer}{r.submissionDueDate ? ` · due ${r.submissionDueDate}` : ''}</option>
+                                            ))}
+                                        </select>
                                     </div>
                                     <div>
                                         <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Practice</label>

@@ -21,7 +21,8 @@ import {
     Check,
     CheckCheck,
     ExternalLink,
-    TrendingUp
+    TrendingUp,
+    FileText
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { AuthProvider } from "@/components/providers/auth-provider";
@@ -44,6 +45,7 @@ interface NavItem {
 const allSidebarItems: NavItem[] = [
     { icon: LayoutDashboard, label: "Dashboard", href: "/dashboard", permissionsAny: ["dashboard:view"] },
     { icon: Briefcase, label: "Opportunities", href: "/dashboard/opportunities", permissionsAny: ["pipeline:view", "presales:view", "sales:view"] },
+    { icon: FileText, label: "RFPs", href: "/dashboard/rfps", permissionsAny: ["pipeline:view", "presales:view", "sales:view"] },
     { icon: Users, label: "Contacts", href: "/dashboard/contacts", permissionsAny: ["contacts:view", "contacts:write"] },
     { icon: BarChart3, label: "Analytics", href: "/dashboard/analytics", permissionsAny: ["analytics:view", "analytics:export"] },
     // Portfolio margin across won deals. Admin-only, matching the Actual GOM
