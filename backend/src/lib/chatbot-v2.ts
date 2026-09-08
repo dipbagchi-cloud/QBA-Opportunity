@@ -4,6 +4,7 @@ import * as chrono from 'chrono-node';
 import { recordStageEntry } from './stage-history';
 import * as phraseMemory from './phrase-memory';
 import { classifyHot, resolveHotConfig } from './opportunity-hot';
+import { CLOSED_STAGE_NAMES as REGISTRY_CLOSED_STAGE_NAMES } from './opportunity-stages';
 
 const prisma = new PrismaClient();
 
@@ -315,8 +316,8 @@ const LLM_ENABLED = process.env.LLM_ENABLED !== 'false';
  * The frontend rewrites {{money:N}} through the same format() every other
  * screen uses, so the bot's numbers match the dashboard's exactly.
  */
-/** Stage names that mean a deal is finished; mirrors CLOSED_STAGE_NAMES elsewhere. */
-const CLOSED_STAGE_NAMES_BOT = ['Closed Won', 'Closed-Won', 'Closed Lost', 'Delivered'];
+/** CR-03 Phase 5: the single closed-name set from the stage registry. */
+const CLOSED_STAGE_NAMES_BOT = REGISTRY_CLOSED_STAGE_NAMES;
 
 function money(n: unknown): string {
     const v = Number(n);

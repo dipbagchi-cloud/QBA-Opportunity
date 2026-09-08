@@ -1,4 +1,5 @@
 import { PERMISSIONS, hasAnyPermission, hasPermission, WILDCARD } from './permissions';
+import { CLOSED_STAGE_NAMES as CANONICAL_CLOSED_STAGE_NAMES } from './opportunity-stages';
 
 type AuthUserLike = {
   userId: string;
@@ -23,12 +24,8 @@ type OpportunityLike = {
 // Opportunities in any of these stages are read-only for everyone except
 // Admin (wildcard). The opportunities:edit-all permission does NOT bypass
 // this lock — once a deal is won, lost, or delivered, the record is frozen.
-const CLOSED_STAGE_NAMES = new Set<string>([
-  'Closed Won',
-  'Closed-Won',
-  'Closed Lost',
-  'Delivered',
-]);
+// CR-03 Phase 5: sourced from the single stage-registry closed-name set.
+const CLOSED_STAGE_NAMES = new Set<string>(CANONICAL_CLOSED_STAGE_NAMES);
 
 type PendingApprovalLike = {
   reviewerId?: string | null;

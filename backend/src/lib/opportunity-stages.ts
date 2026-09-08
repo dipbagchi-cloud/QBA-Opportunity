@@ -63,6 +63,18 @@ const META_BY_NAME: Record<string, StageMeta> = Object.fromEntries(
   CANONICAL_STAGES.map((s) => [s.name, s]),
 );
 
+/**
+ * The single closed-stage NAME set (canonical + aliases). Reconciles the drift
+ * where the controller / opportunity-access carried 4 names (no 'Proposal Lost')
+ * while opportunity-hot / analytics carried 5 — everyone now imports this. Any
+ * name whose canonical stage is closed is included, so legacy variants are
+ * treated as closed rather than leaking back into the open pipeline.
+ */
+export const CLOSED_STAGE_NAMES: string[] = [
+  ...CANONICAL_STAGES.filter((s) => s.isClosed).map((s) => s.name),
+  ...Object.keys(STAGE_ALIASES).filter((k) => META_BY_NAME[STAGE_ALIASES[k]]?.isClosed === true),
+];
+
 /** Resolve any known token to its canonical stage name; unknown input passes through. */
 export function resolveCanonicalStage(name?: string | null): string {
   const raw = (name || '').trim();

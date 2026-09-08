@@ -3,6 +3,7 @@ import {
   CANONICAL_STAGE_NAMES,
   STAGE_ALIASES,
   STAGE_DISPLAY_GROUP,
+  CLOSED_STAGE_NAMES,
   resolveCanonicalStage,
   getStageMeta,
   stageOrder,
@@ -59,6 +60,16 @@ describe('canonical stage registry', () => {
   it('every alias resolves to a real canonical stage', () => {
     for (const target of Object.values(STAGE_ALIASES)) {
       expect(CANONICAL_STAGE_NAMES).toContain(target);
+    }
+  });
+
+  // CR-03 Phase 5: the single reconciled closed-name set (canonical + aliases).
+  it('exposes one closed-name set covering canonical names and all closed aliases', () => {
+    expect([...CLOSED_STAGE_NAMES].sort()).toEqual(
+      ['Closed Lost', 'Closed Won', 'Closed-Won', 'Delivered', 'Proposal Lost'].sort(),
+    );
+    for (const open of ['Discovery', 'Qualification', 'Proposal', 'Negotiation', 'Pipeline', 'Presales', 'Sales']) {
+      expect(CLOSED_STAGE_NAMES).not.toContain(open);
     }
   });
 

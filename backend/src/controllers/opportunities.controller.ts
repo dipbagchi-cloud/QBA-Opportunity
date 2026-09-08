@@ -5,7 +5,7 @@ import { evaluateStageChangeRules, evaluateDataConditionRules, evaluateOpportuni
 import { calculateOpportunityProbability, resolveProbabilityConfig } from '../lib/opportunity-probability';
 import { classifyHot, resolveHotConfig } from '../lib/opportunity-hot';
 import { scoreQualification, resolveQualificationConfig } from '../lib/opportunity-qualification';
-import { resolveCanonicalStage } from '../lib/opportunity-stages';
+import { resolveCanonicalStage, CLOSED_STAGE_NAMES } from '../lib/opportunity-stages';
 import { checkStageEntry } from '../lib/opportunity-stage-gates';
 import { deriveLifecycleStatus, normalizeLifecycleOverride } from '../lib/opportunity-lifecycle';
 import { buildOpportunityAccess } from '../lib/opportunity-access';
@@ -747,11 +747,10 @@ export async function getOpportunityFilterOptions(_req: Request, res: Response) 
 }
 
 // Stage names that mean the deal is finished. `Stage.isClosed` is the primary
-// signal (set correctly for Closed Won / Closed Lost), and this
-// name list is the backstop for any stage added later without the flag — it
-// mirrors CLOSED_STAGE_NAMES in lib/opportunity-access.ts and
-// CLOSED_STAGES_FOR_REMINDER in lib/notification-engine.ts.
-const CLOSED_STAGE_NAMES = ['Closed Won', 'Closed-Won', 'Closed Lost', 'Delivered'];
+// signal (set correctly for Closed Won / Closed Lost), and this name list is the
+// backstop for any stage added later without the flag.
+// CR-03 Phase 5: the closed-name set is now the single one from the stage
+// registry (reconciling the earlier 4-vs-5 drift), imported above.
 
 /**
  * Render one CSV cell: escape quotes/commas/newlines per RFC 4180, and defuse

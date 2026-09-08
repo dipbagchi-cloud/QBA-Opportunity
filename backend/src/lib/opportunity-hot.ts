@@ -18,6 +18,8 @@
  * `opportunity-probability.ts` and `opportunity-access.ts`.
  */
 
+import { CLOSED_STAGE_NAMES as REGISTRY_CLOSED_STAGE_NAMES } from './opportunity-stages';
+
 export interface HotWeights {
   /** A committed quote / proposal number exists on the deal. */
   proposalSent: number;
@@ -60,15 +62,9 @@ export const DEFAULT_HOT_CONFIG: HotClassificationConfig = {
 // name-based one is deliberately worth less on its own.
 const PROPOSAL_PLUS_STAGES = new Set<string>(['Proposal', 'Sales', 'Negotiation']);
 
-// Kept in sync with CLOSED_STAGE_NAMES in the opportunities controller and
-// lib/opportunity-access.ts — a closed or archived deal is never Hot.
-const CLOSED_STAGE_NAMES = new Set<string>([
-  'Closed Won',
-  'Closed-Won',
-  'Closed Lost',
-  'Proposal Lost',
-  'Delivered',
-]);
+// CR-03 Phase 5: the single closed-name set from the stage registry — a closed
+// or archived deal is never Hot.
+const CLOSED_STAGE_NAMES = new Set<string>(REGISTRY_CLOSED_STAGE_NAMES);
 
 const ON_HOLD = 'on hold';
 
