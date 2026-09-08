@@ -28,6 +28,7 @@ import {
     Paperclip,
     Download,
     Loader2,
+    ListChecks,
 } from "lucide-react";
 import Link from "next/link";
 import { useOpportunityStore } from "@/lib/store";
@@ -223,6 +224,10 @@ export default function OpportunitiesPage() {
     // panel, but the matching happens server-side so it covers the whole
     // paginated dataset.
     const [colFilters, setColFilters] = useState<ColFilters>(EMPTY_FILTERS);
+    // CR-13: the "All Open" review preset — a predefined view of every non-closed
+    // opportunity. Kept separate from the column filters so it composes as its own
+    // clearly-labelled active filter rather than hiding inside a column dropdown.
+    const [openOnly, setOpenOnly] = useState(false);
     // Distinct values per filterable column for the type-ahead dropdowns.
     const [filterOptions, setFilterOptions] = useState<Record<string, string[]>>({});
 
@@ -253,7 +258,7 @@ export default function OpportunitiesPage() {
         return sortDir === 'asc' ? <ArrowUp className="w-3 h-3 text-indigo-600" /> : <ArrowDown className="w-3 h-3 text-indigo-600" />;
     };
 
-    const buildQueryParams = useCallback((pg: number, search: string, filters: ColFilters, fetchMax: boolean, lim?: number) => {
+    const buildQueryParams = useCallback((pg: number, search: string, filters: ColFilters, fetchMax: boolean, lim?: number, openOnlyArg?: boolean) => {
         const params: any = {
             page: pg,
             limit: fetchMax ? 500 : (lim !== undefined ? (lim === 0 ? 500 : lim) : (limit === 0 ? 500 : limit)),
@@ -263,12 +268,16 @@ export default function OpportunitiesPage() {
             const picked = (filters[k] || []).map(v => v.trim()).filter(Boolean);
             if (picked.length) params[k] = picked;
         });
+        // CR-13: "All Open" preset → openOnly=1 (server filters to non-closed).
+        // Callers can pass the value explicitly so an immediate refetch isn't
+        // caught by the async state update; otherwise fall back to the state.
+        if (openOnlyArg !== undefined ? openOnlyArg : openOnly) params.openOnly = 1;
         if (sortKey && SERVER_SORT_KEYS.includes(sortKey)) {
             params.sortKey = sortKey;
             params.sortDir = sortDir;
         }
         return params;
-    }, [limit, sortKey, sortDir]);
+    }, [limit, sortKey, sortDir, openOnly]);
 
     // Server resolves filters + DB-backed sorts; only computed columns
     // (probability, last activity) are ordered client-side on the loaded page.
@@ -336,9 +345,30 @@ export default function OpportunitiesPage() {
 
     const handleClearFilters = () => {
         setColFilters(EMPTY_FILTERS);
+        setOpenOnly(false);
         setShowFilters(false);
         setCurrentPage(1);
-        fetchOpportunities(buildQueryParams(1, searchTerm, EMPTY_FILTERS, viewMode === 'kanban' || viewMode === 'by_owner'));
+        fetchOpportunities(buildQueryParams(1, searchTerm, EMPTY_FILTERS, viewMode === 'kanban' || viewMode === 'by_owner', undefined, false));
+    };
+
+    // CR-13: apply the "All Open" review preset — clear any narrow filters and
+    // show every non-closed opportunity, so a previously applied filter can never
+    // silently hide active deals during a review. Explicit openOnly=true is passed
+    // to the immediate refetch to beat the async state update.
+    const applyAllOpenPreset = () => {
+        setColFilters(EMPTY_FILTERS);
+        setSearchTerm("");
+        setOpenOnly(true);
+        setShowFilters(false);
+        setCurrentPage(1);
+        fetchOpportunities(buildQueryParams(1, "", EMPTY_FILTERS, viewMode === 'kanban' || viewMode === 'by_owner', undefined, true));
+    };
+
+    // Turn off just the open-only preset (leave any column filters intact).
+    const clearOpenOnly = () => {
+        setOpenOnly(false);
+        setCurrentPage(1);
+        fetchOpportunities(buildQueryParams(1, searchTerm, colFilters, viewMode === 'kanban' || viewMode === 'by_owner', undefined, false));
     };
 
     const effectiveLimit = limit === 0 ? total : limit;
@@ -357,6 +387,15 @@ export default function OpportunitiesPage() {
                     <p className="text-slate-500 text-sm mt-0.5">Manage your pipeline and track deal progress.</p>
                 </div>
                 <div className="flex gap-2 relative">
+                    {/* CR-13: one-click "All Open" review preset. */}
+                    <button
+                        onClick={applyAllOpenPreset}
+                        title="Show every non-closed opportunity (clears any applied filters)"
+                        className={`btn-ghost bg-white border flex items-center gap-1.5 ${openOnly ? 'border-emerald-300 text-emerald-700 bg-emerald-50' : 'border-slate-200 text-slate-600 hover:border-emerald-300 hover:text-emerald-700'}`}
+                    >
+                        <ListChecks className="w-3.5 h-3.5" />
+                        All Open
+                    </button>
                     <button
                         onClick={() => setShowFilters((prev) => !prev)}
                         className={`btn-ghost bg-white border text-slate-600 flex items-center gap-1.5 ${showFilters || activeFilterCount > 0 ? 'border-indigo-300 text-indigo-600' : 'border-slate-200'}`}
@@ -445,8 +484,22 @@ export default function OpportunitiesPage() {
                 />
             </div>
 
-            {activeFilterCount > 0 && (
+            {(activeFilterCount > 0 || openOnly) && (
                 <div className="flex flex-wrap gap-2">
+                    {/* CR-13: the active "All Open" preset is shown as its own
+                        clearly-labelled, removable chip so it is never invisible. */}
+                    {openOnly && (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-semibold">
+                            All Open (non-closed)
+                            <button
+                                onClick={clearOpenOnly}
+                                className="text-emerald-500 hover:text-red-600"
+                                title="Remove the All Open preset"
+                            >
+                                <X className="w-3 h-3" />
+                            </button>
+                        </span>
+                    )}
                     {LIST_COLUMNS.filter(c => c.filter && colFilters[c.key]?.length).map(c =>
                         colFilters[c.key].map(val => (
                             <span key={`${c.key}:${val}`} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-slate-50 text-slate-700 border border-slate-200 text-xs font-medium">
@@ -647,6 +700,17 @@ export default function OpportunitiesPage() {
                                                             </div>
                                                         );
                                                     })()}
+                                                    {/* CR-12: stage-hygiene flag — a commercial milestone
+                                                        (committed quote) exists but the stage lags it. */}
+                                                    {(opp as any).stageStale && (
+                                                        <span
+                                                            className="inline-flex items-center gap-1 text-[10px] text-amber-800 font-semibold px-1.5 py-0.5 bg-amber-50 rounded-md border border-amber-300"
+                                                            title={(opp as any).stageStaleReason || 'This deal looks further along than its stage.'}
+                                                        >
+                                                            <AlertCircle className="w-3 h-3" />
+                                                            Stage may be stale
+                                                        </span>
+                                                    )}
                                                 </div>
                                             </td>
                                             <td className="py-2.5 px-4 text-[11px] whitespace-nowrap">

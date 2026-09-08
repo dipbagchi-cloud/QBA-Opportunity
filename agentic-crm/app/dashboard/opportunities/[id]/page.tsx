@@ -514,6 +514,10 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const [activeStep, setActiveStep] = useState(0); // 0: Discovery, 1: Proposal, 2: Negotiation
     const [opportunityStage, setOpportunityStage] = useState(0); // actual DB stage (0-3), stays fixed when navigating steps
     const [currentStageName, setCurrentStageName] = useState(''); // actual Kanban stage name (Discovery, Qualification, Proposal, Negotiation, Closed Won, Closed Lost)
+    // CR-12: soft "stale stage" hygiene signal from the backend — set when a
+    // commercial milestone (committed quote / attached SOW) has occurred but the
+    // stage still lags it, so we can prompt (never block) the user to advance.
+    const [stageHygiene, setStageHygiene] = useState<{ stale: boolean; reason?: string; suggestedStage?: string } | null>(null);
     // Stage timeline source data — which stages the deal has been through, and when.
     const [stageHistory, setStageHistory] = useState<StageHistoryEntry[]>([]);
     const [opportunityCreatedAt, setOpportunityCreatedAt] = useState<string>('');
@@ -1126,6 +1130,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 // Update active step based on stage
                 const stageName = data.stage?.name || data.currentStage || '';
                 setCurrentStageName(stageName);
+                // CR-12: stale-stage hygiene signal (soft prompt).
+                setStageHygiene(data.stageHygiene && typeof data.stageHygiene === 'object' ? data.stageHygiene : null);
                 // `stageTimeline` is the reconstructed first-entry date per stage
                 // (stage_history rows plus the audit trail, which is where the
                 // UI transitions were actually recorded). Fall back to the raw
@@ -1577,6 +1583,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     ),
                 }));
                 setCurrentStageName('Proposal');
+                setStageHygiene(null); // CR-12: stage now matches; clear the stale prompt.
                 setActiveStep(1);
                 setOpportunityStage(1);
                 setOpportunityManagerName(presalesForm.managerName);
@@ -2278,6 +2285,31 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             {currentStageName && (
                 <div className="mb-3">
                     <StagePath currentStage={currentStageName} />
+                </div>
+            )}
+
+            {/* CR-12: stale-stage prompt. A commercial milestone (committed quote /
+                attached SOW) has occurred but the stage still lags it. This is a
+                soft nudge, never a block — the actual move still runs through the
+                stage guards, and authorised users can correct legitimate exceptions. */}
+            {stageHygiene?.stale && !isLost && (
+                <div className="mb-3 flex flex-col sm:flex-row sm:items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2.5">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                    <span className="text-sm text-amber-800 flex-1">
+                        <span className="font-semibold">Stage may be out of date.</span>{' '}
+                        {stageHygiene.reason || 'This deal looks further along than its current stage.'}
+                    </span>
+                    {canEditPipeline && (
+                        <button
+                            onClick={() => {
+                                setPresalesForm(prev => ({ ...prev, managerName: prev.managerName || opportunityManagerName }));
+                                setShowPresalesModal(true);
+                            }}
+                            className="self-start sm:self-auto px-3 py-1.5 text-xs font-semibold text-white bg-amber-600 hover:bg-amber-700 rounded-md whitespace-nowrap"
+                        >
+                            Move to {stageHygiene.suggestedStage || 'Proposal'}
+                        </button>
+                    )}
                 </div>
             )}
 

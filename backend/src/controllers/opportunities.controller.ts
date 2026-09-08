@@ -7,6 +7,7 @@ import { classifyHot, resolveHotConfig } from '../lib/opportunity-hot';
 import { scoreQualification, resolveQualificationConfig } from '../lib/opportunity-qualification';
 import { resolveCanonicalStage, CLOSED_STAGE_NAMES, isLegalTransition, isForwardChainMove, stagePath } from '../lib/opportunity-stages';
 import { checkStageEntry } from '../lib/opportunity-stage-gates';
+import { assessStageHygiene } from '../lib/opportunity-stage-hygiene';
 import { deriveLifecycleStatus, normalizeLifecycleOverride } from '../lib/opportunity-lifecycle';
 import { buildOpportunityAccess } from '../lib/opportunity-access';
 import { recordStageEntry } from '../lib/stage-history';
@@ -392,6 +393,17 @@ export async function listOpportunities(req: Request, res: Response) {
             }));
         }
 
+        // CR-13: "All Open" review preset. A predefined view covering every
+        // non-closed, non-archived opportunity, so a reviewer can switch to the
+        // full active pipeline in one click no matter what narrow filter was left
+        // applied. Uses the canonical "open" definition (not closed by stage, not
+        // archived) — the same one the lifecycle clauses build on — so it never
+        // silently drops an open deal the way a stale technology/owner filter can.
+        const openOnly = ['1', 'true', 'yes'].includes(String(req.query.openOnly ?? '').trim().toLowerCase());
+        if (openOnly) {
+            andFilters.push({ isArchived: false, stage: { name: { notIn: CLOSED_STAGE_NAMES } } });
+        }
+
         if (andFilters.length > 0) {
             where.AND = andFilters;
         }
@@ -608,6 +620,18 @@ export async function listOpportunities(req: Request, res: Response) {
                 isQualified: (opp as any).isQualified === true,
                 qualificationStatus: (opp as any).qualificationStatus ?? null,
                 qualificationScore: (opp as any).qualificationScore ?? null,
+                // CR-12: stale-stage hygiene flag so the review list can mark a
+                // deal whose stage lags a commercial milestone. The list proxy
+                // uses the committed-quote signal (SOW category isn't loaded per
+                // row); the detail view additionally checks the attached SOW.
+                ...(() => {
+                    const hygiene = assessStageHygiene({
+                        stageName,
+                        presalesData: (opp as any).presalesData,
+                        hasCurrentSow: false,
+                    });
+                    return { stageStale: hygiene.stale, stageStaleReason: hygiene.reason ?? null };
+                })(),
                 // CR-05: expose archived so the dashboard can exclude archived
                 // deals from pipeline totals and reconcile with analytics.
                 isArchived: (opp as any).isArchived === true,
@@ -1240,7 +1264,15 @@ export async function getOpportunity(req: Request, res: Response) {
         // Include project info if exists
         const project = await prisma.project.findFirst({ where: { opportunityId: id } });
         const stageTimeline = await buildStageTimeline(id, opportunity, opportunity.stageHistory || []);
-        res.json({ ...opportunity, sowDocuments, project: project || null, access, stageTimeline });
+        // CR-12: soft "stale stage" hygiene signal — flags when a commercial
+        // milestone (committed quote / attached SOW) has occurred but the stage
+        // still lags it, so the detail page can prompt the user to advance.
+        const stageHygiene = assessStageHygiene({
+            stageName: (opportunity as any).stage?.name || (opportunity as any).currentStage,
+            presalesData: (opportunity as any).presalesData,
+            hasCurrentSow: sowDocuments.some((d) => d.isCurrent),
+        });
+        res.json({ ...opportunity, sowDocuments, project: project || null, access, stageTimeline, stageHygiene });
     } catch (error) {
         res.status(500).json({ error: 'Failed to fetch opportunity' });
     }
