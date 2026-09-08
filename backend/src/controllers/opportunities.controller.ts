@@ -6,6 +6,7 @@ import { calculateOpportunityProbability, resolveProbabilityConfig } from '../li
 import { classifyHot, resolveHotConfig } from '../lib/opportunity-hot';
 import { scoreQualification, resolveQualificationConfig } from '../lib/opportunity-qualification';
 import { resolveCanonicalStage } from '../lib/opportunity-stages';
+import { checkStageEntry } from '../lib/opportunity-stage-gates';
 import { deriveLifecycleStatus, normalizeLifecycleOverride } from '../lib/opportunity-lifecycle';
 import { buildOpportunityAccess } from '../lib/opportunity-access';
 import { recordStageEntry } from '../lib/stage-history';
@@ -1574,6 +1575,19 @@ export async function updateOpportunity(req: Request, res: Response) {
         }
 
         if (newStageName) {
+            // CR-03 Phase 3: objective stage-entry gate. A deal cannot enter a
+            // later commercial stage without its prerequisite milestone — notably
+            // Negotiation requires a sent proposal (committed quote). Applies to
+            // every path (Kanban drag and detail page both PATCH here). Skip when
+            // the stage isn't actually changing (idempotent saves).
+            const prevStageForGate = previous?.stage?.name || previous?.currentStage || '';
+            if (resolveCanonicalStage(newStageName) !== resolveCanonicalStage(prevStageForGate)) {
+                const gate = checkStageEntry(newStageName, { presalesData: previous?.presalesData });
+                if (!gate.allowed) {
+                    return res.status(400).json({ error: gate.reason });
+                }
+            }
+
             const stage = await prisma.stage.findFirst({ where: { name: newStageName } });
             if (stage) {
                 stageUpdate = {
