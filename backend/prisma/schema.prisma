@@ -352,7 +352,7 @@ model Opportunity {
   adjustedEstimatedValue Decimal?
   
   // Pipeline, Presales, Sales
-  currentStage      String   @default("Pipeline")
+  currentStage      String   @default("Discovery")
   detailedStatus    String?
   isStalled         Boolean  @default(false)
   // Flagged by Sales in Pipeline, by the offshore manager in Presales, and by

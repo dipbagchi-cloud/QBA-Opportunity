@@ -5,6 +5,7 @@ import { evaluateStageChangeRules, evaluateDataConditionRules, evaluateOpportuni
 import { calculateOpportunityProbability, resolveProbabilityConfig } from '../lib/opportunity-probability';
 import { classifyHot, resolveHotConfig } from '../lib/opportunity-hot';
 import { scoreQualification, resolveQualificationConfig } from '../lib/opportunity-qualification';
+import { resolveCanonicalStage } from '../lib/opportunity-stages';
 import { buildOpportunityAccess } from '../lib/opportunity-access';
 import { recordStageEntry } from '../lib/stage-history';
 import path from 'path';
@@ -892,6 +893,10 @@ export async function createOpportunity(req: Request, res: Response) {
                 clientId: clientId,
                 ownerId: ownerId,
                 stageId: discoveryStage?.id!,
+                // CR-03 Phase 2: store the canonical stage name, not the legacy
+                // 'Pipeline' schema default (which was the source of the dual
+                // vocabulary in the data).
+                currentStage: 'Discovery',
                 typeId: defaultType?.id!
             } as any,
             include: {
@@ -1476,7 +1481,10 @@ export async function updateOpportunity(req: Request, res: Response) {
             if (stage) {
                 stageUpdate = {
                     stageId: stage.id,
-                    currentStage: newStageName
+                    // CR-03 Phase 2: persist the canonical stage name so the
+                    // denormalized currentStage never carries the workflow
+                    // vocabulary (Pipeline/Presales/Sales).
+                    currentStage: resolveCanonicalStage(newStageName)
                 };
 
                 if (newStageName === 'Closed Won' || newStageName === 'Closed Lost') {
