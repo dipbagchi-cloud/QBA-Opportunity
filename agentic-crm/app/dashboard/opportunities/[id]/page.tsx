@@ -46,6 +46,7 @@ import { AssignmentPane } from "./components/AssignmentPane";
 import { AssignPresalesModal } from "./components/AssignPresalesModal";
 import { SowStudio } from "./components/SowStudio";
 import { StageTimeline, StageHistoryEntry } from "./components/StageTimeline";
+import { StagePath } from "@/components/opportunities/StagePath";
 import ProjectResourceMappingTab from "./components/ProjectResourceMappingTab";
 import ActualBookingCostTab from "./components/ActualBookingCostTab";
 import MarginVarianceTab from "./components/MarginVarianceTab";
@@ -516,7 +517,10 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     // Stage timeline source data — which stages the deal has been through, and when.
     const [stageHistory, setStageHistory] = useState<StageHistoryEntry[]>([]);
     const [opportunityCreatedAt, setOpportunityCreatedAt] = useState<string>('');
-    const steps = ["Pipeline", "Presales", "Sales", "SOW", "Project", "Actual GOM"];
+    // CR-03: work tabs named by the commercial stage they belong to (the old
+    // Pipeline/Presales/Sales vocabulary is retired). The StagePath above shows
+    // the precise stage; these are the work sections within the flow.
+    const steps = ["Discovery", "Estimation", "Proposal / Negotiation", "SOW", "Project", "Actual GOM"];
     // Declared here rather than further down because the Actual GOM gate below
     // needs it, and a `const` referenced before its declaration throws.
     const activeRoleName = (user?.role?.name || "").trim().toLowerCase();
@@ -2306,6 +2310,13 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     {formData.projectName || "New Opportunity"}
                 </h1>
             </div>
+
+            {/* CR-03: commercial stage path (unified, admin-configurable labels) */}
+            {currentStageName && (
+                <div className="mb-3">
+                    <StagePath currentStage={currentStageName} />
+                </div>
+            )}
 
             {/* PIPELINE VIEW (Step 0) */}
             {activeStep === 0 && (() => {
