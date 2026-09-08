@@ -110,3 +110,57 @@ export const STAGE_DISPLAY_GROUP: Record<string, string> = {
   'Closed Won': 'Closed Won',
   'Closed Lost': 'Closed Lost',
 };
+
+/**
+ * CR-03 (full stage machine) — the legal moves, declared once, in code.
+ *
+ * Structure (which moves are legal) lives here so the server is the authority
+ * and a client cannot post an arbitrary jump; the WORDS shown for each stage are
+ * configuration (Stage.label). Modelled on the arQuon rebuild's state machine:
+ *  - Closed Lost is reachable from any open stage.
+ *  - Proposal is reachable only from Qualification (the estimation/offer gate).
+ *  - Send-back from Proposal or Negotiation to Qualification is the re-estimate
+ *    path.
+ *  - Closed Won is reached from Negotiation (a deliberate close, not a skip).
+ */
+const TRANSITIONS: Record<string, string[]> = {
+  Discovery: ['Qualification', 'Closed Lost'],
+  Qualification: ['Discovery', 'Proposal', 'Closed Lost'],
+  Proposal: ['Qualification', 'Negotiation', 'Closed Lost'],
+  Negotiation: ['Qualification', 'Closed Won', 'Closed Lost'],
+  'Closed Won': [],
+  'Closed Lost': [],
+};
+
+/** Legal destination stages from a given stage (canonical). Unknown → none. */
+export function allowedTransitions(from?: string | null): string[] {
+  return TRANSITIONS[resolveCanonicalStage(from)] ?? [];
+}
+
+/** True if moving from -> to is a legal transition (both resolved canonically). */
+export function isLegalTransition(from?: string | null, to?: string | null): boolean {
+  return allowedTransitions(from).includes(resolveCanonicalStage(to));
+}
+
+export type StageMoveKind = 'forward' | 'back' | 'lose' | 'win';
+
+export interface StageMove {
+  to: string;         // canonical target stage
+  kind: StageMoveKind;
+}
+
+/**
+ * The legal moves from a stage, tagged by the kind of act they are — advancing,
+ * sending back for re-estimation, closing won, or closing lost — which a plain
+ * dropdown flattens. Derived from TRANSITIONS so buttons can never offer a move
+ * the server refuses.
+ */
+export function stageMoves(from?: string | null): StageMove[] {
+  const fromOrder = getStageMeta(from)?.order ?? 0;
+  return allowedTransitions(from).map((to): StageMove => {
+    if (to === 'Closed Lost') return { to, kind: 'lose' };
+    if (to === 'Closed Won') return { to, kind: 'win' };
+    const toOrder = META_BY_NAME[to]?.order ?? 0;
+    return { to, kind: toOrder < fromOrder ? 'back' : 'forward' };
+  });
+}

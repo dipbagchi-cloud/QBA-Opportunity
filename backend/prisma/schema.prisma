@@ -435,6 +435,9 @@ model Opportunity {
 model Stage {
   id               String   @id @default(cuid())
   name             String   @unique
+  // CR-03: `name` is the stable identity (used by currentStage / joins); `label`
+  // is the admin-editable display word shown in the UI (defaults to name).
+  label            String?
   order            Int
   probability      Int      @default(0)
   color            String   @default("#6B7280")

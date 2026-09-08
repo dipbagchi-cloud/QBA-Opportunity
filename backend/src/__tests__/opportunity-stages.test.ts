@@ -7,6 +7,9 @@ import {
   resolveCanonicalStage,
   getStageMeta,
   stageOrder,
+  allowedTransitions,
+  isLegalTransition,
+  stageMoves,
 } from '../lib/opportunity-stages';
 
 describe('canonical stage registry', () => {
@@ -71,6 +74,31 @@ describe('canonical stage registry', () => {
     for (const open of ['Discovery', 'Qualification', 'Proposal', 'Negotiation', 'Pipeline', 'Presales', 'Sales']) {
       expect(CLOSED_STAGE_NAMES).not.toContain(open);
     }
+  });
+
+  // CR-03 full stage machine — the legal-move graph.
+  it('declares the legal transitions and rejects illegal jumps', () => {
+    expect(allowedTransitions('Discovery').sort()).toEqual(['Closed Lost', 'Qualification']);
+    expect(allowedTransitions('Qualification').sort()).toEqual(['Closed Lost', 'Discovery', 'Proposal']);
+    expect(allowedTransitions('Proposal').sort()).toEqual(['Closed Lost', 'Negotiation', 'Qualification']);
+    expect(allowedTransitions('Negotiation').sort()).toEqual(['Closed Lost', 'Closed Won', 'Qualification']);
+    expect(allowedTransitions('Closed Won')).toEqual([]);
+    // legal vs illegal
+    expect(isLegalTransition('Discovery', 'Qualification')).toBe(true);
+    expect(isLegalTransition('Discovery', 'Negotiation')).toBe(false); // no skipping
+    expect(isLegalTransition('Proposal', 'Qualification')).toBe(true); // send-back
+    expect(isLegalTransition('Negotiation', 'Closed Won')).toBe(true);
+    expect(isLegalTransition('Qualification', 'Closed Won')).toBe(false);
+    // resolves the workflow vocabulary on both sides
+    expect(isLegalTransition('Presales', 'Sales')).toBe(true); // Qualification -> Proposal
+  });
+
+  it('tags each legal move with the kind of act it is', () => {
+    const moves = stageMoves('Negotiation');
+    expect(moves.find(m => m.to === 'Closed Won')?.kind).toBe('win');
+    expect(moves.find(m => m.to === 'Closed Lost')?.kind).toBe('lose');
+    expect(moves.find(m => m.to === 'Qualification')?.kind).toBe('back');
+    expect(stageMoves('Discovery').find(m => m.to === 'Qualification')?.kind).toBe('forward');
   });
 
   // Behaviour-neutrality guard: STAGE_DISPLAY_GROUP must remain byte-identical to

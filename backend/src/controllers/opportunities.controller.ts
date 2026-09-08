@@ -5,7 +5,7 @@ import { evaluateStageChangeRules, evaluateDataConditionRules, evaluateOpportuni
 import { calculateOpportunityProbability, resolveProbabilityConfig } from '../lib/opportunity-probability';
 import { classifyHot, resolveHotConfig } from '../lib/opportunity-hot';
 import { scoreQualification, resolveQualificationConfig } from '../lib/opportunity-qualification';
-import { resolveCanonicalStage, CLOSED_STAGE_NAMES } from '../lib/opportunity-stages';
+import { resolveCanonicalStage, CLOSED_STAGE_NAMES, isLegalTransition } from '../lib/opportunity-stages';
 import { checkStageEntry } from '../lib/opportunity-stage-gates';
 import { deriveLifecycleStatus, normalizeLifecycleOverride } from '../lib/opportunity-lifecycle';
 import { buildOpportunityAccess } from '../lib/opportunity-access';
@@ -1581,6 +1581,16 @@ export async function updateOpportunity(req: Request, res: Response) {
             // the stage isn't actually changing (idempotent saves).
             const prevStageForGate = previous?.stage?.name || previous?.currentStage || '';
             if (resolveCanonicalStage(newStageName) !== resolveCanonicalStage(prevStageForGate)) {
+                // CR-03 full stage machine: the move must be a LEGAL transition
+                // (declared once in the registry, enforced here on the server so a
+                // client cannot post an arbitrary jump). Admins may override to
+                // correct data (CR-12: authorised exceptions are allowed).
+                if (!isLegalTransition(prevStageForGate, newStageName) && !isAdminRole) {
+                    return res.status(400).json({
+                        error: `Cannot move from "${resolveCanonicalStage(prevStageForGate)}" to "${resolveCanonicalStage(newStageName)}" — not a permitted stage transition.`,
+                    });
+                }
+                // Objective milestone gate (e.g. Negotiation requires a sent proposal).
                 const gate = checkStageEntry(newStageName, { presalesData: previous?.presalesData });
                 if (!gate.allowed) {
                     return res.status(400).json({ error: gate.reason });

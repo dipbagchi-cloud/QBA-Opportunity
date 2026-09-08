@@ -21,6 +21,7 @@ import {
   getProbabilityModel,
   updateProbabilityModel,
   listRoles,
+  // (stage editing is imported separately below)
   createRole,
   updateRole,
   deleteRole,
@@ -39,6 +40,7 @@ import {
   updateAuthConfig,
   assignLocalPassword,
 } from '../controllers/admin.controller';
+import { updateStage } from '../controllers/stages.controller';
 import {
   listAllRateCards,
   createRateCard,
@@ -260,6 +262,9 @@ router.put('/qualification-framework', authorize(PERMISSIONS.SETTINGS_MANAGE), u
 // CR-04 Probability model (GET: any authenticated user, PUT: settings:manage)
 router.get('/probability-model', getProbabilityModel);
 router.put('/probability-model', authorize(PERMISSIONS.SETTINGS_MANAGE), updateProbabilityModel);
+
+// CR-03 stage config: relabel / retune a stage (settings:manage)
+router.patch('/stages/:name', authorize(PERMISSIONS.SETTINGS_MANAGE), updateStage);
 
 // Audit logs (requires auditlogs:view)
 router.get('/audit-logs', authorize(PERMISSIONS.AUDITLOGS_VIEW), listAuditLogs);
