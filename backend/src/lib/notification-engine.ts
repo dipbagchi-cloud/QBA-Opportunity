@@ -1,6 +1,7 @@
 import { prisma } from './prisma';
 import { sendNotificationEmail, sendRawEmail } from './email';
 import { calculateOpportunityProbability } from './opportunity-probability';
+import { resolveCanonicalStage } from './opportunity-stages';
 import { recordStageEntry } from './stage-history';
 
 // Roles that are "global" - all users with these roles get notified regardless of assignment
@@ -326,20 +327,30 @@ export async function evaluateStageChangeRules(ctx: StageChangeContext): Promise
 
     const matchedToStages = new Set<string>();
 
+    // CR-03 Phase 4: match on the CANONICAL stage so a rule configured in either
+    // vocabulary (Pipeline/Presales/Sales vs Discovery/Qualification/Proposal)
+    // matches the transition. resolveCanonicalStage is identity for canonical
+    // names, so this is behaviour-neutral for the seeded rules.
+    const ctxPrevCanonical = resolveCanonicalStage(ctx.previousStage || '');
+    const ctxNewCanonical = resolveCanonicalStage(ctx.newStage || '');
+
     for (const rule of sortedRules) {
+      const ruleFrom = resolveCanonicalStage(rule.fromStage || '');
+      const ruleTo = resolveCanonicalStage(rule.toStage || '');
+
       // Check if stage transition matches
-      if (rule.fromStage && rule.fromStage !== ctx.previousStage) continue;
-      if (rule.toStage && rule.toStage !== ctx.newStage) continue;
+      if (rule.fromStage && ruleFrom !== ctxPrevCanonical) continue;
+      if (rule.toStage && ruleTo !== ctxNewCanonical) continue;
 
       // Skip generic rule if a specific rule already matched this toStage
-      if (!rule.fromStage && rule.toStage && matchedToStages.has(rule.toStage)) {
-        console.log(`[NotificationEngine] Skipping generic rule "${rule.name}" — specific rule already matched for toStage="${rule.toStage}"`);
+      if (!rule.fromStage && rule.toStage && matchedToStages.has(ruleTo)) {
+        console.log(`[NotificationEngine] Skipping generic rule "${rule.name}" — specific rule already matched for toStage="${ruleTo}"`);
         continue;
       }
 
-      // Track that this toStage has been matched by a specific rule
+      // Track that this toStage has been matched by a specific rule (canonical).
       if (rule.fromStage && rule.toStage) {
-        matchedToStages.add(rule.toStage);
+        matchedToStages.add(ruleTo);
       }
 
       // Get recipient users based on roles

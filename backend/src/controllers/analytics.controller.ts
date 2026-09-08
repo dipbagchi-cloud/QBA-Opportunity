@@ -4,7 +4,7 @@ import { prisma } from '../lib/prisma';
 // registry (single source of truth). Imported under the original name so every
 // call site below is unchanged — this is a pure relocation, not a behaviour
 // change (asserted in opportunity-stages.test.ts).
-import { STAGE_DISPLAY_GROUP as STAGE_GROUP } from '../lib/opportunity-stages';
+import { STAGE_DISPLAY_GROUP as STAGE_GROUP, getStageMeta } from '../lib/opportunity-stages';
 import { isActivePipeline } from '../lib/opportunity-lifecycle';
 // CR-04: probability comes from the single canonical model (maturity-aware),
 // replacing the local stage-only getStageProbability that disagreed with it.
@@ -232,13 +232,16 @@ export async function getAnalytics(req: Request, res: Response) {
         // current pursuit) — the single lifecycle definition, consistently.
         const activeOpps = opportunities.filter(o => isActivePipeline(o as any));
 
+        // CR-03 Phase 4: won/lost detection via the canonical registry, so all
+        // closed variants (Closed-Won, Delivered, Proposal Lost) map correctly,
+        // not just the two exact names. Behaviour-neutral for canonical data.
         const wonOpps = opportunities.filter(o => {
-            const sn = o.stage?.name || o.currentStage;
-            return sn === 'Closed Won';
+            const m = getStageMeta(o.stage?.name || o.currentStage);
+            return m?.isClosed === true && m.isWon === true;
         });
         const lostOpps = opportunities.filter(o => {
-            const sn = o.stage?.name || o.currentStage;
-            return sn === 'Closed Lost';
+            const m = getStageMeta(o.stage?.name || o.currentStage);
+            return m?.isClosed === true && m.isWon === false;
         });
         const closedOpps = wonOpps.length + lostOpps.length;
         const conversionRate = closedOpps > 0 ? (wonOpps.length / closedOpps) * 100 : 0;
