@@ -11,6 +11,7 @@ import RateCardArchive from "./components/RateCardArchive";
 import SkillAliasesPanel from "./components/SkillAliasesPanel";
 import { SowAdminTab } from "./components/SowAdminTab";
 import SalesRulesTab from "./components/SalesRulesTab";
+import StagesTab from "./components/StagesTab";
 import EmailTemplateBuilder, { CustomCalcField } from "@/components/email-templates/EmailTemplateBuilder";
 
 // ── Permission categories for the checkbox grid ──
@@ -179,6 +180,7 @@ export default function SettingsPage() {
                 { key: "pricingmodels", label: "Pricing Models", icon: Tag, permissionAny: ["metadata:manage"] },
                 { key: "projecttypes", label: "Project Types", icon: Briefcase, permissionAny: ["metadata:manage"] },
                 { key: "projectroles", label: "Project Roles", icon: Briefcase, permissionAny: ["metadata:manage"] },
+                { key: "stages", label: "Stages", icon: ArrowRight, permissionAny: ["settings:manage"] },
                 { key: "holidays", label: "Holidays", icon: Calendar, permissionAny: ["settings:manage"] },
             ],
         },
@@ -323,6 +325,7 @@ export default function SettingsPage() {
                     {activeTab === "pricingmodels" && canShowTab("pricingmodels") && <MasterDataTab entity="pricing-models" label="Pricing Model" />}
                     {activeTab === "projecttypes" && canShowTab("projecttypes") && <MasterDataTab entity="project-types" label="Project Type" />}
                     {activeTab === "projectroles" && canShowTab("projectroles") && <MasterDataTab entity="project-roles" label="Project Role" />}
+                    {activeTab === "stages" && canShowTab("stages") && <StagesTab />}
                     {activeTab === "sowadmin" && canShowTab("sowadmin") && <SowAdminTab />}
                     {activeTab === "auditlog" && canShowTab("auditlog") && <AuditLogTab />}
                     {activeTab === "emailtemplates" && canShowTab("emailtemplates") && <EmailTemplatesTab />}
