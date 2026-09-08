@@ -10,6 +10,7 @@ import { canAccessSettingsTab, hasAnyGrantedPermission, type SettingsTabKey } fr
 import RateCardArchive from "./components/RateCardArchive";
 import SkillAliasesPanel from "./components/SkillAliasesPanel";
 import { SowAdminTab } from "./components/SowAdminTab";
+import SalesRulesTab from "./components/SalesRulesTab";
 import EmailTemplateBuilder, { CustomCalcField } from "@/components/email-templates/EmailTemplateBuilder";
 
 // ── Permission categories for the checkbox grid ──
@@ -163,6 +164,7 @@ export default function SettingsPage() {
             tabs: [
                 { key: "ratecards", label: "Rate Cards", icon: DollarSign, permissionAny: ["costcard:manage"] },
                 { key: "budgetassumptions", label: "Budget Assumptions", icon: Settings2, permissionAny: ["settings:manage"] },
+                { key: "salesrules", label: "Sales Rules", icon: Zap, permissionAny: ["settings:manage"] },
                 { key: "currencyrates", label: "Currency Rates", icon: Coins, permissionAny: ["settings:manage"] },
                 { key: "gomcalculator", label: "GOM Calculator", icon: DollarSign, permissionAny: ["settings:manage"] },
             ],
@@ -312,6 +314,7 @@ export default function SettingsPage() {
                     {activeTab === "announcement" && canShowTab("announcement") && <AnnouncementTab />}
                     {activeTab === "ratecards" && canShowTab("ratecards") && <RateCardsTab />}
                     {activeTab === "budgetassumptions" && canShowTab("budgetassumptions") && <BudgetAssumptionsTab />}
+                    {activeTab === "salesrules" && canShowTab("salesrules") && <SalesRulesTab />}
                     {activeTab === "currencyrates" && canShowTab("currencyrates") && <CurrencyRatesTab />}
                     {activeTab === "gomcalculator" && canShowTab("gomcalculator") && <GomCalculatorTab />}
                     {activeTab === "clients" && canShowTab("clients") && <MasterDataTab entity="clients" label="Client" />}

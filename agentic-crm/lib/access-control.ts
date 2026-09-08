@@ -50,6 +50,7 @@ export type SettingsTabKey =
   | "announcement"
   | "ratecards"
   | "budgetassumptions"
+  | "salesrules"
   | "currencyrates"
   | "gomcalculator"
   | "clients"
@@ -73,6 +74,7 @@ const SETTINGS_TAB_PERMISSION_RULES: Partial<Record<SettingsTabKey, string[]>> =
   announcement: ["settings:manage"],
   ratecards: ["costcard:manage"],
   budgetassumptions: ["settings:manage"],
+  salesrules: ["settings:manage"],
   currencyrates: ["settings:manage"],
   gomcalculator: ["settings:manage"],
   clients: ["metadata:manage"],
