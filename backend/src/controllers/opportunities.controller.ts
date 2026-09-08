@@ -241,6 +241,7 @@ export async function listOpportunities(req: Request, res: Response) {
         const qualificationFilters = readMulti(req.query.qualificationStatus);
         const lifecycleFilters = readMulti(req.query.lifecycleStatus);
         const revenueTypeFilters = readMulti(req.query.revenueType);
+        const nextActionFilters = readMulti(req.query.nextAction);
 
         // Started here, awaited in two places: the Stalled pseudo-filter needs
         // the threshold to build the WHERE clause, and the row mapper needs it
@@ -378,6 +379,18 @@ export async function listOpportunities(req: Request, res: Response) {
             andFilters.push(anyOf(revenueTypeFilters, (v) => ({ revenueType: { equals: v } })));
         }
 
+        // CR-08: next-action filter (Overdue / Open / No open action).
+        if (nextActionFilters.length) {
+            const nowTs = new Date();
+            andFilters.push(anyOf(nextActionFilters, (v) => {
+                const s = v.trim().toLowerCase();
+                if (s === 'overdue') return { actions: { some: { status: 'Open', dueDate: { lt: nowTs } } } };
+                if (s === 'open') return { actions: { some: { status: 'Open' } } };
+                if (s === 'no open action') return { actions: { none: { status: 'Open' } } };
+                return {};
+            }));
+        }
+
         if (andFilters.length > 0) {
             where.AND = andFilters;
         }
@@ -422,6 +435,12 @@ export async function listOpportunities(req: Request, res: Response) {
                         orderBy: { createdAt: 'desc' },
                         take: 1,
                         select: { createdAt: true },
+                    },
+                    // CR-08: the current open next action (soonest due first).
+                    actions: {
+                        where: { status: 'Open' },
+                        orderBy: [{ dueDate: 'asc' }, { createdAt: 'desc' }],
+                        take: 1,
                     },
                     _count: {
                         select: { attachments: true },
@@ -593,6 +612,19 @@ export async function listOpportunities(req: Request, res: Response) {
                 isArchived: (opp as any).isArchived === true,
                 // CR-07: derived lifecycle status (independent of commercial stage).
                 lifecycleStatus: deriveLifecycleStatus(opp as any),
+                // CR-08: current open next action (with derived overdue flag).
+                nextAction: (() => {
+                    const a = (opp as any).actions?.[0];
+                    if (!a) return null;
+                    const isOverdue = a.dueDate ? new Date(a.dueDate).getTime() < Date.now() : false;
+                    return {
+                        id: a.id,
+                        description: a.description,
+                        owner: a.owner || '',
+                        dueDate: a.dueDate ? new Date(a.dueDate).toISOString().slice(0, 10) : null,
+                        isOverdue,
+                    };
+                })(),
                 eligibleForEscalation: (opp as any).eligibleForEscalation === true,
                 healthScore: finalHealth,
                 metadata: opp.metadata,
@@ -704,6 +736,8 @@ export async function getOpportunityFilterOptions(_req: Request, res: Response) 
             lifecycleStatus: ['Active', 'On Hold', 'Future/Deferred', 'Won', 'Lost', 'Archived'],
             // CR-09: revenue / engagement type controlled values.
             revenueType: REVENUE_TYPES,
+            // CR-08: next-action filter values.
+            nextAction: ['Overdue', 'Open', 'No open action'],
         });
     } catch (error) {
         console.error('Filter options error:', error);

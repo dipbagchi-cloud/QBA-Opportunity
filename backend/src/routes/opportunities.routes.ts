@@ -2,6 +2,11 @@ import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import path from 'path';
 import {
+    listOpportunityActions,
+    createOpportunityAction,
+    updateOpportunityAction,
+} from '../controllers/opportunity-actions.controller';
+import {
     listOpportunities,
     createOpportunity,
     getOpportunity,
@@ -85,6 +90,11 @@ router.patch('/:id', authorizeAny(PERMISSIONS.PIPELINE_WRITE, PERMISSIONS.PRESAL
 // Hard delete — Admin only (the controller enforces the wildcard check and
 // returns a clear 403 for everyone else). PIPELINE_WRITE is just a base gate.
 router.delete('/:id', authorize(PERMISSIONS.PIPELINE_WRITE), deleteOpportunity);
+// CR-08 structured next-action tracking
+router.get('/:id/actions', authorizeAny(PERMISSIONS.PIPELINE_VIEW, PERMISSIONS.PRESALES_VIEW, PERMISSIONS.SALES_VIEW), listOpportunityActions);
+router.post('/:id/actions', authorizeAny(PERMISSIONS.PIPELINE_WRITE, PERMISSIONS.PRESALES_WRITE, PERMISSIONS.SALES_WRITE), createOpportunityAction);
+router.patch('/actions/:actionId', authorizeAny(PERMISSIONS.PIPELINE_WRITE, PERMISSIONS.PRESALES_WRITE, PERMISSIONS.SALES_WRITE), updateOpportunityAction);
+
 router.post('/:id/convert', authorize(PERMISSIONS.SALES_WRITE), convertOpportunity);
 router.patch('/:id/approve-gom', authorizeAny(PERMISSIONS.PRESALES_WRITE, PERMISSIONS.SALES_WRITE, PERMISSIONS.PIPELINE_WRITE), approveGom);
 router.get('/:id/gom-approval-status', authorizeAny(PERMISSIONS.PIPELINE_VIEW, PERMISSIONS.PRESALES_VIEW, PERMISSIONS.SALES_VIEW), getGomApprovalStatus);

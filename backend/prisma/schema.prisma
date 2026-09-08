@@ -400,6 +400,7 @@ model Opportunity {
   // Child relations
   activities        Activity[]
   tasks             Task[]
+  actions           OpportunityAction[]  // CR-08 structured next-action tracking
   notes             Note[]       // Also used as opportunity comments
   attachments       Attachment[]
   stageHistory      StageHistory[]
@@ -535,6 +536,27 @@ model Task {
   @@index([dueDate])
   @@index([status])
   @@map("tasks")
+}
+
+// CR-08 — structured next action / decision tracking. Each row is one action;
+// history is retained (rows are never overwritten, only completed).
+model OpportunityAction {
+  id            String    @id @default(cuid())
+  description   String
+  owner         String?               // action owner (name)
+  dueDate       DateTime?             // committed due date, where applicable
+  status        String    @default("Open") // Open | Completed
+  completedAt   DateTime?
+  createdAt     DateTime  @default(now())
+  createdById   String
+
+  opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  opportunityId String
+
+  @@index([opportunityId])
+  @@index([status])
+  @@index([dueDate])
+  @@map("opportunity_actions")
 }
 
 model Note {

@@ -75,6 +75,8 @@ const LIST_COLUMNS: ListColumn[] = [
     { key: 'lifecycleStatus', label: 'Lifecycle', filter: true },
     // CR-09: revenue / engagement type, filterable.
     { key: 'revenueType', label: 'Revenue Type', filter: true },
+    // CR-08: current next action (filter by Overdue / Open / No open action).
+    { key: 'nextAction', label: 'Next Action', filter: true },
 ];
 
 // CR-07 lifecycle badge styling.
@@ -777,6 +779,18 @@ export default function OpportunitiesPage() {
                                             </td>
                                             <td className="py-2.5 px-4 text-[11px] text-slate-600 whitespace-nowrap">
                                                 {(opp as any).revenueType || <span className="text-slate-300">—</span>}
+                                            </td>
+                                            <td className="py-2.5 px-4 text-[11px] max-w-[200px]">
+                                                {(opp as any).nextAction ? (
+                                                    <div className="truncate" title={(opp as any).nextAction.description}>
+                                                        <span className="text-slate-700">{(opp as any).nextAction.description}</span>
+                                                        {(opp as any).nextAction.dueDate && (
+                                                            <span className={`ml-1 ${(opp as any).nextAction.isOverdue ? 'text-red-600 font-semibold' : 'text-slate-400'}`}>
+                                                                {(opp as any).nextAction.isOverdue ? 'OVERDUE ' : 'due '}{(opp as any).nextAction.dueDate}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                ) : <span className="text-slate-300">—</span>}
                                             </td>
                                             <td className="py-2.5 px-4 relative">
                                                 <button

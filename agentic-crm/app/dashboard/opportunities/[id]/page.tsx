@@ -684,6 +684,37 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             .catch(() => {});
     }, []);
 
+    // CR-08 structured next-action tracking
+    const [actions, setActions] = useState<any[]>([]);
+    const [newAction, setNewAction] = useState({ description: '', owner: '', dueDate: '' });
+    const [savingAction, setSavingAction] = useState(false);
+    const loadActions = useCallback(async () => {
+        try {
+            const res = await fetch(`${API_URL}/api/opportunities/${id}/actions`, { headers: getAuthHeaders() });
+            if (res.ok) setActions(await res.json());
+        } catch (e) { console.error(e); }
+    }, [id]);
+    useEffect(() => { loadActions(); }, [loadActions]);
+    const addAction = async () => {
+        if (!newAction.description.trim()) return;
+        setSavingAction(true);
+        try {
+            const res = await fetch(`${API_URL}/api/opportunities/${id}/actions`, {
+                method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(newAction),
+            });
+            if (res.ok) { setNewAction({ description: '', owner: '', dueDate: '' }); await loadActions(); }
+            else { const e = await res.json().catch(() => ({})); toast({ title: 'Error', description: e.error || 'Failed to add action.' }); }
+        } catch (e) { console.error(e); } finally { setSavingAction(false); }
+    };
+    const completeAction = async (actionId: string) => {
+        try {
+            await fetch(`${API_URL}/api/opportunities/actions/${actionId}`, {
+                method: 'PATCH', headers: getAuthHeaders(), body: JSON.stringify({ status: 'Completed' }),
+            });
+            await loadActions();
+        } catch (e) { console.error(e); }
+    };
+
     // GOM percent and revenue from estimation context
     const [contextGomPercent, setContextGomPercent] = useState(0);
     const [contextRevenue, setContextRevenue] = useState(0);
@@ -3037,6 +3068,60 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     <div className="col-span-2">
                                         <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Description</label>
                                         <div className="font-semibold text-slate-800 whitespace-pre-wrap">{formData.description}</div>
+                                    </div>
+                                </div>
+
+                                {/* Divider */}
+                                <hr className="border-slate-100" />
+
+                                {/* CR-08: Next Action / Decision Tracking */}
+                                <div className="space-y-3">
+                                    <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                                        <h3 className="font-bold text-slate-900">Next Actions</h3>
+                                    </div>
+                                    {/* Add action */}
+                                    <div className="flex flex-wrap gap-2 items-end">
+                                        <div className="flex-1 min-w-[200px]">
+                                            <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1">Action</label>
+                                            <input value={newAction.description} onChange={e => setNewAction(p => ({ ...p, description: e.target.value }))} placeholder="What needs to happen next?" className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1">Owner</label>
+                                            <input value={newAction.owner} onChange={e => setNewAction(p => ({ ...p, owner: e.target.value }))} placeholder="Owner" className="w-32 px-3 py-2 border border-slate-300 rounded-md text-sm" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-1">Due</label>
+                                            <input type="date" value={newAction.dueDate} onChange={e => setNewAction(p => ({ ...p, dueDate: e.target.value }))} className="px-3 py-2 border border-slate-300 rounded-md text-sm" />
+                                        </div>
+                                        <button onClick={addAction} disabled={savingAction || !newAction.description.trim()} className="px-4 py-2 bg-indigo-600 text-white font-semibold rounded-md text-sm hover:bg-indigo-700 disabled:opacity-50">{savingAction ? 'Adding…' : 'Add Action'}</button>
+                                    </div>
+                                    {/* Action list */}
+                                    <div className="bg-slate-50 border border-slate-200 rounded-md overflow-hidden">
+                                        <table className="w-full text-xs text-left text-slate-600">
+                                            <thead className="bg-slate-100 border-b border-slate-200 font-semibold">
+                                                <tr><th className="px-3 py-2">Action</th><th className="px-3 py-2">Owner</th><th className="px-3 py-2">Due</th><th className="px-3 py-2">Status</th><th className="px-3 py-2"></th></tr>
+                                            </thead>
+                                            <tbody>
+                                                {actions.length === 0 ? (
+                                                    <tr><td className="px-3 py-6 text-center text-slate-400 italic" colSpan={5}>No actions recorded</td></tr>
+                                                ) : actions.map((a: any) => (
+                                                    <tr key={a.id} className="border-b border-slate-100">
+                                                        <td className="px-3 py-2">{a.description}</td>
+                                                        <td className="px-3 py-2">{a.owner || '—'}</td>
+                                                        <td className="px-3 py-2">{a.dueDate || '—'}</td>
+                                                        <td className="px-3 py-2">
+                                                            <span className={`px-2 py-0.5 rounded-full border font-semibold ${a.status === 'Overdue' ? 'bg-red-100 text-red-600 border-red-200' : a.status === 'Completed' ? 'bg-green-100 text-green-700 border-green-200' : 'bg-amber-100 text-amber-800 border-amber-300'}`}>{a.status}</span>
+                                                        </td>
+                                                        <td className="px-3 py-2 text-right">
+                                                            {a.rawStatus !== 'Completed' && (
+                                                                <button onClick={() => completeAction(a.id)} className="text-indigo-600 hover:underline">Complete</button>
+                                                            )}
+                                                            {a.rawStatus === 'Completed' && a.completedAt && <span className="text-slate-400">Done {a.completedAt}</span>}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
                                     </div>
                                 </div>
 
