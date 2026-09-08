@@ -9,8 +9,9 @@
  * the stage level (CR-04 already fixed the probability symptom), regardless of
  * whether the move came from the Kanban or the detail page.
  *
- * The SOW / GOM-approval requirements for entering Proposal stay in the
- * controller (they need async DB lookups); this lib covers the pure checks and
+ * The SOW / GOM-approval requirements for entering Negotiation (the proposal is
+ * built in Proposal and SUBMITTED by moving to Negotiation) stay in the
+ * controller — they need async DB lookups; this lib covers the pure checks and
  * is the single, testable definition of the entry milestones.
  *
  * Stage names resolve through the CR-03 registry so both vocabularies are

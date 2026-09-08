@@ -511,7 +511,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     // Presales View State (The detailed view after transition)
     const [activeTab, setActiveTab] = useState("Project Details");
     const [actualGomSubTab, setActualGomSubTab] = useState<string>(ACTUAL_GOM_SUBTABS[0]);
-    const [activeStep, setActiveStep] = useState(0); // 0: Pipeline, 1: Presales
+    const [activeStep, setActiveStep] = useState(0); // 0: Discovery, 1: Proposal, 2: Negotiation
     const [opportunityStage, setOpportunityStage] = useState(0); // actual DB stage (0-3), stays fixed when navigating steps
     const [currentStageName, setCurrentStageName] = useState(''); // actual Kanban stage name (Discovery, Qualification, Proposal, Negotiation, Closed Won, Closed Lost)
     // Stage timeline source data — which stages the deal has been through, and when.
@@ -519,8 +519,10 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const [opportunityCreatedAt, setOpportunityCreatedAt] = useState<string>('');
     // CR-03: work tabs named by the commercial stage they belong to (the old
     // Pipeline/Presales/Sales vocabulary is retired). The StagePath above shows
-    // the precise stage; these are the work sections within the flow.
-    const steps = ["Discovery", "Estimation", "Proposal / Negotiation", "SOW", "Project", "Actual GOM"];
+    // the precise stage (incl. the Qualification checkpoint); these are the work
+    // sections within the flow. Estimation / scheduling / GOM / SOW all live under
+    // Proposal (step 1); the quote is sent by moving Proposal → Negotiation (step 2).
+    const steps = ["Discovery", "Proposal", "Negotiation", "SOW", "Project", "Actual GOM"];
     // Declared here rather than further down because the Actual GOM gate below
     // needs it, and a `const` referenced before its declaration throws.
     const activeRoleName = (user?.role?.name || "").trim().toLowerCase();
@@ -1141,9 +1143,14 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     setLostRemarks(data.salesData?.lostRemarks || data.detailedStatus || '');
                 } else if (stageName === 'Closed Won' || stageName === 'Closed-Won' || stageName === 'Delivered' || data.project) {
                     stageIdx = 3;
-                } else if (stageName === 'Proposal' || stageName === 'Negotiation' || stageName === 'Sales') {
+                } else if (stageName === 'Negotiation' || stageName === 'Sales') {
+                    // Negotiation (proposal sent) → the quote/close tab. Legacy
+                    // 'Sales' records were at this same quote/close phase.
                     stageIdx = 2;
-                } else if (stageName === 'Presales' || stageName === 'Qualification') {
+                } else if (stageName === 'Proposal' || stageName === 'Presales' || stageName === 'Qualification') {
+                    // CR-03 flow-shift: Proposal is the estimation stage → the
+                    // estimation tab. Qualification is a transient checkpoint and
+                    // legacy 'Presales' records were also doing estimation here.
                     stageIdx = 1;
                 }
                 // Deep link from the delivery queue: ?tab=actual-gom lands
@@ -1531,7 +1538,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         }
 
         if (!formData.technology || formData.technology.trim() === "") {
-            toast({ title: "Validation Error", description: "Technology must be selected before moving to Presales." });
+            toast({ title: "Validation Error", description: "Technology must be selected before moving to Proposal." });
             return;
         }
 
@@ -1542,12 +1549,15 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         }
         setIsSaving(true);
         try {
-            // Update stage to Qualification (Presales) and save presales data
+            // CR-03 flow-shift: Discovery advances straight to Proposal (the
+            // estimation stage), passing the Qualification checkpoint. The BANT
+            // answers are carried so the backend scores and gates the checkpoint
+            // atomically on the way through.
             const res = await fetch(`${API_URL}/api/opportunities/${id}`, {
                 method: 'PATCH',
                 headers: getAuthHeaders(),
                 body: JSON.stringify({
-                    stageName: 'Qualification', // Maps to Presales in our workflow
+                    stageName: 'Proposal',
                     managerName: presalesForm.managerName,
                     // CR-02: carry the qualification answers so the move is scored
                     // and gated atomically by the backend.
@@ -1563,19 +1573,19 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 // Update local store only (no second PATCH to avoid duplicate notifications)
                 useOpportunityStore.setState((state) => ({
                     opportunities: state.opportunities.map((opp) =>
-                        opp.id === id ? { ...opp, stage: 'Qualification' } : opp
+                        opp.id === id ? { ...opp, stage: 'Proposal' } : opp
                     ),
                 }));
-                setCurrentStageName('Qualification');
+                setCurrentStageName('Proposal');
                 setActiveStep(1);
                 setOpportunityStage(1);
                 setOpportunityManagerName(presalesForm.managerName);
                 setShowPresalesModal(false);
-                toast({ title: "Success", description: "Moved to Presales successfully!" });
+                toast({ title: "Success", description: "Moved to Proposal successfully!" });
             } else {
                 // Surface the backend reason (e.g. the CR-02 qualification gate).
                 const err = await res.json().catch(() => ({}));
-                toast({ title: "Error", description: err.error || "Failed to move to Presales." });
+                toast({ title: "Error", description: err.error || "Failed to move to Proposal." });
             }
         } catch (e) {
             console.error(e);
@@ -1600,7 +1610,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     setGomApproved(data.gomApproved);
                     setApprovedGomPercent(data.gomApproved ? contextGomPercent : null);
                     setGomPendingApproval(null);
-                    toast({ title: data.gomApproved ? "GOM Approved" : "GOM Approval Revoked", description: data.gomApproved ? "GOM has been approved. You can now move to Sales." : "GOM approval has been revoked." });
+                    toast({ title: data.gomApproved ? "GOM Approved" : "GOM Approval Revoked", description: data.gomApproved ? "GOM has been approved. You can now send the proposal to Negotiation." : "GOM approval has been revoked." });
                 }
             } else {
                 const data = await res.json().catch(() => null);
@@ -1630,11 +1640,13 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         }
     };
 
-    const handleMoveToSales = async () => {
-        // A committed quote (GOM-calculated revenue) must exist before the deal
-        // can be submitted to Sales. No GOM => no quote => block.
+    // CR-03 flow-shift: sending the proposal to the client. The estimate/GOM/SOW
+    // are built in Proposal; submitting them moves the deal Proposal → Negotiation.
+    const handleMoveToNegotiation = async () => {
+        // A committed quote (GOM-calculated revenue) must exist before the proposal
+        // can be sent. No GOM => no quote => block.
         if (!(contextRevenue > 0)) {
-            toast({ title: "No Quote Yet", description: "Complete the GOM Calculator first — there is no quote to submit to Sales." });
+            toast({ title: "No Quote Yet", description: "Complete the GOM Calculator first — there is no quote to send to Negotiation." });
             return;
         }
         // GOM is effectively approved when flagged by manager OR when at/above the
@@ -1646,50 +1658,18 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             return;
         }
         // Once the GOM is approved (manager sign-off or auto-approve above the
-        // threshold) there is no further blocker to moving to Sales. Manager
+        // threshold) there is no further blocker to sending the proposal. Manager
         // approval is the intended override for deals below the configured
         // minimum GOM — re-blocking on `minGomPercent` here would contradict the
-        // approval banner, the Move-to-Sales button's own enable check, and the
-        // backend (which allows the move whenever gomApproved is true).
-        toast({ title: "Processing", description: "Moving to Sales..." });
+        // approval banner, the button's own enable check, and the backend (which
+        // allows the move whenever gomApproved is true).
+        toast({ title: "Processing", description: "Sending proposal to Negotiation..." });
         setIsSaving(true);
         try {
-            const res = await fetch(`${API_URL}/api/opportunities/${id}`, {
-                method: 'PATCH',
-                headers: getAuthHeaders(),
-                body: JSON.stringify({ stageName: 'Proposal' })
-            });
-            if (res.ok) {
-                const updatedData = await res.json().catch(() => ({}));
-                // Update local store only (no second PATCH to avoid duplicate notifications)
-                useOpportunityStore.setState((state) => ({
-                    opportunities: state.opportunities.map((opp) =>
-                        opp.id === id ? { ...opp, stage: 'Proposal' } : opp
-                    ),
-                }));
-                setCurrentStageName('Proposal');
-                setActiveStep(2);
-                setOpportunityStage(2);
-                // Sync detailedStatus from backend to clear the re-estimation banner
-                setDetailedStatus(updatedData.detailedStatus || '');
-                toast({ title: "Success", description: "Moved to Sales stage." });
-            } else {
-                const err = await res.json().catch(() => ({}));
-                toast({ title: "Error", description: err.error || "Failed to move to Sales." });
-            }
-        } catch (e) {
-            console.error(e);
-        } finally {
-            setIsSaving(false);
-        }
-    };
-
-    const handleProposalSent = async () => {
-        toast({ title: "Processing", description: "Sending proposal..." });
-        setIsSaving(true);
-        try {
-            // Include the current GOM-calculated revenue so the notification email
-            // always reflects the final quote price, not the pipeline estimate.
+            // Stamp the current GOM-calculated revenue so the Negotiation
+            // notification email reflects the final quote price, not the pipeline
+            // estimate. presalesData is merged server-side, so this never wipes the
+            // estimation data already saved on the record.
             const patchBody: any = { stageName: 'Negotiation' };
             if (contextRevenue > 0) {
                 patchBody.presalesData = { finalRevenue: contextRevenue };
@@ -1700,20 +1680,22 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 body: JSON.stringify(patchBody)
             });
             if (res.ok) {
-                // Update local store only (no second PATCH to avoid duplicate notifications).
-                // Clear detailedStatus so any lingering "Estimation Submitted" /
-                // "Re-estimation Submitted" / "Sent for Re-estimate" banner disappears
-                // without requiring a page reload.
+                const updatedData = await res.json().catch(() => ({}));
+                // Update local store only (no second PATCH to avoid duplicate notifications)
                 useOpportunityStore.setState((state) => ({
                     opportunities: state.opportunities.map((opp) =>
                         opp.id === id ? { ...opp, stage: 'Negotiation', detailedStatus: '' } : opp
                     ),
                 }));
                 setCurrentStageName('Negotiation');
-                setDetailedStatus('');
+                setActiveStep(2);
+                setOpportunityStage(2);
+                // Sync detailedStatus from backend to clear the re-estimation banner
+                setDetailedStatus(updatedData.detailedStatus || '');
                 toast({ title: "Success", description: "Proposal sent. Opportunity moved to Negotiation." });
             } else {
-                toast({ title: "Error", description: "Failed to update stage." });
+                const err = await res.json().catch(() => ({}));
+                toast({ title: "Error", description: err.error || "Failed to move to Negotiation." });
             }
         } catch (e) {
             console.error(e);
@@ -1734,8 +1716,10 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         setIsSaving(true);
         try {
             const suggestedRevenue = Number(reEstimateSuggestedRevenue) > 0 ? Number(reEstimateSuggestedRevenue) : null;
+            // CR-03 flow-shift: re-estimation sends the deal back Negotiation →
+            // Proposal (the estimation stage), landing on the estimation tab.
             const payload: any = {
-                stageName: 'Qualification',
+                stageName: 'Proposal',
                 detailedStatus: 'Re-estimation',
                 status: 're-estimation',
                 reEstimateComment: reEstimateComment.trim(),
@@ -1752,7 +1736,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             });
             if (res.ok) {
                 // Update UI state immediately
-                setCurrentStageName('Qualification');
+                setCurrentStageName('Proposal');
                 setActiveStep(1);
                 setOpportunityStage(1);
                 setGomApproved(false);
@@ -1764,7 +1748,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 // Update local store only (no second PATCH to avoid duplicate notifications)
                 useOpportunityStore.setState((state) => ({
                     opportunities: state.opportunities.map((opp) =>
-                        opp.id === id ? { ...opp, stage: 'Qualification' } : opp
+                        opp.id === id ? { ...opp, stage: 'Proposal' } : opp
                     ),
                 }));
             } else {
@@ -2014,7 +1998,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 disabled={isStalled}
                                 className={`px-4 py-2 text-white rounded-md font-medium ${isStalled ? 'bg-slate-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
                             >
-                                Move to Presales
+                                Move to Proposal
                             </button>
                             <button
                                 type="button"
@@ -2037,58 +2021,37 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             </button>
                             {(() => {
                                 // A SOW must be attached, and a committed quote must exist
-                                // (GOM calculated) AND be approved, before the deal can be
-                                // submitted to Sales. Time & Material deals are exempt from
-                                // the SOW requirement (billed on actuals).
+                                // (GOM calculated) AND be approved, before the proposal can
+                                // be sent to Negotiation. Time & Material deals are exempt
+                                // from the SOW requirement (billed on actuals).
                                 const hasSow = sowDocuments.some(d => d.isCurrent);
                                 const hasQuote = contextRevenue > 0;
                                 const gomOk = gomApproved || (gomAutoApprovePercent > 0 && contextGomPercent >= gomAutoApprovePercent);
                                 const canMove = (hasSow || isTandMPricing) && hasQuote && gomOk;
                                 const blockReason = (!hasSow && !isTandMPricing)
-                                    ? 'Attach the Statement of Work (SOW) first — it is mandatory before moving to Sales.'
+                                    ? 'Attach the Statement of Work (SOW) first — it is mandatory before sending the proposal to Negotiation.'
                                     : !hasQuote
-                                        ? 'Complete the GOM Calculator first — there is no quote to submit to Sales.'
+                                        ? 'Complete the GOM Calculator first — there is no quote to send to Negotiation.'
                                         : !gomOk
                                             ? 'GOM must be approved first (see GOM Calculator tab).'
                                             : '';
                                 return (
                                     <button
-                                        onClick={handleMoveToSales}
+                                        onClick={handleMoveToNegotiation}
                                         disabled={isSaving || isStalled || !canMove}
                                         className={`px-4 py-2 rounded-md font-medium disabled:opacity-50 ${canMove && !isStalled ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-slate-300 text-slate-600 cursor-not-allowed'}`}
                                         title={blockReason}
                                     >
-                                        {isSaving ? 'Moving...' : 'Move to Sales'}
+                                        {isSaving ? 'Sending...' : 'Move to Negotiation'}
                                     </button>
                                 );
                             })()}
                         </>
                     )}
-                    {canWorkSalesStage && opportunityStage === 2 && !isLost && currentStageName === 'Proposal' && (
-                        <>
-                            <button
-                                onClick={() => { setLostModalType('Closed Lost'); setShowLostModal(true); }}
-                                disabled={isSaving || isStalled}
-                                className="px-4 py-2 bg-white border border-rose-300 text-rose-600 rounded-md font-medium hover:bg-rose-50 disabled:opacity-50"
-                            >
-                                <span className="flex items-center gap-1.5"><XCircle className="w-4 h-4" /> Mark as Lost</span>
-                            </button>
-                            <button
-                                onClick={handleSendBackForReestimate}
-                                disabled={isSaving || isStalled}
-                                className="px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-md font-medium hover:bg-slate-50 disabled:opacity-50"
-                            >
-                                <span className="flex items-center gap-1.5"><RefreshCw className="w-4 h-4" /> Send for Re-estimate</span>
-                            </button>
-                            <button
-                                onClick={handleProposalSent}
-                                disabled={isSaving || isStalled}
-                                className="px-4 py-2 bg-blue-600 text-white rounded-md font-medium hover:bg-blue-700 disabled:opacity-50 disabled:bg-slate-400"
-                            >
-                                {isSaving ? 'Sending...' : 'Mark Proposal Sent'}
-                            </button>
-                        </>
-                    )}
+                    {/* CR-03 flow-shift: the proposal is SENT from the estimation
+                        tab (Proposal → Negotiation), so there is no separate
+                        "Mark Proposal Sent" step on stage 2. A record on stage 2
+                        is already in Negotiation. */}
                     {canWorkSalesStage && opportunityStage === 2 && !isLost && currentStageName === 'Negotiation' && (
                         <>
                             <button
@@ -2170,8 +2133,8 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                 <div className={`text-sm rounded-md px-3 py-2 ${canEditSow ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'bg-slate-50 text-slate-500'}`}>
                                     {canEditSow
                                         ? (isTandMPricing
-                                            ? 'No SOW attached. A Statement of Work is optional for Time & Material deals — you can move to Sales without one.'
-                                            : 'No SOW attached yet. A Statement of Work is required before this opportunity can be moved to Sales.')
+                                            ? 'No SOW attached. A Statement of Work is optional for Time & Material deals — you can send the proposal to Negotiation without one.'
+                                            : 'No SOW attached yet. A Statement of Work is required before the proposal can be sent to Negotiation.')
                                         : 'No SOW document has been attached.'}
                                 </div>
                             ) : (
@@ -2240,7 +2203,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     <Check className="w-4 h-4 flex-shrink-0 text-purple-500" />
                     <div>
                         <span className="font-semibold text-sm">Re-estimation Submitted</span>
-                        <span className="text-xs ml-2 text-purple-600">{'-'} Updated re-estimation has been submitted to Sales</span>
+                        <span className="text-xs ml-2 text-purple-600">{'-'} Updated re-estimation has been sent to Negotiation</span>
                     </div>
                 </div>
             )}
@@ -2746,20 +2709,20 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                         </div>
 
                         {/* Eligible for Escalation — ownership moves with the stage:
-                            Sales raises it in Pipeline, the offshore manager owns it
-                            through Presales, and either may adjust it once in Sales.
-                            The gate comes from the server (access.workflow) rather
-                            than being re-derived here, so the UI can never offer an
-                            edit the API would reject. */}
+                            Sales raises it in Discovery, the offshore manager owns it
+                            through estimation (Proposal), and either may adjust it once
+                            the proposal is sent (Negotiation). The gate comes from the
+                            server (access.workflow) rather than being re-derived here,
+                            so the UI can never offer an edit the API would reject. */}
                         {(() => {
                             const canEditEscalation = opportunityAccess?.workflow?.escalationEditable === true;
                             const stageOwnerHint =
                                 currentStageName === 'Discovery' || currentStageName === 'Pipeline'
                                     ? 'Only the assigned sales rep can change this while the deal is in Discovery.'
-                                    : currentStageName === 'Qualification' || currentStageName === 'Presales'
-                                        ? 'Only the assigned offshore manager can change this while the deal is in Qualification.'
-                                        : currentStageName === 'Proposal' || currentStageName === 'Negotiation'
-                                            ? 'The assigned sales rep or offshore manager can change this at this stage.'
+                                    : currentStageName === 'Qualification' || currentStageName === 'Presales' || currentStageName === 'Proposal'
+                                        ? 'Only the assigned offshore manager can change this while the deal is in estimation (Proposal).'
+                                        : currentStageName === 'Negotiation' || currentStageName === 'Sales'
+                                            ? 'The assigned sales rep or offshore manager can change this during Negotiation.'
                                             : 'This is read-only once the opportunity is closed.';
                             return (
                                 <div className="col-span-1 md:col-span-2">
@@ -4177,12 +4140,12 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 </div>
             )}
 
-            {/* Presales Modal */}
+            {/* Move to Proposal Modal */}
             {showPresalesModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
                     <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden">
                         <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-white">
-                            <h3 className="font-bold text-lg text-slate-800">Move to Presales</h3>
+                            <h3 className="font-bold text-lg text-slate-800">Move to Proposal</h3>
                             <button
                                 onClick={() => setShowPresalesModal(false)}
                                 className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100"

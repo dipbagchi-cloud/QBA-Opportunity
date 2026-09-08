@@ -5,7 +5,7 @@ import { evaluateStageChangeRules, evaluateDataConditionRules, evaluateOpportuni
 import { calculateOpportunityProbability, resolveProbabilityConfig } from '../lib/opportunity-probability';
 import { classifyHot, resolveHotConfig } from '../lib/opportunity-hot';
 import { scoreQualification, resolveQualificationConfig } from '../lib/opportunity-qualification';
-import { resolveCanonicalStage, CLOSED_STAGE_NAMES, isLegalTransition } from '../lib/opportunity-stages';
+import { resolveCanonicalStage, CLOSED_STAGE_NAMES, isLegalTransition, isForwardChainMove, stagePath } from '../lib/opportunity-stages';
 import { checkStageEntry } from '../lib/opportunity-stage-gates';
 import { deriveLifecycleStatus, normalizeLifecycleOverride } from '../lib/opportunity-lifecycle';
 import { buildOpportunityAccess } from '../lib/opportunity-access';
@@ -1278,9 +1278,10 @@ export async function updateOpportunity(req: Request, res: Response) {
             !!body.eligibleForEscalation !== !!(previous as any).eligibleForEscalation;
         if (escalationSubmitted && !access.workflow.escalationEditable) {
             const stageNow = previous?.stage?.name || previous?.currentStage || '';
-            const owner = (stageNow === 'Discovery' || stageNow === 'Pipeline')
+            const canonStageNow = resolveCanonicalStage(stageNow);
+            const owner = (canonStageNow === 'Discovery')
                 ? 'the assigned sales rep'
-                : (stageNow === 'Qualification' || stageNow === 'Presales')
+                : (canonStageNow === 'Qualification' || canonStageNow === 'Proposal')
                     ? 'the assigned offshore manager'
                     : 'the assigned sales rep or offshore manager';
             return res.status(403).json({
@@ -1312,10 +1313,11 @@ export async function updateOpportunity(req: Request, res: Response) {
             }
         }
 
-        // Opportunity Close Date is editable only until the proposal is submitted
-        // (stage moves to Proposal / Sales / Negotiation / Closed). The freeze
-        // applies to non-admin actors; admins can correct it at any stage.
-        const SUBMITTED_STAGES = new Set(['Proposal', 'Sales', 'Negotiation', 'Closed Won', 'Closed-Won', 'Closed Lost', 'Delivered']);
+        // Opportunity Close Date is editable only until the proposal is submitted.
+        // CR-03 flow-shift: the proposal is submitted when it is SENT to the client
+        // (Negotiation onward) — Proposal is now the estimation stage, so the close
+        // date stays editable through it. The freeze applies to non-admin actors.
+        const SUBMITTED_STAGES = new Set(['Negotiation', 'Closed Won', 'Closed-Won', 'Closed Lost', 'Delivered']);
         const proposalSubmitted = SUBMITTED_STAGES.has(prevStageNameForRule);
         if (body.expectedCloseDate !== undefined) {
             const incoming = body.expectedCloseDate ? new Date(body.expectedCloseDate) : null;
@@ -1349,12 +1351,12 @@ export async function updateOpportunity(req: Request, res: Response) {
         // ────────────────────────────────────────────────────────────────────
         // Extended-status auto-transition.
         // When a Sales-role user updates tentativeStartDate while the opp is
-        // already past proposal submission (Proposal / Negotiation), the deal
-        // must go back to Qualification for re-estimation with detailedStatus
-        // ='Extended'. Admins bypass this auto-transition (they may be
-        // correcting data without intending a re-estimation cycle).
+        // already past proposal submission (CR-03 flow-shift: Negotiation — the
+        // proposal has been sent), the deal must go back to Proposal for
+        // re-estimation with detailedStatus='Extended'. Admins bypass this
+        // auto-transition (they may be correcting data without a re-estimate).
         // ────────────────────────────────────────────────────────────────────
-        const POST_SUBMIT_STAGES = new Set(['Proposal', 'Negotiation']);
+        const POST_SUBMIT_STAGES = new Set(['Negotiation']);
         const tentativeStartChanged =
             body.tentativeStartDate !== undefined &&
             (body.tentativeStartDate
@@ -1390,12 +1392,14 @@ export async function updateOpportunity(req: Request, res: Response) {
 
         let autoExtended = false;
         if (triggerExtended) {
-            const qualStage = await prisma.stage.findFirst({ where: { name: 'Qualification' } });
-            if (qualStage) {
+            // CR-03 flow-shift: re-estimation goes back to Proposal (the estimation
+            // stage), not Qualification (the checkpoint).
+            const reEstimateStage = await prisma.stage.findFirst({ where: { name: 'Proposal' } });
+            if (reEstimateStage) {
                 // stageUpdate (built further below) will overwrite stageId — we
                 // pre-empt it here so the controller commits the move on this
                 // single update.
-                (body as any).__autoExtendedStageId = qualStage.id;
+                (body as any).__autoExtendedStageId = reEstimateStage.id;
                 autoExtended = true;
                 // Auto-bump close date to (newStart − 2 days) to maintain the
                 // close < start invariant.
@@ -1470,15 +1474,18 @@ export async function updateOpportunity(req: Request, res: Response) {
         }
 
         const canBypassQualGate = isAdminRole || (req.user!.permissions || []).includes('opportunities:edit-all');
-        const movingIntoQualifiedPipeline =
-            newStageName === 'Qualification' &&
-            !['Qualification', 'Presales', 'Proposal', 'Negotiation'].includes(previousStageName);
-        if (movingIntoQualifiedPipeline && qualConfig.enabled && qualConfig.gateMode === 'block'
+        // Qualification is the checkpoint: a deal cannot LEAVE Discovery forward
+        // (to Qualification / Proposal / Negotiation) unless it is Qualified. The
+        // move to estimation now targets Proposal, passing this checkpoint.
+        const leavingDiscoveryForward =
+            resolveCanonicalStage(previousStageName) === 'Discovery' &&
+            isForwardChainMove(previousStageName, newStageName);
+        if (leavingDiscoveryForward && qualConfig.enabled && qualConfig.gateMode === 'block'
             && effectiveQualStatus !== 'Qualified' && !canBypassQualGate) {
             return res.status(400).json({
                 error: effectiveQualStatus && effectiveQualStatus !== 'Incomplete'
-                    ? `Cannot move to Presales: this opportunity is "${effectiveQualStatus}". Complete the Deal Qualification checklist with a Qualified outcome first.`
-                    : 'Cannot move to Presales: complete the Deal Qualification checklist (BANT + Deliverability) first.',
+                    ? `Cannot advance: this opportunity is "${effectiveQualStatus}". Complete the Deal Qualification checkpoint (BANT + Deliverability) with a Qualified outcome first.`
+                    : 'Cannot advance: complete the Deal Qualification checkpoint (BANT + Deliverability) first.',
                 qualificationStatus: effectiveQualStatus || 'Incomplete',
             });
         }
@@ -1497,9 +1504,12 @@ export async function updateOpportunity(req: Request, res: Response) {
                 return res.status(400).json({ error: 'Assignment fields are locked for this opportunity stage/status.' });
             }
 
-            const isInitialMoveToPresales =
-                newStageName === 'Qualification' &&
-                !['Qualification', 'Presales', 'Proposal', 'Negotiation'].includes(previousStageName);
+            // CR-03 flow-shift: the assignment handoff moment is the initial
+            // forward move OUT of Discovery (into the qualified pipeline). That
+            // single advance may pass through the Qualification checkpoint on its
+            // way to Proposal, so it is the forward-chain move, not a literal
+            // "moved to Qualification" check.
+            const isInitialMoveToPresales = leavingDiscoveryForward;
             const invalidAssignmentEdits: string[] = [];
 
             // Debug information to help trace assignment validation failures
@@ -1581,11 +1591,14 @@ export async function updateOpportunity(req: Request, res: Response) {
             // the stage isn't actually changing (idempotent saves).
             const prevStageForGate = previous?.stage?.name || previous?.currentStage || '';
             if (resolveCanonicalStage(newStageName) !== resolveCanonicalStage(prevStageForGate)) {
-                // CR-03 full stage machine: the move must be a LEGAL transition
-                // (declared once in the registry, enforced here on the server so a
-                // client cannot post an arbitrary jump). Admins may override to
+                // CR-03 full stage machine: the move must be a LEGAL transition,
+                // OR a forward advance up the chain (Discovery -> Proposal passes
+                // through the Qualification checkpoint). Enforced on the server so a
+                // client cannot post an arbitrary jump; admins may override to
                 // correct data (CR-12: authorised exceptions are allowed).
-                if (!isLegalTransition(prevStageForGate, newStageName) && !isAdminRole) {
+                if (!isLegalTransition(prevStageForGate, newStageName)
+                    && !isForwardChainMove(prevStageForGate, newStageName)
+                    && !isAdminRole) {
                     return res.status(400).json({
                         error: `Cannot move from "${resolveCanonicalStage(prevStageForGate)}" to "${resolveCanonicalStage(newStageName)}" — not a permitted stage transition.`,
                     });
@@ -1613,10 +1626,11 @@ export async function updateOpportunity(req: Request, res: Response) {
                 if (newStageName === 'Closed Lost') {
                     stageUpdate.detailedStatus = 'Lost';
                 }
-                // Track re-estimation iterations (item 7)
-                // When Sales sends back to Qualification (re-estimate), increment counter
+                // Track re-estimation iterations. CR-03 flow-shift: re-estimation
+                // now sends the deal back from Negotiation to Proposal (the
+                // estimation stage), not to Qualification (the checkpoint).
                 const prevStageName = previous?.stage?.name || previous?.currentStage || '';
-                if (newStageName === 'Qualification' && (prevStageName === 'Proposal' || prevStageName === 'Negotiation')) {
+                if (newStageName === 'Proposal' && prevStageName === 'Negotiation') {
                     stageUpdate.reEstimateCount = (previous as any)?.reEstimateCount ? (previous as any).reEstimateCount + 1 : 1;
                     stageUpdate.detailedStatus = 'Sent for Re-estimate';
                     stageUpdate.gomApproved = false; // Reset GOM approval on re-estimate
@@ -1629,15 +1643,15 @@ export async function updateOpportunity(req: Request, res: Response) {
                 if (newStageName === 'Negotiation') {
                     stageUpdate.detailedStatus = null;
                 }
-                // When presales submits to sales: first time = 'Estimation Submitted', subsequent = 'Re-estimation Submitted'
-                if (newStageName === 'Proposal') {
+                // CR-03 flow-shift: the estimate is built in Proposal and SUBMITTED
+                // by sending the proposal to the client — i.e. moving Proposal ->
+                // Negotiation. So the SOW + committed-quote + GOM-approval gate now
+                // guards entry to Negotiation (it used to guard entry to Proposal).
+                if (newStageName === 'Negotiation') {
                     // Hard requirement: a signed-off Statement of Work (SOW) document
-                    // must be attached in Pre-sales before the deal can be submitted
-                    // to Sales. Time & Material opportunities are exempt — they are
-                    // billed on actuals and typically don't require a signed SOW upfront.
-                    // Match the configured pricing-model value ("Time & Material"), not
-                    // just the "T&M" abbreviation; normalize so common variants
-                    // ("T&M", "Time and Material", "Time&Material") all qualify.
+                    // must be attached in Proposal before the proposal can be sent.
+                    // Time & Material opportunities are exempt — they are billed on
+                    // actuals and typically don't require a signed SOW upfront.
                     const normalizedPricing = (previous?.pricingModel as string || '')
                         .toLowerCase().replace(/\s+/g, '').replace(/and/g, '&');
                     const isTandM = normalizedPricing === 't&m' || normalizedPricing === 'time&material';
@@ -1646,22 +1660,18 @@ export async function updateOpportunity(req: Request, res: Response) {
                         select: { id: true },
                     });
                     if (!isTandM && !currentSow) {
-                        return res.status(400).json({ error: 'Cannot move to Sales: a Statement of Work (SOW) document must be attached in Pre-sales first.' });
+                        return res.status(400).json({ error: 'Cannot move to Negotiation: attach a Statement of Work (SOW) in Proposal first.' });
                     }
-                    // Hard requirement: a committed quote (GOM-calculated revenue)
-                    // must exist before a deal can be submitted to Sales. No GOM
-                    // => no quote => block. This stops un-quoted deals from ever
-                    // reaching Sales / Closed (which then skewed Closed Revenue).
+                    // Hard requirement: a committed quote (GOM-calculated revenue) must
+                    // exist before the proposal is sent. No GOM => no quote => block.
                     const pd = previous?.presalesData as any;
                     const committedQuote = pd?.finalRevenue ?? pd?.totalRevenue ?? pd?.gomSummary?.totalRevenue ?? pd?.projectedQuote;
                     if (!(committedQuote != null && Number(committedQuote) > 0)) {
-                        return res.status(400).json({ error: 'Cannot move to Sales: complete the GOM Calculator first — there is no quote to submit.' });
+                        return res.status(400).json({ error: 'Cannot move to Negotiation: complete the GOM Calculator in Proposal first — there is no quote to send.' });
                     }
                     if (!previous?.gomApproved) {
                         // Auto-approve when the final GOM% is at/above the configured
-                        // threshold (mirrors the frontend banner + Move-to-Sales gate so
-                        // server and UI cannot disagree). Persist gomApproved=true so
-                        // downstream reads see a consistent state.
+                        // threshold (server + UI agree). Persist gomApproved=true.
                         const presalesData = previous?.presalesData as any;
                         const finalGomPercent: number | undefined = presalesData?.finalGomPercent;
                         const config = await prisma.systemConfig.findUnique({ where: { key: 'budget_assumptions' } });
@@ -1669,12 +1679,11 @@ export async function updateOpportunity(req: Request, res: Response) {
                         const autoApproveThreshold: number = assumptions.gomAutoApprovePercent || assumptions.marginPercent || 35;
                         const autoApproved = finalGomPercent != null && finalGomPercent >= autoApproveThreshold;
                         if (!autoApproved) {
-                            return res.status(400).json({ error: `GOM is below the ${autoApproveThreshold}% auto-approve threshold. Request manager approval before moving to Sales.` });
+                            return res.status(400).json({ error: `GOM is below the ${autoApproveThreshold}% auto-approve threshold. Request manager approval before moving to Negotiation.` });
                         }
                         stageUpdate.gomApproved = true;
                     }
                     const reEstCount = (previous as any)?.reEstimateCount || 0;
-                    stageUpdate.detailedStatus = reEstCount > 0 ? 'Re-estimation Submitted' : 'Estimation Submitted';
 
                     // Stamp the cost card this estimate was submitted against.
                     //
@@ -1710,13 +1719,15 @@ export async function updateOpportunity(req: Request, res: Response) {
             }
         }
 
-        // If there's a reEstimate comment, create a Note for audit trail
-        if (body.reEstimateComment && newStageName === 'Qualification') {
+        // If there's a reEstimate comment, create a Note for audit trail.
+        // CR-03 flow-shift: re-estimation sends the deal back Negotiation → Proposal,
+        // so the comment is attached when the target stage is Proposal.
+        if (body.reEstimateComment && newStageName === 'Proposal') {
             await prisma.note.create({
                 data: {
                     content: body.reEstimateComment,
                     mentions: '',
-                    stage: 'Sales',
+                    stage: 'Proposal',
                     opportunityId: id,
                     authorId: req.user!.userId,
                 },
@@ -1829,7 +1840,7 @@ export async function updateOpportunity(req: Request, res: Response) {
                 // win over any other stage/status fields in the same PATCH).
                 ...(autoExtended ? {
                     stageId: (body as any).__autoExtendedStageId,
-                    currentStage: 'Qualification',
+                    currentStage: 'Proposal',
                     detailedStatus: 'Extended',
                     gomApproved: false,
                     reEstimateCount: (previous?.reEstimateCount ?? 0) + 1,
@@ -1976,7 +1987,7 @@ export async function updateOpportunity(req: Request, res: Response) {
 
         // Dedicated audit entries for special stage transitions
         const prevStageName2 = previous?.stage?.name || previous?.currentStage || '';
-        if (newStageName === 'Qualification' && (prevStageName2 === 'Proposal' || prevStageName2 === 'Negotiation')) {
+        if (newStageName === 'Proposal' && prevStageName2 === 'Negotiation') {
             // Re-estimate: write a SEND_BACK_REESTIMATE audit entry
             const reEstComment = body.reEstimateComment ? `Re-estimate Comment: ${body.reEstimateComment}` : 'Sent back for re-estimation';
             await prisma.auditLog.create({
@@ -1989,8 +2000,8 @@ export async function updateOpportunity(req: Request, res: Response) {
                 },
             });
         }
-        if (newStageName === 'Proposal' && prevStageName2 === 'Qualification') {
-            // Presales submitted estimation: write ESTIMATION_SUBMITTED entry
+        if (newStageName === 'Negotiation' && prevStageName2 === 'Proposal') {
+            // Estimation submitted (proposal sent): write ESTIMATION_SUBMITTED entry
             const estDetails: string[] = [];
             if (body.presalesData?.managerName) estDetails.push(`Manager: ${body.presalesData.managerName}`);
             if (body.presalesData?.comments) estDetails.push(`Comments: ${body.presalesData.comments}`);
@@ -2056,7 +2067,7 @@ export async function updateOpportunity(req: Request, res: Response) {
         if (newStageName && newStageName !== (previous?.stage?.name || previous?.currentStage)) {
             let notificationStageName = newStageName;
             const prevStageName2 = previous?.stage?.name || previous?.currentStage || '';
-            if (newStageName === 'Qualification' && (prevStageName2 === 'Proposal' || prevStageName2 === 'Negotiation')) {
+            if (newStageName === 'Proposal' && prevStageName2 === 'Negotiation') {
                 notificationStageName = 'Re-estimation';
             }
 

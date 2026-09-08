@@ -127,10 +127,37 @@ const TRANSITIONS: Record<string, string[]> = {
   Discovery: ['Qualification', 'Closed Lost'],
   Qualification: ['Discovery', 'Proposal', 'Closed Lost'],
   Proposal: ['Qualification', 'Negotiation', 'Closed Lost'],
-  Negotiation: ['Qualification', 'Closed Won', 'Closed Lost'],
+  // Send-back from Negotiation goes to Proposal — re-estimation happens in the
+  // Proposal stage (where the offer/SOW is built), matching the sales flow.
+  Negotiation: ['Proposal', 'Closed Won', 'Closed Lost'],
   'Closed Won': [],
   'Closed Lost': [],
 };
+
+/**
+ * The forward chain of OPEN stages, in order. Qualification is a checkpoint on
+ * the way to Proposal (the estimation/offer stage), so a single "advance" from
+ * Discovery may pass through it. A forward move is any move up this chain.
+ */
+export const FORWARD_CHAIN = ['Discovery', 'Qualification', 'Proposal', 'Negotiation'];
+
+/**
+ * The stages a forward move must traverse (intermediate checkpoints + target),
+ * e.g. Discovery -> Proposal returns ['Qualification', 'Proposal']. Empty when
+ * `to` is not strictly forward of `from` on the chain (a lateral/backward/closed
+ * move, which goes through TRANSITIONS instead).
+ */
+export function stagePath(from?: string | null, to?: string | null): string[] {
+  const f = FORWARD_CHAIN.indexOf(resolveCanonicalStage(from));
+  const t = FORWARD_CHAIN.indexOf(resolveCanonicalStage(to));
+  if (f === -1 || t === -1 || t <= f) return [];
+  return FORWARD_CHAIN.slice(f + 1, t + 1);
+}
+
+/** A forward advance up the chain (possibly across a checkpoint). */
+export function isForwardChainMove(from?: string | null, to?: string | null): boolean {
+  return stagePath(from, to).length > 0;
+}
 
 /** Legal destination stages from a given stage (canonical). Unknown → none. */
 export function allowedTransitions(from?: string | null): string[] {

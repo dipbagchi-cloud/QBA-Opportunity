@@ -147,10 +147,11 @@ export function buildOpportunityAccess(params: {
   const canEditPresalesContent = isAdmin || editAllActive || (isAssignedPresales && canEditAssignedOpportunity);
 
   // "Eligible for Escalation" changes hands as the deal progresses: the sales
-  // rep raises it while the deal is still in Pipeline, the offshore manager
-  // owns it through Presales, and once it reaches Sales either of them can
-  // adjust it. Anyone else — including other sales reps and presales
-  // assignees — sees it read-only. Closed deals freeze like everything else.
+  // rep raises it while the deal is still in Discovery, the offshore manager
+  // owns it through the estimation stage (now Proposal — CR-03 flow-shift moved
+  // estimation there from Presales), and once the proposal is sent (Negotiation)
+  // either of them can adjust it. Anyone else — including other sales reps and
+  // presales assignees — sees it read-only. Closed deals freeze like everything.
   const escalationOwnedAtThisStage = (() => {
     if (isClosedStage) return false;
     switch (stageName) {
@@ -159,8 +160,9 @@ export function buildOpportunityAccess(params: {
         return isSalesRep;
       case 'Qualification':
       case 'Presales':
-        return isManager;
       case 'Proposal':
+        // Proposal is the estimation stage — manager-owned, as Presales was.
+        return isManager;
       case 'Sales':
       case 'Negotiation':
         return isSalesRep || isManager;

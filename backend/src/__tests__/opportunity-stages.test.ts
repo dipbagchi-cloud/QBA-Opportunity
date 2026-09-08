@@ -81,7 +81,9 @@ describe('canonical stage registry', () => {
     expect(allowedTransitions('Discovery').sort()).toEqual(['Closed Lost', 'Qualification']);
     expect(allowedTransitions('Qualification').sort()).toEqual(['Closed Lost', 'Discovery', 'Proposal']);
     expect(allowedTransitions('Proposal').sort()).toEqual(['Closed Lost', 'Negotiation', 'Qualification']);
-    expect(allowedTransitions('Negotiation').sort()).toEqual(['Closed Lost', 'Closed Won', 'Qualification']);
+    // CR-03 flow-shift: re-estimation sends the deal back Negotiation -> Proposal
+    // (the estimation stage), not to the Qualification checkpoint.
+    expect(allowedTransitions('Negotiation').sort()).toEqual(['Closed Lost', 'Closed Won', 'Proposal']);
     expect(allowedTransitions('Closed Won')).toEqual([]);
     // legal vs illegal
     expect(isLegalTransition('Discovery', 'Qualification')).toBe(true);
@@ -97,7 +99,8 @@ describe('canonical stage registry', () => {
     const moves = stageMoves('Negotiation');
     expect(moves.find(m => m.to === 'Closed Won')?.kind).toBe('win');
     expect(moves.find(m => m.to === 'Closed Lost')?.kind).toBe('lose');
-    expect(moves.find(m => m.to === 'Qualification')?.kind).toBe('back');
+    // CR-03 flow-shift: the send-back from Negotiation goes to Proposal.
+    expect(moves.find(m => m.to === 'Proposal')?.kind).toBe('back');
     expect(stageMoves('Discovery').find(m => m.to === 'Qualification')?.kind).toBe('forward');
   });
 
