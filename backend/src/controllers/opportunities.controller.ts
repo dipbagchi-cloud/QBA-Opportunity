@@ -533,6 +533,9 @@ export async function listOpportunities(req: Request, res: Response) {
                 isQualified: (opp as any).isQualified === true,
                 qualificationStatus: (opp as any).qualificationStatus ?? null,
                 qualificationScore: (opp as any).qualificationScore ?? null,
+                // CR-05: expose archived so the dashboard can exclude archived
+                // deals from pipeline totals and reconcile with analytics.
+                isArchived: (opp as any).isArchived === true,
                 eligibleForEscalation: (opp as any).eligibleForEscalation === true,
                 healthScore: finalHealth,
                 metadata: opp.metadata,

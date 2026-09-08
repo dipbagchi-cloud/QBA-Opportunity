@@ -36,6 +36,17 @@ describe('canonical stage registry', () => {
     expect(resolveCanonicalStage('Proposal Lost')).toBe('Closed Lost');
   });
 
+  // CR-05 relies on this: every closed variant must read as closed so the
+  // active-pipeline filter excludes them (not just the two exact names).
+  it('treats every closed variant as isClosed for the active-pipeline filter', () => {
+    for (const v of ['Closed Won', 'Closed-Won', 'Delivered', 'Closed Lost', 'Proposal Lost']) {
+      expect(getStageMeta(v)?.isClosed).toBe(true);
+    }
+    for (const v of ['Discovery', 'Qualification', 'Presales', 'Proposal', 'Sales', 'Negotiation']) {
+      expect(getStageMeta(v)?.isClosed).toBe(false);
+    }
+  });
+
   it('passes canonical names through and leaves unknown input untouched', () => {
     expect(resolveCanonicalStage('Negotiation')).toBe('Negotiation');
     expect(resolveCanonicalStage('Banana')).toBe('Banana');

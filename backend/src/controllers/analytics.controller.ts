@@ -4,7 +4,7 @@ import { prisma } from '../lib/prisma';
 // registry (single source of truth). Imported under the original name so every
 // call site below is unchanged — this is a pure relocation, not a behaviour
 // change (asserted in opportunity-stages.test.ts).
-import { STAGE_DISPLAY_GROUP as STAGE_GROUP } from '../lib/opportunity-stages';
+import { STAGE_DISPLAY_GROUP as STAGE_GROUP, getStageMeta } from '../lib/opportunity-stages';
 // CR-04: probability comes from the single canonical model (maturity-aware),
 // replacing the local stage-only getStageProbability that disagreed with it.
 import { calculateOpportunityProbability, resolveProbabilityConfig, type ProbabilityConfig } from '../lib/opportunity-probability';
@@ -63,7 +63,11 @@ function getRevenue(opp: any, ratesToBase: Record<string, number>, opts?: { quot
 // GET /api/analytics
 export async function getAnalytics(req: Request, res: Response) {
     try {
+        // CR-05: archived opportunities are excluded from analytics entirely —
+        // they have been removed from the pipeline, so counting them anywhere
+        // inflates the totals (the doc lists Archived alongside Lost as excluded).
         const opportunities = await prisma.opportunity.findMany({
+            where: { isArchived: false },
             include: { client: true, owner: true, type: true, stage: true }
         });
 
@@ -217,10 +221,12 @@ export async function getAnalytics(req: Request, res: Response) {
         const salesRepRevenueData = (Object.values(revenueBySalesRep) as { name: string; revenue: number }[]).sort((a, b) => b.revenue - a.revenue);
 
         // 4. Pipeline Metrics
-        const activeOpps = opportunities.filter(o => {
-            const sn = o.stage?.name || o.currentStage;
-            return sn !== 'Closed Won' && sn !== 'Closed Lost';
-        });
+        // CR-05: active pipeline = every non-closed deal, using the canonical
+        // registry so all closed variants (Closed Won/Lost, Delivered, Closed-Won)
+        // are excluded, not just the two exact names. Archived deals are already
+        // gone (query filter above), so this reconciles to open-and-not-archived.
+        const activeOpps = opportunities.filter(o =>
+            getStageMeta(o.stage?.name || o.currentStage)?.isClosed !== true);
 
         const wonOpps = opportunities.filter(o => {
             const sn = o.stage?.name || o.currentStage;

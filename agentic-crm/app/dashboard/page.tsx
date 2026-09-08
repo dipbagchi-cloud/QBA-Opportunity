@@ -140,6 +140,8 @@ interface Opportunity {
     /** CR-02: qualification outcome. */
     isQualified?: boolean;
     qualificationStatus?: string | null;
+    /** CR-05: archived deals are excluded from pipeline totals. */
+    isArchived?: boolean;
     monthlyRevenue?: Record<string, number>;
 }
 
@@ -483,7 +485,9 @@ export default function DashboardPage() {
     const CLOSED_STAGES_ALL = ['Closed Won', 'Closed-Won', 'Closed Lost', 'Delivered'];
 
     const opportunities = useMemo(() => {
-        return rawOpportunities.map(o => {
+        // CR-05: archived deals are excluded from every dashboard aggregation, so
+        // the tiles reconcile with the analytics endpoint (which also excludes them).
+        return rawOpportunities.filter(o => !o.isArchived).map(o => {
             const cur = o.currency || 'INR';
             // Convert opp-currency amounts to INR base. Prefer the opportunity's
             // stored exchangeRatesSnapshot (the same rates the list view uses)
@@ -701,8 +705,10 @@ export default function DashboardPage() {
     // open book, matching the analytics API, which defines projectedRevenue
     // and pipelineValue with the same expression.
     const isOpenStage = (o: Opportunity) => {
-        const s = o.currentStage;
-        return s !== 'Closed Won' && s !== 'Closed-Won' && s !== 'Closed Lost';
+        // CR-05: use the full closed set (incl. Delivered) so "open" reconciles
+        // with the analytics active-pipeline definition. Archived deals are
+        // already filtered out of `opportunities` above.
+        return !CLOSED_STAGES_ALL.includes(o.currentStage);
     };
     const openPipeline = opportunities.filter(isOpenStage);
     const projectedRevenue = sumValue(openPipeline);
