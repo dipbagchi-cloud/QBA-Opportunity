@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { sendNotificationEmail } from '../lib/email';
 import { evaluateStageChangeRules, evaluateDataConditionRules, evaluateOpportunityCreatedRules, evaluateAssignmentChangeRules, evaluateOpportunityChangeNotice, evaluateExtendedNotification, evaluateStartDateChangedNotification, evaluateCommentNotification, resolveCalculatedFields } from '../lib/notification-engine';
-import { calculateOpportunityProbability } from '../lib/opportunity-probability';
+import { calculateOpportunityProbability, resolveProbabilityConfig } from '../lib/opportunity-probability';
 import { classifyHot, resolveHotConfig } from '../lib/opportunity-hot';
 import { scoreQualification, resolveQualificationConfig } from '../lib/opportunity-qualification';
 import { buildOpportunityAccess } from '../lib/opportunity-access';
@@ -206,6 +206,9 @@ export async function listOpportunities(req: Request, res: Response) {
         // CR-01 Hot classification config (maturity-based, activity-independent).
         // Started alongside the stalled config so it is ready by the row mapper.
         const hotConfigPromise = prisma.systemConfig.findUnique({ where: { key: 'hot_classification' } });
+        // CR-04: config-driven probability, so the list's displayed probability
+        // matches analytics' forecast.
+        const probConfigPromise = prisma.systemConfig.findUnique({ where: { key: 'probability_model' } });
 
         const andFilters: any[] = [];
 
@@ -348,7 +351,7 @@ export async function listOpportunities(req: Request, res: Response) {
             select: { id: true, name: true },
         });
 
-        const [opportunities, total, stalledConfig, hotConfigRaw] = await Promise.all([
+        const [opportunities, total, stalledConfig, hotConfigRaw, probConfigRaw] = await Promise.all([
             prisma.opportunity.findMany({
                 where,
                 include: {
@@ -377,6 +380,7 @@ export async function listOpportunities(req: Request, res: Response) {
             prisma.opportunity.count({ where }),
             stalledConfigPromise,
             hotConfigPromise,
+            probConfigPromise,
         ]);
 
         // Inactivity threshold (in days) used to flag a deal as stalled —
@@ -387,11 +391,12 @@ export async function listOpportunities(req: Request, res: Response) {
         // every row's "closing soon" test uses the same instant.
         const hotConfig = resolveHotConfig(hotConfigRaw?.value ?? null);
         const hotNow = new Date();
+        const probConfig = resolveProbabilityConfig(probConfigRaw?.value ?? null);
 
         // Transform for frontend with dynamic intelligence 
         const formatted = opportunities.map(opp => {
             const stageName = opp.stage?.name || opp.currentStage || 'Discovery';
-            const probability = calculateOpportunityProbability(opp as any);
+            const probability = calculateOpportunityProbability(opp as any, probConfig);
 
             const hasPresalesData = opp.presalesData && Object.keys(opp.presalesData as any).length > 0;
             const hasRate = opp.expectedDayRate && Number(opp.expectedDayRate) > 0;

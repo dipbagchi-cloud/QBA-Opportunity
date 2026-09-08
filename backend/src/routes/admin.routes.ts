@@ -18,6 +18,8 @@ import {
   updateHotClassification,
   getQualificationFramework,
   updateQualificationFramework,
+  getProbabilityModel,
+  updateProbabilityModel,
   listRoles,
   createRole,
   updateRole,
@@ -254,6 +256,10 @@ router.put('/hot-classification', authorize(PERMISSIONS.SETTINGS_MANAGE), update
 // CR-02 Qualification framework (GET: any authenticated user, PUT: settings:manage)
 router.get('/qualification-framework', getQualificationFramework);
 router.put('/qualification-framework', authorize(PERMISSIONS.SETTINGS_MANAGE), updateQualificationFramework);
+
+// CR-04 Probability model (GET: any authenticated user, PUT: settings:manage)
+router.get('/probability-model', getProbabilityModel);
+router.put('/probability-model', authorize(PERMISSIONS.SETTINGS_MANAGE), updateProbabilityModel);
 
 // Audit logs (requires auditlogs:view)
 router.get('/audit-logs', authorize(PERMISSIONS.AUDITLOGS_VIEW), listAuditLogs);

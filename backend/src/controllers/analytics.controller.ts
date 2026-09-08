@@ -5,19 +5,9 @@ import { prisma } from '../lib/prisma';
 // call site below is unchanged — this is a pure relocation, not a behaviour
 // change (asserted in opportunity-stages.test.ts).
 import { STAGE_DISPLAY_GROUP as STAGE_GROUP } from '../lib/opportunity-stages';
-
-// Dynamic probability based on stage
-function getStageProbability(stageName: string): number {
-    switch (stageName) {
-        case 'Discovery': case 'Pipeline': return 10;
-        case 'Qualification': case 'Presales': return 25;
-        case 'Proposal': case 'Sales': return 50;
-        case 'Negotiation': return 75;
-        case 'Closed Won': return 100;
-        case 'Closed Lost': return 0;
-        default: return 10;
-    }
-}
+// CR-04: probability comes from the single canonical model (maturity-aware),
+// replacing the local stage-only getStageProbability that disagreed with it.
+import { calculateOpportunityProbability, resolveProbabilityConfig, type ProbabilityConfig } from '../lib/opportunity-probability';
 
 const PIPELINE_STAGE_NAMES = new Set(['Discovery', 'Pipeline']);
 
@@ -83,6 +73,11 @@ export async function getAnalytics(req: Request, res: Response) {
             acc[r.code] = Number(r.rateToBase) || 0;
             return acc;
         }, {} as Record<string, number>);
+
+        // CR-04: forecast analytics use the corrected, config-driven probability.
+        const probConfigRow = await prisma.systemConfig.findUnique({ where: { key: 'probability_model' } });
+        const probConfig: ProbabilityConfig = resolveProbabilityConfig(probConfigRow?.value ?? null);
+        const stageProb = (o: any) => calculateOpportunityProbability(o, probConfig);
 
         // 1. Opportunity Dashboard Data
         const revenueByMonth: any = {};
@@ -243,7 +238,7 @@ export async function getAnalytics(req: Request, res: Response) {
 
         // Weighted pipeline value (probability × value)
         const weightedPipeline = activeOpps.reduce((sum, o) => {
-            const prob = getStageProbability(o.stage?.name || o.currentStage || 'Pipeline');
+            const prob = stageProb(o);
             return sum + (getRevenue(o, ratesToBase) * prob / 100);
         }, 0);
 
@@ -455,7 +450,7 @@ export async function getAnalytics(req: Request, res: Response) {
                 // Additional fields for mobile analytics
                 totalValue: pipelineValue,
                 totalCount: activeOpps.length,
-                avgProbability: activeOpps.length > 0 ? activeOpps.reduce((sum, o) => sum + getStageProbability(o.stage?.name || o.currentStage || 'Pipeline'), 0) / activeOpps.length : 0,
+                avgProbability: activeOpps.length > 0 ? activeOpps.reduce((sum, o) => sum + stageProb(o), 0) / activeOpps.length : 0,
                 weightedValue: weightedPipeline,
                 stageBreakdown,
                 stages: stageBreakdown,

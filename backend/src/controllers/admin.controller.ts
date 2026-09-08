@@ -6,6 +6,7 @@ import { isSSOUser, getAuthMode } from './auth.controller';
 import { recordAudit } from '../lib/audit';
 import { resolveHotConfig, DEFAULT_HOT_CONFIG } from '../lib/opportunity-hot';
 import { resolveQualificationConfig, DEFAULT_QUALIFICATION_CONFIG, QUALIFICATION_DIMENSIONS } from '../lib/opportunity-qualification';
+import { resolveProbabilityConfig, DEFAULT_PROBABILITY_CONFIG } from '../lib/opportunity-probability';
 
 // GET /api/admin/users
 export async function listUsers(req: Request, res: Response) {
@@ -1115,6 +1116,58 @@ export async function updateQualificationFramework(req: Request, res: Response) 
   } catch (error) {
     console.error('Update qualification framework error:', error);
     res.status(500).json({ error: 'Failed to update qualification framework config' });
+  }
+}
+
+// ── CR-04 Probability model ──
+// Single canonical probability curve + maturity guard, tunable by Sales
+// Leadership without a deploy.
+const PROBABILITY_MODEL_KEY = 'probability_model';
+
+// GET /api/admin/probability-model
+export async function getProbabilityModel(req: Request, res: Response) {
+  try {
+    const config = await prisma.systemConfig.findUnique({ where: { key: PROBABILITY_MODEL_KEY } });
+    res.json(resolveProbabilityConfig(config?.value ?? DEFAULT_PROBABILITY_CONFIG));
+  } catch (error) {
+    console.error('Get probability model error:', error);
+    res.status(500).json({ error: 'Failed to fetch probability model config' });
+  }
+}
+
+// PUT /api/admin/probability-model
+export async function updateProbabilityModel(req: Request, res: Response) {
+  try {
+    if (!req.body || typeof req.body !== 'object') {
+      return res.status(400).json({ error: 'Request body must be a JSON object' });
+    }
+    const value = resolveProbabilityConfig(req.body) as any;
+
+    const config = await prisma.systemConfig.upsert({
+      where: { key: PROBABILITY_MODEL_KEY },
+      update: { value },
+      create: {
+        key: PROBABILITY_MODEL_KEY,
+        value,
+        category: 'analytics',
+        description: 'CR-04 canonical probability model (stage curve + maturity guard)',
+      },
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        entity: 'SystemConfig',
+        entityId: config.id,
+        action: 'UPDATE_PROBABILITY_MODEL',
+        userId: req.user!.userId,
+        changes: value,
+      },
+    });
+
+    res.json(config.value);
+  } catch (error) {
+    console.error('Update probability model error:', error);
+    res.status(500).json({ error: 'Failed to update probability model config' });
   }
 }
 
