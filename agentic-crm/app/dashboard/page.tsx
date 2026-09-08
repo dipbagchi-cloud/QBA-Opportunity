@@ -90,6 +90,10 @@ interface Analytics {
         pipelineValue: number;
         avgDealValue: number;
         totalOpps: number;
+        // CR-06 leadership forecast analytics
+        wonByPeriod?: { last7Days: { count: number; value: number }; currentMonth: { count: number; value: number }; previousMonth: { count: number; value: number } };
+        closingThisMonth?: { count: number; value: number; forecastValue: number };
+        pipelineByVertical?: { name: string; count: number; value: number }[];
     };
     presales: {
         proposalSuccessRate: number;
@@ -1537,6 +1541,40 @@ export default function DashboardPage() {
                     <span>{COLD_LEGEND.replace(/^Cold — /, '')}</span>
                 </span>
             </div>
+
+            {/* CR-06: Leadership forecast — won-by-period, closing this month, verticals */}
+            {pipeline && (pipeline.closingThisMonth || pipeline.wonByPeriod) && (
+                <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+                    <h3 className="text-sm font-bold text-slate-800 mb-3">Leadership Forecast</h3>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+                            <div className="text-[10px] uppercase font-semibold text-slate-500">Won · Last 7 days</div>
+                            <div className="text-lg font-bold text-emerald-700">{fmtCurrency(pipeline.wonByPeriod?.last7Days.value || 0, { compact: true })}</div>
+                            <div className="text-[11px] text-slate-400">{pipeline.wonByPeriod?.last7Days.count || 0} deals</div>
+                        </div>
+                        <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+                            <div className="text-[10px] uppercase font-semibold text-slate-500">Won · This month</div>
+                            <div className="text-lg font-bold text-emerald-700">{fmtCurrency(pipeline.wonByPeriod?.currentMonth.value || 0, { compact: true })}</div>
+                            <div className="text-[11px] text-slate-400">{pipeline.wonByPeriod?.currentMonth.count || 0} deals · prev {fmtCurrency(pipeline.wonByPeriod?.previousMonth.value || 0, { compact: true })}</div>
+                        </div>
+                        <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+                            <div className="text-[10px] uppercase font-semibold text-slate-500">Closing this month</div>
+                            <div className="text-lg font-bold text-indigo-700">{fmtCurrency(pipeline.closingThisMonth?.forecastValue || 0, { compact: true })}</div>
+                            <div className="text-[11px] text-slate-400">{pipeline.closingThisMonth?.count || 0} deals · {fmtCurrency(pipeline.closingThisMonth?.value || 0, { compact: true })} total</div>
+                        </div>
+                        <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+                            <div className="text-[10px] uppercase font-semibold text-slate-500">Active pipeline by vertical</div>
+                            <div className="flex flex-wrap gap-1.5 mt-1">
+                                {(pipeline.pipelineByVertical || []).map(v => (
+                                    <span key={v.name} className="px-1.5 py-0.5 rounded border border-slate-200 bg-white text-[11px] text-slate-600">
+                                        {v.name}: <span className="font-semibold">{v.count}</span> · {fmtCurrency(v.value, { compact: true })}
+                                    </span>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Pending Actions — only the logged-in user's own open opportunities */}
             {user?.name && (

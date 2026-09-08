@@ -259,6 +259,49 @@ export async function getAnalytics(req: Request, res: Response) {
         const qualifiedPipelineValue = qualifiedActive.reduce((sum, o) => sum + getRevenue(o, ratesToBase), 0);
         const unqualifiedPipelineValue = unqualifiedActive.reduce((sum, o) => sum + getRevenue(o, ratesToBase), 0);
 
+        // ── CR-06: leadership forecast analytics (on the corrected logic) ──
+        const nowD = new Date();
+        const startOfMonth = new Date(nowD.getFullYear(), nowD.getMonth(), 1);
+        const startOfPrevMonth = new Date(nowD.getFullYear(), nowD.getMonth() - 1, 1);
+        const endOfMonth = new Date(nowD.getFullYear(), nowD.getMonth() + 1, 0, 23, 59, 59);
+        const sevenDaysAgo = new Date(nowD.getTime() - 7 * 86400000);
+        const inRange = (d: any, from: Date, to: Date) => {
+            if (!d) return false;
+            const t = new Date(d).getTime();
+            return t >= from.getTime() && t <= to.getTime();
+        };
+        const wonSummary = (from: Date, to: Date) => {
+            const rows = wonOpps.filter(o => inRange((o as any).actualCloseDate, from, to));
+            return { count: rows.length, value: rows.reduce((s, o) => s + getRevenue(o, ratesToBase), 0) };
+        };
+        const wonByPeriod = {
+            last7Days: wonSummary(sevenDaysAgo, nowD),
+            currentMonth: wonSummary(startOfMonth, endOfMonth),
+            previousMonth: wonSummary(startOfPrevMonth, startOfMonth),
+        };
+        // Active deals expected to close this month, with probability-weighted forecast.
+        const closingThisMonthOpps = activeOpps.filter(o => inRange((o as any).expectedCloseDate, startOfMonth, endOfMonth));
+        const closingThisMonth = {
+            count: closingThisMonthOpps.length,
+            value: closingThisMonthOpps.reduce((s, o) => s + getRevenue(o, ratesToBase), 0),
+            forecastValue: closingThisMonthOpps.reduce((s, o) => s + getRevenue(o, ratesToBase) * stageProb(o) / 100, 0),
+        };
+        // Vertical slice of the active pipeline (AI / SAP / Other), by technology.
+        const verticalOf = (o: any) => {
+            const t = (o.technology || '').toLowerCase();
+            if (/\bai\b/.test(t) || t.includes('a.i')) return 'AI';
+            if (t.includes('sap')) return 'SAP';
+            return 'Other';
+        };
+        const byVerticalMap: Record<string, { name: string; count: number; value: number }> = {};
+        for (const o of activeOpps) {
+            const v = verticalOf(o);
+            if (!byVerticalMap[v]) byVerticalMap[v] = { name: v, count: 0, value: 0 };
+            byVerticalMap[v].count += 1;
+            byVerticalMap[v].value += getRevenue(o, ratesToBase);
+        }
+        const pipelineByVertical = Object.values(byVerticalMap);
+
         // 5. Pre-Sales Metrics
         const presalesOpps = opportunities.filter(o => {
             const sn = o.stage?.name || o.currentStage;
@@ -458,6 +501,10 @@ export async function getAnalytics(req: Request, res: Response) {
                 unqualifiedCount: unqualifiedActive.length,
                 qualifiedPipelineValue,
                 unqualifiedPipelineValue,
+                // CR-06 leadership forecast analytics.
+                wonByPeriod,
+                closingThisMonth,
+                pipelineByVertical,
                 totalOpps: opportunities.length,
                 // Additional fields for mobile analytics
                 totalValue: pipelineValue,
