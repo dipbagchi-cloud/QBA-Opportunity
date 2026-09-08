@@ -1,18 +1,10 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
-
-// Stage-to-display mapping for grouping
-const STAGE_GROUP: Record<string, string> = {
-    'Discovery': 'Pipeline',
-    'Pipeline': 'Pipeline',
-    'Qualification': 'Qualification',
-    'Presales': 'Qualification',
-    'Proposal': 'Proposal',
-    'Sales': 'Proposal',
-    'Negotiation': 'Negotiation',
-    'Closed Won': 'Closed Won',
-    'Closed Lost': 'Closed Lost',
-};
+// CR-03 Phase 1: the stage→display-group map now lives in the canonical stage
+// registry (single source of truth). Imported under the original name so every
+// call site below is unchanged — this is a pure relocation, not a behaviour
+// change (asserted in opportunity-stages.test.ts).
+import { STAGE_DISPLAY_GROUP as STAGE_GROUP } from '../lib/opportunity-stages';
 
 // Dynamic probability based on stage
 function getStageProbability(stageName: string): number {
