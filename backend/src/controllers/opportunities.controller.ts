@@ -99,6 +99,10 @@ async function resolveOpportunityAccess(
  */
 export const STAGE_STATUS_VALUES = ['Extended', 'On Hold', 'Stalled'] as const;
 
+// CR-09: controlled revenue / engagement motion types. Product/Sales/Finance
+// may refine these master values; keep in sync with the create/edit form.
+export const REVENUE_TYPES = ['New Business', 'Extension/Renewal', 'Incremental/Expansion', 'Extension + Incremental'];
+
 function isStageStatusValue(value: string): boolean {
     return STAGE_STATUS_VALUES.some((s) => s.toLowerCase() === value.trim().toLowerCase());
 }
@@ -236,6 +240,7 @@ export async function listOpportunities(req: Request, res: Response) {
         const technologyFilters = readMulti(req.query.technology);
         const qualificationFilters = readMulti(req.query.qualificationStatus);
         const lifecycleFilters = readMulti(req.query.lifecycleStatus);
+        const revenueTypeFilters = readMulti(req.query.revenueType);
 
         // Started here, awaited in two places: the Stalled pseudo-filter needs
         // the threshold to build the WHERE clause, and the row mapper needs it
@@ -366,6 +371,11 @@ export async function listOpportunities(req: Request, res: Response) {
         // CR-07: lifecycle status filter (derived → WHERE fragment).
         if (lifecycleFilters.length) {
             andFilters.push(anyOf(lifecycleFilters, (v) => lifecycleStatusClause(v)));
+        }
+
+        // CR-09: revenue / engagement type filter.
+        if (revenueTypeFilters.length) {
+            andFilters.push(anyOf(revenueTypeFilters, (v) => ({ revenueType: { equals: v } })));
         }
 
         if (andFilters.length > 0) {
@@ -544,6 +554,7 @@ export async function listOpportunities(req: Request, res: Response) {
                 region: opp.region || '',
                 country: (opp as any).country || '',
                 projectType: (opp as any).projectType || '',
+                revenueType: (opp as any).revenueType || '',
                 fundingType: (opp as any).fundingType || '',
                 pricingModel: (opp as any).pricingModel || '',
                 practice: (opp as any).practice || '',
@@ -691,6 +702,8 @@ export async function getOpportunityFilterOptions(_req: Request, res: Response) 
             qualificationStatus: ['Qualified', 'Needs Review', 'Not Qualified', 'Not Assessed'],
             // CR-07: lifecycle statuses (Won/Lost/Archived derive from stage/flag).
             lifecycleStatus: ['Active', 'On Hold', 'Future/Deferred', 'Won', 'Lost', 'Archived'],
+            // CR-09: revenue / engagement type controlled values.
+            revenueType: REVENUE_TYPES,
         });
     } catch (error) {
         console.error('Filter options error:', error);
@@ -912,6 +925,7 @@ export async function createOpportunity(req: Request, res: Response) {
                 practice: body.practice,
                 technology: body.technology,
                 projectType: body.projectType,
+                revenueType: body.revenueType,
                 tentativeStartDate: parseDateOnly(body.tentativeStartDate) ?? undefined,
                 tentativeDuration: body.tentativeDuration,
                 tentativeDurationUnit: body.tentativeDurationUnit,
@@ -1710,6 +1724,7 @@ export async function updateOpportunity(req: Request, res: Response) {
                 practice: body.practice,
                 technology: body.technology,
                 projectType: body.projectType,
+                revenueType: body.revenueType,
                 salesRepName: body.salesRepName || body.salesRep,
                 managerName: body.managerName,
                 presalesAssigneeName: body.presalesAssigneeName,

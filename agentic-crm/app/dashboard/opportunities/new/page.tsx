@@ -26,6 +26,8 @@ import { API_URL, getAuthHeaders } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 
 const DURATION_UNITS = ["days", "weeks", "months"];
+// CR-09: revenue / engagement motion types (mirror REVENUE_TYPES in the backend).
+const REVENUE_TYPE_OPTIONS = ["New Business", "Extension/Renewal", "Incremental/Expansion", "Extension + Incremental"];
 
 function SearchableSelect({ name, value, options, disabled, onChange, placeholder, required, className }: any) {
     const [open, setOpen] = useState(false);
@@ -199,6 +201,7 @@ export default function NewOpportunityPage() {
         country: "",
         region: "",
         projectType: "",
+        revenueType: "",
         projectName: "",
         practice: "",
         salesRep: "",
@@ -493,6 +496,7 @@ export default function NewOpportunityPage() {
                 practice: formData.practice,
                 technology: formData.technology,
                 projectType: formData.projectType,
+                revenueType: formData.revenueType,
                 tentativeStartDate: formData.tentativeStartDate ? new Date(formData.tentativeStartDate) : null,
                 tentativeEndDate: formData.tentativeEndDate ? new Date(formData.tentativeEndDate) : null,
                 expectedCloseDate: formData.expectedCloseDate ? new Date(formData.expectedCloseDate) : null,
@@ -643,6 +647,18 @@ export default function NewOpportunityPage() {
                             onChange={handleChange}
                             placeholder="Select Project Type"
                             options={projectTypes.map((t: string) => ({ label: t, value: t }))}
+                        />
+                    </div>
+
+                    {/* CR-09: Revenue / Engagement Type */}
+                    <div className="space-y-1.5">
+                        <label className="block text-sm font-bold text-slate-700">Revenue Type</label>
+                        <SearchableSelect
+                            name="revenueType"
+                            value={formData.revenueType}
+                            onChange={handleChange}
+                            placeholder="Select Revenue Type"
+                            options={REVENUE_TYPE_OPTIONS.map((t) => ({ label: t, value: t }))}
                         />
                     </div>
 

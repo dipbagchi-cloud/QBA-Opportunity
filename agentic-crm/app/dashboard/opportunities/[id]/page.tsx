@@ -58,6 +58,8 @@ import ResetActualGom from "./components/ResetActualGom";
 const ACTUAL_GOM_SUBTABS = ["Project / Resource Mapping", "Actual Booking & Cost", "Margin & Variance"];
 
 const DURATION_UNITS = ["days", "weeks", "months"];
+// CR-09: revenue / engagement motion types (mirror REVENUE_TYPES in the backend).
+const REVENUE_TYPE_OPTIONS = ["New Business", "Extension/Renewal", "Incremental/Expansion", "Extension + Incremental"];
 const ARCHITECTS = ["David Chen", "Sarah Jones", "Rahul Gupta", "Emily White"];
 
 function SearchableSelect({ name, value, options, disabled, onChange, placeholder, required, className }: any) {
@@ -426,6 +428,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         country: "",
         region: "",
         projectType: "",
+        revenueType: "",
         projectName: "",
         practice: "",
         salesRep: "",
@@ -986,6 +989,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     country: data.country || "",
                     region: data.region || "",
                     projectType: data.projectType || "New Development",
+                    revenueType: data.revenueType || "",
                     projectName: data.title || "",
                     practice: data.practice || "",
                     salesRep: data.salesRepName || "",
@@ -2375,6 +2379,19 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             />
                         </div>
 
+                        {/* CR-09: Revenue / Engagement Type */}
+                        <div className="space-y-1.5">
+                            <label className="block text-sm font-bold text-slate-700">Revenue Type</label>
+                            <SearchableSelect
+                                name="revenueType"
+                                value={formData.revenueType}
+                                options={REVENUE_TYPE_OPTIONS.map((t) => ({ value: t, label: t }))}
+                                onChange={handleChange}
+                                placeholder="Select Revenue Type"
+                                disabled={!isPipelineEditable}
+                            />
+                        </div>
+
                         {/* Row 2 */}
                         <div className="col-span-1 md:col-span-2 space-y-1.5">
                             <label className="block text-sm font-bold text-slate-700">Project Name *</label>
@@ -2952,6 +2969,10 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                                     <div>
                                         <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Type of Opportunity</label>
                                         <div className="font-semibold text-slate-800">{formData.projectType}</div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Revenue Type</label>
+                                        <div className="font-semibold text-slate-800">{formData.revenueType || <span className="text-slate-400">-</span>}</div>
                                     </div>
                                     <div>
                                         <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Practice</label>

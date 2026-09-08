@@ -343,6 +343,9 @@ model Opportunity {
   practice          String?
   technology        String?
   projectType       String?
+  // CR-09: revenue / engagement motion type (New Business, Extension/Renewal,
+  // Incremental/Expansion, Extension + Incremental).
+  revenueType       String?
   tentativeStartDate DateTime?
   tentativeDuration String?     // e.g. "6"
   tentativeDurationUnit String? // "days", "weeks", or "months"
@@ -419,6 +422,8 @@ model Opportunity {
   @@index([expectedCloseDate])
   @@index([qualificationStatus])
   @@index([isQualified])
+  @@index([lifecycleStatus])
+  @@index([revenueType])
   @@map("opportunities")
 }
 

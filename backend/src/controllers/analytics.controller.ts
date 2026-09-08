@@ -91,6 +91,8 @@ export async function getAnalytics(req: Request, res: Response) {
         const countByOwner: any = {};
         const revenueByTech: any = {};
         const revenueByClient: any = {};
+        // CR-09: won revenue split by revenue/engagement type.
+        const revenueByType: Record<string, number> = {};
         const revenueByOwner: any = {};
         const countBySalesRep: any = {};
         const revenueBySalesRep: any = {};
@@ -176,6 +178,8 @@ export async function getAnalytics(req: Request, res: Response) {
             // Revenue by Client — only Closed Won deals
             if (stageName === 'Closed Won') {
                 revenueByClient[clientName] = (revenueByClient[clientName] || 0) + rev;
+                const rt = (opp as any).revenueType || 'Unclassified';
+                revenueByType[rt] = (revenueByType[rt] || 0) + rev;
             }
 
             // Revenue by Owner (Sales Rep) — only Closed Won deals
@@ -424,6 +428,8 @@ export async function getAnalytics(req: Request, res: Response) {
                 countByOwner: ownerBarData,
                 revenueByTech: techRevenueData,
                 revenueByClient: revenueByClientFull,
+                // CR-09: won revenue by revenue/engagement type (new vs continuation).
+                wonRevenueByType: Object.keys(revenueByType).map(k => ({ name: k, value: revenueByType[k] })),
                 revenueByOwner: ownerRevenueData,
                 countBySalesRep: salesRepBarData,
                 revenueBySalesRep: salesRepRevenueData,

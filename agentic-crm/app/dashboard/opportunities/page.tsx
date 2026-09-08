@@ -73,6 +73,8 @@ const LIST_COLUMNS: ListColumn[] = [
     { key: 'qualificationStatus', label: 'Qualification', filter: true },
     // CR-07: lifecycle status, filterable (Active/On Hold/Future/Won/Lost/Archived).
     { key: 'lifecycleStatus', label: 'Lifecycle', filter: true },
+    // CR-09: revenue / engagement type, filterable.
+    { key: 'revenueType', label: 'Revenue Type', filter: true },
 ];
 
 // CR-07 lifecycle badge styling.
@@ -772,6 +774,9 @@ export default function OpportunitiesPage() {
                                                 {(opp as any).lifecycleStatus
                                                     ? <span className={`px-2 py-0.5 rounded-full border font-semibold ${lifecycleBadgeClass((opp as any).lifecycleStatus)}`}>{(opp as any).lifecycleStatus}</span>
                                                     : <span className="text-slate-300">—</span>}
+                                            </td>
+                                            <td className="py-2.5 px-4 text-[11px] text-slate-600 whitespace-nowrap">
+                                                {(opp as any).revenueType || <span className="text-slate-300">—</span>}
                                             </td>
                                             <td className="py-2.5 px-4 relative">
                                                 <button
