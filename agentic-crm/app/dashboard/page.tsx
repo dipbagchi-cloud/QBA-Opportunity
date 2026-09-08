@@ -134,6 +134,9 @@ interface Opportunity {
     daysInStage: number;
     daysToClose?: number | null;
     isStalled: boolean;
+    /** CR-01: maturity-based Hot flag from the backend (not activity recency). */
+    isHot?: boolean;
+    hotScore?: number;
     monthlyRevenue?: Record<string, number>;
 }
 
@@ -1178,19 +1181,18 @@ export default function DashboardPage() {
      * Open vs Closed partitions the whole book by stage, so the two counts
      * always add up to the "Opportunities" tile.
      *
-     * Hot vs Cold splits the OPEN deals by whether they have been touched
-     * recently. `isStalled` already carries exactly that signal from the
-     * backend: it is set when the last real activity — a field edit OR a new
-     * comment — is older than the configurable stale threshold (Admin >
-     * Budget Assumptions, default 30 days), or when someone put the deal On
-     * Hold. So Hot = open and not stalled, Cold = open and stalled. Closed
-     * deals are in neither, matching Open/Closed above.
+     * CR-01: Hot and Cold now measure two DIFFERENT things, so they are no
+     * longer exact complements. Hot = open deal whose commercial-maturity score
+     * (backend `isHot` — quote sent, stage, closing window; NOT activity) clears
+     * the configured threshold. Cold = open deal that has gone quiet or is On
+     * Hold (the unchanged `isStalled` neglect signal). A deal can be both (mature
+     * but going quiet) or neither. Closed deals are in neither.
      */
     // Same open/closed line as Projected Revenue and Pipeline Value, so the
     // Open tile always agrees with them.
     const openOpps = openPipeline;
     const closedOpps = opportunities.filter(o => !isOpenStage(o));
-    const hotOpps = openOpps.filter(o => !o.isStalled);
+    const hotOpps = openOpps.filter(o => !!o.isHot);
     const coldOpps = openOpps.filter(o => !!o.isStalled);
 
     const portfolioColumns = [
@@ -1200,8 +1202,8 @@ export default function DashboardPage() {
 
     // One wording for the Hot/Cold split, reused by the tile legend and by the
     // note inside each popup, so the two can never drift apart.
-    const HOT_LEGEND = 'Hot — open deal edited or commented on within the stale threshold (Admin › Budget Assumptions, default 30 days).';
-    const COLD_LEGEND = 'Cold — open deal with no edit or comment past that threshold, or put On Hold.';
+    const HOT_LEGEND = 'Hot — open deal whose commercial-maturity score clears the configured threshold (quote sent, stage, closing window). Editing a deal does not make it Hot.';
+    const COLD_LEGEND = 'Cold — open deal with no edit or comment past the stale threshold (Admin › Budget Assumptions, default 30 days), or put On Hold.';
     // Row 3 — by workflow PHASE, which is a different question from row 2's
     // per-stage split: Sales covers the whole sales motion (Proposal through
     // Negotiation), so the two rows never simply repeat each other's numbers.
@@ -1248,11 +1250,11 @@ export default function DashboardPage() {
         },
         {
             label: 'Hot',
-            hint: 'Touched recently',
+            hint: 'Commercially mature',
             badgeColor: 'bg-orange-50 text-orange-700 border-orange-200',
             count: hotOpps.length,
             totalValue: hotOpps.reduce((s, o) => s + (Number(o.value) || 0), 0),
-            drill: { title: 'Hot Opportunities — Edited or Commented Recently', note: HOT_LEGEND, columns: portfolioColumns, data: hotOpps },
+            drill: { title: 'Hot Opportunities — Commercially Mature', note: HOT_LEGEND, columns: portfolioColumns, data: hotOpps },
         },
         {
             label: 'Cold',
@@ -1493,8 +1495,9 @@ export default function DashboardPage() {
             </div>
 
             {/* Legend for the Hot/Cold tiles above — "hot" and "cold" are not
-                self-explanatory, and both are activity signals rather than
-                anything about deal value or probability. */}
+                self-explanatory. CR-01: Hot is a commercial-maturity signal
+                (quote sent, stage, closing window), while Cold is an activity /
+                neglect signal — so the two are no longer complements. */}
             <div className="flex items-start gap-x-4 gap-y-1 flex-wrap text-[10px] text-slate-400 -mt-0.5 px-0.5">
                 <span className="inline-flex items-center gap-1">
                     <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold border bg-orange-50 text-orange-700 border-orange-200">Hot</span>

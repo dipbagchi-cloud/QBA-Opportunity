@@ -3,6 +3,7 @@ import { prisma } from '../lib/prisma';
 import { sendNotificationEmail } from '../lib/email';
 import { evaluateStageChangeRules, evaluateDataConditionRules, evaluateOpportunityCreatedRules, evaluateAssignmentChangeRules, evaluateOpportunityChangeNotice, evaluateExtendedNotification, evaluateStartDateChangedNotification, evaluateCommentNotification, resolveCalculatedFields } from '../lib/notification-engine';
 import { calculateOpportunityProbability } from '../lib/opportunity-probability';
+import { classifyHot, resolveHotConfig } from '../lib/opportunity-hot';
 import { buildOpportunityAccess } from '../lib/opportunity-access';
 import { recordStageEntry } from '../lib/stage-history';
 import path from 'path';
@@ -200,6 +201,9 @@ export async function listOpportunities(req: Request, res: Response) {
         // to compute each deal's badge. Kicking it off before either keeps the
         // common path (no Stalled filter) running in parallel with the query.
         const stalledConfigPromise = prisma.systemConfig.findUnique({ where: { key: 'budget_assumptions' } });
+        // CR-01 Hot classification config (maturity-based, activity-independent).
+        // Started alongside the stalled config so it is ready by the row mapper.
+        const hotConfigPromise = prisma.systemConfig.findUnique({ where: { key: 'hot_classification' } });
 
         const andFilters: any[] = [];
 
@@ -332,7 +336,7 @@ export async function listOpportunities(req: Request, res: Response) {
             select: { id: true, name: true },
         });
 
-        const [opportunities, total, stalledConfig] = await Promise.all([
+        const [opportunities, total, stalledConfig, hotConfigRaw] = await Promise.all([
             prisma.opportunity.findMany({
                 where,
                 include: {
@@ -360,11 +364,17 @@ export async function listOpportunities(req: Request, res: Response) {
             }),
             prisma.opportunity.count({ where }),
             stalledConfigPromise,
+            hotConfigPromise,
         ]);
 
         // Inactivity threshold (in days) used to flag a deal as stalled —
         // configurable from Admin > Budget Assumptions (default 30).
         const stalledDaysThreshold = resolveStalledThreshold(stalledConfig);
+        // CR-01: maturity-based Hot classification config (Admin > Budget
+        // Assumptions › Hot Classification). One `now` for the whole page so
+        // every row's "closing soon" test uses the same instant.
+        const hotConfig = resolveHotConfig(hotConfigRaw?.value ?? null);
+        const hotNow = new Date();
 
         // Transform for frontend with dynamic intelligence 
         const formatted = opportunities.map(opp => {
@@ -490,6 +500,18 @@ export async function listOpportunities(req: Request, res: Response) {
                 daysInStage,
                 daysSinceActivity,
                 isStalled,
+                ...(() => {
+                    // CR-01: Hot is derived from commercial maturity, NOT activity
+                    // recency. When the flag is off, fall back to the legacy rule
+                    // (open and not stalled) so the two can be compared before
+                    // cutover.
+                    const hot = classifyHot(opp as any, hotConfig, hotNow);
+                    return {
+                        isHot: hotConfig.enabled ? hot.isHot : (!isClosedStage && !isStalled),
+                        hotScore: hot.hotScore,
+                        hotReasons: hot.reasons,
+                    };
+                })(),
                 eligibleForEscalation: (opp as any).eligibleForEscalation === true,
                 healthScore: finalHealth,
                 metadata: opp.metadata,

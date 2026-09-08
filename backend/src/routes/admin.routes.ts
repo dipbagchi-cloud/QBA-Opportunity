@@ -14,6 +14,8 @@ import {
   updateAssistantSettings,
   getBudgetAssumptions,
   updateBudgetAssumptions,
+  getHotClassification,
+  updateHotClassification,
   listRoles,
   createRole,
   updateRole,
@@ -242,6 +244,10 @@ router.put('/assistant-settings', authorize(PERMISSIONS.SETTINGS_MANAGE), update
 // Budget assumptions (GET: any authenticated user, PUT: requires settings:manage)
 router.get('/budget-assumptions', getBudgetAssumptions);
 router.put('/budget-assumptions', authorize(PERMISSIONS.SETTINGS_MANAGE), updateBudgetAssumptions);
+
+// CR-01 Hot classification rule (GET: any authenticated user, PUT: settings:manage)
+router.get('/hot-classification', getHotClassification);
+router.put('/hot-classification', authorize(PERMISSIONS.SETTINGS_MANAGE), updateHotClassification);
 
 // Audit logs (requires auditlogs:view)
 router.get('/audit-logs', authorize(PERMISSIONS.AUDITLOGS_VIEW), listAuditLogs);

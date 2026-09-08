@@ -3,6 +3,7 @@ import OpenAI from 'openai';
 import * as chrono from 'chrono-node';
 import { recordStageEntry } from './stage-history';
 import * as phraseMemory from './phrase-memory';
+import { classifyHot, resolveHotConfig } from './opportunity-hot';
 
 const prisma = new PrismaClient();
 
@@ -2484,6 +2485,10 @@ async function execHotCold(params: any, ctx: UserContext): Promise<ActionResult>
     const config = await prisma.systemConfig.findUnique({ where: { key: 'budget_assumptions' } });
     const rawThreshold = Number((config?.value as any)?.stalledDaysThreshold);
     const thresholdDays = Number.isFinite(rawThreshold) && rawThreshold > 0 ? rawThreshold : 30;
+    // CR-01: Hot is now a maturity classification (see lib/opportunity-hot.ts),
+    // not activity recency. Cold stays the neglect signal it always was.
+    const hotCfg = await prisma.systemConfig.findUnique({ where: { key: 'hot_classification' } });
+    const hotConfig = resolveHotConfig(hotCfg?.value ?? null);
 
     const opps = await prisma.opportunity.findMany({
         where: { isArchived: false, stage: { isClosed: false }, ...buildOpportunityWhere(params, ctx) },
@@ -2496,12 +2501,15 @@ async function execHotCold(params: any, ctx: UserContext): Promise<ActionResult>
     });
 
     const now = Date.now();
+    const nowDate = new Date(now);
     const scored = opps.map(o => {
         // Last activity is the later of an edit and a comment — the same pair the
         // opportunities list uses, so the two agree on what "quiet" means.
         const lastNote = o.notes[0]?.createdAt ? new Date(o.notes[0].createdAt).getTime() : 0;
         const lastActivity = Math.max(new Date(o.updatedAt).getTime(), lastNote);
         const idleDays = Math.max(0, Math.floor((now - lastActivity) / 86_400_000));
+        const stalled = !!o.isStalled || idleDays > thresholdDays;
+        const hot = classifyHot(o as any, hotConfig, nowDate);
         return {
             id: o.id,
             title: o.title,
@@ -2510,16 +2518,20 @@ async function execHotCold(params: any, ctx: UserContext): Promise<ActionResult>
             owner: o.owner?.name || '-',
             value: Number(o.value) || 0,
             idleDays,
-            stalled: !!o.isStalled || idleDays > thresholdDays,
+            stalled,
+            // Legacy fallback (hot = not stalled) when the flag is off; these
+            // deals are already open, so that mirrors the old dashboard rule.
+            isHot: hotConfig.enabled ? hot.isHot : !stalled,
+            hotScore: hot.hotScore,
         };
     });
 
-    const picked = scored.filter(o => o.stalled === wantsCold);
-    // Cold: the most neglected first. Hot: the most recently touched first, with
-    // value breaking ties, since that is what "hottest" is asking about.
+    const picked = scored.filter(o => wantsCold ? o.stalled : o.isHot);
+    // Cold: the most neglected first. Hot: the most commercially mature first
+    // (highest score), with value breaking ties.
     picked.sort((a, b) => wantsCold
         ? (b.idleDays - a.idleDays) || (b.value - a.value)
-        : (a.idleDays - b.idleDays) || (b.value - a.value));
+        : (b.hotScore - a.hotScore) || (b.value - a.value));
 
     const shown = picked.slice(0, limit);
     const label = wantsCold ? 'Cold' : 'Hot';
@@ -2529,15 +2541,16 @@ async function execHotCold(params: any, ctx: UserContext): Promise<ActionResult>
         return { tool: 'hot_cold', success: true, summary: `No ${label.toLowerCase()} opportunities right now.`, data: null };
     }
 
-    const lines = shown.map((o, i) =>
-        `${i + 1}. **${o.title}** — ${o.client} · ${o.stage} · ${money(o.value)} · ${o.idleDays}d since last activity`);
+    const lines = shown.map((o, i) => wantsCold
+        ? `${i + 1}. **${o.title}** — ${o.client} · ${o.stage} · ${money(o.value)} · ${o.idleDays}d since last activity`
+        : `${i + 1}. **${o.title}** — ${o.client} · ${o.stage} · ${money(o.value)} · maturity ${o.hotScore}`);
 
     const heading = picked.length > shown.length
         ? `**${label} opportunities** — showing top ${shown.length} of ${picked.length}, ${money(total)} in total`
         : `**${label} opportunities** — ${picked.length}, ${money(total)} in total`;
     const rule = wantsCold
         ? `_Cold = open deals with no edit or comment for over ${thresholdDays} days, or marked On Hold._`
-        : `_Hot = open deals with recent activity (within ${thresholdDays} days)._`;
+        : `_Hot = open deals whose commercial maturity score is at least ${hotConfig.threshold} (quote sent, stage, closing window). Editing a deal does not make it Hot._`;
 
     return {
         tool: 'hot_cold',

@@ -4,6 +4,7 @@ import { DEFAULT_ROLE_PERMISSIONS, validatePermissions } from '../lib/permission
 import { hashPassword } from '../services/auth.service';
 import { isSSOUser, getAuthMode } from './auth.controller';
 import { recordAudit } from '../lib/audit';
+import { resolveHotConfig, DEFAULT_HOT_CONFIG } from '../lib/opportunity-hot';
 
 // GET /api/admin/users
 export async function listUsers(req: Request, res: Response) {
@@ -996,6 +997,64 @@ export async function updateBudgetAssumptions(req: Request, res: Response) {
   } catch (error) {
     console.error('Update budget assumptions error:', error);
     res.status(500).json({ error: 'Failed to update budget assumptions' });
+  }
+}
+
+// ── CR-01 Hot Opportunity classification ──
+// Maturity-based Hot rule, tunable by Sales Leadership without a deploy. Stored
+// as its own systemConfig key so a budget-assumptions save can't clobber it.
+const HOT_CLASSIFICATION_KEY = 'hot_classification';
+
+// GET /api/admin/hot-classification
+export async function getHotClassification(req: Request, res: Response) {
+  try {
+    const config = await prisma.systemConfig.findUnique({
+      where: { key: HOT_CLASSIFICATION_KEY },
+    });
+    // Always return a fully-resolved config so the UI has every field, even
+    // before anything has been saved.
+    res.json(resolveHotConfig(config?.value ?? DEFAULT_HOT_CONFIG));
+  } catch (error) {
+    console.error('Get hot classification error:', error);
+    res.status(500).json({ error: 'Failed to fetch hot classification config' });
+  }
+}
+
+// PUT /api/admin/hot-classification
+export async function updateHotClassification(req: Request, res: Response) {
+  try {
+    if (!req.body || typeof req.body !== 'object') {
+      return res.status(400).json({ error: 'Request body must be a JSON object' });
+    }
+    // Normalise before persisting so a partial/malformed payload can never
+    // store NaN weights that would break the classifier.
+    const value = resolveHotConfig(req.body) as any;
+
+    const config = await prisma.systemConfig.upsert({
+      where: { key: HOT_CLASSIFICATION_KEY },
+      update: { value },
+      create: {
+        key: HOT_CLASSIFICATION_KEY,
+        value,
+        category: 'analytics',
+        description: 'CR-01 maturity-based Hot opportunity classification rule',
+      },
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        entity: 'SystemConfig',
+        entityId: config.id,
+        action: 'UPDATE_HOT_CLASSIFICATION',
+        userId: req.user!.userId,
+        changes: value,
+      },
+    });
+
+    res.json(config.value);
+  } catch (error) {
+    console.error('Update hot classification error:', error);
+    res.status(500).json({ error: 'Failed to update hot classification config' });
   }
 }
 
