@@ -247,6 +247,13 @@ export async function getAnalytics(req: Request, res: Response) {
             return sum + (getRevenue(o, ratesToBase) * prob / 100);
         }, 0);
 
+        // CR-02: split the active pipeline by qualification, so an unqualified
+        // deal does not inflate the qualified pipeline (BANT + Deliverability).
+        const qualifiedActive = activeOpps.filter(o => (o as any).isQualified === true);
+        const unqualifiedActive = activeOpps.filter(o => (o as any).isQualified !== true);
+        const qualifiedPipelineValue = qualifiedActive.reduce((sum, o) => sum + getRevenue(o, ratesToBase), 0);
+        const unqualifiedPipelineValue = unqualifiedActive.reduce((sum, o) => sum + getRevenue(o, ratesToBase), 0);
+
         // 5. Pre-Sales Metrics
         const presalesOpps = opportunities.filter(o => {
             const sn = o.stage?.name || o.currentStage;
@@ -439,6 +446,11 @@ export async function getAnalytics(req: Request, res: Response) {
                 pipelineValue,
                 weightedPipeline,
                 avgDealValue,
+                // CR-02 Qualified-vs-Unqualified split of the active pipeline.
+                qualifiedCount: qualifiedActive.length,
+                unqualifiedCount: unqualifiedActive.length,
+                qualifiedPipelineValue,
+                unqualifiedPipelineValue,
                 totalOpps: opportunities.length,
                 // Additional fields for mobile analytics
                 totalValue: pipelineValue,

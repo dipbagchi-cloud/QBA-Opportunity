@@ -137,6 +137,9 @@ interface Opportunity {
     /** CR-01: maturity-based Hot flag from the backend (not activity recency). */
     isHot?: boolean;
     hotScore?: number;
+    /** CR-02: qualification outcome. */
+    isQualified?: boolean;
+    qualificationStatus?: string | null;
     monthlyRevenue?: Record<string, number>;
 }
 
@@ -1194,6 +1197,10 @@ export default function DashboardPage() {
     const closedOpps = opportunities.filter(o => !isOpenStage(o));
     const hotOpps = openOpps.filter(o => !!o.isHot);
     const coldOpps = openOpps.filter(o => !!o.isStalled);
+    // CR-02: split the OPEN book by qualification so an unqualified deal is not
+    // counted in the qualified pipeline. Uses the backend `isQualified` outcome.
+    const qualifiedOpps = openOpps.filter(o => !!o.isQualified);
+    const unqualifiedOpps = openOpps.filter(o => !o.isQualified);
 
     const portfolioColumns = [
         ...stageProjectColumns,
@@ -1263,6 +1270,22 @@ export default function DashboardPage() {
             count: coldOpps.length,
             totalValue: coldOpps.reduce((s, o) => s + (Number(o.value) || 0), 0),
             drill: { title: 'Cold Opportunities — No Recent Edit or Comment', note: COLD_LEGEND, columns: portfolioColumns, data: coldOpps },
+        },
+        {
+            label: 'Qualified',
+            hint: 'BANT + Deliverability',
+            badgeColor: 'bg-green-50 text-green-700 border-green-200',
+            count: qualifiedOpps.length,
+            totalValue: qualifiedOpps.reduce((s, o) => s + (Number(o.value) || 0), 0),
+            drill: { title: 'Qualified Opportunities — Passed BANT + Deliverability', note: 'Qualified — open deal whose Deal Qualification outcome is Qualified. Only these count as qualified pipeline.', columns: portfolioColumns, data: qualifiedOpps },
+        },
+        {
+            label: 'Unqualified',
+            hint: 'Not yet qualified',
+            badgeColor: 'bg-slate-100 text-slate-600 border-slate-300',
+            count: unqualifiedOpps.length,
+            totalValue: unqualifiedOpps.reduce((s, o) => s + (Number(o.value) || 0), 0),
+            drill: { title: 'Unqualified Opportunities — Needs Review / Not Qualified / Not Assessed', note: 'Unqualified — open deal not yet marked Qualified. Excluded from the qualified pipeline so it cannot inflate it.', columns: portfolioColumns, data: unqualifiedOpps },
         },
     ];
 

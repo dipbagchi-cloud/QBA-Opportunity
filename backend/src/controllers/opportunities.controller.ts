@@ -196,6 +196,7 @@ export async function listOpportunities(req: Request, res: Response) {
         const nameFilters = readMulti(req.query.name);
         const practiceFilters = readMulti(req.query.practice);
         const technologyFilters = readMulti(req.query.technology);
+        const qualificationFilters = readMulti(req.query.qualificationStatus);
 
         // Started here, awaited in two places: the Stalled pseudo-filter needs
         // the threshold to build the WHERE clause, and the row mapper needs it
@@ -308,6 +309,16 @@ export async function listOpportunities(req: Request, res: Response) {
 
         if (technologyFilters.length) {
             andFilters.push(anyOf(technologyFilters, (v) => ({ technology: { contains: v, mode: 'insensitive' } })));
+        }
+
+        // CR-02: filter by qualification outcome. 'Not Assessed' matches records
+        // that have never been through the checklist (qualificationStatus null).
+        if (qualificationFilters.length) {
+            andFilters.push(anyOf(qualificationFilters, (v) =>
+                v.trim().toLowerCase() === 'not assessed'
+                    ? { qualificationStatus: null }
+                    : { qualificationStatus: { equals: v } }
+            ));
         }
 
         if (andFilters.length > 0) {
@@ -621,6 +632,9 @@ export async function getOpportunityFilterOptions(_req: Request, res: Response) 
             manager: uniqSorted(opps.map((o) => o.managerName)),
             practice: uniqSorted(opps.map((o) => (o as any).practice)),
             technology: uniqSorted(techTokens),
+            // CR-02: controlled qualification outcomes; 'Not Assessed' targets
+            // records that have never been through the checklist (null status).
+            qualificationStatus: ['Qualified', 'Needs Review', 'Not Qualified', 'Not Assessed'],
         });
     } catch (error) {
         console.error('Filter options error:', error);

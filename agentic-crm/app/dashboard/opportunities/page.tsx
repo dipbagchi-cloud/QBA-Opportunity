@@ -69,7 +69,16 @@ const LIST_COLUMNS: ListColumn[] = [
     { key: 'endDate', label: 'Est. End', sort: 'server' },
     { key: 'closeDate', label: 'Close Date', sort: 'server' },
     { key: 'lastActivity', label: 'Last Activity', sort: 'client' },
+    // CR-02: qualification outcome, filterable (values from filter-options).
+    { key: 'qualificationStatus', label: 'Qualification', filter: true },
 ];
+
+// CR-02 qualification badge styling, shared with the detail view's palette.
+const qualBadgeClass = (status?: string | null) =>
+    status === 'Qualified' ? 'bg-green-100 text-green-700 border-green-200'
+    : status === 'Needs Review' ? 'bg-amber-100 text-amber-700 border-amber-200'
+    : status === 'Not Qualified' ? 'bg-red-100 text-red-600 border-red-200'
+    : 'bg-slate-100 text-slate-400 border-slate-200';
 
 // The Stage filter also offers the three status badges the list paints beside
 // the stage — that is where users look for "on hold". The backend appends them
@@ -725,6 +734,11 @@ export default function OpportunitiesPage() {
                                             </td>
                                             <td className="py-2.5 px-4 text-[11px] text-slate-500">
                                                 {opp.lastActivity}
+                                            </td>
+                                            <td className="py-2.5 px-4 text-[11px] whitespace-nowrap">
+                                                {(opp as any).qualificationStatus
+                                                    ? <span className={`px-2 py-0.5 rounded-full border font-semibold ${qualBadgeClass((opp as any).qualificationStatus)}`}>{(opp as any).qualificationStatus}</span>
+                                                    : <span className="text-slate-300">—</span>}
                                             </td>
                                             <td className="py-2.5 px-4 relative">
                                                 <button
