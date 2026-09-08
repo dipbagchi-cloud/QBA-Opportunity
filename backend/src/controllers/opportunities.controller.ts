@@ -4,6 +4,7 @@ import { sendNotificationEmail } from '../lib/email';
 import { evaluateStageChangeRules, evaluateDataConditionRules, evaluateOpportunityCreatedRules, evaluateAssignmentChangeRules, evaluateOpportunityChangeNotice, evaluateExtendedNotification, evaluateStartDateChangedNotification, evaluateCommentNotification, resolveCalculatedFields } from '../lib/notification-engine';
 import { calculateOpportunityProbability } from '../lib/opportunity-probability';
 import { classifyHot, resolveHotConfig } from '../lib/opportunity-hot';
+import { scoreQualification, resolveQualificationConfig } from '../lib/opportunity-qualification';
 import { buildOpportunityAccess } from '../lib/opportunity-access';
 import { recordStageEntry } from '../lib/stage-history';
 import path from 'path';
@@ -512,6 +513,10 @@ export async function listOpportunities(req: Request, res: Response) {
                         hotReasons: hot.reasons,
                     };
                 })(),
+                // CR-02 qualification outcome (for badges, filters and reporting).
+                isQualified: (opp as any).isQualified === true,
+                qualificationStatus: (opp as any).qualificationStatus ?? null,
+                qualificationScore: (opp as any).qualificationScore ?? null,
                 eligibleForEscalation: (opp as any).eligibleForEscalation === true,
                 healthScore: finalHealth,
                 metadata: opp.metadata,
@@ -1305,6 +1310,55 @@ export async function updateOpportunity(req: Request, res: Response) {
         const assignmentValueChanged = (nextValue: unknown, previousValue: unknown) =>
             nextValue !== undefined && normalizeAssignment(nextValue) !== normalizeAssignment(previousValue);
 
+        // ── CR-02 Deal Qualification (BANT + Deliverability) ──
+        // Score any submitted checklist answers, persist the outcome, and gate the
+        // FIRST move into the qualified pipeline (Discovery → Qualification) for a
+        // deal that is not Qualified. Mirrors the SOW/quote gates on the move to
+        // Sales. Re-estimate moves (Proposal/Negotiation → Qualification) are
+        // excluded because the deal is already past this boundary.
+        const qualConfigRow = await prisma.systemConfig.findUnique({ where: { key: 'qualification_framework' } });
+        const qualConfig = resolveQualificationConfig(qualConfigRow?.value ?? null);
+        let qualificationUpdate: any = {};
+        let effectiveQualStatus: string | null = (previous as any)?.qualificationStatus ?? null;
+        if (body.qualificationAnswers && typeof body.qualificationAnswers === 'object') {
+            const result = scoreQualification(body.qualificationAnswers, qualConfig);
+            const prevQualData = ((previous as any)?.qualificationData && typeof (previous as any).qualificationData === 'object')
+                ? (previous as any).qualificationData : {};
+            const history = Array.isArray(prevQualData.history) ? prevQualData.history : [];
+            qualificationUpdate = {
+                isQualified: result.isQualified,
+                qualificationStatus: result.status,
+                qualificationScore: result.score,
+                qualifiedAt: new Date(),
+                qualifiedById: req.user!.userId,
+                qualificationData: {
+                    answers: body.qualificationAnswers,
+                    notes: body.qualificationNotes ?? prevQualData.notes ?? null,
+                    result: { score: result.score, maxScore: result.maxScore, status: result.status, reasons: result.reasons },
+                    // Retain a bounded history of outcomes rather than overwriting.
+                    history: [
+                        ...history,
+                        { at: new Date().toISOString(), by: req.user!.userId, status: result.status, score: result.score },
+                    ].slice(-20),
+                },
+            };
+            effectiveQualStatus = result.status;
+        }
+
+        const canBypassQualGate = isAdminRole || (req.user!.permissions || []).includes('opportunities:edit-all');
+        const movingIntoQualifiedPipeline =
+            newStageName === 'Qualification' &&
+            !['Qualification', 'Presales', 'Proposal', 'Negotiation'].includes(previousStageName);
+        if (movingIntoQualifiedPipeline && qualConfig.enabled && qualConfig.gateMode === 'block'
+            && effectiveQualStatus !== 'Qualified' && !canBypassQualGate) {
+            return res.status(400).json({
+                error: effectiveQualStatus && effectiveQualStatus !== 'Incomplete'
+                    ? `Cannot move to Presales: this opportunity is "${effectiveQualStatus}". Complete the Deal Qualification checklist with a Qualified outcome first.`
+                    : 'Cannot move to Presales: complete the Deal Qualification checklist (BANT + Deliverability) first.',
+                qualificationStatus: effectiveQualStatus || 'Incomplete',
+            });
+        }
+
         const submittedSalesRepName = body.salesRepName !== undefined ? body.salesRepName : body.salesRep;
         const salesRepChanged = assignmentValueChanged(submittedSalesRepName, previous?.salesRepName);
         const managerChanged = assignmentValueChanged(body.managerName, previous?.managerName);
@@ -1600,6 +1654,8 @@ export async function updateOpportunity(req: Request, res: Response) {
                 // Complex Data
                 presalesData: newPresalesData,
                 salesData: body.salesData,
+                // CR-02: persist the qualification outcome (empty object no-ops).
+                ...qualificationUpdate,
                 ...(metadataUpdate ? { metadata: metadataUpdate } : {}),
 
                 // Relations if changed

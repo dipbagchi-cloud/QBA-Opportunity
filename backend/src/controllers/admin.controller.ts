@@ -5,6 +5,7 @@ import { hashPassword } from '../services/auth.service';
 import { isSSOUser, getAuthMode } from './auth.controller';
 import { recordAudit } from '../lib/audit';
 import { resolveHotConfig, DEFAULT_HOT_CONFIG } from '../lib/opportunity-hot';
+import { resolveQualificationConfig, DEFAULT_QUALIFICATION_CONFIG, QUALIFICATION_DIMENSIONS } from '../lib/opportunity-qualification';
 
 // GET /api/admin/users
 export async function listUsers(req: Request, res: Response) {
@@ -1055,6 +1056,65 @@ export async function updateHotClassification(req: Request, res: Response) {
   } catch (error) {
     console.error('Update hot classification error:', error);
     res.status(500).json({ error: 'Failed to update hot classification config' });
+  }
+}
+
+// ── CR-02 Deal Qualification framework (BANT + Deliverability) ──
+// Weights, thresholds, the deliverability gate and block/warn mode are tunable
+// by Sales Leadership without a deploy. The dimensions/scale are fixed in code.
+const QUALIFICATION_FRAMEWORK_KEY = 'qualification_framework';
+
+// GET /api/admin/qualification-framework
+export async function getQualificationFramework(req: Request, res: Response) {
+  try {
+    const config = await prisma.systemConfig.findUnique({
+      where: { key: QUALIFICATION_FRAMEWORK_KEY },
+    });
+    // Return the resolved config plus the dimension metadata so the UI can
+    // render the checklist and admin form from a single source of truth.
+    res.json({
+      config: resolveQualificationConfig(config?.value ?? DEFAULT_QUALIFICATION_CONFIG),
+      dimensions: QUALIFICATION_DIMENSIONS,
+    });
+  } catch (error) {
+    console.error('Get qualification framework error:', error);
+    res.status(500).json({ error: 'Failed to fetch qualification framework config' });
+  }
+}
+
+// PUT /api/admin/qualification-framework
+export async function updateQualificationFramework(req: Request, res: Response) {
+  try {
+    if (!req.body || typeof req.body !== 'object') {
+      return res.status(400).json({ error: 'Request body must be a JSON object' });
+    }
+    const value = resolveQualificationConfig(req.body) as any;
+
+    const config = await prisma.systemConfig.upsert({
+      where: { key: QUALIFICATION_FRAMEWORK_KEY },
+      update: { value },
+      create: {
+        key: QUALIFICATION_FRAMEWORK_KEY,
+        value,
+        category: 'analytics',
+        description: 'CR-02 BANT + Deliverability qualification framework',
+      },
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        entity: 'SystemConfig',
+        entityId: config.id,
+        action: 'UPDATE_QUALIFICATION_FRAMEWORK',
+        userId: req.user!.userId,
+        changes: value,
+      },
+    });
+
+    res.json(config.value);
+  } catch (error) {
+    console.error('Update qualification framework error:', error);
+    res.status(500).json({ error: 'Failed to update qualification framework config' });
   }
 }
 

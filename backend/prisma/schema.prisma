@@ -361,7 +361,18 @@ model Opportunity {
   eligibleForEscalation Boolean @default(false)
   reEstimateCount   Int      @default(0)    // Number of times sent back for re-estimation
   gomApproved       Boolean  @default(false) // GOM must be approved before moving to Sales
-  
+
+  // -- CR-02 Deal Qualification (BANT + Deliverability) --
+  // Outcome columns are indexed for filtering/analytics; the detailed answers,
+  // notes and history live in qualificationData. isQualified is consumed by the
+  // Hot classifier (lib/opportunity-hot.ts).
+  isQualified         Boolean  @default(false)
+  qualificationStatus String?  // 'Qualified' | 'Needs Review' | 'Not Qualified'
+  qualificationScore  Int?
+  qualifiedAt         DateTime?
+  qualifiedById       String?
+  qualificationData   Json?
+
   // Presales Data
   presalesData      Json?
   
@@ -403,6 +414,8 @@ model Opportunity {
   @@index([teamId])
   @@index([createdAt])
   @@index([expectedCloseDate])
+  @@index([qualificationStatus])
+  @@index([isQualified])
   @@map("opportunities")
 }
 

@@ -668,6 +668,19 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const [reEstimateComment, setReEstimateComment] = useState("");
     const [detailedStatus, setDetailedStatus] = useState<string>("");
 
+    // CR-02 Deal Qualification (BANT + Deliverability)
+    const [qualAnswers, setQualAnswers] = useState<Record<string, number>>({});
+    const [qualStatus, setQualStatus] = useState<string | null>(null);
+    const [qualScore, setQualScore] = useState<number | null>(null);
+    const [qualFramework, setQualFramework] = useState<{ config: any; dimensions: any[] } | null>(null);
+    const [savingQual, setSavingQual] = useState(false);
+    useEffect(() => {
+        fetch(`${API_URL}/api/admin/qualification-framework`, { headers: getAuthHeaders() })
+            .then(r => r.ok ? r.json() : null)
+            .then(d => { if (d?.dimensions) setQualFramework(d); })
+            .catch(() => {});
+    }, []);
+
     // GOM percent and revenue from estimation context
     const [contextGomPercent, setContextGomPercent] = useState(0);
     const [contextRevenue, setContextRevenue] = useState(0);
@@ -1026,6 +1039,10 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                     : "";
                 setReEstimateSuggestedRevenue(savedSuggestedRevenue != null ? String(savedSuggestedRevenue) : String(legacyReEstimateValue || ""));
                 setDetailedStatus(data.detailedStatus || "");
+                // CR-02: seed qualification answers/outcome from the record.
+                setQualAnswers((data.qualificationData?.answers && typeof data.qualificationData.answers === 'object') ? data.qualificationData.answers : {});
+                setQualStatus(data.qualificationStatus || null);
+                setQualScore(data.qualificationScore ?? null);
                 setGomApproved(data.gomApproved === true);
                 setApprovedGomPercent(data.gomApproved === true && data.presalesData?.finalGomPercent != null
                     ? Number(data.presalesData.finalGomPercent)
@@ -1299,6 +1316,59 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
         }
     };
 
+    const qualBadgeClass = (status: string) =>
+        status === 'Qualified' ? 'bg-green-100 text-green-700 border-green-200'
+        : status === 'Needs Review' ? 'bg-amber-100 text-amber-700 border-amber-200'
+        : status === 'Not Qualified' ? 'bg-red-100 text-red-600 border-red-200'
+        : 'bg-slate-100 text-slate-500 border-slate-200';
+
+    // CR-02: client-side preview of the qualification outcome, mirroring the
+    // backend scorer (lib/opportunity-qualification.ts) using the fetched config.
+    const evaluateQualification = (answers: Record<string, number>) => {
+        const cfg = qualFramework?.config;
+        const dims = qualFramework?.dimensions || [];
+        if (!cfg || !dims.length) return null;
+        let score = 0, maxScore = 0, complete = true;
+        for (const d of dims) {
+            const wt = Number(cfg.weights?.[d.key] ?? 1);
+            maxScore += 2 * wt;
+            const lvl = answers[d.key];
+            if (lvl !== 0 && lvl !== 1 && lvl !== 2) { complete = false; continue; }
+            score += lvl * wt;
+        }
+        let status: string;
+        if (!complete) status = 'Incomplete';
+        else if (cfg.deliverabilityGate && answers['deliverability'] === 0) status = 'Not Qualified';
+        else if (score >= cfg.passThreshold) status = 'Qualified';
+        else if (score >= cfg.needsReviewMin) status = 'Needs Review';
+        else status = 'Not Qualified';
+        return { score, maxScore, status, complete };
+    };
+
+    const handleSaveQualification = async () => {
+        setSavingQual(true);
+        try {
+            const res = await fetch(`${API_URL}/api/opportunities/${id}`, {
+                method: 'PATCH',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({ qualificationAnswers: qualAnswers }),
+            });
+            if (res.ok) {
+                const data = await res.json();
+                setQualStatus(data.qualificationStatus || null);
+                setQualScore(data.qualificationScore ?? null);
+                toast({ title: 'Qualification saved', description: `Outcome: ${data.qualificationStatus}` });
+            } else {
+                const err = await res.json().catch(() => ({}));
+                toast({ title: 'Error', description: err.error || 'Failed to save qualification.' });
+            }
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setSavingQual(false);
+        }
+    };
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
 
@@ -1420,6 +1490,9 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 body: JSON.stringify({
                     stageName: 'Qualification', // Maps to Presales in our workflow
                     managerName: presalesForm.managerName,
+                    // CR-02: carry the qualification answers so the move is scored
+                    // and gated atomically by the backend.
+                    qualificationAnswers: qualAnswers,
                     presalesData: {
                         ...rawPresalesData,
                         ...presalesForm
@@ -1441,7 +1514,9 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 setShowPresalesModal(false);
                 toast({ title: "Success", description: "Moved to Presales successfully!" });
             } else {
-                toast({ title: "Error", description: "Failed to move to Presales." });
+                // Surface the backend reason (e.g. the CR-02 qualification gate).
+                const err = await res.json().catch(() => ({}));
+                toast({ title: "Error", description: err.error || "Failed to move to Presales." });
             }
         } catch (e) {
             console.error(e);
@@ -2716,6 +2791,72 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                         )}
                     </div>
                 </form>
+
+                {/* CR-02 Deal Qualification (BANT + Deliverability) */}
+                {qualFramework && (
+                    <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-5">
+                        <div className="mb-4 flex items-center gap-3">
+                            <h2 className="text-base font-bold text-slate-900">Deal Qualification</h2>
+                            <span className="text-xs text-slate-400">BANT + Deliverability</span>
+                            {qualStatus && (
+                                <span className={`px-3 py-1 rounded-full text-xs font-bold border ${qualBadgeClass(qualStatus)}`}>
+                                    {qualStatus}{qualScore != null ? ` · ${qualScore}` : ''}
+                                </span>
+                            )}
+                        </div>
+                        {opportunityStage === 0 && canEditPipeline ? (
+                            <>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {qualFramework.dimensions.map((d: any) => (
+                                        <div key={d.key} className="space-y-1.5">
+                                            <label className="block text-sm font-bold text-slate-700">{d.label}</label>
+                                            <select
+                                                value={qualAnswers[d.key] ?? ''}
+                                                onChange={(e) => setQualAnswers(prev => ({ ...prev, [d.key]: Number(e.target.value) }))}
+                                                className="w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm shadow-sm bg-white"
+                                            >
+                                                <option value="">— Select —</option>
+                                                {d.options.map((o: any) => (
+                                                    <option key={o.points} value={o.points}>{o.label}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    ))}
+                                </div>
+                                {(() => {
+                                    const preview = evaluateQualification(qualAnswers);
+                                    return (
+                                        <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-4">
+                                            <div className="text-sm text-slate-600">
+                                                {preview ? (
+                                                    <>Live outcome: <span className={`font-bold px-2 py-0.5 rounded border ${qualBadgeClass(preview.status)}`}>{preview.status}</span>{' '}
+                                                    <span className="text-slate-400">({preview.score}/{preview.maxScore}; pass ≥ {qualFramework.config.passThreshold})</span></>
+                                                ) : 'Complete the checklist to evaluate.'}
+                                                {preview && preview.complete && preview.status !== 'Qualified' && qualFramework.config.gateMode === 'block' && (
+                                                    <div className="text-xs text-amber-600 mt-1">Must be Qualified to move to Presales.</div>
+                                                )}
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={handleSaveQualification}
+                                                disabled={savingQual}
+                                                className="px-4 py-2 bg-slate-100 text-slate-700 rounded-md font-semibold text-sm hover:bg-slate-200 disabled:opacity-70"
+                                            >
+                                                {savingQual ? 'Saving...' : 'Save Qualification'}
+                                            </button>
+                                        </div>
+                                    );
+                                })()}
+                            </>
+                        ) : (
+                            <div className="text-sm text-slate-600">
+                                {qualStatus
+                                    ? <>Outcome: <span className="font-bold">{qualStatus}</span>{qualScore != null ? ` (score ${qualScore})` : ''}</>
+                                    : 'Not qualified yet.'}
+                            </div>
+                        )}
+                    </div>
+                )}
                 </div>
                 );
             })()}

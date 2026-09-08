@@ -16,6 +16,8 @@ import {
   updateBudgetAssumptions,
   getHotClassification,
   updateHotClassification,
+  getQualificationFramework,
+  updateQualificationFramework,
   listRoles,
   createRole,
   updateRole,
@@ -248,6 +250,10 @@ router.put('/budget-assumptions', authorize(PERMISSIONS.SETTINGS_MANAGE), update
 // CR-01 Hot classification rule (GET: any authenticated user, PUT: settings:manage)
 router.get('/hot-classification', getHotClassification);
 router.put('/hot-classification', authorize(PERMISSIONS.SETTINGS_MANAGE), updateHotClassification);
+
+// CR-02 Qualification framework (GET: any authenticated user, PUT: settings:manage)
+router.get('/qualification-framework', getQualificationFramework);
+router.put('/qualification-framework', authorize(PERMISSIONS.SETTINGS_MANAGE), updateQualificationFramework);
 
 // Audit logs (requires auditlogs:view)
 router.get('/audit-logs', authorize(PERMISSIONS.AUDITLOGS_VIEW), listAuditLogs);
