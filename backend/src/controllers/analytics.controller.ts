@@ -4,7 +4,8 @@ import { prisma } from '../lib/prisma';
 // registry (single source of truth). Imported under the original name so every
 // call site below is unchanged — this is a pure relocation, not a behaviour
 // change (asserted in opportunity-stages.test.ts).
-import { STAGE_DISPLAY_GROUP as STAGE_GROUP, getStageMeta } from '../lib/opportunity-stages';
+import { STAGE_DISPLAY_GROUP as STAGE_GROUP } from '../lib/opportunity-stages';
+import { isActivePipeline } from '../lib/opportunity-lifecycle';
 // CR-04: probability comes from the single canonical model (maturity-aware),
 // replacing the local stage-only getStageProbability that disagreed with it.
 import { calculateOpportunityProbability, resolveProbabilityConfig, type ProbabilityConfig } from '../lib/opportunity-probability';
@@ -221,12 +222,11 @@ export async function getAnalytics(req: Request, res: Response) {
         const salesRepRevenueData = (Object.values(revenueBySalesRep) as { name: string; revenue: number }[]).sort((a, b) => b.revenue - a.revenue);
 
         // 4. Pipeline Metrics
-        // CR-05: active pipeline = every non-closed deal, using the canonical
-        // registry so all closed variants (Closed Won/Lost, Delivered, Closed-Won)
-        // are excluded, not just the two exact names. Archived deals are already
-        // gone (query filter above), so this reconciles to open-and-not-archived.
-        const activeOpps = opportunities.filter(o =>
-            getStageMeta(o.stage?.name || o.currentStage)?.isClosed !== true);
+        // CR-05 + CR-07: active pipeline = Active/On Hold lifecycle only. This
+        // excludes all closed variants (via the registry), archived (already
+        // filtered at the query) AND Future/Deferred deals (retained, but not a
+        // current pursuit) — the single lifecycle definition, consistently.
+        const activeOpps = opportunities.filter(o => isActivePipeline(o as any));
 
         const wonOpps = opportunities.filter(o => {
             const sn = o.stage?.name || o.currentStage;

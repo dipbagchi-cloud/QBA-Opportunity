@@ -6,6 +6,7 @@ import { calculateOpportunityProbability, resolveProbabilityConfig } from '../li
 import { classifyHot, resolveHotConfig } from '../lib/opportunity-hot';
 import { scoreQualification, resolveQualificationConfig } from '../lib/opportunity-qualification';
 import { resolveCanonicalStage } from '../lib/opportunity-stages';
+import { deriveLifecycleStatus, normalizeLifecycleOverride } from '../lib/opportunity-lifecycle';
 import { buildOpportunityAccess } from '../lib/opportunity-access';
 import { recordStageEntry } from '../lib/stage-history';
 import path from 'path';
@@ -154,6 +155,42 @@ function stageStatusClause(value: string, stalledDaysThreshold: number): any {
     return { detailedStatus: { equals: value.trim(), mode: 'insensitive' as const } };
 }
 
+/**
+ * CR-07 lifecycle filter → Prisma WHERE fragment, mirroring the precedence in
+ * deriveLifecycleStatus (facts before overrides): Archived > Won/Lost (stage) >
+ * Future/Deferred / On Hold (override) > Active.
+ */
+function lifecycleStatusClause(value: string): any {
+    const v = value.trim();
+    const wonNames = ['Closed Won', 'Closed-Won', 'Delivered'];
+    const lostNames = ['Closed Lost', 'Proposal Lost'];
+    const closedNames = [...wonNames, ...lostNames];
+    const openNotArchived = { isArchived: false, stage: { name: { notIn: closedNames } } };
+    const notOnHold = {
+        AND: [
+            { OR: [{ lifecycleStatus: null }, { NOT: { lifecycleStatus: { equals: 'On Hold', mode: 'insensitive' as const } } }] },
+            { OR: [{ detailedStatus: null }, { NOT: { detailedStatus: { equals: 'On Hold', mode: 'insensitive' as const } } }] },
+        ],
+    };
+    const notFuture = { OR: [{ lifecycleStatus: null }, { NOT: { lifecycleStatus: 'Future/Deferred' } }] };
+    switch (v) {
+        case 'Won': return { isArchived: false, stage: { name: { in: wonNames } } };
+        case 'Lost': return { isArchived: false, stage: { name: { in: lostNames } } };
+        case 'Archived': return { isArchived: true };
+        case 'Future/Deferred': return { AND: [openNotArchived, { lifecycleStatus: 'Future/Deferred' }] };
+        case 'On Hold': return {
+            AND: [openNotArchived, notFuture, {
+                OR: [
+                    { lifecycleStatus: { equals: 'On Hold', mode: 'insensitive' as const } },
+                    { detailedStatus: { equals: 'On Hold', mode: 'insensitive' as const } },
+                ],
+            }],
+        };
+        case 'Active': return { AND: [openNotArchived, notFuture, notOnHold] };
+        default: return {};
+    }
+}
+
 // GET /api/opportunities
 export async function listOpportunities(req: Request, res: Response) {
     try {
@@ -198,6 +235,7 @@ export async function listOpportunities(req: Request, res: Response) {
         const practiceFilters = readMulti(req.query.practice);
         const technologyFilters = readMulti(req.query.technology);
         const qualificationFilters = readMulti(req.query.qualificationStatus);
+        const lifecycleFilters = readMulti(req.query.lifecycleStatus);
 
         // Started here, awaited in two places: the Stalled pseudo-filter needs
         // the threshold to build the WHERE clause, and the row mapper needs it
@@ -323,6 +361,11 @@ export async function listOpportunities(req: Request, res: Response) {
                     ? { qualificationStatus: null }
                     : { qualificationStatus: { equals: v } }
             ));
+        }
+
+        // CR-07: lifecycle status filter (derived → WHERE fragment).
+        if (lifecycleFilters.length) {
+            andFilters.push(anyOf(lifecycleFilters, (v) => lifecycleStatusClause(v)));
         }
 
         if (andFilters.length > 0) {
@@ -537,6 +580,8 @@ export async function listOpportunities(req: Request, res: Response) {
                 // CR-05: expose archived so the dashboard can exclude archived
                 // deals from pipeline totals and reconcile with analytics.
                 isArchived: (opp as any).isArchived === true,
+                // CR-07: derived lifecycle status (independent of commercial stage).
+                lifecycleStatus: deriveLifecycleStatus(opp as any),
                 eligibleForEscalation: (opp as any).eligibleForEscalation === true,
                 healthScore: finalHealth,
                 metadata: opp.metadata,
@@ -644,6 +689,8 @@ export async function getOpportunityFilterOptions(_req: Request, res: Response) 
             // CR-02: controlled qualification outcomes; 'Not Assessed' targets
             // records that have never been through the checklist (null status).
             qualificationStatus: ['Qualified', 'Needs Review', 'Not Qualified', 'Not Assessed'],
+            // CR-07: lifecycle statuses (Won/Lost/Archived derive from stage/flag).
+            lifecycleStatus: ['Active', 'On Hold', 'Future/Deferred', 'Won', 'Lost', 'Archived'],
         });
     } catch (error) {
         console.error('Filter options error:', error);
@@ -1691,6 +1738,9 @@ export async function updateOpportunity(req: Request, res: Response) {
                 // Relations if changed
                 clientId: clientId,
                 ...(body.detailedStatus !== undefined ? { detailedStatus: body.detailedStatus } : {}),
+                // CR-07: governance override (On Hold / Future/Deferred); normalized
+                // so derived facts (Won/Lost/Archived) can never be stored here.
+                ...(body.lifecycleStatus !== undefined ? { lifecycleStatus: normalizeLifecycleOverride(body.lifecycleStatus) } : {}),
                 ...(body.isStalled !== undefined ? { isStalled: body.isStalled } : {}),
                 // Only whoever owns the escalation flag at the current stage may
                 // move it (Sales in Pipeline, offshore manager in Presales,

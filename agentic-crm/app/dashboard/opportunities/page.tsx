@@ -71,7 +71,19 @@ const LIST_COLUMNS: ListColumn[] = [
     { key: 'lastActivity', label: 'Last Activity', sort: 'client' },
     // CR-02: qualification outcome, filterable (values from filter-options).
     { key: 'qualificationStatus', label: 'Qualification', filter: true },
+    // CR-07: lifecycle status, filterable (Active/On Hold/Future/Won/Lost/Archived).
+    { key: 'lifecycleStatus', label: 'Lifecycle', filter: true },
 ];
+
+// CR-07 lifecycle badge styling.
+const lifecycleBadgeClass = (s?: string | null) =>
+    s === 'Active' ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+    : s === 'On Hold' ? 'bg-amber-100 text-amber-800 border-amber-300'
+    : s === 'Future/Deferred' ? 'bg-violet-50 text-violet-700 border-violet-200'
+    : s === 'Won' ? 'bg-green-100 text-green-700 border-green-200'
+    : s === 'Lost' ? 'bg-red-100 text-red-600 border-red-200'
+    : s === 'Archived' ? 'bg-slate-200 text-slate-600 border-slate-300'
+    : 'bg-slate-100 text-slate-400 border-slate-200';
 
 // CR-02 qualification badge styling, shared with the detail view's palette.
 const qualBadgeClass = (status?: string | null) =>
@@ -272,6 +284,22 @@ export default function OpportunitiesPage() {
         setCurrentPage(pg);
         fetchOpportunities(buildQueryParams(pg, search ?? searchTerm, filters ?? colFilters, viewMode === 'kanban' || viewMode === 'by_owner', lim));
     }, [fetchOpportunities, searchTerm, colFilters, viewMode, buildQueryParams]);
+
+    // CR-07: set the lifecycle override (On Hold / Future/Deferred, or Active to
+    // clear) from the row menu, then refresh the current page.
+    const setLifecycle = useCallback(async (oppId: string, value: string) => {
+        try {
+            await fetch(`${API_URL}/api/opportunities/${oppId}`, {
+                method: 'PATCH',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({ lifecycleStatus: value }),
+            });
+        } catch (e) {
+            console.error(e);
+        }
+        setActiveMenu(null);
+        fetchOpportunities(buildQueryParams(currentPage, searchTerm, colFilters, viewMode === 'kanban' || viewMode === 'by_owner'));
+    }, [fetchOpportunities, buildQueryParams, currentPage, searchTerm, colFilters, viewMode]);
 
     useEffect(() => {
         loadPage(1, "", EMPTY_FILTERS);
@@ -740,6 +768,11 @@ export default function OpportunitiesPage() {
                                                     ? <span className={`px-2 py-0.5 rounded-full border font-semibold ${qualBadgeClass((opp as any).qualificationStatus)}`}>{(opp as any).qualificationStatus}</span>
                                                     : <span className="text-slate-300">—</span>}
                                             </td>
+                                            <td className="py-2.5 px-4 text-[11px] whitespace-nowrap">
+                                                {(opp as any).lifecycleStatus
+                                                    ? <span className={`px-2 py-0.5 rounded-full border font-semibold ${lifecycleBadgeClass((opp as any).lifecycleStatus)}`}>{(opp as any).lifecycleStatus}</span>
+                                                    : <span className="text-slate-300">—</span>}
+                                            </td>
                                             <td className="py-2.5 px-4 relative">
                                                 <button
                                                     onClick={() => setActiveMenu(activeMenu === opp.id ? null : opp.id)}
@@ -764,6 +797,20 @@ export default function OpportunitiesPage() {
                                                                 {isViewOnly(opp) ? <Info className="w-4 h-4" /> : <Edit className="w-4 h-4" />}
                                                                 {isViewOnly(opp) ? "View Details" : "Edit Details"}
                                                             </Link>
+                                                            {/* CR-07: lifecycle governance actions — open, editable deals only */}
+                                                            {!isViewOnly(opp) && !['Won', 'Lost', 'Archived'].includes((opp as any).lifecycleStatus) && (
+                                                                <div className="border-t border-slate-100">
+                                                                    {(opp as any).lifecycleStatus !== 'On Hold' && (
+                                                                        <button onClick={() => setLifecycle(opp.id, 'On Hold')} className="w-full text-left px-4 py-2.5 text-sm text-slate-600 hover:bg-slate-50">Mark On Hold</button>
+                                                                    )}
+                                                                    {(opp as any).lifecycleStatus !== 'Future/Deferred' && (
+                                                                        <button onClick={() => setLifecycle(opp.id, 'Future/Deferred')} className="w-full text-left px-4 py-2.5 text-sm text-slate-600 hover:bg-slate-50">Mark Future/Deferred</button>
+                                                                    )}
+                                                                    {(opp as any).lifecycleStatus !== 'Active' && (
+                                                                        <button onClick={() => setLifecycle(opp.id, 'Active')} className="w-full text-left px-4 py-2.5 text-sm text-slate-600 hover:bg-slate-50">Set Active</button>
+                                                                    )}
+                                                                </div>
+                                                            )}
                                                             {isAdmin && (
                                                                 <button
                                                                     onClick={() => {

@@ -354,6 +354,9 @@ model Opportunity {
   // Pipeline, Presales, Sales
   currentStage      String   @default("Discovery")
   detailedStatus    String?
+  // CR-07: lifecycle status override (On Hold / Future/Deferred). Won/Lost/
+  // Archived derive from stage + isArchived, so they are never stored here.
+  lifecycleStatus   String?
   isStalled         Boolean  @default(false)
   // Flagged by Sales in Pipeline, by the offshore manager in Presales, and by
   // either once the deal reaches Sales. See escalationEditable in
