@@ -8,6 +8,7 @@ import { scoreQualification, resolveQualificationConfig } from '../lib/opportuni
 import { resolveCanonicalStage, CLOSED_STAGE_NAMES, isLegalTransition, isForwardChainMove, stagePath } from '../lib/opportunity-stages';
 import { checkStageEntry } from '../lib/opportunity-stage-gates';
 import { assessStageHygiene } from '../lib/opportunity-stage-hygiene';
+import { roleKey } from '../lib/role-identity';
 import { deriveLifecycleStatus, normalizeLifecycleOverride } from '../lib/opportunity-lifecycle';
 import { buildOpportunityAccess } from '../lib/opportunity-access';
 import { recordStageEntry } from '../lib/stage-history';
@@ -1397,7 +1398,7 @@ export async function updateOpportunity(req: Request, res: Response) {
             (previous?.tentativeStartDate
                 ? new Date(previous.tentativeStartDate).getTime()
                 : 0);
-        const actorIsSales = (req.user!.roleName || '').trim().toLowerCase() === 'sales';
+        const actorIsSales = roleKey(req.user!.roleName) === 'sales';
         const triggerExtended =
             tentativeStartChanged &&
             POST_SUBMIT_STAGES.has(prevStageNameForRule) &&
@@ -1464,7 +1465,10 @@ export async function updateOpportunity(req: Request, res: Response) {
         let stageUpdate: any = {};
         const newStageName = body.stageName || body.stage;
         const previousStageName = previous?.stage?.name || previous?.currentStage || '';
-        const activeRoleName = (req.user!.roleName || '').trim().toLowerCase();
+        // roleKey normalises the renamed roles (Business Development->sales,
+        // Solutions->presales) and legacy names to a stable canonical key, so the
+        // checks below and any already-issued token keep working unchanged.
+        const activeRoleName = roleKey(req.user!.roleName);
         const isAdminRole = (req.user!.permissions || []).includes('*') || activeRoleName === 'admin';
         const normalizeAssignment = (value: unknown) => String(value ?? '').trim();
         const assignmentValueChanged = (nextValue: unknown, previousValue: unknown) =>
@@ -1979,7 +1983,7 @@ export async function updateOpportunity(req: Request, res: Response) {
         // Gated to actor role = Sales/Admin so Presales saving GOM and Manager
         // edits don't spam manager/presales with notifications about their own
         // workflow (they already have other signals for that).
-        const actorRole = (req.user?.roleName || '').trim().toLowerCase();
+        const actorRole = roleKey(req.user?.roleName);
         const actorIsSalesOrAdmin = actorRole === 'sales' || actorRole === 'admin'
             || (req.user?.permissions || []).includes('*');
         const prevStageNameForNotice = previous?.stage?.name || previous?.currentStage || '';

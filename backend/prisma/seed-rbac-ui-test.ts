@@ -11,19 +11,19 @@ const users = {
   owner: {
     email: 'rbac.owner.external@example.com',
     name: 'RBAC Owner External',
-    role: 'Sales',
+    role: 'Business Development',
     title: 'Sales Owner',
   },
   peer: {
     email: 'rbac.peer.external@example.com',
     name: 'RBAC Peer External',
-    role: 'Sales',
+    role: 'Business Development',
     title: 'Sales Peer',
   },
   presales: {
     email: 'rbac.presales.external@example.com',
     name: 'RBAC Presales External',
-    role: 'Presales',
+    role: 'Solutions',
     title: 'Presales Consultant',
   },
   manager: {
@@ -107,7 +107,7 @@ async function ensureBaseData() {
 async function ensureRoles() {
   const roleDefs = [
     {
-      name: 'Sales',
+      name: 'Business Development',
       description: 'Sales operations. Can manage pipeline and sales entries.',
       permissions: [
         'dashboard:view',
@@ -127,7 +127,7 @@ async function ensureRoles() {
       isSystem: true,
     },
     {
-      name: 'Presales',
+      name: 'Solutions',
       description: 'Presales operations. Can manage presales entries and estimations.',
       permissions: [
         'dashboard:view',

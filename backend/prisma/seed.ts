@@ -84,8 +84,8 @@ async function main() {
             isSystem: true,
         },
         {
-            name: 'Sales',
-            description: 'Sales operations. Can manage pipeline and sales entries.',
+            name: 'Business Development',
+            description: 'Business Development / deal owners. Own opportunities from Discovery through close.',
             permissions: [
                 'dashboard:view',
                 'pipeline:view', 'pipeline:write',
@@ -101,8 +101,8 @@ async function main() {
             isSystem: true,
         },
         {
-            name: 'Presales',
-            description: 'Presales operations. Can manage presales entries and estimations.',
+            name: 'Solutions',
+            description: 'Solutions / estimation team. Build scheduling, estimation and GOM in the Proposal stage.',
             permissions: [
                 'dashboard:view',
                 'pipeline:view',
@@ -190,7 +190,7 @@ async function main() {
             name: 'Dip Bagchi',
             title: 'Sales Director',
             roleName: 'Admin',
-            extraRoles: ['Manager', 'Sales'],
+            extraRoles: ['Manager', 'Business Development'],
             teamId: team.id,
         },
         {
@@ -198,22 +198,22 @@ async function main() {
             name: 'Raj Kumar',
             title: 'Sales Manager',
             roleName: 'Manager',
-            extraRoles: ['Sales'],
+            extraRoles: ['Business Development'],
             teamId: team.id,
         },
         {
             email: 'sales@example.com',
             name: 'Priya Sharma',
-            title: 'Sales Executive',
-            roleName: 'Sales',
+            title: 'Business Development Executive',
+            roleName: 'Business Development',
             extraRoles: [],
             teamId: team.id,
         },
         {
             email: 'presales@example.com',
             name: 'Amit Patel',
-            title: 'Presales Consultant',
-            roleName: 'Presales',
+            title: 'Solutions Consultant',
+            roleName: 'Solutions',
             extraRoles: [],
             teamId: team.id,
         },

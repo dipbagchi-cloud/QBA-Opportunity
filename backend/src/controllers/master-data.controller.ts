@@ -680,7 +680,9 @@ export async function listSalespersons(req: Request, res: Response) {
     const users = await prisma.user.findMany({
         where: {
             isActive: true,
-            roles: { some: { name: 'Sales' } },
+            // "Business Development" is the renamed Sales role; accept the legacy
+            // name too so this keeps working before every environment is renamed.
+            roles: { some: { name: { in: ['Business Development', 'Sales'] } } },
         },
         orderBy: { name: 'asc' },
         select: { id: true, name: true, email: true, department: true, roles: { select: { name: true } } },
@@ -767,7 +769,7 @@ export async function listPresalesTeam(req: Request, res: Response) {
             users = await prisma.user.findMany({
                 where: {
                     isActive: true,
-                    roles: { some: { name: 'Presales' } },
+                    roles: { some: { name: { in: ['Solutions', 'Presales'] } } },
                     // contains-match so a practice scopes correctly regardless of
                     // the "<Practice> - <Entity>" suffix stored on the user.
                     department: { contains: department, mode: 'insensitive' },
@@ -789,7 +791,7 @@ export async function listPresalesTeam(req: Request, res: Response) {
             users = await prisma.user.findMany({
                 where: {
                     isActive: true,
-                    roles: { some: { name: 'Presales' } },
+                    roles: { some: { name: { in: ['Solutions', 'Presales'] } } },
                 },
                 orderBy: { name: 'asc' },
                 select: { id: true, name: true, email: true, department: true },

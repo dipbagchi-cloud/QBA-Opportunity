@@ -35,6 +35,7 @@ import {
 import { useOpportunityStore } from "@/lib/store";
 import { useAuthStore } from "@/lib/auth-store";
 import { getOpportunityEditAccess } from "@/lib/opportunity-edit-access";
+import { roleKey } from "@/lib/roles";
 import { EstimationTab } from "./components/EstimationTab";
 import { ResourceAssignmentTab } from "./components/ResourceAssignmentTab";
 import { GomCalculatorTab } from "./components/GomCalculatorTab";
@@ -528,7 +529,9 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
     const steps = ["Discovery", "Proposal", "Negotiation", "SOW", "Project", "Actual GOM"];
     // Declared here rather than further down because the Actual GOM gate below
     // needs it, and a `const` referenced before its declaration throws.
-    const activeRoleName = (user?.role?.name || "").trim().toLowerCase();
+    // roleKey normalises the renamed roles (Business Development->sales,
+    // Solutions->presales) and legacy names to a stable canonical key.
+    const activeRoleName = roleKey(user?.role?.name);
     const isActiveAdmin = !!user?.role?.permissions?.includes("*") || activeRoleName === "admin";
     const isManagerOrAdmin = !!opportunityAccess?.permissions?.approvals?.manage;
     const canApproveGom = !!opportunityAccess?.permissions?.approvals?.manage;

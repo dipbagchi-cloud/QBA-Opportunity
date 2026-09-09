@@ -7,6 +7,7 @@ import { useAuthStore } from '@/lib/auth-store';
 import { MoreHorizontal, User, AlertCircle, Clock, Calendar, CalendarCheck, CalendarClock, X } from 'lucide-react';
 import Link from 'next/link';
 import { useCurrency } from '@/components/providers/currency-provider';
+import { roleKey } from '@/lib/roles';
 
 const STAGES = [
     { id: 'Discovery', title: 'Discovery', color: 'bg-indigo-500' },
@@ -24,7 +25,7 @@ export default function KanbanBoard() {
 
     const isViewOnly = (opp: any) => {
         if (!user || !user.role || !user.role.name) return true;
-        const role = user.role.name.toLowerCase();
+        const role = roleKey(user.role.name);
         if (role === 'sales' || role === 'presales') {
             const isOwner = opp.ownerId === user.id || opp.owner?.id === user.id || opp.owner === user.name;
             const isAssigned = opp.salesRepName === user.name || opp.managerName === user.name;
