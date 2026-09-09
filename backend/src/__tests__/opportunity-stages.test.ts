@@ -104,12 +104,13 @@ describe('canonical stage registry', () => {
     expect(stageMoves('Discovery').find(m => m.to === 'Qualification')?.kind).toBe('forward');
   });
 
-  // Behaviour-neutrality guard: STAGE_DISPLAY_GROUP must remain byte-identical to
-  // the map analytics.controller used inline before CR-03 Phase 1 relocated it.
-  it('reproduces the exact analytics stage→group map', () => {
+  // CR-03: every stage groups under its own canonical name (the old
+  // Pipeline/Presales/Sales words are retired as group labels); the legacy tokens
+  // remain as keys so legacy rows bucket correctly.
+  it('groups each stage under its canonical name', () => {
     expect(STAGE_DISPLAY_GROUP).toEqual({
-      'Discovery': 'Pipeline',
-      'Pipeline': 'Pipeline',
+      'Discovery': 'Discovery',
+      'Pipeline': 'Discovery',
       'Qualification': 'Qualification',
       'Presales': 'Qualification',
       'Proposal': 'Proposal',

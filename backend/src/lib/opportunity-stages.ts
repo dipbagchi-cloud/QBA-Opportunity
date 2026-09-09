@@ -28,7 +28,7 @@ export interface StageMeta {
 }
 
 export const CANONICAL_STAGES: StageMeta[] = [
-  { name: 'Discovery',     order: 1, isClosed: false, isWon: false, group: 'Pipeline' },
+  { name: 'Discovery',     order: 1, isClosed: false, isWon: false, group: 'Discovery' },
   { name: 'Qualification', order: 2, isClosed: false, isWon: false, group: 'Qualification' },
   { name: 'Proposal',      order: 3, isClosed: false, isWon: false, group: 'Proposal' },
   { name: 'Negotiation',   order: 4, isClosed: false, isWon: false, group: 'Negotiation' },
@@ -93,15 +93,14 @@ export function stageOrder(name?: string | null): number | undefined {
 }
 
 /**
- * The exact stage→display-group map analytics uses today, lifted verbatim so it
- * lives in one place. Keys include the workflow-vocabulary synonyms (Pipeline /
- * Presales / Sales) because analytics currently receives both vocabularies.
- * This is a pure relocation — the object is identical to the inline one it
- * replaces (asserted in the tests).
+ * The stage→display-group map analytics uses to bucket deals. CR-03 unified the
+ * vocabulary, so every stage now groups under its own canonical name; the retired
+ * workflow synonyms (Pipeline / Presales / Sales) still appear as KEYS so legacy
+ * rows fall into the right bucket, but no group is labelled with the old words.
  */
 export const STAGE_DISPLAY_GROUP: Record<string, string> = {
-  Discovery: 'Pipeline',
-  Pipeline: 'Pipeline',
+  Discovery: 'Discovery',
+  Pipeline: 'Discovery',
   Qualification: 'Qualification',
   Presales: 'Qualification',
   Proposal: 'Proposal',

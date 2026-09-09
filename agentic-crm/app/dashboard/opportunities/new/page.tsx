@@ -231,7 +231,9 @@ export default function NewOpportunityPage() {
 
     // Step State
     const [activeStep, setActiveStep] = useState(0);
-    const steps = ["Pipeline", "Presales", "Sales", "Project"];
+    // CR-03: unified commercial-stage vocabulary (the old Pipeline/Presales/Sales
+    // step names are retired). A new opportunity is created in Discovery.
+    const steps = ["Discovery", "Proposal", "Negotiation", "Project"];
 
     // Fetch dropdown data
     useEffect(() => {
@@ -487,7 +489,7 @@ export default function NewOpportunityPage() {
                         ? Math.round(Number(formData.expectedDayRate) * 20 * durationToMonths(Number(formData.duration) || 0, formData.durationUnit))
                         : undefined),
                 currency, // <-- Add the current currency from context
-                stage: "Pipeline",
+                stage: "Discovery",
                 description: formData.description,
 
                 // Enhanced Fields
@@ -547,7 +549,7 @@ export default function NewOpportunityPage() {
             {/* Header / Breadcrumb */}
             <div>
                 <h1 className="text-lg font-semibold text-slate-800">
-                    Opportunity / <span className="text-slate-500 font-normal">New Pipeline</span>
+                    Opportunity / <span className="text-slate-500 font-normal">New Opportunity</span>
                 </h1>
             </div>
 
@@ -708,7 +710,7 @@ export default function NewOpportunityPage() {
                             placeholder="Find Manager (optional)"
                             options={managers.map(m => ({ label: `${m.name}${m.department ? ` (${m.department})` : ''}`, value: m.name }))}
                         />
-                        <p className="text-[10px] text-slate-400">Can be assigned later at Move-to-Presales</p>
+                        <p className="text-[10px] text-slate-400">Can be assigned later at Move to Proposal</p>
                     </div>
 
                     <div className="space-y-1.5">
@@ -720,7 +722,7 @@ export default function NewOpportunityPage() {
                             placeholder="Find Presales (optional)"
                             options={presalesTeam.map(p => ({ label: `${p.name}${p.department ? ` (${p.department})` : ''}`, value: p.name }))}
                         />
-                        <p className="text-[10px] text-slate-400">Can be assigned later during Presales</p>
+                        <p className="text-[10px] text-slate-400">Can be assigned later during the Proposal stage</p>
                     </div>
 
                     <div className="space-y-1.5">

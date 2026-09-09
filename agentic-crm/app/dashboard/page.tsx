@@ -45,18 +45,21 @@ const STAGE_COLORS: Record<string, string> = {
     Project: "bg-emerald-50 text-emerald-700 border-emerald-200",
 };
 
+// CR-03: display the unified commercial-stage vocabulary. Canonical stages show
+// as themselves; the retired workflow tokens (Pipeline/Presales/Sales) and closed
+// variants map onto their canonical name so legacy rows read the same way.
 const STAGE_DISPLAY: Record<string, string> = {
-    Pipeline: "Pipeline",
-    Qualification: "Presales",
-    Presales: "Presales",
-    Proposal: "Sales",
-    Sales: "Sales",
-    Negotiation: "Sales",
-    "Closed Won": "Project",
-    "Closed-Won": "Project",
-    "Closed Lost": "Lost",
-    Delivered: "Project",
-    Discovery: "Pipeline",
+    Pipeline: "Discovery",
+    Discovery: "Discovery",
+    Qualification: "Qualification",
+    Presales: "Qualification",
+    Proposal: "Proposal",
+    Sales: "Proposal",
+    Negotiation: "Negotiation",
+    "Closed Won": "Closed Won",
+    "Closed-Won": "Closed Won",
+    Delivered: "Closed Won",
+    "Closed Lost": "Closed Lost",
 };
 
 // Consistent colors for pie chart stages
@@ -200,10 +203,10 @@ function PendingActionsPanel({
 
     const CLOSED = ['Closed Won', 'Closed-Won', 'Closed Lost', 'Delivered'];
     const actionForStage = (s: string) => {
-        if (s === 'Pipeline' || s === 'Discovery') return 'Qualify & assign presales';
-        if (s === 'Qualification' || s === 'Presales') return 'Complete presales estimation';
-        if (s === 'Proposal' || s === 'Sales') return 'Prepare or send quote';
-        if (s === 'Negotiation') return 'Close negotiation';
+        if (s === 'Pipeline' || s === 'Discovery') return 'Qualify & move to Proposal';
+        if (s === 'Qualification' || s === 'Presales') return 'Build the estimate in Proposal';
+        if (s === 'Proposal' || s === 'Sales') return 'Prepare or send the proposal';
+        if (s === 'Negotiation') return 'Close the deal';
         return 'Review';
     };
     const ownerFor = (o: Opportunity) => {
@@ -764,7 +767,7 @@ export default function DashboardPage() {
 
     // Build tech → project names mapping for tooltip
     const STAGE_GROUP: Record<string, string> = {
-        'Discovery': 'Pipeline', 'Pipeline': 'Pipeline', 'Qualification': 'Qualification',
+        'Discovery': 'Discovery', 'Pipeline': 'Discovery', 'Qualification': 'Qualification',
         'Presales': 'Qualification', 'Proposal': 'Proposal', 'Sales': 'Proposal',
         'Negotiation': 'Negotiation', 'Closed Won': 'Closed Won', 'Closed Lost': 'Closed Lost',
     };
@@ -1221,13 +1224,14 @@ export default function DashboardPage() {
     // note inside each popup, so the two can never drift apart.
     const HOT_LEGEND = 'Hot — open deal whose commercial-maturity score clears the configured threshold (quote sent, stage, closing window). Editing a deal does not make it Hot.';
     const COLD_LEGEND = 'Cold — open deal with no edit or comment past the stale threshold (Admin › Budget Assumptions, default 30 days), or put On Hold.';
-    // Row 3 — by workflow PHASE, which is a different question from row 2's
-    // per-stage split: Sales covers the whole sales motion (Proposal through
-    // Negotiation), so the two rows never simply repeat each other's numbers.
+    // Row 3 — by workflow PHASE, a coarser question than row 2's per-stage split:
+    // the Proposal phase covers the estimation-through-close motion (Qualification
+    // checkpoint, Proposal estimation and Negotiation), so the two rows never
+    // simply repeat each other's numbers. CR-03: unified stage vocabulary.
     const PHASE_BUCKETS: { label: string; hint: string; stages: string[]; badgeColor: string }[] = [
-        { label: 'Pipeline', hint: 'Qualifying',      stages: ['Discovery', 'Pipeline'],                    badgeColor: 'bg-sky-50 text-sky-700 border-sky-200' },
-        { label: 'Presales', hint: 'Being estimated', stages: ['Qualification', 'Presales'],                badgeColor: 'bg-amber-50 text-amber-700 border-amber-200' },
-        { label: 'Sales',    hint: 'Quoted, in play', stages: ['Proposal', 'Sales', 'Negotiation'],         badgeColor: 'bg-purple-50 text-purple-700 border-purple-200' },
+        { label: 'Discovery',   hint: 'Qualifying',        stages: ['Discovery', 'Pipeline'],                              badgeColor: 'bg-sky-50 text-sky-700 border-sky-200' },
+        { label: 'Proposal',    hint: 'Being estimated',   stages: ['Qualification', 'Presales', 'Proposal', 'Sales'],     badgeColor: 'bg-purple-50 text-purple-700 border-purple-200' },
+        { label: 'Negotiation', hint: 'Quoted, in play',   stages: ['Negotiation'],                                        badgeColor: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
     ];
 
     const portfolioTiles: {

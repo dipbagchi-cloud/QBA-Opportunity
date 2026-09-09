@@ -48,7 +48,7 @@ export default function AnalyticsPage() {
 
     // Build project-name lookup maps for tooltips
     const STAGE_GROUP: Record<string, string> = {
-        'Discovery': 'Pipeline', 'Pipeline': 'Pipeline', 'Qualification': 'Qualification',
+        'Discovery': 'Discovery', 'Pipeline': 'Discovery', 'Qualification': 'Qualification',
         'Presales': 'Qualification', 'Proposal': 'Proposal', 'Sales': 'Proposal',
         'Negotiation': 'Negotiation', 'Closed Won': 'Closed Won', 'Closed Lost': 'Closed Lost',
     };

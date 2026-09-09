@@ -2183,7 +2183,7 @@ function BudgetAssumptionsTab() {
                     <h3 className="font-semibold text-sm text-slate-800 mb-3">Application Settings</h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-lg">
                         <InputField label="Auto-Save Interval (minutes)" name="autoSaveIntervalMinutes" desc="How often opportunity forms auto-save (0 = disabled)." />
-                        <InputField label="Min GOM % for Sales Submission" name="minGomPercent" desc="Presales cannot submit to Sales unless GOM meets this % (0 = no check)." />
+                        <InputField label="Min GOM % to Send Proposal" name="minGomPercent" desc="The proposal cannot be sent to Negotiation unless GOM meets this % (0 = no check)." />
                         <InputField label="GOM Auto-Approve Above %" name="gomAutoApprovePercent" desc="Auto-approve GOM when GOM % is at or above this threshold (0 = manual only)." />
                         <InputField label="Stalled After (days of inactivity)" name="stalledDaysThreshold" desc="An opportunity is flagged as stalled after this many days with no stage movement (default 30)." />
                         <div className="grid gap-1 md:col-span-2">

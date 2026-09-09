@@ -18,7 +18,7 @@ const STAGES = [
 ];
 
 export default function KanbanBoard() {
-    const { opportunities, updateOpportunity } = useOpportunityStore();
+    const { opportunities } = useOpportunityStore();
     const { user } = useAuthStore();
     const { currency: globalCurrency, getSymbol, getRate } = useCurrency();
 
@@ -46,81 +46,49 @@ export default function KanbanBoard() {
 
     const [dragError, setDragError] = useState<string | null>(null);
 
-    // Valid forward transitions (stage order index)
+    // Stage order for detecting forward vs backward drags.
     const STAGE_ORDER: Record<string, number> = {
         'Discovery': 0, 'Qualification': 1, 'Proposal': 2, 'Negotiation': 3, 'Closed Won': 4,
     };
 
+    // CR-03 flow-shift: every stage change now runs through a checkpoint or gate
+    // that lives on the opportunity detail page — leaving Discovery requires the
+    // Deal Qualification (BANT) checklist; sending the proposal to Negotiation
+    // requires an attached SOW, a committed quote and GOM approval; closing needs
+    // remarks / project conversion. None of that can be reproduced by a drag, so
+    // the board routes stage changes to the detail page rather than posting a move
+    // the server would reject. The board stays a live overview of the pipeline.
     const onDragEnd = (result: DropResult) => {
         const { destination, source, draggableId } = result;
-
         if (!destination) return;
-        if (destination.droppableId === source.droppableId && destination.index === source.index) return;
+        // Same column (including reorder) is a no-op.
+        if (destination.droppableId === source.droppableId) return;
 
         const fromStage = source.droppableId;
         const toStage = destination.droppableId;
         const opp = opportunities.find(o => o.id === draggableId);
         if (!opp) return;
+        const oppName = (opp as any).name || (opp as any).title || 'this opportunity';
 
-        // Allow reordering within same column
-        if (fromStage === toStage) return;
+        if (toStage === 'Closed Lost') {
+            setDragError(`To mark a deal lost, open “${oppName}” and use “Mark as Lost” to record the reason.`);
+            return;
+        }
 
-        // Block backward moves (except to Lost stages)
         const fromIdx = STAGE_ORDER[fromStage] ?? 0;
         const toIdx = STAGE_ORDER[toStage] ?? 0;
-        if (toStage !== 'Closed Lost' && toIdx < fromIdx) {
-            setDragError(`Cannot move backward from ${fromStage} to ${toStage}. Use the detail page to send back for re-estimation.`);
+        if (toIdx < fromIdx) {
+            setDragError(`To move a deal back for re-estimation, open “${oppName}” and use “Send back for re-estimate”. Backward moves aren’t done from the board.`);
             return;
         }
 
-        // Block skipping stages (must go one step at a time)
-        if (toStage !== 'Closed Lost' && toIdx > fromIdx + 1) {
-            setDragError(`Cannot skip stages. Move one step at a time (${fromStage} must go to ${STAGES.find(s => STAGE_ORDER[s.id] === fromIdx + 1)?.title || 'next stage'}).`);
-            return;
-        }
-
-        // Discovery -> Qualification: requires technology
-        if (fromStage === 'Discovery' && toStage === 'Qualification') {
-            if (!opp.technology || (typeof opp.technology === 'string' && opp.technology.trim() === '')) {
-                setDragError(`Cannot move to Qualification: Technology must be filled. Please open the opportunity detail page to complete required fields and use "Move to Presales".`);
-                return;
-            }
-            // Presales data (manager name, proposal due date) is needed
-            setDragError(`Moving to Qualification requires presales data (Manager, Proposal Due Date). Please open the opportunity detail page and use "Move to Presales" button.`);
-            return;
-        }
-
-        // Qualification -> Proposal: requires GOM approval
-        if (fromStage === 'Qualification' && toStage === 'Proposal') {
-            if (!opp.gomApproved) {
-                setDragError(`Cannot move to Sales: GOM must be approved first. Please open the opportunity detail page, complete the estimation, and use "Move to Sales" button.`);
-                return;
-            }
-            // GOM approved - allow the move
-            updateOpportunity(draggableId, { stage: toStage });
-            return;
-        }
-
-        // Proposal -> Negotiation: allowed (proposal sent)
-        if (fromStage === 'Proposal' && toStage === 'Negotiation') {
-            updateOpportunity(draggableId, { stage: toStage });
-            return;
-        }
-
-        // Negotiation -> Closed Won: allowed
-        if (fromStage === 'Negotiation' && toStage === 'Closed Won') {
-            updateOpportunity(draggableId, { stage: toStage });
-            return;
-        }
-
-        // Moving to Lost stages: allowed but requires remarks via detail page
-        if (toStage === 'Closed Lost') {
-            setDragError(`To mark as lost, please open the opportunity detail page and use "Mark as Lost" button to provide required remarks.`);
-            return;
-        }
-
-        // Default: block unrecognized transitions
-        setDragError(`This transition (${fromStage} to ${toStage}) is not allowed from the Kanban board. Please use the opportunity detail page.`);
+        // Forward move → point at the right stage action on the detail page.
+        const actionHint =
+            fromStage === 'Discovery' ? '“Move to Proposal”'
+            : fromStage === 'Proposal' ? '“Move to Negotiation”'
+            : (fromStage === 'Negotiation' && toStage === 'Closed Won') ? '“Move to Project”'
+            : 'the stage actions';
+        setDragError(`Stage changes run through checks (qualification, SOW, GOM) that live on the opportunity page. Open “${oppName}” and use ${actionHint} there.`);
     };
 
     return (

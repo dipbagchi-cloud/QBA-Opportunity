@@ -50,7 +50,7 @@ const SAMPLE_DATA: Record<string, string> = {
     "opportunity.value": "USD 250,000",
     "opportunity.currency": "USD",
     "opportunity.probability": "70",
-    "opportunity.currentStage": "Presales",
+    "opportunity.currentStage": "Proposal",
     "opportunity.detailedStatus": "Estimation Submitted",
     "opportunity.region": "South Asia",
     "opportunity.practice": "Cloud & DevOps",

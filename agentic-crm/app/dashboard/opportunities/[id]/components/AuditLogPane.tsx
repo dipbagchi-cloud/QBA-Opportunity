@@ -31,7 +31,7 @@ const actionMeta: Record<string, { label: string; color: string }> = {
     GOM_REJECTED:            { label: "GOM Rejected",             color: "bg-red-100 text-red-700" },
     ON_HOLD:                 { label: "Placed On Hold",           color: "bg-amber-100 text-amber-700" },
     HOLD_REMOVED:            { label: "Hold Removed",             color: "bg-teal-100 text-teal-700" },
-    MOVED_TO_PRESALES:       { label: "Moved to Presales",        color: "bg-purple-100 text-purple-700" },
+    MOVED_TO_PRESALES:       { label: "Moved to Proposal",         color: "bg-purple-100 text-purple-700" },
     PROPOSAL_SENT:           { label: "Proposal Sent",            color: "bg-pink-100 text-pink-700" },
     CLOSED_WON:              { label: "Closed Won",               color: "bg-emerald-100 text-emerald-700" },
 };

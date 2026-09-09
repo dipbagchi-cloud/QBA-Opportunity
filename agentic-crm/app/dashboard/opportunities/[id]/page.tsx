@@ -1984,7 +1984,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                     <h1 className="text-lg font-semibold text-slate-800">
-                        Opportunity / <span className="text-slate-500 font-normal">Pipeline Details</span>
+                        Opportunity / <span className="text-slate-500 font-normal">Details</span>
                     </h1>
                 </div>
 
@@ -2968,7 +2968,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                         )}
                         {!isLost && opportunityStage >= 2 && !adminEditUnlocked && (
                             <div className="mx-4 mt-3 px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-md text-xs text-amber-700 font-medium">
-                                {opportunityStage === 3 ? 'SOW Approved' : currentStageName === 'Negotiation' ? 'Under Negotiation' : currentStageName || 'Sales'} - All fields are read-only.
+                                {opportunityStage === 3 ? 'SOW Approved' : currentStageName === 'Negotiation' ? 'Under Negotiation' : currentStageName || 'This stage'} - All fields are read-only.
                             </div>
                         )}
                         {!isLost && opportunityStage >= 2 && adminEditUnlocked && (
@@ -3611,7 +3611,7 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                             onClick={() => setSalesPipelineOpen(prev => !prev)}
                             className="w-full flex items-center justify-between px-6 py-3 text-left hover:bg-slate-50 transition-colors"
                         >
-                            <h3 className="text-sm font-bold text-slate-800">Pipeline Details</h3>
+                            <h3 className="text-sm font-bold text-slate-800">Opportunity Details</h3>
                             <ChevronDown className={`w-5 h-5 text-slate-400 transition-transform duration-200 ${salesPipelineOpen ? 'rotate-180' : ''}`} />
                         </button>
                         {salesPipelineOpen && (
