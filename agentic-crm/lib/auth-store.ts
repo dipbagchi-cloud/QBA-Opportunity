@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { API_URL } from './api';
 import { hasAnyGrantedPermission, hasGrantedPermission } from './access-control';
+import { broadcastLogout } from './auth-channel';
 
 export interface AuthUser {
   id: string;
@@ -33,6 +34,13 @@ interface AuthState {
   error: string | null;
   mustChangePassword: boolean;
 
+  /** Take over a session token handed across by another tab of this origin.
+   *  Stored exactly like a freshly issued token (sessionStorage only) and
+   *  still verified against the backend by checkAuth() before anything renders. */
+  adoptToken: (token: string) => void;
+  /** Drop this tab's session without broadcasting — used when another tab has
+   *  already signed out and told us to. */
+  clearSession: () => void;
   login: (email: string, password: string) => Promise<boolean>;
   ssoLogin: (email: string) => Promise<boolean>;
   ssoCallback: (code: string) => Promise<boolean>;
@@ -51,6 +59,22 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   isLoading: false,
   error: null,
   mustChangePassword: false,
+
+  adoptToken: (token: string) => {
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('auth_token', token);
+      localStorage.removeItem('auth_token');
+    }
+    set({ token, isAuthenticated: false });
+  },
+
+  clearSession: () => {
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('auth_token');
+      localStorage.removeItem('auth_token');
+    }
+    set({ user: null, token: null, isAuthenticated: false, error: null });
+  },
 
   login: async (email: string, password: string) => {
     set({ isLoading: true, error: null });
@@ -145,6 +169,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     sessionStorage.removeItem('auth_token');
     localStorage.removeItem('auth_token');
     set({ user: null, token: null, isAuthenticated: false, error: null });
+    // Signing out of one tab signs out every tab of this origin.
+    broadcastLogout();
   },
 
   checkAuth: async () => {

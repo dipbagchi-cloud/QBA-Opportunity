@@ -40,6 +40,13 @@ import KanbanBoard from "@/components/opportunities/KanbanBoard";
 import { useCurrency } from "@/components/providers/currency-provider";
 import { ByOwnerBoard } from "./components/ByOwnerBoard";
 import { MultiSelectFilter } from "@/components/ui/multi-select-filter";
+import {
+    DEFAULT_PAGE_SIZE,
+    parseListState,
+    serializeListState,
+    type ListUrlConfig,
+    type ViewMode,
+} from "@/lib/opportunity-list-url";
 import { useToast } from "@/hooks/use-toast";
 
 // Column model for the list. `serverSort` columns are sorted in the DB (so the
@@ -114,6 +121,11 @@ const FILTER_KEYS = LIST_COLUMNS.filter(c => c.filter).map(c => c.key);
 // server-side so the filter covers the whole dataset, not just this page.
 type ColFilters = Record<string, string[]>;
 const EMPTY_FILTERS: ColFilters = {};
+
+// Column keys the list can filter and sort on, in the shape the URL helpers
+// expect (see lib/opportunity-list-url).
+const SORTABLE_KEYS = LIST_COLUMNS.filter(c => c.sort).map(c => c.key);
+const LIST_URL_CONFIG: ListUrlConfig = { filterKeys: FILTER_KEYS, sortableKeys: SORTABLE_KEYS };
 
 export default function OpportunitiesPage() {
     const { opportunities, deleteOpportunity, fetchOpportunities, total, page, totalPages, isLoading } = useOpportunityStore();
@@ -258,7 +270,7 @@ export default function OpportunitiesPage() {
         return sortDir === 'asc' ? <ArrowUp className="w-3 h-3 text-indigo-600" /> : <ArrowDown className="w-3 h-3 text-indigo-600" />;
     };
 
-    const buildQueryParams = useCallback((pg: number, search: string, filters: ColFilters, fetchMax: boolean, lim?: number, openOnlyArg?: boolean) => {
+    const buildQueryParams = useCallback((pg: number, search: string, filters: ColFilters, fetchMax: boolean, lim?: number, openOnlyArg?: boolean, sortArg?: { key: string | null; dir: 'asc' | 'desc' }) => {
         const params: any = {
             page: pg,
             limit: fetchMax ? 500 : (lim !== undefined ? (lim === 0 ? 500 : lim) : (limit === 0 ? 500 : limit)),
@@ -272,9 +284,11 @@ export default function OpportunitiesPage() {
         // Callers can pass the value explicitly so an immediate refetch isn't
         // caught by the async state update; otherwise fall back to the state.
         if (openOnlyArg !== undefined ? openOnlyArg : openOnly) params.openOnly = 1;
-        if (sortKey && SERVER_SORT_KEYS.includes(sortKey)) {
-            params.sortKey = sortKey;
-            params.sortDir = sortDir;
+        const effectiveSortKey = sortArg ? sortArg.key : sortKey;
+        const effectiveSortDir = sortArg ? sortArg.dir : sortDir;
+        if (effectiveSortKey && SERVER_SORT_KEYS.includes(effectiveSortKey)) {
+            params.sortKey = effectiveSortKey;
+            params.sortDir = effectiveSortDir;
         }
         return params;
     }, [limit, sortKey, sortDir, openOnly]);
@@ -314,12 +328,50 @@ export default function OpportunitiesPage() {
         fetchOpportunities(buildQueryParams(currentPage, searchTerm, colFilters, viewMode === 'kanban' || viewMode === 'by_owner'));
     }, [fetchOpportunities, buildQueryParams, currentPage, searchTerm, colFilters, viewMode]);
 
+    // The restore below fetches immediately; without this the debounced effect
+    // would fire the very same request again as its state updates land. It holds
+    // the exact state the restore already fetched, so it can only ever cancel
+    // that duplicate - a real change the user makes never matches it, and it is
+    // one-shot either way.
+    const alreadyFetchedFor = useRef<string | null>(null);
+    const debouncedFetchKey = (search: string, filters: ColFilters, key: string | null, dir: 'asc' | 'desc') =>
+        JSON.stringify([search, filters, key, dir]);
+
+    // Initial load. When the URL carries a review state - Back from a deal, a
+    // refresh, or a link opened in another tab - it is restored (filters, the
+    // All Open preset, sort, view and page) instead of being dropped.
     useEffect(() => {
-        loadPage(1, "", EMPTY_FILTERS);
+        const restored = parseListState(window.location.search, LIST_URL_CONFIG);
+        if (!restored) {
+            loadPage(1, "", EMPTY_FILTERS);
+            return;
+        }
+        setSearchTerm(restored.search);
+        setColFilters(restored.filters);
+        setOpenOnly(restored.openOnly);
+        setSortKey(restored.sortKey);
+        setSortDir(restored.sortDir);
+        setViewMode(restored.viewMode);
+        setLimit(restored.limit);
+        setCurrentPage(restored.page);
+        alreadyFetchedFor.current = debouncedFetchKey(restored.search, restored.filters, restored.sortKey, restored.sortDir);
+        fetchOpportunities(buildQueryParams(
+            restored.page,
+            restored.search,
+            restored.filters,
+            restored.viewMode === 'kanban' || restored.viewMode === 'by_owner',
+            restored.limit,
+            restored.openOnly,
+            { key: restored.sortKey, dir: restored.sortDir },
+        ));
     }, []);
 
-    // Reload all opportunities when switching to kanban mode
+    // Reload all opportunities when switching to kanban mode. The first run is
+    // skipped so it cannot race the initial (possibly restored) load above with
+    // an unfiltered fetch.
+    const didMountViewMode = useRef(false);
     useEffect(() => {
+        if (!didMountViewMode.current) { didMountViewMode.current = true; return; }
         fetchOpportunities(buildQueryParams(currentPage, searchTerm, colFilters, viewMode === 'kanban' || viewMode === 'by_owner'));
     }, [viewMode]);
 
@@ -328,12 +380,36 @@ export default function OpportunitiesPage() {
     const didMount = useRef(false);
     useEffect(() => {
         if (!didMount.current) { didMount.current = true; return; }
+        if (alreadyFetchedFor.current !== null) {
+            const isRestoreEcho = alreadyFetchedFor.current === debouncedFetchKey(searchTerm, colFilters, sortKey, sortDir);
+            alreadyFetchedFor.current = null;
+            if (isRestoreEcho) return;
+        }
         const timer = setTimeout(() => {
             setCurrentPage(1);
             fetchOpportunities(buildQueryParams(1, searchTerm, colFilters, viewMode === 'kanban' || viewMode === 'by_owner'));
         }, 350);
         return () => clearTimeout(timer);
     }, [searchTerm, colFilters, sortKey, sortDir]);
+
+    // Mirror the live review state into the URL. replaceState rather than push,
+    // so Back leaves the list instead of walking back through every filter
+    // tweak - and so returning to this entry later rebuilds the same view.
+    const urlSyncArmed = useRef(false);
+    useEffect(() => {
+        if (!urlSyncArmed.current) { urlSyncArmed.current = true; return; }
+        const qs = serializeListState({
+            search: searchTerm,
+            filters: colFilters,
+            openOnly,
+            sortKey,
+            sortDir,
+            viewMode,
+            page: currentPage,
+            limit,
+        }, LIST_URL_CONFIG);
+        window.history.replaceState(window.history.state, '', `${window.location.pathname}${qs ? `?${qs}` : ''}`);
+    }, [searchTerm, colFilters, openOnly, sortKey, sortDir, viewMode, currentPage, limit]);
 
     const setColFilter = (key: string, vals: string[]) =>
         setColFilters((prev) => ({ ...prev, [key]: vals }));
