@@ -913,7 +913,7 @@ export default function DashboardPage() {
                 if (d < 10) return `${d.toFixed(1)}d`;
                 return `${d.toFixed(0)}d`;
             })(),
-            subtitle: `Presales success ${(presales?.proposalSuccessRate || 0).toFixed(0)}%`,
+            subtitle: `Proposal success ${(presales?.proposalSuccessRate || 0).toFixed(0)}%`,
             icon: Clock,
             iconBg: "bg-rose-100",
             iconColor: "text-rose-600",

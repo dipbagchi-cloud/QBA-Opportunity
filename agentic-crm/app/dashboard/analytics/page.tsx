@@ -139,8 +139,8 @@ export default function AnalyticsPage() {
             <div className="bg-white border border-slate-200 p-1 rounded-lg inline-flex gap-1 mb-4">
                 <TabButton id="dashboard" label="Dashboard" />
                 <TabButton id="pipeline" label="Pipeline Metrics" />
-                <TabButton id="presales" label="Resource & Pre-Sales" />
-                <TabButton id="sales" label="Sales & Conversion" />
+                <TabButton id="presales" label="Resource & Estimation" />
+                <TabButton id="sales" label="Conversion & Win Rate" />
             </div>
 
             {/* 1. OPPORTUNITY DASHBOARD */}
@@ -379,13 +379,13 @@ export default function AnalyticsPage() {
                 </div>
             )}
 
-            {/* 3. PRE-SALES */}
+            {/* 3. RESOURCE & ESTIMATION */}
             {activeTab === "presales" && (
                 <div className="space-y-4 animate-in fade-in">
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
                         <MetricCard title="Proposal Success Rate" value={`${(presales.proposalSuccessRate || 0).toFixed(1)}%`} icon={CheckCircle} color="text-emerald-600" bg="bg-emerald-50" />
                         <MetricCard title="Avg Effort Cost / Opp" value={format(presales.effortPerOpp || 0)} icon={Users} color="text-indigo-600" bg="bg-indigo-50" />
-                        <MetricCard title="Total Presales Opps" value={presales.totalPresalesOpps || 0} icon={FileText} color="text-slate-600" bg="bg-slate-50" />
+                        <MetricCard title="Opps in Estimation" value={presales.totalPresalesOpps || 0} icon={FileText} color="text-slate-600" bg="bg-slate-50" />
                         <MetricCard title="Avg Re-estimate Iterations" value={(presales.avgReEstimateIterations || 0).toFixed(1)} icon={RefreshCw} color="text-orange-600" bg="bg-orange-50" />
                     </div>
 

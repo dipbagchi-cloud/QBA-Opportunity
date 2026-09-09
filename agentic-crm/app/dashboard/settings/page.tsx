@@ -15,6 +15,12 @@ import StagesTab from "./components/StagesTab";
 import EmailTemplateBuilder, { CustomCalcField } from "@/components/email-templates/EmailTemplateBuilder";
 
 // ── Permission categories for the checkbox grid ──
+// CR-03: the GROUP LABELS use the unified commercial vocabulary. The permission
+// KEYS (pipeline:* / presales:* / sales:*) are intentionally left unchanged —
+// they are stored on roles and checked throughout the code and backend, so
+// renaming them would be a data migration, not a display change. The label→key
+// mapping is therefore deliberate: "Opportunities"=pipeline, "Proposal"=presales
+// (the estimation content that now lives in the Proposal stage), "Negotiation"=sales.
 const PERMISSION_CATEGORIES = [
     {
         label: "Dashboard",
@@ -23,7 +29,7 @@ const PERMISSION_CATEGORIES = [
         ],
     },
     {
-        label: "Pipeline / Opportunities",
+        label: "Opportunities",
         permissions: [
             { key: "pipeline:view", label: "View" },
             { key: "pipeline:write", label: "Create / Edit" },
@@ -31,7 +37,7 @@ const PERMISSION_CATEGORIES = [
         ],
     },
     {
-        label: "Presales",
+        label: "Proposal",
         permissions: [
             { key: "presales:view", label: "View" },
             { key: "presales:write", label: "Edit" },
@@ -42,7 +48,7 @@ const PERMISSION_CATEGORIES = [
         permissions: [{ key: "estimation:manage", label: "Manage" }],
     },
     {
-        label: "Sales",
+        label: "Negotiation",
         permissions: [
             { key: "sales:view", label: "View" },
             { key: "sales:write", label: "Edit" },
