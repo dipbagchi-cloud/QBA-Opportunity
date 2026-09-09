@@ -1224,35 +1224,16 @@ export default function DashboardPage() {
     // note inside each popup, so the two can never drift apart.
     const HOT_LEGEND = 'Hot — open deal whose commercial-maturity score clears the configured threshold (quote sent, stage, closing window). Editing a deal does not make it Hot.';
     const COLD_LEGEND = 'Cold — open deal with no edit or comment past the stale threshold (Admin › Budget Assumptions, default 30 days), or put On Hold.';
-    // Row 3 — by workflow PHASE, a coarser question than row 2's per-stage split:
-    // the Proposal phase covers the estimation-through-close motion (Qualification
-    // checkpoint, Proposal estimation and Negotiation), so the two rows never
-    // simply repeat each other's numbers. CR-03: unified stage vocabulary.
-    const PHASE_BUCKETS: { label: string; hint: string; stages: string[]; badgeColor: string }[] = [
-        { label: 'Discovery',   hint: 'Qualifying',        stages: ['Discovery', 'Pipeline'],                              badgeColor: 'bg-sky-50 text-sky-700 border-sky-200' },
-        { label: 'Proposal',    hint: 'Being estimated',   stages: ['Qualification', 'Presales', 'Proposal', 'Sales'],     badgeColor: 'bg-purple-50 text-purple-700 border-purple-200' },
-        { label: 'Negotiation', hint: 'Quoted, in play',   stages: ['Negotiation'],                                        badgeColor: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
-    ];
-
+    // CR-03: the per-stage row above already shows Discovery / Qualification /
+    // Proposal / Negotiation. A coarser "phase" row that re-grouped those same
+    // stages under the SAME names (folding Qualification into Proposal) only
+    // duplicated the labels with different numbers, so it was removed. These
+    // portfolio tiles are the distinct cross-stage lenses (won/lost, hot/cold,
+    // qualification outcome), not a second copy of the stage breakdown.
     const portfolioTiles: {
         label: string; hint: string; count: number; totalValue: number;
         badgeColor: string; drill: DrillDownConfig;
     }[] = [
-        ...PHASE_BUCKETS.map(phase => {
-            const rows = opportunities.filter(o => phase.stages.includes(o.currentStage));
-            return {
-                label: phase.label,
-                hint: phase.hint,
-                badgeColor: phase.badgeColor,
-                count: rows.length,
-                totalValue: rows.reduce((s, o) => s + (Number(o.value) || 0), 0),
-                drill: {
-                    title: `${phase.label} — ${phase.hint}`,
-                    columns: portfolioColumns,
-                    data: rows,
-                } as DrillDownConfig,
-            };
-        }),
         {
             label: 'Closed',
             hint: 'Won or lost',

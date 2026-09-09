@@ -46,7 +46,6 @@ import { AssignmentPane } from "./components/AssignmentPane";
 import { AssignPresalesModal } from "./components/AssignPresalesModal";
 import { SowStudio } from "./components/SowStudio";
 import { StageTimeline, StageHistoryEntry } from "./components/StageTimeline";
-import { StagePath } from "@/components/opportunities/StagePath";
 import ProjectResourceMappingTab from "./components/ProjectResourceMappingTab";
 import ActualBookingCostTab from "./components/ActualBookingCostTab";
 import MarginVarianceTab from "./components/MarginVarianceTab";
@@ -2215,63 +2214,10 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 </div>
             )}
 
-            {/* Stepper Navigation */}
-            <div className="bg-white p-3 rounded-lg shadow-sm border border-slate-200">
-                <div className="flex w-full mt-1 h-8 bg-slate-50 rounded-full overflow-hidden border border-slate-200">
-                    {/* SOW is never a bar segment (it opens from the Sales step). "Actual GOM"
-                        shows only on a Closed Won deal, and there it shows for every role.
-                        Every segment is flex-1, so the bar spans the same width either way:
-                        four wider segments before the deal is won, five narrower ones after. */}
-                    {steps
-                        .filter(step => step !== "SOW" && (step !== "Actual GOM" || canViewActualGom))
-                        .map((step, visibleIdx, visibleSteps) => {
-                        const idx = steps.indexOf(step);
-                        // Map step idx to DB stage: 0=Pipeline, 1=Presales, 2=Sales, 3=SOW (accessible at stage 2+), 4=Project (stage 3), 5=Actual GOM (stage 3)
-                        const stageForIdx = idx <= 2 ? idx : idx === 3 ? 2 : 3;
-                        const isActualGom = idx === 5;
-                        // Actual GOM never renders as "completed" — the delivered margin is
-                        // not a milestone the deal passes through, so it stays a plain
-                        // destination once the project exists.
-                        const isCompleted = isActualGom ? false : idx <= 2 ? idx < opportunityStage : idx === 3 ? opportunityStage >= 3 : opportunityStage === 3;
-                        const isActive = idx === activeStep;
-                        const hasStepAccess =
-                            idx === 0 ? canViewPipeline :
-                            idx === 1 ? canViewPresales :
-                            idx === 2 ? canViewSales :
-                            isActualGom ? canViewActualGom :
-                            canViewProject;
-                        const isAccessible = opportunityStage >= stageForIdx && hasStepAccess;
-
-                        let bgClass = "bg-slate-100 text-slate-300 cursor-not-allowed";
-                        if (isAccessible) {
-                            bgClass = "bg-slate-50 text-slate-500 hover:bg-slate-100 hover:text-slate-700 cursor-pointer";
-                        }
-                        if (isCompleted && !isActive) bgClass = "bg-emerald-500 text-white cursor-pointer";
-                        if (isCompleted && isActive) bgClass = "bg-emerald-700 text-white cursor-pointer ring-2 ring-emerald-300";
-                        if (isActive && !isCompleted) bgClass = "bg-indigo-900 text-white cursor-pointer";
-
-                        return (
-                            <button
-                                key={step}
-                                onClick={() => { if (isAccessible) setActiveStep(idx); }}
-                                disabled={!isAccessible}
-                                className={`flex-1 flex items-center justify-center gap-2 text-sm font-medium transition-colors relative ${bgClass}`}
-                            >
-                                {isCompleted && <Check className="w-4 h-4" />}
-                                {step}
-                                {/* Chevron Separator — keyed off position in the VISIBLE list so
-                                    the last segment never draws a trailing divider, whichever
-                                    role is looking. */}
-                                {visibleIdx !== visibleSteps.length - 1 && (
-                                    <div className={`absolute right-0 top-0 bottom-0 w-[1px] transform skew-x-12 translate-x-3 z-10
-                                        ${isCompleted && idx + 1 <= opportunityStage ? 'bg-emerald-500 border-r border-emerald-400' : 'bg-white border-r border-slate-300'}`}
-                                    ></div>
-                                )}
-                            </button>
-                        );
-                    })}
-                </div>
-            </div>
+            {/* CR-03: the old Pipeline/Presales/Sales stepper bar is retired. The
+                Stage Timeline above is the single stage indicator; the work section
+                shown below follows the deal's stage (set on load and advanced by the
+                stage actions), so a second stage-shaped bar here was redundant. */}
 
             {/* Project Title Header */}
             <div className="mt-4 mb-2 flex items-center justify-between">
@@ -2281,12 +2227,6 @@ export default function OpportunityDetailsPage({ params }: { params: Promise<{ i
                 </h1>
             </div>
 
-            {/* CR-03: commercial stage path (unified, admin-configurable labels) */}
-            {currentStageName && (
-                <div className="mb-3">
-                    <StagePath currentStage={currentStageName} />
-                </div>
-            )}
 
             {/* CR-12: stale-stage prompt. A commercial milestone (committed quote /
                 attached SOW) has occurred but the stage still lags it. This is a
