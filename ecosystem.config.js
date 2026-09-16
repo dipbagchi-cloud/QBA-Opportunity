@@ -50,7 +50,15 @@ const BACKEND_DEFAULTS = {
 
 const FRONTEND_DEFAULTS = {
     ...COMMON,
-    script: 'npm',
+    // Launch Next.js directly via node rather than `npm start`. `npm start` forks
+    // `next start` as a CHILD process that PM2 does not own; on a restart that
+    // child can survive as an orphan still holding the port, so PM2 then
+    // crash-loops on EADDRINUSE while the orphan keeps serving the OLD build —
+    // the "QA sometimes won't open after a deploy" symptom. Running the next
+    // binary under node makes PM2 track the real next-server process, so a
+    // restart cleanly stops and replaces it.
+    script: 'node_modules/next/dist/bin/next',
+    interpreter: 'node',
     max_memory_restart: '1G',
     merge_logs: true,
 };
@@ -67,7 +75,7 @@ module.exports = {
             ...FRONTEND_DEFAULTS,
             name: 'qcrm-frontend',
             cwd: '/home/azureuser/app/agentic-crm',
-            args: 'start',
+            args: 'start -p 3000',
         },
 
         // ── QA ─────────────────────────────────────────────────────────
@@ -80,7 +88,7 @@ module.exports = {
             ...FRONTEND_DEFAULTS,
             name: 'qcrm-qa-frontend',
             cwd: '/home/azureuser/qa/agentic-crm',
-            args: 'start -- -p 3004',
+            args: 'start -p 3004',
             env: { PORT: '3004' },
         },
 
@@ -94,7 +102,7 @@ module.exports = {
             ...FRONTEND_DEFAULTS,
             name: 'qcrm-uat-frontend',
             cwd: '/home/azureuser/uat/agentic-crm',
-            args: 'start -- -p 3002',
+            args: 'start -p 3002',
             env: { PORT: '3002' },
         },
     ],
